@@ -35,6 +35,7 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-830/tes
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TOP_BAR_TAB_COUNT = 20
 TRIGGER_TAB_COUNT = 24
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 
 REQUEST_STEPS = [
     "Launch the application in a desktop browser.",
@@ -44,7 +45,7 @@ REQUEST_STEPS = [
 ]
 EXPECTED_RESULT = (
     "The workspace switcher trigger receives keyboard focus in its correct logical "
-    "sequence after 'Settings' and immediately before 'Search issues', and the "
+    "sequence after 'Settings' and immediately before the Search control, and the "
     "trigger shows a visible focus indicator when focused."
 )
 
@@ -54,6 +55,8 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts830_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts830_failure.png"
 
@@ -172,8 +175,9 @@ def main() -> None:
             )
 
             try:
-                page.clear_focus()
-                sequence = page.collect_tab_sequence(tab_count=TOP_BAR_TAB_COUNT)
+                sequence = page.collect_tab_sequence_from_search(
+                    tab_count=TOP_BAR_TAB_COUNT,
+                )
                 order_summary = _assert_top_bar_focus_order(sequence)
                 result["top_bar_focus_sequence"] = [asdict(step) for step in sequence]
             except Exception as error:
@@ -203,7 +207,7 @@ def main() -> None:
             )
 
             try:
-                page.clear_focus()
+                page.focus_search_field()
                 trigger_focus = page.observe_trigger_keyboard_focus(
                     tab_count=TRIGGER_TAB_COUNT,
                 )
@@ -276,33 +280,56 @@ def _assert_top_bar_focus_order(
         raise AssertionError(
             "Step 3 failed: no keyboard focus sequence was captured from the top bar.",
         )
-    settings_index = _label_index(distinct_labels, lambda label: label == "Settings")
+    if _label_index(distinct_labels, lambda label: label == "Settings") is None:
+        raise AssertionError(
+            "Step 3 failed: the captured top-bar keyboard sequence did not include "
+            "Settings.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
+        )
     trigger_index = _label_index(
         distinct_labels,
         lambda label: label.startswith("Workspace switcher:"),
     )
-    search_index = _label_index(distinct_labels, _is_search_control_label)
-    if settings_index is None or trigger_index is None or search_index is None:
+    if trigger_index is None:
         raise AssertionError(
             "Step 3 failed: the captured top-bar keyboard sequence did not include "
-            "Settings, the workspace switcher trigger, and the Search control.\n"
+            "the workspace switcher trigger.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
         )
-    if not (settings_index < trigger_index < search_index):
+    if _label_index(distinct_labels, _is_search_control_label) is None:
+        raise AssertionError(
+            "Step 3 failed: the captured top-bar keyboard sequence did not include "
+            "the Search control.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
+        )
+    adjacent_triplet = _adjacent_workspace_triplet(distinct_labels)
+    if adjacent_triplet is None:
+        previous_label = distinct_labels[trigger_index - 1] if trigger_index > 0 else "<none>"
+        next_label = (
+            distinct_labels[trigger_index + 1]
+            if trigger_index + 1 < len(distinct_labels)
+            else "<none>"
+        )
         raise AssertionError(
             "Step 3 failed: the workspace switcher trigger was not reached in the "
-            "required logical sequence after Settings and before Search.\n"
+            "required logical sequence immediately after Settings and immediately "
+            "before the Search control.\n"
+            f"Observed trigger neighbors: previous={previous_label!r}, "
+            f"next={next_label!r}\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
         )
+    settings_label, trigger_label, search_label = adjacent_triplet
     return (
         "Observed focus sequence: "
         f"{_focus_sequence_summary(sequence)}; "
         "distinct keyboard order: "
         f"{_distinct_focus_sequence_summary(sequence)}; "
-        "workspace switcher remained in the required Settings -> Workspace "
-        "switcher -> Search order."
+        "workspace switcher remained in the required adjacent order: "
+        f"{settings_label} -> {trigger_label} -> {search_label}."
     )
 
 
@@ -327,6 +354,18 @@ def _distinct_focus_sequence_summary(
     if normalized_final_label and (not labels or labels[-1] != normalized_final_label):
         labels.append(normalized_final_label)
     return " -> ".join(labels)
+
+
+def _adjacent_workspace_triplet(labels: list[str]) -> tuple[str, str, str] | None:
+    for index in range(1, len(labels) - 1):
+        current = labels[index]
+        if not current.startswith("Workspace switcher:"):
+            continue
+        previous = labels[index - 1]
+        following = labels[index + 1]
+        if previous == "Settings" and _is_search_control_label(following):
+            return previous, current, following
+    return None
 
 
 def _label_index(
@@ -390,7 +429,11 @@ def _trigger_focus_summary(
 
 def _is_search_control_label(label: str) -> bool:
     normalized = label.strip()
-    return normalized == "Search" or normalized.startswith("Search ")
+    return (
+        normalized in {"Search", "Search issues", "JQL Search"}
+        or normalized.startswith("Search ")
+        or normalized.endswith(" Search")
+    )
 
 
 def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
@@ -516,6 +559,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -536,6 +583,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -661,7 +712,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Outcome: the workspace switcher trigger was reached in logical order "
-            "after Settings and before Search issues, and the focused trigger showed "
+            "after Settings and before the Search control, and the focused trigger showed "
             "a visible focus indicator."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
@@ -690,7 +741,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "1. Open the deployed TrackState app in a desktop browser.",
             "2. Go to Dashboard and use keyboard navigation across the top bar.",
             "3. Start from the first visible top-bar control and press `Tab` repeatedly.",
-            "4. Observe where focus goes around `Settings`, the workspace switcher trigger, and `Search issues`.",
+            "4. Observe where focus goes around `Settings`, the workspace switcher trigger, and the Search control.",
             "5. When focus lands on the workspace switcher trigger, observe whether a visible focus indicator is shown.",
             "",
             "## Exact steps from the test case with observations",
@@ -817,6 +868,53 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"* Screenshot: {{{{{screenshot}}}}}"]
     return [f"- Screenshot: `{screenshot}`"]
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else (
+            "Re-ran "
+            f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+        )
+    )
+    return (
+        "Fixed: Step 3 now requires the workspace switcher to be directly adjacent to "
+        "the expected neighbors (`Settings` immediately before it and the Search "
+        "control immediately after it), and the search-label matcher now recognizes "
+        "the live labels already used in this flow, including `Search issues` and "
+        f"`JQL Search`. {rerun_summary}"
+    )
 
 
 if __name__ == "__main__":
