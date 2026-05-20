@@ -44,6 +44,7 @@ DEFAULT_BRANCH = "main"
 FIRST_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-856-alt"
+LINKED_BUGS = ["TS-863", "TS-852"]
 
 PRECONDITIONS = [
     "At least two workspaces are saved in the account.",
@@ -51,6 +52,12 @@ PRECONDITIONS = [
     "The first workspace row in the list is currently selected/highlighted.",
 ]
 TEST_CASE_STEPS = [
+    "Press the 'Arrow Down' key.",
+]
+REQUEST_REPRODUCTION_STEPS = [
+    "Ensure at least two workspaces are saved in the account.",
+    "Open the workspace switcher panel.",
+    "Confirm the first workspace row in the list is currently selected/highlighted.",
     "Press the 'Arrow Down' key.",
 ]
 AUTOMATION_STEPS = [
@@ -101,7 +108,7 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "key_stability_ms": KEY_STABILITY_MS,
-        "linked_bugs": ["TS-852"],
+        "linked_bugs": LINKED_BUGS,
         "preconditions": PRECONDITIONS,
         "preloaded_workspace_state": workspace_state,
         "user_login": user.login,
@@ -663,6 +670,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         f"* Expected result: {EXPECTED_RESULT}",
         (
+            f"* Actual result: {_actual_result_summary(result)}"
+            if not passed
+            else "* Actual result: matched the expected behavior in the live UI."
+        ),
+        (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
             f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
             f"browser {{Chromium (Playwright)}}, OS {{{{{result['os']}}}}}."
@@ -713,6 +725,11 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
             else f"- Did not match the expected result. {_failed_step_summary(result)}"
         ),
         f"- Expected result: {EXPECTED_RESULT}",
+        (
+            f"- Actual result: {_actual_result_summary(result)}"
+            if not passed
+            else "- Actual result: matched the expected behavior in the live UI."
+        ),
         (
             f"- Environment: URL `{result['app_url']}`, repository "
             f"`{result['repository']}` @ `{result['repository_ref']}`, browser "
@@ -793,19 +810,24 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Arrow Down from the original open workspace-switcher state does not move selection and focus to the next row button",
+            f"# {TICKET_KEY} - Arrow Down keeps focus on the workspace-switcher trigger instead of the next row button",
             "",
             "## Exact steps to reproduce",
-            *[
-                _annotated_step_line(result, step_number, action)
-                for step_number, action in enumerate(AUTOMATION_STEPS, start=1)
-            ],
+            *_ticket_reproduction_lines(result),
             "",
             "## Expected result",
             EXPECTED_RESULT,
             "",
-            "## Actual result",
-            str(result.get("error", "<missing error>")),
+            "## Actual vs Expected",
+            f"- Expected: {EXPECTED_RESULT}",
+            f"- Actual: {_actual_result_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            "The workspace switcher updates its active selection on Arrow Down, but the "
+            "production focus-management path does not move primary keyboard focus from "
+            "the workspace-switcher trigger to the next saved-workspace row button. The "
+            "public UI therefore fails the expected FocusTraversalPolicy behavior from the "
+            "original ticket precondition without any extra pointer interaction.",
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -836,15 +858,60 @@ def _bug_description(result: dict[str, object]) -> str:
     ) + "\n"
 
 
-def _annotated_step_line(
-    result: dict[str, object],
-    step_number: int,
-    action: str,
-) -> str:
-    marker = "✅" if _step_status(result, step_number) == "passed" else "❌"
-    return (
-        f"{step_number}. {action} — {marker} {_step_observation(result, step_number)}"
+def _ticket_reproduction_lines(result: dict[str, object]) -> list[str]:
+    saved_rows = result.get("saved_workspace_rows_before_arrow")
+    row_count = len(saved_rows) if isinstance(saved_rows, list) else 0
+    open_panel = result.get("open_panel_observation")
+    panel_kind = (
+        open_panel.get("container_kind")
+        if isinstance(open_panel, dict)
+        else "<unknown>"
     )
+    active_before = result.get("active_workspace_before_arrow", "<unknown>")
+    arrow_down = result.get("arrow_down_observation")
+    active_after = (
+        arrow_down.get("active_workspace_name")
+        if isinstance(arrow_down, dict)
+        else "<unknown>"
+    )
+    active = arrow_down.get("active") if isinstance(arrow_down, dict) else None
+    focus = arrow_down.get("focus") if isinstance(arrow_down, dict) else None
+    row_focus = arrow_down.get("row_focus") if isinstance(arrow_down, dict) else None
+    active_label = (
+        _snippet(str(active.get("accessible_name") or active.get("text") or ""))
+        if isinstance(active, dict)
+        else "<missing>"
+    )
+    active_role = active.get("role") if isinstance(active, dict) else "<missing>"
+    active_on_trigger = (
+        focus.get("active_on_trigger") if isinstance(focus, dict) else "<missing>"
+    )
+    row_contains_active = (
+        row_focus.get("row_contains_active")
+        if isinstance(row_focus, dict)
+        else "<missing>"
+    )
+    return [
+        (
+            f"1. {REQUEST_REPRODUCTION_STEPS[0]} — ✅ Observed `saved_workspace_row_count={row_count}` "
+            "in the open switcher."
+        ),
+        (
+            f"2. {REQUEST_REPRODUCTION_STEPS[1]} — ✅ Observed the desktop workspace switcher "
+            f"open with `panel_kind={panel_kind}` and a visible `Workspace switcher` title."
+        ),
+        (
+            f"3. {REQUEST_REPRODUCTION_STEPS[2]} — ✅ Observed "
+            f"`active_workspace_before_arrow={active_before!r}`."
+        ),
+        (
+            f"4. {REQUEST_REPRODUCTION_STEPS[3]} — ❌ Observed "
+            f"`active_workspace_after_arrow={active_after!r}`, but the focused element stayed "
+            f"on `{active_role}` `{active_label}` with `active_on_trigger={active_on_trigger}` "
+            f"and `row_contains_active={row_contains_active}` instead of focusing the second "
+            "saved-workspace row button."
+        ),
+    ]
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -899,6 +966,35 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     return str(result.get("error", "No failure details recorded."))
 
 
+def _actual_result_summary(result: dict[str, object]) -> str:
+    arrow_down = result.get("arrow_down_observation")
+    if not isinstance(arrow_down, dict):
+        return str(result.get("error", "<missing actual result>"))
+    active_after = arrow_down.get("active_workspace_name")
+    active = arrow_down.get("active")
+    focus = arrow_down.get("focus")
+    row_focus = arrow_down.get("row_focus")
+    active_role = active.get("role") if isinstance(active, dict) else "<missing>"
+    active_label = (
+        _snippet(str(active.get("accessible_name") or active.get("text") or ""))
+        if isinstance(active, dict)
+        else "<missing>"
+    )
+    active_on_trigger = (
+        focus.get("active_on_trigger") if isinstance(focus, dict) else "<missing>"
+    )
+    row_contains_active = (
+        row_focus.get("row_contains_active")
+        if isinstance(row_focus, dict)
+        else "<missing>"
+    )
+    return (
+        f"After Arrow Down, the active saved workspace changed to {active_after!r}, but the "
+        f"focused element remained the workspace-switcher trigger (`role={active_role}`, "
+        f"`label={active_label}`) with `active_on_trigger={active_on_trigger}` and "
+        f"`row_contains_active={row_contains_active}` instead of moving focus to the "
+        f"{SECOND_WORKSPACE_DISPLAY_NAME!r} row button."
+    )
 def _step_status(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
