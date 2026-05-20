@@ -34,14 +34,23 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 }) {
   final listener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
-    if (keyboardEvent.key != 'Tab') {
-      if (keyboardEvent.key == 'Home' || keyboardEvent.key == 'End') {
-        keyboardEvent.preventDefault();
-        onBrowserBoundaryKey(keyboardEvent.key);
-      }
+    if (keyboardEvent.key == 'Tab') {
+      onBrowserTab();
       return;
     }
-    onBrowserTab();
+
+    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
+      return;
+    }
+
+    if (!browserFocusWithinWorkspaceSwitcherRow(
+      ancestors: _activeBrowserFocusAncestors(),
+    )) {
+      return;
+    }
+
+    keyboardEvent.preventDefault();
+    onBrowserBoundaryKey(keyboardEvent.key);
   }).toJS;
 
   web.window.addEventListener('keydown', listener, true.toJS);
@@ -51,18 +60,9 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
-  final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
-  web.Element? element = web.document.activeElement;
-  while (element != null) {
-    ancestors.add(
-      BrowserWorkspaceSwitcherFocusAncestorSnapshot(
-        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
-        textContent: element.textContent,
-      ),
-    );
-    element = element.parentElement;
-  }
-  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
+  return browserFocusWithinWorkspaceSwitcher(
+    ancestors: _activeBrowserFocusAncestors(),
+  );
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
@@ -102,9 +102,29 @@ bool _focusSemanticsElement(String semanticsIdentifier) {
         semanticsIdentifier) {
       continue;
     }
-    (candidate as web.HTMLElement).focus();
+    if (candidate case final web.HTMLElement htmlElement) {
+      htmlElement.focus();
+    }
     final activeElement = web.document.activeElement;
-    return activeElement == candidate || candidate.contains(activeElement);
+    if (activeElement == candidate || candidate.contains(activeElement)) {
+      return true;
+    }
   }
   return false;
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>
+_activeBrowserFocusAncestors() {
+  final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
+  web.Element? element = web.document.activeElement;
+  while (element != null) {
+    ancestors.add(
+      BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
+        textContent: element.textContent,
+      ),
+    );
+    element = element.parentElement;
+  }
+  return ancestors;
 }

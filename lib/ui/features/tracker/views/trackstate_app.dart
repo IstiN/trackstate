@@ -123,6 +123,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  List<String>? _desktopWorkspaceSwitcherProfileOrder;
   String? _requestedWorkspaceSwitcherRowFocusId;
   int _workspaceSwitcherRowFocusRequestVersion = 0;
   final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
@@ -1109,6 +1110,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
+      _desktopWorkspaceSwitcherProfileOrder = [
+        for (final profile in _workspaceState.profiles) profile.id,
+      ];
       _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
       if (activeWorkspaceId != null) {
         _workspaceSwitcherRowFocusRequestVersion += 1;
@@ -1185,6 +1189,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
+      _desktopWorkspaceSwitcherProfileOrder = null;
       _requestedWorkspaceSwitcherRowFocusId = null;
     });
     if (!restoreTriggerFocus) {
@@ -1291,6 +1296,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   }) {
     final content = Builder(
       builder: (sheetContext) {
+        final workspaceSwitcherState = _workspaceState.copyWith(
+          profiles: _desktopWorkspaceSwitcherProfiles(),
+        );
         final closeSwitcher = compact
             ? () => Navigator.of(sheetContext, rootNavigator: true).pop()
             : _closeDesktopWorkspaceSwitcher;
@@ -1317,7 +1325,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                     : null,
                 exposeActiveSummarySemantics: true,
                 viewModel: viewModel,
-                workspaces: _workspaceState,
+                workspaces: workspaceSwitcherState,
                 authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
                 hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
                 localWorkspaceAvailability: _localWorkspaceAvailability,
@@ -1421,7 +1429,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   Future<void> _switchToAdjacentWorkspace({required int step}) async {
-    final profiles = _workspaceState.profiles;
+    final profiles = _desktopWorkspaceSwitcherProfiles();
     if (!_isDesktopWorkspaceSwitcherVisible || profiles.length < 2) {
       return;
     }
@@ -1439,7 +1447,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   Future<void> _switchToBoundaryWorkspace({required bool selectFirst}) async {
-    final profiles = _workspaceState.profiles;
+    final profiles = _desktopWorkspaceSwitcherProfiles();
     if (!_isDesktopWorkspaceSwitcherVisible || profiles.isEmpty) {
       return;
     }
@@ -1448,6 +1456,25 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace,
       workspaceSwitcherFocusWorkspaceId: workspace.id,
     );
+  }
+
+  List<WorkspaceProfile> _desktopWorkspaceSwitcherProfiles() {
+    final storedOrder = _desktopWorkspaceSwitcherProfileOrder;
+    if (!_isDesktopWorkspaceSwitcherVisible ||
+        storedOrder == null ||
+        storedOrder.isEmpty) {
+      return _workspaceState.profiles;
+    }
+    final profilesById = <String, WorkspaceProfile>{
+      for (final profile in _workspaceState.profiles) profile.id: profile,
+    };
+    final orderedProfiles = <WorkspaceProfile>[
+      for (final workspaceId in storedOrder)
+        if (profilesById.containsKey(workspaceId))
+          profilesById.remove(workspaceId)!,
+    ];
+    orderedProfiles.addAll(profilesById.values);
+    return orderedProfiles;
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {

@@ -986,6 +986,7 @@ void main() {
           activeWorkspaceId: 'hosted:main/repo@main',
           migrationComplete: true,
         ),
+        reorderOnSelect: true,
       );
 
       tester.view.physicalSize = const Size(1440, 960);
@@ -1452,6 +1453,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+      expect(
+        tester.getTopLeft(mainRow).dy,
+        lessThan(tester.getTopLeft(altRow).dy),
+      );
+      expect(
+        tester.getTopLeft(altRow).dy,
+        lessThan(tester.getTopLeft(endRow).dy),
+      );
       expect(
         FocusManager.instance.primaryFocus?.debugLabel,
         'workspace-switcher-row-summary-hosted:alt/repo@main',
@@ -2498,9 +2507,10 @@ Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
 }
 
 class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
-  _MemoryWorkspaceProfileService(this.state);
+  _MemoryWorkspaceProfileService(this.state, {this.reorderOnSelect = false});
 
   WorkspaceProfilesState state;
+  final bool reorderOnSelect;
   final List<String> selectedProfileIds = <String>[];
 
   @override
@@ -2564,7 +2574,27 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
     selectedProfileIds.add(workspaceId);
-    state = state.copyWith(activeWorkspaceId: workspaceId);
+    if (!reorderOnSelect) {
+      state = state.copyWith(activeWorkspaceId: workspaceId);
+      return state;
+    }
+    final selectedIndex = state.profiles.indexWhere(
+      (profile) => profile.id == workspaceId,
+    );
+    if (selectedIndex < 0) {
+      state = state.copyWith(activeWorkspaceId: workspaceId);
+      return state;
+    }
+    final selectedProfile = state.profiles[selectedIndex];
+    state = WorkspaceProfilesState(
+      profiles: [
+        selectedProfile.copyWith(lastOpenedAt: DateTime.utc(2026, 5, 20, 12)),
+        for (var index = 0; index < state.profiles.length; index += 1)
+          if (index != selectedIndex) state.profiles[index],
+      ],
+      activeWorkspaceId: workspaceId,
+      migrationComplete: true,
+    );
     return state;
   }
 
