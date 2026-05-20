@@ -34,6 +34,7 @@ from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E
 TICKET_KEY = "TS-825"
 TEST_CASE_TITLE = "Press non-Escape navigation keys — workspace switcher panel remains open"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-825/test_ts_825.py"
+TEST_FILE_PATH = "testing/tests/TS-825/test_ts_825.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 KEY_STABILITY_MS = 1_000
 START_FIELD_LABEL = "Repository"
@@ -225,6 +226,7 @@ def main() -> None:
                 arrow_down = _press_key_and_observe(
                     page=page,
                     key="ArrowDown",
+                    expected_active_workspace=SECONDARY_WORKSPACE_DISPLAY_NAME,
                 )
                 result["arrow_down_observation"] = arrow_down
                 try:
@@ -397,6 +399,7 @@ def _press_key_and_observe(
     *,
     page: LiveWorkspaceSwitcherPage,
     key: str,
+    expected_active_workspace: str | None = None,
 ) -> dict[str, object]:
     page.start_transition_monitor()
     page.press_key(key)
@@ -404,6 +407,11 @@ def _press_key_and_observe(
         stability_ms=KEY_STABILITY_MS,
         timeout_ms=4_000,
     )
+    if expected_active_workspace is not None:
+        page.wait_for_active_saved_workspace(
+            expected_active_workspace,
+            timeout_ms=10_000,
+        )
     switcher = page.observe_open_switcher(timeout_ms=4_000)
     panel = page.observe_open_panel(
         expected_container_kinds=("anchored-panel", "surface"),
@@ -760,6 +768,16 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        RUN_COMMAND,
+        "{code}",
     ]
     if not passed:
         lines.extend(
@@ -922,7 +940,13 @@ def _annotated_step_line(
     step_number: int,
     action: str,
 ) -> str:
-    marker = "✅" if _step_status(result, step_number) == "passed" else "❌"
+    status = _step_status(result, step_number)
+    if status == "passed":
+        marker = "✅"
+    elif status == "failed":
+        marker = "❌"
+    else:
+        marker = "⏭️"
     return (
         f"{step_number}. {marker} {action}\n"
         f"   Actual: {_step_observation(result, step_number)}"
@@ -984,20 +1008,33 @@ def _failed_step_summary(result: dict[str, object]) -> str:
 def _step_status(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
-        return "failed"
+        return "not_run"
     for step in steps:
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("status", "failed"))
-    return "failed"
+    return "not_run"
 
 
 def _step_observation(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
-        return "<no observation recorded>"
+        return "Not reached because an earlier test step failed."
     for step in steps:
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("observed", "<no observation recorded>"))
+    first_failed = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("status") == "failed"
+        ),
+        None,
+    )
+    if isinstance(first_failed, dict):
+        return (
+            f"Not reached because Step {first_failed.get('step')} failed: "
+            f"{first_failed.get('action')}"
+        )
     return "<no observation recorded>"
 
 

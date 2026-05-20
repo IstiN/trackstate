@@ -33,7 +33,8 @@ TEST_CASE_TITLE = (
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-830/test_ts_830.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
-TRIGGER_TAB_COUNT = 5
+TOP_BAR_TAB_COUNT = 20
+TRIGGER_TAB_COUNT = 24
 
 REQUEST_STEPS = [
     "Launch the application in a desktop browser.",
@@ -42,9 +43,9 @@ REQUEST_STEPS = [
     "Observe the focus sequence and the visible focus state of the workspace switcher trigger.",
 ]
 EXPECTED_RESULT = (
-    "The workspace switcher trigger receives keyboard focus as part of the live "
-    "desktop keyboard sequence, remains in logical order with the surrounding "
-    "primary controls, and shows a visible focus indicator when focused."
+    "The workspace switcher trigger receives keyboard focus in its correct logical "
+    "sequence after 'Settings' and immediately before 'Search issues', and the "
+    "trigger shows a visible focus indicator when focused."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -81,7 +82,7 @@ def main() -> None:
         "os": platform.platform(),
         "run_command": RUN_COMMAND,
         "desktop_viewport": DESKTOP_VIEWPORT,
-        "top_bar_tab_count": TRIGGER_TAB_COUNT,
+        "top_bar_tab_count": TOP_BAR_TAB_COUNT,
         "trigger_tab_count": TRIGGER_TAB_COUNT,
         "expected_result": EXPECTED_RESULT,
         "user_login": user.login,
@@ -134,8 +135,8 @@ def main() -> None:
             _record_human_verification(
                 result,
                 check=(
-                    "Viewed the live desktop shell before tabbing and confirmed the "
-                    "visible workspace switcher trigger text in the current chrome."
+                    "Viewed the desktop app shell before tabbing and confirmed the visible "
+                    "top-bar controls, including the workspace switcher trigger text."
                 ),
                 observed=(
                     f"trigger_text={trigger.visible_text!r}; "
@@ -170,51 +171,42 @@ def main() -> None:
                 ),
             )
 
-        with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
-            page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime = tracker_page.open()
-                if runtime.kind != "ready":
-                    raise AssertionError(
-                        "Step 4 failed: the deployed app did not return to an interactive "
-                        "desktop state before the trigger focus treatment was checked.\n"
-                        f"Observed runtime state: {runtime.kind}\n"
-                        f"Observed body text:\n{runtime.body_text}",
-                    )
-                page.dismiss_connection_banner()
+                page.clear_focus()
+                sequence = page.collect_tab_sequence(tab_count=TOP_BAR_TAB_COUNT)
+                order_summary = _assert_top_bar_focus_order(sequence)
+                result["top_bar_focus_sequence"] = [asdict(step) for step in sequence]
+            except Exception as error:
+                _capture_failure_screenshot(page, result)
+                _record_step(
+                    result,
+                    step=3,
+                    status="failed",
+                    action=REQUEST_STEPS[2],
+                    observed=str(error),
+                )
+                raise
+            _record_step(
+                result,
+                step=3,
+                status="passed",
+                action=REQUEST_STEPS[2],
+                observed=order_summary,
+            )
+            _record_human_verification(
+                result,
+                check=(
+                    "Tabbed through the desktop top bar like a user and observed the "
+                    "actual visible keyboard sequence."
+                ),
+                observed=order_summary,
+            )
+
+            try:
                 page.clear_focus()
                 trigger_focus = page.observe_trigger_keyboard_focus(
                     tab_count=TRIGGER_TAB_COUNT,
                 )
-            except Exception as error:
-                _capture_failure_screenshot(page, result)
-                _record_step(
-                    result,
-                    step=3,
-                    status="failed",
-                    action=REQUEST_STEPS[2],
-                    observed=str(error),
-                )
-                raise
-            try:
-                order_summary = _assert_top_bar_focus_order(
-                    trigger_focus.focus_sequence,
-                    final_active_label=trigger_focus.active_label_after_focus,
-                )
-                result["top_bar_focus_sequence"] = [
-                    asdict(step) for step in trigger_focus.focus_sequence
-                ]
-            except Exception as error:
-                _capture_failure_screenshot(page, result)
-                _record_step(
-                    result,
-                    step=3,
-                    status="failed",
-                    action=REQUEST_STEPS[2],
-                    observed=str(error),
-                )
-                raise
-            try:
                 focus_summary = _assert_visible_focus_indicator(trigger_focus)
                 result["trigger_keyboard_focus_observation"] = (
                     _trigger_keyboard_focus_payload(trigger_focus)
@@ -231,36 +223,21 @@ def main() -> None:
                     observed=str(error),
                 )
                 raise
-        _record_step(
-            result,
-            step=3,
-            status="passed",
-            action=REQUEST_STEPS[2],
-            observed=order_summary,
-        )
-        _record_human_verification(
-            result,
-            check=(
-                "Pressed Tab through the live desktop shell like a user and "
-                "observed the actual visible keyboard sequence."
-            ),
-            observed=order_summary,
-        )
-        _record_step(
-            result,
-            step=4,
-            status="passed",
-            action=REQUEST_STEPS[3],
-            observed=focus_summary,
-        )
-        _record_human_verification(
-            result,
-            check=(
-                "Observed the focused workspace switcher trigger itself, not just DOM "
-                "presence, and confirmed a visible keyboard focus indicator was shown."
-            ),
-            observed=focus_summary,
-        )
+            _record_step(
+                result,
+                step=4,
+                status="passed",
+                action=REQUEST_STEPS[3],
+                observed=focus_summary,
+            )
+            _record_human_verification(
+                result,
+                check=(
+                    "Observed the focused workspace switcher trigger itself, not just DOM "
+                    "presence, and confirmed a visible keyboard focus indicator was shown."
+                ),
+                observed=focus_summary,
+            )
 
         _write_pass_outputs(result)
         print("TS-830 passed")
@@ -293,59 +270,45 @@ def _assert_keyboard_focusable(
 
 def _assert_top_bar_focus_order(
     sequence: tuple[FocusNavigationStep, ...],
-    *,
-    final_active_label: str | None,
 ) -> str:
     distinct_labels = _distinct_focus_labels(sequence)
-    normalized_final_label = (final_active_label or "").replace("\n", " ").strip()
-    if normalized_final_label.startswith("Workspace switcher:") and (
-        not distinct_labels or distinct_labels[-1] != normalized_final_label
-    ):
-        distinct_labels.append(normalized_final_label)
     if not distinct_labels:
         raise AssertionError(
-            "Step 3 failed: no keyboard focus sequence was captured from the live "
-            "desktop shell.",
+            "Step 3 failed: no keyboard focus sequence was captured from the top bar.",
         )
+    settings_index = _label_index(distinct_labels, lambda label: label == "Settings")
     trigger_index = _label_index(
         distinct_labels,
         lambda label: label.startswith("Workspace switcher:"),
     )
-    jql_search_index = _label_index(distinct_labels, lambda label: label == "JQL Search")
-    if trigger_index is None:
+    search_index = _label_index(distinct_labels, _is_search_control_label)
+    if settings_index is None or trigger_index is None or search_index is None:
         raise AssertionError(
-            "Step 3 failed: the captured keyboard sequence never reached the visible "
-            "workspace switcher trigger.\n"
-            f"Observed focus sequence: {_focus_sequence_summary(sequence)}",
-        )
-    if trigger_index == 0:
-        raise AssertionError(
-            "Step 3 failed: keyboard navigation landed on the workspace switcher "
-            "trigger before any preceding primary navigation control.\n"
+            "Step 3 failed: the captured top-bar keyboard sequence did not include "
+            "Settings, the workspace switcher trigger, and the Search control.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
-            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence, final_active_label=final_active_label)}",
+            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
         )
-    if jql_search_index is None or jql_search_index >= trigger_index:
+    if not (settings_index < trigger_index < search_index):
         raise AssertionError(
-            "Step 3 failed: the workspace switcher trigger did not remain in logical "
-            "order after the preceding primary navigation controls.\n"
+            "Step 3 failed: the workspace switcher trigger was not reached in the "
+            "required logical sequence after Settings and before Search.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
-            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence, final_active_label=final_active_label)}",
+            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
         )
     return (
         "Observed focus sequence: "
         f"{_focus_sequence_summary(sequence)}; "
         "distinct keyboard order: "
-        f"{_distinct_focus_sequence_summary(sequence, final_active_label=final_active_label)}; "
-        "workspace switcher remained in the live keyboard sequence and received focus."
+        f"{_distinct_focus_sequence_summary(sequence)}; "
+        "workspace switcher remained in the required Settings -> Workspace "
+        "switcher -> Search order."
     )
 
 
 def _distinct_focus_labels(sequence: tuple[FocusNavigationStep, ...]) -> list[str]:
     distinct: list[str] = []
     for step in sequence:
-        if step.after_tag_name != "FLT-SEMANTICS":
-            continue
         label = (step.after_label or "").replace("\n", " ").strip()
         if not label:
             continue
@@ -423,6 +386,11 @@ def _trigger_focus_summary(
         f"after_outline_width={observation.after_outline_width!r}; "
         f"after_box_shadow={observation.after_box_shadow!r}"
     )
+
+
+def _is_search_control_label(label: str) -> bool:
+    normalized = label.strip()
+    return normalized == "Search" or normalized.startswith("Search ")
 
 
 def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
@@ -582,11 +550,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was checked by automation",
         "* Opened the deployed desktop TrackState app in Chromium with a stored hosted token.",
         "* Verified the visible workspace switcher trigger exposes keyboard-focusable semantics.",
-        "* Collected the real Tab sequence across the live desktop chrome controls.",
+        "* Collected the real Tab sequence across the primary top-bar controls.",
         "* Verified the workspace switcher trigger shows a visible focus indicator when focused.",
         "",
         "h4. Real user-style verification",
-        "* Confirmed the visible desktop shell labels rendered before tabbing.",
+        "* Confirmed the visible top-bar labels rendered in the desktop shell before tabbing.",
         "* Observed the live keyboard order as a user would experience it, not just DOM presence.",
         "* Confirmed the focus indicator on the actual trigger element after keyboard focus landed on it.",
         "",
@@ -633,11 +601,11 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was checked by automation",
         "- Opened the deployed desktop TrackState app in Chromium with a stored hosted token.",
         "- Verified the workspace switcher trigger was keyboard-focusable.",
-        "- Collected the real Tab sequence across the live desktop chrome controls.",
+        "- Collected the real Tab sequence across the top-bar controls.",
         "- Verified the focused trigger showed a visible focus indicator.",
         "",
         "## Real user-style verification",
-        "- Confirmed the visible desktop shell labels rendered before tabbing.",
+        "- Confirmed the visible top-bar labels rendered in the desktop shell before tabbing.",
         "- Observed the live keyboard order as a user would experience it.",
         "- Confirmed the visible focus treatment on the actual workspace switcher trigger.",
         "",
@@ -693,7 +661,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Outcome: the workspace switcher trigger was reached in logical order "
-            "within the live desktop keyboard sequence, and the focused trigger showed "
+            "after Settings and before Search issues, and the focused trigger showed "
             "a visible focus indicator."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
@@ -716,13 +684,13 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Desktop keyboard navigation misses or misrenders the workspace switcher trigger",
+            f"# {TICKET_KEY} - Desktop top-bar keyboard order misses or misrenders the workspace switcher trigger",
             "",
             "## Steps to reproduce",
             "1. Open the deployed TrackState app in a desktop browser.",
-            "2. Leave the app in the default live desktop shell state.",
-            "3. Press `Tab` repeatedly to move through the visible primary controls.",
-            "4. Observe where focus goes when the sequence approaches the workspace switcher trigger and the following desktop chrome controls.",
+            "2. Go to Dashboard and use keyboard navigation across the top bar.",
+            "3. Start from the first visible top-bar control and press `Tab` repeatedly.",
+            "4. Observe where focus goes around `Settings`, the workspace switcher trigger, and `Search issues`.",
             "5. When focus lands on the workspace switcher trigger, observe whether a visible focus indicator is shown.",
             "",
             "## Exact steps from the test case with observations",

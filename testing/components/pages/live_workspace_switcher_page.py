@@ -80,6 +80,60 @@ class WorkspaceTriggerFocusabilityObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaExpandedObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_expanded: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_controls: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsTargetObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_element_found: bool
+    controlled_element_visible: bool
+    controlled_element_id: str | None
+    controlled_element_role: str | None
+    controlled_element_tag_name: str | None
+    controlled_element_text: str
+    trigger_outer_html: str
+    controlled_element_outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherSurfaceReferenceObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_surface_found: bool
+    controlled_surface_visible: bool
+    controlled_surface_id: str | None
+    controlled_surface_role: str | None
+    controlled_surface_tag_name: str | None
+    controlled_surface_text: str
+    visible_surface_id: str | None
+    visible_surface_role: str | None
+    visible_surface_tag_name: str | None
+    visible_surface_text: str
+    trigger_outer_html: str
+    visible_surface_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -96,6 +150,14 @@ class WorkspaceSwitcherPanelObservation:
     bottom_aligned: bool
     full_screen_like: bool
     background_dimmed: bool
+
+
+@dataclass(frozen=True)
+class BackgroundScrollObservation:
+    scroll_y: float
+    viewport_height: float
+    scroll_height: float
+    max_scroll_y: float
 
 
 @dataclass(frozen=True)
@@ -193,6 +255,11 @@ class WorkspaceSwitcherInternalFocusObservation:
     before_role: str | None
     before_tag_name: str
     before_outer_html: str
+    before_visible: bool
+    before_in_viewport: bool
+    before_within_switcher: bool
+    before_on_trigger: bool
+    before_owned_by_switcher: bool
     after_label: str | None
     after_role: str | None
     after_tag_name: str
@@ -206,6 +273,20 @@ class WorkspaceSwitcherInternalFocusObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherFocusOwnershipObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    switcher_focus_within: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherInteractiveObservation:
     label: str
     accessible_label: str
@@ -215,6 +296,35 @@ class WorkspaceSwitcherInteractiveObservation:
     y: float
     width: float
     height: float
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherFocusTargetObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherRowFocusObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+    row_found: bool
+    row_contains_active: bool
+    row_text: str
 
 
 @dataclass(frozen=True)
@@ -305,6 +415,47 @@ class MobileTriggerFocusObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerForwardFocusObservation:
+    trigger_label: str
+    trigger_text: str
+    starting_focus_label: str | None
+    starting_focus_role: str | None
+    starting_focus_tag_name: str
+    next_focus_label: str | None
+    next_focus_role: str | None
+    next_focus_tag_name: str
+    next_focus_outer_html: str
+    next_focus_visible: bool
+    next_focus_in_viewport: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerReverseFocusObservation:
+    trigger_label: str
+    trigger_text: str
+    starting_focus_label: str | None
+    starting_focus_role: str | None
+    starting_focus_tag_name: str
+    starting_focus_outer_html: str
+    before_reverse_outline: str
+    before_reverse_outline_color: str
+    before_reverse_outline_width: str
+    before_reverse_box_shadow: str
+    before_reverse_focus_visible: bool
+    before_reverse_trigger_focused: bool
+    after_reverse_outline: str
+    after_reverse_outline_color: str
+    after_reverse_outline_width: str
+    after_reverse_box_shadow: str
+    after_reverse_focus_visible: bool
+    after_reverse_trigger_focused: bool
+    restored_focus_label: str | None
+    restored_focus_role: str | None
+    restored_focus_tag_name: str
+    restored_focus_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceTriggerKeyboardFocusObservation:
     trigger_label: str
     trigger_text: str
@@ -340,6 +491,9 @@ class LiveWorkspaceSwitcherPage:
         self._session = tracker_page.session
         self._project_settings_page = self._settings_page(tracker_page)
 
+    def _switcher_text_field_selector(self, label: str) -> str:
+        return f'input[aria-label="{label}"]'
+
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
 
@@ -362,6 +516,298 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         self._session.mouse_move(1, 1)
+
+    def observe_background_scroll(self) -> BackgroundScrollObservation:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidateScore = (candidate) => {
+                const area = candidate.rect.width * candidate.rect.height;
+                const overflowBonus =
+                  candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                    ? 1_000_000
+                    : 0;
+                return overflowBonus + area + candidate.scrollHeight;
+              };
+              const windowScrollHeight = Math.max(
+                document.scrollingElement?.scrollHeight || 0,
+                document.documentElement?.scrollHeight || 0,
+                document.body?.scrollHeight || 0,
+              );
+              const windowViewportHeight =
+                window.innerHeight || document.documentElement?.clientHeight || 0;
+              const windowScrollY =
+                window.scrollY
+                || window.pageYOffset
+                || document.scrollingElement?.scrollTop
+                || document.documentElement?.scrollTop
+                || document.body?.scrollTop
+                || 0;
+              const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+              const elementCandidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return {
+                    scrollTop: element.scrollTop || 0,
+                    clientHeight: element.clientHeight || 0,
+                    scrollHeight: element.scrollHeight || 0,
+                    overflowY: style.overflowY,
+                    text: normalize(element.innerText || element.textContent || ''),
+                    rect: {
+                      width: rect.width,
+                      height: rect.height,
+                    },
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.scrollHeight - candidate.clientHeight > 40
+                  && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                  && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                  && !candidate.text.startsWith('Workspace switcher'),
+                )
+                .sort((left, right) => candidateScore(right) - candidateScore(left));
+              const bestCandidate = elementCandidates[0] || null;
+              const scrollingElement =
+                document.scrollingElement || document.documentElement || document.body;
+              const useWindow =
+                windowMaxScrollY > 0
+                || bestCandidate === null
+                || (windowMaxScrollY >= Math.max(80, (bestCandidate.scrollHeight - bestCandidate.clientHeight)));
+              const scrollHeight = useWindow
+                ? Math.max(
+                    scrollingElement?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0,
+                    document.body?.scrollHeight || 0,
+                  )
+                : bestCandidate.scrollHeight;
+              const viewportHeight = useWindow
+                ? (window.innerHeight || document.documentElement?.clientHeight || 0)
+                : bestCandidate.clientHeight;
+              const scrollY = useWindow
+                ? (
+                    window.scrollY
+                    || window.pageYOffset
+                    || scrollingElement?.scrollTop
+                    || 0
+                  )
+                : bestCandidate.scrollTop;
+              return {
+                scrollY,
+                viewportHeight,
+                scrollHeight,
+                maxScrollY: Math.max(0, scrollHeight - viewportHeight),
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted tracker did not expose readable background scroll metrics.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return BackgroundScrollObservation(
+            scroll_y=float(payload.get("scrollY", 0.0)),
+            viewport_height=float(payload.get("viewportHeight", 0.0)),
+            scroll_height=float(payload.get("scrollHeight", 0.0)),
+            max_scroll_y=float(payload.get("maxScrollY", 0.0)),
+        )
+
+    def scroll_background_to(
+        self,
+        *,
+        y: float,
+        timeout_ms: int = 15_000,
+    ) -> BackgroundScrollObservation:
+        payload = self._session.evaluate(
+            """
+            (targetY) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidateScore = (candidate) => {
+                const area = candidate.rect.width * candidate.rect.height;
+                const overflowBonus =
+                  candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                    ? 1_000_000
+                    : 0;
+                return overflowBonus + area + candidate.scrollHeight;
+              };
+              const scrollingElement =
+                document.scrollingElement || document.documentElement || document.body;
+              const windowScrollHeight = Math.max(
+                scrollingElement?.scrollHeight || 0,
+                document.documentElement?.scrollHeight || 0,
+                document.body?.scrollHeight || 0,
+              );
+              const windowViewportHeight =
+                window.innerHeight || document.documentElement?.clientHeight || 0;
+              const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+              const elementCandidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return {
+                    element,
+                    scrollHeight: element.scrollHeight || 0,
+                    clientHeight: element.clientHeight || 0,
+                    overflowY: style.overflowY,
+                    text: normalize(element.innerText || element.textContent || ''),
+                    rect: {
+                      width: rect.width,
+                      height: rect.height,
+                    },
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.scrollHeight - candidate.clientHeight > 40
+                  && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                  && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                  && !candidate.text.startsWith('Workspace switcher'),
+                )
+                .sort((left, right) => candidateScore(right) - candidateScore(left));
+              const bestCandidate = elementCandidates[0] || null;
+              const useWindow =
+                windowMaxScrollY > 0
+                || bestCandidate === null
+                || (windowMaxScrollY >= Math.max(80, (bestCandidate.scrollHeight - bestCandidate.clientHeight)));
+              const scrollHeight = useWindow
+                ? windowScrollHeight
+                : bestCandidate.scrollHeight;
+              const viewportHeight = useWindow
+                ? windowViewportHeight
+                : bestCandidate.clientHeight;
+              const maxScrollY = Math.max(0, scrollHeight - viewportHeight);
+              const clampedY = Math.min(Math.max(Number(targetY) || 0, 0), maxScrollY);
+              if (useWindow) {
+                window.scrollTo({ top: clampedY, behavior: 'instant' });
+              } else {
+                bestCandidate.element.scrollTop = clampedY;
+              }
+              return {
+                expectedScrollY: clampedY,
+              };
+            }
+            """,
+            arg=float(y),
+        )
+        expected_scroll_y = (
+            float(payload.get("expectedScrollY", 0.0))
+            if isinstance(payload, dict)
+            else float(y)
+        )
+        try:
+            self._session.wait_for_function(
+                """
+                ({ expectedScrollY }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const candidateScore = (candidate) => {
+                    const area = candidate.rect.width * candidate.rect.height;
+                    const overflowBonus =
+                      candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                        ? 1_000_000
+                        : 0;
+                    return overflowBonus + area + candidate.scrollHeight;
+                  };
+                  const scrollingElement =
+                    document.scrollingElement || document.documentElement || document.body;
+                  const windowScrollHeight = Math.max(
+                    scrollingElement?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0,
+                    document.body?.scrollHeight || 0,
+                  );
+                  const windowViewportHeight =
+                    window.innerHeight || document.documentElement?.clientHeight || 0;
+                  const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+                  const elementCandidates = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .map((element) => {
+                      const rect = element.getBoundingClientRect();
+                      const style = window.getComputedStyle(element);
+                      return {
+                        scrollTop: element.scrollTop || 0,
+                        scrollHeight: element.scrollHeight || 0,
+                        clientHeight: element.clientHeight || 0,
+                        overflowY: style.overflowY,
+                        text: normalize(element.innerText || element.textContent || ''),
+                        rect: {
+                          width: rect.width,
+                          height: rect.height,
+                        },
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.scrollHeight - candidate.clientHeight > 40
+                      && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                      && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                      && !candidate.text.startsWith('Workspace switcher'),
+                    )
+                    .sort((left, right) => candidateScore(right) - candidateScore(left));
+                  const bestCandidate = elementCandidates[0] || null;
+                  const useWindow =
+                    windowMaxScrollY > 0
+                    || bestCandidate === null
+                    || (
+                      windowMaxScrollY >= Math.max(
+                        80,
+                        bestCandidate.scrollHeight - bestCandidate.clientHeight,
+                      )
+                    );
+                  const scrollY = useWindow
+                    ? (
+                        window.scrollY
+                        || window.pageYOffset
+                        || scrollingElement?.scrollTop
+                        || 0
+                      )
+                    : bestCandidate.scrollTop;
+                  return Math.abs(scrollY - expectedScrollY) <= 1;
+                }
+                """,
+                arg={"expectedScrollY": expected_scroll_y},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Scrolling the background page to the requested position did not settle.\n"
+                f"Requested scroll Y: {expected_scroll_y:.1f}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return self.observe_background_scroll()
 
     def navigate_to_section(self, label: str) -> None:
         clicked = self._session.evaluate(
@@ -495,6 +941,272 @@ class LiveWorkspaceSwitcherPage:
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
 
+    def observe_focus_ownership(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherFocusOwnershipObservation:
+        active = self._session.active_element()
+        payload = self._probe_blur_focus_state(panel)
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherFocusOwnershipObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(payload.get("activeVisible")),
+            active_in_viewport=bool(payload.get("activeInViewport")),
+            switcher_focus_within=bool(payload.get("switcherFocusWithin")),
+            active_within_switcher=bool(payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
+        )
+
+    def observe_switcher_focus_target(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        active = self._session.active_element()
+        payload = self._probe_blur_focus_state(panel)
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherFocusTargetObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(payload.get("activeVisible")),
+            active_in_viewport=bool(payload.get("activeInViewport")),
+            active_within_switcher=bool(payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
+        )
+
+    def observe_saved_workspace_row_focus(
+        self,
+        *,
+        display_name: str,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherRowFocusObservation:
+        active = self._session.active_element()
+        focus_payload = self._probe_blur_focus_state(panel)
+        if not isinstance(focus_payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        row_payload = self._session.evaluate(
+            """
+            ({ displayName, panelLeft, panelTop, panelRight, panelBottom }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isInsidePanel = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return centerX >= panelLeft - 1
+                  && centerX <= panelRight + 1
+                  && centerY >= panelTop - 1
+                  && centerY <= panelBottom + 1;
+              };
+              const matchesRow = (element) => {
+                const text = normalize(element?.innerText || element?.textContent || '');
+                return text.includes(displayName)
+                  && text.includes('Branch:')
+                  && text.includes('Delete:');
+              };
+
+              const active = document.activeElement instanceof Element
+                ? document.activeElement
+                : null;
+              let focusedRow = null;
+              let current = active;
+              while (current && current !== document.body) {
+                if (isVisible(current) && isInsidePanel(current) && matchesRow(current)) {
+                  focusedRow = current;
+                  break;
+                }
+                current = current.parentElement;
+              }
+
+              const visibleRow = Array.from(document.querySelectorAll('*'))
+                .filter((element) => isVisible(element) && isInsidePanel(element) && matchesRow(element))
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] || null;
+              const targetRow = focusedRow || visibleRow;
+              return {
+                rowFound: Boolean(targetRow),
+                rowContainsActive: Boolean(focusedRow),
+                rowText: normalize(targetRow?.innerText || targetRow?.textContent || ''),
+              };
+            }
+            """,
+            arg={
+                "displayName": display_name,
+                "panelLeft": panel.left,
+                "panelTop": panel.top,
+                "panelRight": panel.left + panel.width,
+                "panelBottom": panel.top + panel.height,
+            },
+        )
+        if not isinstance(row_payload, dict):
+            raise AssertionError(
+                "The workspace switcher row-focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherRowFocusObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(focus_payload.get("activeVisible")),
+            active_in_viewport=bool(focus_payload.get("activeInViewport")),
+            active_within_switcher=bool(focus_payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(focus_payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(focus_payload.get("focusOwnedBySwitcher")),
+            row_found=bool(row_payload.get("rowFound")),
+            row_contains_active=bool(row_payload.get("rowContainsActive")),
+            row_text=str(row_payload.get("rowText", "")),
+        )
+
+    def focus_switcher_button(
+        self,
+        label: str,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({ heading, label }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const buttonSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                  ].join(',');
+                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                    .filter(isVisible)
+                    .find((element) => {
+                      const elementLabel = labelFor(element);
+                      const elementText = visibleText(element);
+                      return elementLabel === label || elementText === label;
+                    });
+                  if (!candidate) {
+                    return null;
+                  }
+                  candidate.focus({ preventScroll: true });
+                  const active = document.activeElement;
+                  return active === candidate || candidate.contains(active)
+                    ? {
+                        activeLabel: labelFor(active),
+                        activeTagName: active?.tagName || '',
+                      }
+                    : null;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "label": label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable "{label}" button.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        observation = self.observe_switcher_focus_target(panel=panel)
+        if (
+            not observation.focus_owned_by_switcher
+            or not observation.active_within_switcher
+        ):
+            raise AssertionError(
+                f'Focusing the visible "{label}" button did not keep keyboard focus inside '
+                "the open workspace switcher.\n"
+                f"Observed focus label: {observation.active_label!r}\n"
+                f"Observed focus role: {observation.active_role!r}\n"
+                f"Observed focus tag: {observation.active_tag_name!r}\n"
+                f"Observed focus within switcher: {observation.active_within_switcher!r}\n"
+                f"Observed focus owned by switcher: {observation.focus_owned_by_switcher!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return observation
+
     def focus_switcher_text_field(
         self,
         label: str,
@@ -503,7 +1215,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> FocusedElementObservation:
         try:
             self._session.focus(
-                f'input[aria-label="{label}"]',
+                self._switcher_text_field_selector(label),
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -513,6 +1225,24 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self._session.active_element()
+
+    def read_switcher_text_field_value(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            return self._session.read_value(
+                self._switcher_text_field_selector(label),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a readable "{label}" text '
+                "field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
         self._session.press_key(key, timeout_ms=timeout_ms)
@@ -538,6 +1268,11 @@ class LiveWorkspaceSwitcherPage:
                 """
                 ({ heading, stabilityMs }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isWorkspaceRowText = (text) =>
+                    text.includes('Branch:')
+                    && text.includes('Delete')
+                    && (text.includes('Hosted') || text.includes('Local'))
+                    && (text.includes('Open') || text.includes('Active'));
                   const isVisible = (element) => {
                     if (!element) {
                       return false;
@@ -554,17 +1289,28 @@ class LiveWorkspaceSwitcherPage:
                     .filter(isVisible)
                     .map((element) => {
                       const rect = element.getBoundingClientRect();
+                      const text = visibleText(element);
                       return {
                         element,
-                        text: visibleText(element),
+                        text,
                         area: rect.width * rect.height,
+                        hasLegacyWorkspaceLabels:
+                          text.includes('Saved workspaces') && text.includes('Add workspace'),
+                        hasCurrentWorkspaceLabels:
+                          text.includes('Save and switch')
+                          && (text.includes('Hosted') || text.includes('Local'))
+                          && (text.includes('Delete') || text.includes('Branch:')),
+                        hasWorkspaceRowText: isWorkspaceRowText(text),
                       };
                     })
                     .filter((candidate) =>
                       candidate.text.includes(heading)
-                      && candidate.text.includes('Saved workspaces')
-                      && candidate.text.includes('Add workspace')
-                      && candidate.text.includes('Save and switch'),
+                      && (
+                        candidate.hasLegacyWorkspaceLabels
+                        || candidate.hasCurrentWorkspaceLabels
+                        || candidate.hasWorkspaceRowText
+                        || candidate.text.includes('Hosted Local')
+                      ),
                     )
                     .sort((left, right) => left.area - right.area);
                   const surfaceVisible = panelCandidates.length > 0;
@@ -603,34 +1349,164 @@ class LiveWorkspaceSwitcherPage:
         *,
         timeout_ms: int = 10_000,
     ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
-        body_text = self.current_body_text()
-        if "Saved workspaces" not in body_text or "Add workspace" not in body_text:
-            raise AssertionError(
-                "The open workspace switcher did not expose any readable saved workspace rows.\n"
-                f"Observed body text:\n{body_text}",
-            )
-        panel_text = body_text.split("Saved workspaces", 1)[1].split("Add workspace", 1)[0]
-        row_pattern = re.compile(
-            r"(?P<display>[^\n]+)\n"
-            r"(?P<detail>[^\n]*Branch:[^\n]+)\n"
-            r"(?P<type>Hosted|Local)\n"
-            r"(?P<state>[^\n]+)\n"
-            r"(?P<action>Active|Open: [^\n]+)\n"
-            r"(?P<delete>Delete: [^\n]+)",
-            re.MULTILINE,
-        )
-        matches = list(row_pattern.finditer(panel_text))
-        if not matches:
-            raise AssertionError(
-                "The open workspace switcher did not expose any readable saved workspace rows.\n"
-                f"Observed body text:\n{body_text}",
-            )
         rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
-        for match in matches:
-            display_name = match.group("display").strip()
+        switcher = self.observe_open_switcher(timeout_ms=timeout_ms)
+        body_text = self.current_body_text()
+        state_labels = (
+            "Attachments limited",
+            "Saved hosted workspace",
+            "Needs sign-in",
+            "Read-only",
+            "Connected",
+            "Unavailable",
+            "Local Git",
+        )
+        summary_line_pattern = re.compile(
+            rf"^(?P<display>.+?), "
+            rf"(?P<target_type>Hosted|Local), "
+            rf"(?P<state>{'|'.join(re.escape(label) for label in state_labels)}), "
+            rf"(?P<detail>.+Branch:.+)$",
+        )
+        panel_lines = [
+            " ".join(line.split()).strip()
+            for line in switcher.body_text.splitlines()
+            if line.strip()
+        ]
+        deduped_lines = [
+            re.sub(r"^(.+)\s+\1$", r"\1", line)
+            for line in panel_lines
+        ]
+        heading_indexes = [
+            index for index, line in enumerate(deduped_lines) if line == self._switcher_heading
+        ]
+        parsed_rows: list[
+            tuple[str, str, str | None, str | None, tuple[str, ...], bool, str]
+        ] = []
+        if heading_indexes:
+            candidate_lines = deduped_lines[heading_indexes[-1] + 1 :]
+            index = 0
+            while index < len(candidate_lines):
+                if index + 2 < len(candidate_lines):
+                    summary_line = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    summary_match = summary_line_pattern.match(summary_line)
+                    if (
+                        summary_match is not None
+                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and delete_label.startswith("Delete: ")
+                    ):
+                        parsed_rows.append(
+                            (
+                                summary_match.group("display").strip(),
+                                summary_match.group("detail").strip(),
+                                summary_match.group("target_type").strip(),
+                                summary_match.group("state").strip(),
+                                (action_label, delete_label),
+                                action_label == "Active",
+                                summary_line,
+                            ),
+                        )
+                        index += 3
+                        continue
+                if index + 5 >= len(candidate_lines):
+                    index += 1
+                    continue
+                display_name = candidate_lines[index]
+                detail_text = candidate_lines[index + 1]
+                target_type_label = candidate_lines[index + 2]
+                state_label = candidate_lines[index + 3]
+                action_label = candidate_lines[index + 4]
+                delete_label = candidate_lines[index + 5]
+                if (
+                    "Branch:" in detail_text
+                    and target_type_label in {"Hosted", "Local"}
+                    and (action_label == "Active" or action_label.startswith("Open: "))
+                    and delete_label.startswith("Delete: ")
+                ):
+                    parsed_rows.append(
+                        (
+                            display_name,
+                            detail_text,
+                            target_type_label,
+                            state_label,
+                            (action_label, delete_label),
+                            action_label == "Active",
+                            display_name,
+                        ),
+                    )
+                    index += 6
+                    continue
+                index += 1
+            if not parsed_rows:
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    header = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if "Branch:" not in header or not delete_label.startswith("Delete: "):
+                        index += 1
+                        continue
+
+                    display_name: str | None = None
+                    target_type_label: str | None = None
+                    state_label: str | None = None
+                    detail_text = header
+                    header_parts = [part.strip() for part in header.split(", ", 3)]
+                    if len(header_parts) >= 4:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        state_label = header_parts[2] or None
+                        detail_text = header_parts[3]
+                    elif len(header_parts) >= 2:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        detail_text = ", ".join(header_parts[2:]) or header
+                    if not display_name:
+                        index += 1
+                        continue
+
+                    parsed_rows.append(
+                        (
+                            display_name,
+                            detail_text,
+                            target_type_label,
+                            state_label,
+                            (action_label, delete_label),
+                            action_label == "Active",
+                            header,
+                        ),
+                    )
+                    index += 3
+        if not parsed_rows:
+            for row in switcher.rows:
+                display_name = row.display_name
+                detail_text = row.detail_text.strip()
+                if not display_name or "Branch:" not in detail_text:
+                    continue
+                parsed_rows.append(
+                    (
+                        display_name,
+                        detail_text,
+                        row.target_type_label,
+                        row.state_label,
+                        row.action_labels,
+                        row.selected,
+                        display_name,
+                    ),
+                )
+        for (
+            display_name,
+            detail_text,
+            target_type_label,
+            state_label,
+            action_labels,
+            selected,
+            locator_text,
+        ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ text }) => {
+                ({ displayName, locatorText, detailText, actionLabels, deleteLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -643,13 +1519,102 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  const candidate = Array.from(document.querySelectorAll('*'))
+                  const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                  const areaFor = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width * rect.height;
+                  };
+                  const rectFor = (element) => element.getBoundingClientRect();
+                  const unionRect = (elements) => {
+                    if (!elements.length) {
+                      return null;
+                    }
+                    const rects = elements.map((element) => rectFor(element));
+                    const left = Math.min(...rects.map((rect) => rect.left));
+                    const top = Math.min(...rects.map((rect) => rect.top));
+                    const right = Math.max(...rects.map((rect) => rect.right));
+                    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                    return {
+                      left,
+                      top,
+                      width: Math.max(0, right - left),
+                      height: Math.max(0, bottom - top),
+                    };
+                  };
+                  const countMatches = (text, fragment) =>
+                    !fragment ? 0 : text.split(fragment).length - 1;
+                  const matchesRow = (element) => {
+                    const text = textFor(element);
+                    return text.includes(displayName)
+                      && (!locatorText || text.includes(locatorText))
+                      && text.includes(detailText)
+                      && actionLabels.every((label) => !label || text.includes(label))
+                      && (!deleteLabel || text.includes(deleteLabel));
+                  };
+                  const anchors = Array.from(document.querySelectorAll('*'))
                     .filter((element) => isVisible(element))
-                    .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                    .filter((element) => {
+                      const text = textFor(element);
+                      const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                      return (
+                        text === locatorText
+                        || text === displayName
+                        || text === deleteLabel
+                        || ariaLabel === deleteLabel
+                        || actionLabels.includes(text)
+                        || actionLabels.includes(ariaLabel)
+                      );
+                    })
+                    .sort((left, right) => areaFor(left) - areaFor(right));
+                  const displayAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    return text === locatorText || text === displayName;
+                  }) || null;
+                  const actionAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                  }) || null;
+                  const deleteAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return text === deleteLabel || ariaLabel === deleteLabel;
+                  }) || null;
+                  const anchorBounds = unionRect(
+                    [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                  );
+                  if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                    return anchorBounds;
+                  }
+                  let candidate = null;
+                  for (const anchor of anchors) {
+                    let current = anchor;
+                    while (current && current !== document.body) {
+                      const text = textFor(current);
+                      if (
+                        isVisible(current)
+                        && matchesRow(current)
+                        && countMatches(text, 'Branch:') <= 1
+                        && countMatches(text, 'Delete:') <= 1
+                      ) {
+                        candidate = current;
+                        break;
+                      }
+                      current = current.parentElement;
+                    }
+                    if (candidate) {
+                      break;
+                    }
+                  }
+                  if (!candidate) {
+                    candidate = Array.from(document.querySelectorAll('*'))
+                      .filter((element) => isVisible(element) && matchesRow(element))
+                      .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                  }
                   if (!candidate) {
                     return null;
                   }
-                  const rect = candidate.getBoundingClientRect();
+                  const rect = rectFor(candidate);
                   return {
                     left: rect.left,
                     top: rect.top,
@@ -658,28 +1623,249 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
-                arg={"text": display_name},
+                arg={
+                    "displayName": display_name,
+                    "locatorText": locator_text,
+                    "detailText": detail_text,
+                    "actionLabels": list(action_labels),
+                    "deleteLabel": action_labels[-1] if action_labels else "",
+                },
             )
             if not isinstance(bounds, dict):
                 raise AssertionError(
                     f'The open workspace switcher exposed saved workspace text for "{display_name}", '
                     "but its visible label could not be located for interaction.\n"
+                    f"Observed switcher text:\n{switcher.switcher_text}\n"
                     f"Observed body text:\n{body_text}",
                 )
-            action_labels = (match.group("action").strip(), match.group("delete").strip())
             rows.append(
                 WorkspaceSwitcherSavedWorkspaceRowObservation(
                     display_name=display_name,
-                    target_type_label=match.group("type").strip(),
-                    state_label=match.group("state").strip(),
-                    detail_text=match.group("detail").strip(),
-                    selected=match.group("action").strip() == "Active",
+                    target_type_label=target_type_label,
+                    state_label=state_label,
+                    detail_text=detail_text,
+                    selected=selected,
                     action_labels=action_labels,
                     left=float(bounds.get("left", 0.0)),
                     top=float(bounds.get("top", 0.0)),
                     width=float(bounds.get("width", 0.0)),
                     height=float(bounds.get("height", 0.0)),
                 ),
+            )
+        if not rows:
+            for row in switcher.rows:
+                display_name = (row.display_name or "").strip()
+                detail_text = row.detail_text.strip()
+                if not display_name or "Branch:" not in detail_text:
+                    continue
+                action_labels = tuple(
+                    label
+                    for label in (
+                        *row.action_labels,
+                        *row.button_labels,
+                    )
+                    if label
+                )
+                bounds = self._session.evaluate(
+                    """
+                    ({ displayName, detailText, actionLabels, deleteLabel }) => {
+                      const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                      const isVisible = (element) => {
+                        if (!element) {
+                          return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0
+                          && rect.height > 0
+                          && style.visibility !== 'hidden'
+                          && style.display !== 'none';
+                      };
+                      const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                      const areaFor = (element) => {
+                        const rect = element.getBoundingClientRect();
+                        return rect.width * rect.height;
+                      };
+                      const rectFor = (element) => element.getBoundingClientRect();
+                      const unionRect = (elements) => {
+                        if (!elements.length) {
+                          return null;
+                        }
+                        const rects = elements.map((element) => rectFor(element));
+                        const left = Math.min(...rects.map((rect) => rect.left));
+                        const top = Math.min(...rects.map((rect) => rect.top));
+                        const right = Math.max(...rects.map((rect) => rect.right));
+                        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                        return {
+                          left,
+                          top,
+                          width: Math.max(0, right - left),
+                          height: Math.max(0, bottom - top),
+                        };
+                      };
+                      const countMatches = (text, fragment) =>
+                        !fragment ? 0 : text.split(fragment).length - 1;
+                      const matchesRow = (element) => {
+                        const text = textFor(element);
+                        return text.includes(displayName)
+                          && text.includes(detailText)
+                          && actionLabels.every((label) => !label || text.includes(label))
+                          && (!deleteLabel || text.includes(deleteLabel));
+                      };
+                      const anchors = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element))
+                        .filter((element) => {
+                          const text = textFor(element);
+                          const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                          return text === deleteLabel || ariaLabel === deleteLabel;
+                        })
+                        .sort((left, right) => areaFor(left) - areaFor(right));
+                      const displayAnchor = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element) && textFor(element) === displayName)
+                        .sort((left, right) => areaFor(left) - areaFor(right))[0] || null;
+                      const actionAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                      }) || null;
+                      const deleteAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return text === deleteLabel || ariaLabel === deleteLabel;
+                      }) || null;
+                      const anchorBounds = unionRect(
+                        [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                      );
+                      if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                        return anchorBounds;
+                      }
+                      let candidate = null;
+                      for (const anchor of anchors) {
+                        let current = anchor;
+                        while (current && current !== document.body) {
+                          const text = textFor(current);
+                          if (
+                            isVisible(current)
+                            && matchesRow(current)
+                            && countMatches(text, 'Branch:') <= 1
+                            && countMatches(text, 'Delete:') <= 1
+                          ) {
+                            candidate = current;
+                            break;
+                          }
+                          current = current.parentElement;
+                        }
+                        if (candidate) {
+                          break;
+                        }
+                      }
+                      if (!candidate) {
+                        candidate = Array.from(document.querySelectorAll('*'))
+                          .filter((element) => isVisible(element) && matchesRow(element))
+                          .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                      }
+                      if (!candidate) {
+                        return null;
+                      }
+                      const rect = rectFor(candidate);
+                      return {
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                      };
+                    }
+                    """,
+                    arg={
+                        "displayName": display_name,
+                        "detailText": detail_text,
+                        "actionLabels": list(action_labels),
+                        "deleteLabel": action_labels[-1] if action_labels else "",
+                    },
+                )
+                if not isinstance(bounds, dict):
+                    continue
+                rows.append(
+                    WorkspaceSwitcherSavedWorkspaceRowObservation(
+                        display_name=display_name,
+                        target_type_label=row.target_type_label,
+                        state_label=row.state_label,
+                        detail_text=detail_text,
+                        selected=row.selected,
+                        action_labels=action_labels,
+                        left=float(bounds.get("left", 0.0)),
+                        top=float(bounds.get("top", 0.0)),
+                        width=float(bounds.get("width", 0.0)),
+                        height=float(bounds.get("height", 0.0)),
+                    ),
+                )
+        if not rows:
+            row_pattern = re.compile(
+                r"(?P<display>[^\n]+)\n"
+                r"(?P<detail>[^\n]*Branch:[^\n]+)\n"
+                r"(?P<type>Hosted|Local)\n"
+                r"(?P<state>[^\n]+)\n"
+                r"(?P<action>Active|Open: [^\n]+)\n"
+                r"(?P<delete>Delete: [^\n]+)",
+                re.MULTILINE,
+            )
+            for match in row_pattern.finditer(body_text):
+                display_name = match.group("display").strip()
+                bounds = self._session.evaluate(
+                    """
+                    ({ text }) => {
+                      const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                      const isVisible = (element) => {
+                        if (!element) {
+                          return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0
+                          && rect.height > 0
+                          && style.visibility !== 'hidden'
+                          && style.display !== 'none';
+                      };
+                      const candidate = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element))
+                        .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                      if (!candidate) {
+                        return null;
+                      }
+                      const rect = candidate.getBoundingClientRect();
+                      return {
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                      };
+                    }
+                    """,
+                    arg={"text": display_name},
+                )
+                if not isinstance(bounds, dict):
+                    continue
+                rows.append(
+                    WorkspaceSwitcherSavedWorkspaceRowObservation(
+                        display_name=display_name,
+                        target_type_label=match.group("type").strip(),
+                        state_label=match.group("state").strip(),
+                        detail_text=match.group("detail").strip(),
+                        selected=match.group("action").strip() == "Active",
+                        action_labels=(
+                            match.group("action").strip(),
+                            match.group("delete").strip(),
+                        ),
+                        left=float(bounds.get("left", 0.0)),
+                        top=float(bounds.get("top", 0.0)),
+                        width=float(bounds.get("width", 0.0)),
+                        height=float(bounds.get("height", 0.0)),
+                    ),
+                )
+        if not rows:
+            raise AssertionError(
+                "The open workspace switcher did not expose any readable saved workspace rows.\n"
+                f"Observed body text:\n{body_text}",
             )
         return tuple(rows)
 
@@ -701,6 +1887,49 @@ class LiveWorkspaceSwitcherPage:
             row.top + min(28.0, row.height * 0.25),
         )
 
+    def wait_for_active_saved_workspace(
+        self,
+        display_name: str,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherSavedWorkspaceRowObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({ displayName }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const bodyText = normalize(document.body?.innerText || document.body?.textContent || '');
+                  const activeMarker = `Active Delete: ${displayName}`;
+                  const activeIndex = bodyText.indexOf(activeMarker);
+                  if (activeIndex < 0) {
+                    return null;
+                  }
+                  const displayIndex = bodyText.lastIndexOf(displayName, activeIndex);
+                  return displayIndex >= 0
+                    ? bodyText.slice(displayIndex, activeIndex + activeMarker.length)
+                    : activeMarker;
+                }
+                """,
+                arg={
+                    "displayName": display_name,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher never marked "{display_name}" as the active '
+                "saved workspace within the expected wait window.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        rows = self.observe_saved_workspace_rows(timeout_ms=timeout_ms)
+        active_row = next((row for row in rows if row.selected), None)
+        if active_row is None:
+            raise AssertionError(
+                "The open workspace switcher did not expose an active saved workspace row "
+                "after waiting for the selection change.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return active_row
     def workspace_trigger_reached(
         self,
         sequence: tuple[FocusNavigationStep, ...],
@@ -770,6 +1999,441 @@ class LiveWorkspaceSwitcherPage:
             outer_html=str(payload.get("outerHtml", "")),
         )
 
+    def observe_trigger_aria_expanded(
+        self,
+        *,
+        expected_value: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaExpandedObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix, expectedValue }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const ariaExpanded = trigger.getAttribute('aria-expanded');
+                  if (expectedValue !== null && ariaExpanded !== expectedValue) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaExpanded,
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={
+                    "triggerLabelPrefix": self._trigger_label_prefix,
+                    "expectedValue": expected_value,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            expected_description = (
+                f" with aria-expanded={expected_value!r}" if expected_value is not None else ""
+            )
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger"
+                f"{expected_description} for ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaExpandedObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_expanded=(
+                str(payload.get("ariaExpanded"))
+                if payload.get("ariaExpanded") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaControlsObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaControls: trigger.getAttribute('aria-controls'),
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_controls=(
+                str(payload.get("ariaControls"))
+                if payload.get("ariaControls") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls_target(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerAriaControlsTargetObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledElement = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledElementFound: Boolean(controlledElement),
+                    controlledElementVisible: Boolean(controlledElement) && isVisible(controlledElement),
+                    controlledElementId: controlledElement?.id || null,
+                    controlledElementRole: controlledElement?.getAttribute?.('role') || null,
+                    controlledElementTagName: controlledElement?.tagName || null,
+                    controlledElementText: normalize(
+                      controlledElement?.innerText || controlledElement?.textContent || '',
+                    ),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    controlledElementOuterHtml: controlledElement?.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsTargetObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_element_found=bool(payload.get("controlledElementFound")),
+            controlled_element_visible=bool(payload.get("controlledElementVisible")),
+            controlled_element_id=(
+                str(payload.get("controlledElementId"))
+                if payload.get("controlledElementId") is not None
+                else None
+            ),
+            controlled_element_role=(
+                str(payload.get("controlledElementRole"))
+                if payload.get("controlledElementRole") is not None
+                else None
+            ),
+            controlled_element_tag_name=(
+                str(payload.get("controlledElementTagName"))
+                if payload.get("controlledElementTagName") is not None
+                else None
+            ),
+            controlled_element_text=str(payload.get("controlledElementText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            controlled_element_outer_html=str(payload.get("controlledElementOuterHtml", "")),
+        )
+
+    def observe_surface_reference(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherSurfaceReferenceObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const visibleDialogs = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  ).filter(isVisible);
+                  let switcher = visibleDialogs.find((candidate) =>
+                    normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
+                  );
+                  if (!switcher) {
+                    const headings = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .map((element) => ({
+                        element,
+                        label: normalize(element.getAttribute?.('aria-label') || ''),
+                        text: normalize(element.innerText || element.textContent || ''),
+                        area: (() => {
+                          const rect = element.getBoundingClientRect();
+                          return rect.width * rect.height;
+                        })(),
+                      }))
+                      .filter((candidate) =>
+                        candidate.label === 'Workspace switcher'
+                        || candidate.text === 'Workspace switcher'
+                        || (
+                          candidate.text.includes('Workspace switcher')
+                          && (
+                            candidate.text.includes('Saved workspaces')
+                            || candidate.text.includes('Save and switch')
+                            || candidate.text.includes('Hosted Local')
+                            || candidate.text.includes('Add workspace')
+                          )
+                        )
+                      )
+                      .sort((left, right) => left.area - right.area);
+                    for (const headingCandidate of headings) {
+                      let current = headingCandidate.element;
+                      while (current && current !== document.body) {
+                        const text = normalize(current.innerText || current.textContent || '');
+                        if (
+                          text.includes('Workspace switcher')
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                            || text.includes('Add workspace')
+                          )
+                        ) {
+                          switcher = current;
+                          break;
+                        }
+                        current = current.parentElement;
+                      }
+                      if (switcher) {
+                        break;
+                      }
+                    }
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledSurface = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  const controlledVisible = Boolean(controlledSurface) && isVisible(controlledSurface);
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledSurfaceFound: Boolean(controlledSurface),
+                    controlledSurfaceVisible: controlledVisible,
+                    controlledSurfaceId: controlledSurface?.id || null,
+                    controlledSurfaceRole: controlledSurface?.getAttribute?.('role') || null,
+                    controlledSurfaceTagName: controlledSurface?.tagName || null,
+                    controlledSurfaceText: normalize(
+                      controlledSurface?.innerText || controlledSurface?.textContent || '',
+                    ),
+                    visibleSurfaceId: switcher.id || null,
+                    visibleSurfaceRole: switcher.getAttribute?.('role') || null,
+                    visibleSurfaceTagName: switcher.tagName || null,
+                    visibleSurfaceText: normalize(switcher.innerText || switcher.textContent || ''),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    visibleSurfaceOuterHtml: switcher.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The deployed app did not expose a readable visible workspace switcher "
+                "surface for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The deployed app did not expose a readable workspace switcher trigger "
+                "and surface reference for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherSurfaceReferenceObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_surface_found=bool(payload.get("controlledSurfaceFound")),
+            controlled_surface_visible=bool(payload.get("controlledSurfaceVisible")),
+            controlled_surface_id=(
+                str(payload.get("controlledSurfaceId"))
+                if payload.get("controlledSurfaceId") is not None
+                else None
+            ),
+            controlled_surface_role=(
+                str(payload.get("controlledSurfaceRole"))
+                if payload.get("controlledSurfaceRole") is not None
+                else None
+            ),
+            controlled_surface_tag_name=(
+                str(payload.get("controlledSurfaceTagName"))
+                if payload.get("controlledSurfaceTagName") is not None
+                else None
+            ),
+            controlled_surface_text=str(payload.get("controlledSurfaceText", "")),
+            visible_surface_id=(
+                str(payload.get("visibleSurfaceId"))
+                if payload.get("visibleSurfaceId") is not None
+                else None
+            ),
+            visible_surface_role=(
+                str(payload.get("visibleSurfaceRole"))
+                if payload.get("visibleSurfaceRole") is not None
+                else None
+            ),
+            visible_surface_tag_name=(
+                str(payload.get("visibleSurfaceTagName"))
+                if payload.get("visibleSurfaceTagName") is not None
+                else None
+            ),
+            visible_surface_text=str(payload.get("visibleSurfaceText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            visible_surface_outer_html=str(payload.get("visibleSurfaceOuterHtml", "")),
+        )
+
     def focus_trigger_via_keyboard(
         self,
         *,
@@ -777,6 +2441,31 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
         self.focus_search_field(timeout_ms=timeout_ms)
+        return self._focus_trigger_via_keyboard_after_current_focus(
+            max_tabs=max_tabs,
+            timeout_ms=timeout_ms,
+            start_description="the visible top-bar search field",
+        )
+
+    def focus_trigger_via_keyboard_from_current_focus(
+        self,
+        *,
+        max_tabs: int = 12,
+        timeout_ms: int = 30_000,
+    ) -> tuple[FocusNavigationStep, ...]:
+        return self._focus_trigger_via_keyboard_after_current_focus(
+            max_tabs=max_tabs,
+            timeout_ms=timeout_ms,
+            start_description="the current active element",
+        )
+
+    def _focus_trigger_via_keyboard_after_current_focus(
+        self,
+        *,
+        max_tabs: int,
+        timeout_ms: int,
+        start_description: str,
+    ) -> tuple[FocusNavigationStep, ...]:
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, max_tabs + 1):
             before = self._session.active_element()
@@ -795,14 +2484,26 @@ class LiveWorkspaceSwitcherPage:
             if self._is_workspace_trigger_label(after.accessible_name):
                 return tuple(steps)
         raise AssertionError(
-            "Keyboard Tab navigation from the visible top-bar search field never "
-            "reached the workspace switcher trigger.\n"
+            f"Keyboard Tab navigation from {start_description} never reached the "
+            "workspace switcher trigger.\n"
             + "Observed focus sequence: "
             + " -> ".join(
-                step.after_label or f"<{step.after_tag_name}>"
+                self._describe_focus_step_target(
+                    step.after_label,
+                    step.after_tag_name,
+                )
                 for step in steps
             )
         )
+
+    @staticmethod
+    def _describe_focus_step_target(label: str | None, tag_name: str | None) -> str:
+        normalized = re.sub(r"\s+", " ", label or "").strip()
+        if not normalized:
+            return f"<{tag_name or 'unknown'}>"
+        if len(normalized) > 96:
+            return normalized[:93] + "..."
+        return normalized
 
     def press_enter_on_active_element_and_wait_for_surface(
         self,
@@ -811,6 +2512,156 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         self._session.press_key("Enter", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
+
+    def press_space_on_active_element_and_wait_for_surface(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
+        self._wait_for_surface(timeout_ms=timeout_ms)
+
+    def press_space_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Space on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def press_enter_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Enter", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Enter on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_space(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Space on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Space again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_enter(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Enter on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Enter again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(
@@ -3301,6 +5152,12 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherInternalFocusObservation:
         before = self._session.active_element()
+        before_payload = self._probe_blur_focus_state(panel)
+        if not isinstance(before_payload, dict):
+            raise AssertionError(
+                "The workspace switcher internal-focus pre-Tab probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
         self._session.press_key("Tab", timeout_ms=timeout_ms)
 
         probe_script = """
@@ -3460,6 +5317,11 @@ class LiveWorkspaceSwitcherPage:
             before_role=before.role,
             before_tag_name=before.tag_name,
             before_outer_html=before.outer_html,
+            before_visible=bool(before_payload.get("activeVisible")),
+            before_in_viewport=bool(before_payload.get("activeInViewport")),
+            before_within_switcher=bool(before_payload.get("activeWithinSwitcher")),
+            before_on_trigger=bool(before_payload.get("activeOnTrigger")),
+            before_owned_by_switcher=bool(before_payload.get("focusOwnedBySwitcher")),
             after_label=after.accessible_name,
             after_role=after.role,
             after_tag_name=after.tag_name,
@@ -3551,6 +5413,142 @@ class LiveWorkspaceSwitcherPage:
             active_tag_name_after_focus=active.tag_name,
             active_outer_html_after_focus=active.outer_html,
             focus_sequence=tuple(steps),
+        )
+
+    def observe_forward_focus_from_trigger(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerForwardFocusObservation:
+        starting_focus = self._session.active_element()
+        if not self._is_workspace_trigger_label(starting_focus.accessible_name) and not self._is_workspace_trigger_label(
+            starting_focus.text,
+        ):
+            raise AssertionError(
+                "Forward keyboard navigation must start with the workspace switcher "
+                "trigger focused.\n"
+                f"Observed active element: label={starting_focus.accessible_name!r}, "
+                f"role={starting_focus.role!r}, tag={starting_focus.tag_name!r}, "
+                f"text={starting_focus.text!r}",
+            )
+
+        trigger_snapshot = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
+        try:
+            self._session.press_key("Tab", timeout_ms=timeout_ms)
+            next_focus = self._session.active_element()
+            next_focus_visibility = self._active_element_visibility_snapshot()
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Tab from the focused workspace switcher trigger did not move "
+                "keyboard focus to a visible subsequent interactive element.\n"
+                f"Observed active element after Tab: label={active.accessible_name!r}, "
+                f"role={active.role!r}, tag={active.tag_name!r}, text={active.text!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+        return WorkspaceTriggerForwardFocusObservation(
+            trigger_label=str(trigger_snapshot.get("triggerLabel", "")),
+            trigger_text=str(trigger_snapshot.get("triggerText", "")),
+            starting_focus_label=starting_focus.accessible_name,
+            starting_focus_role=starting_focus.role,
+            starting_focus_tag_name=starting_focus.tag_name,
+            next_focus_label=next_focus.accessible_name,
+            next_focus_role=next_focus.role,
+            next_focus_tag_name=next_focus.tag_name,
+            next_focus_outer_html=next_focus.outer_html,
+            next_focus_visible=bool(next_focus_visibility.get("visible")),
+            next_focus_in_viewport=bool(next_focus_visibility.get("inViewport")),
+        )
+
+    def observe_reverse_focus_return_to_trigger(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerReverseFocusObservation:
+        starting_focus = self._session.active_element()
+        if self._is_workspace_trigger_label(starting_focus.accessible_name) or self._is_workspace_trigger_label(
+            starting_focus.text,
+        ):
+            raise AssertionError(
+                "Reverse keyboard navigation must start from the control after the "
+                "workspace switcher trigger, not from the trigger itself.\n"
+                f"Observed active element: label={starting_focus.accessible_name!r}, "
+                f"role={starting_focus.role!r}, tag={starting_focus.tag_name!r}, "
+                f"text={starting_focus.text!r}",
+            )
+
+        before_reverse = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
+
+        try:
+            self._session.press_key("Shift+Tab", timeout_ms=timeout_ms)
+            self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || element?.textContent || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  const active = document.activeElement;
+                  if (!trigger || !active || !isVisible(trigger)) {
+                    return null;
+                  }
+                  return active === trigger || trigger.contains(active) ? true : null;
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Shift+Tab from the subsequent focused element did not return "
+                "keyboard focus to the workspace switcher trigger.\n"
+                f"Observed active element after Shift+Tab: label={active.accessible_name!r}, "
+                f"role={active.role!r}, tag={active.tag_name!r}, text={active.text!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+        after_reverse = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
+        restored_focus = self._session.active_element()
+        return WorkspaceTriggerReverseFocusObservation(
+            trigger_label=str(before_reverse.get("triggerLabel", "")),
+            trigger_text=str(before_reverse.get("triggerText", "")),
+            starting_focus_label=starting_focus.accessible_name,
+            starting_focus_role=starting_focus.role,
+            starting_focus_tag_name=starting_focus.tag_name,
+            starting_focus_outer_html=starting_focus.outer_html,
+            before_reverse_outline=str(before_reverse.get("outline", "")),
+            before_reverse_outline_color=str(before_reverse.get("outlineColor", "")),
+            before_reverse_outline_width=str(before_reverse.get("outlineWidth", "")),
+            before_reverse_box_shadow=str(before_reverse.get("boxShadow", "")),
+            before_reverse_focus_visible=bool(before_reverse.get("focusVisible")),
+            before_reverse_trigger_focused=bool(before_reverse.get("isFocused")),
+            after_reverse_outline=str(after_reverse.get("outline", "")),
+            after_reverse_outline_color=str(after_reverse.get("outlineColor", "")),
+            after_reverse_outline_width=str(after_reverse.get("outlineWidth", "")),
+            after_reverse_box_shadow=str(after_reverse.get("boxShadow", "")),
+            after_reverse_focus_visible=bool(after_reverse.get("focusVisible")),
+            after_reverse_trigger_focused=bool(after_reverse.get("isFocused")),
+            restored_focus_label=restored_focus.accessible_name,
+            restored_focus_role=restored_focus.role,
+            restored_focus_tag_name=restored_focus.tag_name,
+            restored_focus_outer_html=restored_focus.outer_html,
         )
 
     def screenshot(self, path: str, *, full_page: bool = True) -> None:
@@ -3686,6 +5684,99 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, dict):
             raise AssertionError(
                 "The live app did not expose the workspace switcher trigger.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def _desktop_trigger_snapshot(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> dict[str, object]:
+        payload = self._session.wait_for_function(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const trigger = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+              ).find((candidate) =>
+                isVisible(candidate)
+                && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
+                  .startsWith('Workspace switcher:')
+              );
+              if (!trigger) {
+                return null;
+              }
+              const rect = trigger.getBoundingClientRect();
+              const style = window.getComputedStyle(trigger);
+              const active = document.activeElement;
+              return {
+                triggerLabel: normalize(trigger.getAttribute('aria-label') || ''),
+                triggerText: normalize(trigger.innerText || trigger.textContent),
+                triggerX: rect.x,
+                triggerY: rect.y,
+                triggerWidth: rect.width,
+                triggerHeight: rect.height,
+                outline: style.outline,
+                outlineColor: style.outlineColor,
+                outlineWidth: style.outlineWidth,
+                boxShadow: style.boxShadow,
+                focusVisible: Boolean(
+                  typeof trigger.matches === 'function' && trigger.matches(':focus-visible'),
+                ),
+                isFocused: Boolean(active && (active === trigger || trigger.contains(active))),
+              };
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The desktop layout did not expose the workspace switcher trigger for "
+                "focus-style inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def _active_element_visibility_snapshot(self) -> dict[str, object]:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const active = document.activeElement;
+              if (!active) {
+                return null;
+              }
+              const rect = active.getBoundingClientRect();
+              const style = window.getComputedStyle(active);
+              return {
+                visible: rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none',
+                inViewport: rect.width > 0
+                  && rect.height > 0
+                  && rect.right > 0
+                  && rect.bottom > 0
+                  && rect.left < window.innerWidth
+                  && rect.top < window.innerHeight,
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The active-element visibility probe did not return an observation.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return payload
@@ -4370,7 +6461,6 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         if trailer in normalized:
             normalized = normalized.split(trailer, 1)[0].strip()
             break
-    chunk_pattern = re.compile(r".+? Delete(?= .+? Delete|$)")
     states = (
         "Attachments limited",
         "Saved hosted workspace",
@@ -4380,49 +6470,39 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         "Unavailable",
         "Local Git",
     )
+    escaped_states = "|".join(re.escape(state) for state in states)
+    row_pattern = re.compile(
+        rf"(?P<display>.+?), "
+        rf"(?P<target_type>Hosted|Local), "
+        rf"(?P<state>{escaped_states}), "
+        rf"(?P<detail>.+? • Branch: \S+(?: • Write Branch: \S+)?) "
+        rf"(?P<action>Active|Open: .+?) "
+        rf"(?P<delete>Delete: .+?)"
+        rf"(?= .+?, (?:Hosted|Local), (?:{escaped_states}), |$)",
+    )
     rows: list[WorkspaceSwitcherRowObservation] = []
-    for chunk_match in chunk_pattern.finditer(normalized):
-        chunk = chunk_match.group(0).strip()
-        action = "Open workspace" if chunk.endswith("Open workspace Delete") else "Open" if chunk.endswith("Open Delete") else "Active"
-        suffix = f" {action} Delete"
-        if not chunk.endswith(suffix):
-            continue
-        chunk_without_action = chunk[: -len(suffix)].strip()
-        target_type = None
-        state_label = None
-        for candidate_state in states:
-            for candidate_type in ("Hosted", "Local"):
-                candidate_suffix = f" {candidate_type} {candidate_state}"
-                if chunk_without_action.endswith(candidate_suffix):
-                    target_type = candidate_type
-                    state_label = candidate_state
-                    chunk_without_action = chunk_without_action[: -len(candidate_suffix)].strip()
-                    break
-            if target_type is not None:
-                break
-        if target_type is None or state_label is None:
-            continue
-        detail_match = re.search(
-            r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)$",
-            chunk_without_action,
-        )
-        if detail_match is None:
-            continue
-        detail_text = detail_match.group("detail").strip()
-        target = detail_text.split(" • Branch:", 1)[0].strip()
-        display_name = chunk_without_action[: detail_match.start()].strip() or target
-        button_labels = ("Delete",) if action == "Active" else (action, "Delete")
+    for match in row_pattern.finditer(normalized):
+        display_name = match.group("display").strip()
+        target_type = match.group("target_type").strip()
+        state_label = match.group("state").strip()
+        detail_text = match.group("detail").strip()
+        action = match.group("action").strip()
+        delete_label = match.group("delete").strip()
+        button_labels = (delete_label,) if action == "Active" else (action, delete_label)
         rows.append(
             WorkspaceSwitcherRowObservation(
                 display_name=display_name,
                 target_type_label=target_type,
                 state_label=state_label,
                 detail_text=detail_text,
-                visible_text=f"{display_name} {detail_text} {target_type} {state_label} {action} Delete",
+                visible_text=(
+                    f"{display_name} {detail_text} {target_type} "
+                    f"{state_label} {action} {delete_label}"
+                ),
                 selected=action == "Active",
                 semantics_label=None,
                 icon_accessibility_label=None,
-                action_labels=((action,) if action == "Active" else (action,)),
+                action_labels=(action,),
                 button_labels=button_labels,
             ),
         )
