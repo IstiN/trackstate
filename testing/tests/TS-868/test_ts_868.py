@@ -46,7 +46,7 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 LAST_WORKSPACE_DISPLAY_NAME = "Hosted end workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-868-alt"
 LAST_WORKSPACE_WRITE_BRANCH = "ts-868-end"
-LINKED_BUGS = ["TS-866"]
+LINKED_BUGS = ["TS-866", "TS-869"]
 
 PRECONDITIONS = [
     "The workspace switcher panel is open.",
