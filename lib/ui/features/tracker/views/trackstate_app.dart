@@ -3417,10 +3417,15 @@ class _Sidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 28),
                 for (final item in items)
-                  _NavButton(
-                    item: item,
-                    selected: viewModel.section == item.section,
-                    onPressed: () => viewModel.selectSection(item.section),
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(
+                      _desktopPrimaryNavigationOrder(item.section),
+                    ),
+                    child: _NavButton(
+                      item: item,
+                      selected: viewModel.section == item.section,
+                      onPressed: () => viewModel.selectSection(item.section),
+                    ),
                   ),
               ],
             );
@@ -3504,140 +3509,137 @@ class _TopBar extends StatelessWidget {
         : () => onOpenWorkspaceSwitcher(context, compact: compact);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
-      child: FocusTraversalGroup(
-        policy: OrderedTraversalPolicy(),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            Widget orderedControl(double order, Widget child) {
-              return FocusTraversalOrder(
-                order: NumericFocusOrder(order),
-                child: child,
-              );
-            }
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          Widget orderedControl(double order, Widget child) {
+            return FocusTraversalOrder(
+              order: NumericFocusOrder(order),
+              child: child,
+            );
+          }
 
-            final condensedDesktop =
-                !compact &&
-                constraints.maxWidth <
-                    (canOpenWorkspaceOnboarding ? 1380 : 1240);
-            final iconOnlyActions = compact || condensedDesktop;
-            final actionGap = iconOnlyActions ? 8.0 : 12.0;
-            final createIssueOrder = compact ? 2.0 : 3.0;
-            final addWorkspaceOrder = compact ? 3.0 : 4.0;
-            final workspaceSwitcherOrder = compact ? 5.0 : 5.0;
-            final themeToggleOrder = compact ? 4.0 : 6.0;
-            Widget buildHeaderActions() {
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(width: actionGap),
+          final condensedDesktop =
+              !compact &&
+              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
+          final iconOnlyActions = compact || condensedDesktop;
+          final actionGap = iconOnlyActions ? 8.0 : 12.0;
+          final createIssueOrder = compact ? 2.0 : 1.0;
+          final addWorkspaceOrder = compact ? 3.0 : 1.5;
+          final workspaceSwitcherOrder = compact ? 5.0 : 7.0;
+          final searchOrder = compact ? 2.0 : 8.0;
+          final themeToggleOrder = compact ? null : 9.0;
+          final syncPillOrder = compact ? null : 10.0;
+          Widget buildHeaderActions() {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(width: actionGap),
+                if (iconOnlyActions)
+                  orderedControl(
+                    createIssueOrder,
+                    _IconButtonSurface(
+                      label: l10n.createIssue,
+                      glyph: TrackStateIconGlyph.plus,
+                      onPressed: openCreateIssue,
+                      semanticsSortOrder: createIssueOrder,
+                      size: compact ? null : _desktopTopBarControlHeight,
+                    ),
+                  )
+                else
+                  orderedControl(
+                    createIssueOrder,
+                    _PrimaryButton(
+                      label: l10n.createIssue,
+                      icon: TrackStateIconGlyph.plus,
+                      onPressed: openCreateIssue,
+                      height: _desktopTopBarControlHeight,
+                      semanticsSortOrder: createIssueOrder,
+                    ),
+                  ),
+                if (canOpenWorkspaceOnboarding) ...[
+                  const SizedBox(width: 8),
                   if (iconOnlyActions)
                     orderedControl(
-                      createIssueOrder,
+                      addWorkspaceOrder,
                       _IconButtonSurface(
-                        label: l10n.createIssue,
-                        glyph: TrackStateIconGlyph.plus,
-                        onPressed: openCreateIssue,
-                        semanticsSortOrder: createIssueOrder,
+                        label: l10n.addWorkspace,
+                        glyph: TrackStateIconGlyph.repository,
+                        onPressed: openWorkspaceOnboarding,
+                        semanticsSortOrder: addWorkspaceOrder,
                         size: compact ? null : _desktopTopBarControlHeight,
                       ),
                     )
                   else
                     orderedControl(
-                      createIssueOrder,
-                      _PrimaryButton(
-                        label: l10n.createIssue,
-                        icon: TrackStateIconGlyph.plus,
-                        onPressed: openCreateIssue,
+                      addWorkspaceOrder,
+                      _SecondaryButton(
+                        label: l10n.addWorkspace,
+                        icon: TrackStateIconGlyph.repository,
+                        onPressed: openWorkspaceOnboarding,
                         height: _desktopTopBarControlHeight,
-                        semanticsSortOrder: createIssueOrder,
+                        semanticsSortOrder: addWorkspaceOrder,
                       ),
                     ),
-                  if (canOpenWorkspaceOnboarding) ...[
-                    const SizedBox(width: 8),
-                    if (iconOnlyActions)
-                      orderedControl(
-                        addWorkspaceOrder,
-                        _IconButtonSurface(
-                          label: l10n.addWorkspace,
-                          glyph: TrackStateIconGlyph.repository,
-                          onPressed: openWorkspaceOnboarding,
-                          semanticsSortOrder: addWorkspaceOrder,
-                          size: compact ? null : _desktopTopBarControlHeight,
-                        ),
-                      )
-                    else
-                      orderedControl(
-                        addWorkspaceOrder,
-                        _SecondaryButton(
-                          label: l10n.addWorkspace,
-                          icon: TrackStateIconGlyph.repository,
-                          onPressed: openWorkspaceOnboarding,
-                          height: _desktopTopBarControlHeight,
-                          semanticsSortOrder: addWorkspaceOrder,
-                        ),
-                      ),
-                  ],
-                  if (!compact) ...[
-                    const SizedBox(width: 8),
-                    orderedControl(
-                      workspaceSwitcherOrder,
-                      TapRegion(
-                        groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
-                        child: SizedBox(
-                          key: workspaceSwitcherTriggerKey,
-                          child: KeyedSubtree(
-                            key: const ValueKey('workspace-switcher-trigger'),
-                            child: condensedDesktop
-                                ? _WorkspaceSwitcherTriggerButton(
-                                    summary: workspaceSummary,
-                                    compact: false,
-                                    condensed: true,
-                                    expanded: isDesktopWorkspaceSwitcherVisible,
-                                    onPressed: openWorkspaceSwitcher,
-                                    semanticsSortOrder: workspaceSwitcherOrder,
-                                    controlsNodes: const {
-                                      browserWorkspaceSwitcherSemanticsIdentifier,
-                                    },
-                                    focusNode:
-                                        workspaceSwitcherTriggerFocusNode,
-                                  )
-                                : _PrimaryButton(
-                                    label: workspaceSummary.textLabel,
-                                    semanticLabel:
-                                        workspaceSummary.semanticLabel,
-                                    icon: workspaceSummary.icon,
-                                    expanded: isDesktopWorkspaceSwitcherVisible,
-                                    onPressed: openWorkspaceSwitcher,
-                                    height: _desktopTopBarControlHeight,
-                                    semanticsSortOrder: workspaceSwitcherOrder,
-                                    controlsNodes: const {
-                                      browserWorkspaceSwitcherSemanticsIdentifier,
-                                    },
-                                    focusNode:
-                                        workspaceSwitcherTriggerFocusNode,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                ],
+                if (!compact) ...[
                   const SizedBox(width: 8),
                   orderedControl(
-                    themeToggleOrder,
-                    _IconButtonSurface(
-                      label: viewModel.themePreference == ThemePreference.dark
-                          ? l10n.lightTheme
-                          : l10n.darkTheme,
-                      glyph: viewModel.themePreference == ThemePreference.dark
-                          ? TrackStateIconGlyph.sun
-                          : TrackStateIconGlyph.moon,
-                      onPressed: viewModel.toggleTheme,
-                      semanticsSortOrder: themeToggleOrder,
-                      size: compact ? null : _desktopTopBarControlHeight,
+                    workspaceSwitcherOrder,
+                    TapRegion(
+                      groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                      child: SizedBox(
+                        key: workspaceSwitcherTriggerKey,
+                        child: KeyedSubtree(
+                          key: const ValueKey('workspace-switcher-trigger'),
+                          child: condensedDesktop
+                              ? _WorkspaceSwitcherTriggerButton(
+                                  summary: workspaceSummary,
+                                  compact: false,
+                                  condensed: true,
+                                  expanded: isDesktopWorkspaceSwitcherVisible,
+                                  onPressed: openWorkspaceSwitcher,
+                                  semanticsSortOrder: workspaceSwitcherOrder,
+                                  controlsNodes: const {
+                                    browserWorkspaceSwitcherSemanticsIdentifier,
+                                  },
+                                  focusNode: workspaceSwitcherTriggerFocusNode,
+                                )
+                              : _PrimaryButton(
+                                  label: workspaceSummary.textLabel,
+                                  semanticLabel: workspaceSummary.semanticLabel,
+                                  icon: workspaceSummary.icon,
+                                  expanded: isDesktopWorkspaceSwitcherVisible,
+                                  onPressed: openWorkspaceSwitcher,
+                                  height: _desktopTopBarControlHeight,
+                                  semanticsSortOrder: workspaceSwitcherOrder,
+                                  controlsNodes: const {
+                                    browserWorkspaceSwitcherSemanticsIdentifier,
+                                  },
+                                  focusNode: workspaceSwitcherTriggerFocusNode,
+                                ),
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Semantics(
+                ],
+                const SizedBox(width: 8),
+                orderedControl(
+                  themeToggleOrder ?? searchOrder + 1,
+                  _IconButtonSurface(
+                    label: viewModel.themePreference == ThemePreference.dark
+                        ? l10n.lightTheme
+                        : l10n.darkTheme,
+                    glyph: viewModel.themePreference == ThemePreference.dark
+                        ? TrackStateIconGlyph.sun
+                        : TrackStateIconGlyph.moon,
+                    onPressed: viewModel.toggleTheme,
+                    size: compact ? null : _desktopTopBarControlHeight,
+                    semanticsSortOrder: themeToggleOrder,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ExcludeFocus(
+                  child: Semantics(
                     container: true,
                     label: _profileDisplayName(viewModel),
                     child: ExcludeSemantics(
@@ -3691,135 +3693,128 @@ class _TopBar extends StatelessWidget {
                       ),
                     ),
                   ),
-                ],
-              );
-            }
-
-            if (compact) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      TrackStateIcon(
-                        TrackStateIconGlyph.logo,
-                        color: colors.secondary,
-                        size: 32,
-                        semanticLabel: l10n.appTitle,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          l10n.appTitle,
-                          style: Theme.of(context).textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      orderedControl(
-                        1,
-                        _IconButtonSurface(
-                          label: _workspaceSyncLabel(l10n, viewModel),
-                          glyph: TrackStateIconGlyph.sync,
-                          onPressed: () =>
-                              viewModel.selectSection(TrackerSection.settings),
-                          semanticsSortOrder: 1,
-                          size: _desktopTopBarControlHeight,
-                        ),
-                      ),
-                      buildHeaderActions(),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  orderedControl(
-                    workspaceSwitcherOrder,
-                    TapRegion(
-                      groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
-                      child: KeyedSubtree(
-                        key: const ValueKey('workspace-switcher-trigger'),
-                        child: _WorkspaceSwitcherTriggerButton(
-                          summary: workspaceSummary,
-                          compact: true,
-                          condensed: false,
-                          onPressed: openWorkspaceSwitcher,
-                          focusNode: workspaceSwitcherTriggerFocusNode,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            }
-
-            return Row(
-              children: [
-                orderedControl(
-                  1,
-                  _SyncPill(
-                    label: _workspaceSyncLabel(l10n, viewModel),
-                    tone: _workspaceSyncTone(viewModel),
-                    height: _desktopTopBarControlHeight,
-                    semanticsSortOrder: 1,
-                    onPressed: () =>
-                        viewModel.selectSection(TrackerSection.settings),
-                  ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: SizedBox(
-                    height: _desktopTopBarControlHeight,
-                    child: orderedControl(
-                      2,
-                      Semantics(
-                        label: l10n.searchIssues,
-                        sortKey: const OrdinalSortKey(2),
-                        textField: true,
-                        child: TextField(
-                          controller: TextEditingController(
-                            text: viewModel.jql,
-                          ),
-                          onSubmitted: viewModel.updateQuery,
-                          maxLines: 1,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodyMedium?.copyWith(height: 1),
-                          textAlignVertical: TextAlignVertical.center,
-                          decoration: InputDecoration(
-                            isDense: true,
-                            isCollapsed: true,
-                            constraints: const BoxConstraints.tightFor(
-                              height: _desktopTopBarControlHeight,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            prefixIcon: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: TrackStateIcon(
-                                TrackStateIconGlyph.search,
-                                color: colors.muted,
-                                size: _desktopTopBarIconSize,
-                                semanticLabel: l10n.searchIssues,
-                              ),
-                            ),
-                            prefixIconConstraints:
-                                const BoxConstraints.tightFor(
-                                  width: _desktopTopBarControlHeight,
-                                  height: _desktopTopBarControlHeight,
-                                ),
-                            hintText: l10n.jqlPlaceholder,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                buildHeaderActions(),
               ],
             );
-          },
-        ),
+          }
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    TrackStateIcon(
+                      TrackStateIconGlyph.logo,
+                      color: colors.secondary,
+                      size: 32,
+                      semanticLabel: l10n.appTitle,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        l10n.appTitle,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _IconButtonSurface(
+                      label: _workspaceSyncLabel(l10n, viewModel),
+                      glyph: TrackStateIconGlyph.sync,
+                      onPressed: () =>
+                          viewModel.selectSection(TrackerSection.settings),
+                      size: _desktopTopBarControlHeight,
+                    ),
+                    buildHeaderActions(),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                orderedControl(
+                  workspaceSwitcherOrder,
+                  TapRegion(
+                    groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                    child: KeyedSubtree(
+                      key: const ValueKey('workspace-switcher-trigger'),
+                      child: _WorkspaceSwitcherTriggerButton(
+                        summary: workspaceSummary,
+                        compact: true,
+                        condensed: false,
+                        onPressed: openWorkspaceSwitcher,
+                        focusNode: workspaceSwitcherTriggerFocusNode,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              orderedControl(
+                syncPillOrder ?? searchOrder + 1,
+                _SyncPill(
+                  label: _workspaceSyncLabel(l10n, viewModel),
+                  tone: _workspaceSyncTone(viewModel),
+                  height: _desktopTopBarControlHeight,
+                  onPressed: () =>
+                      viewModel.selectSection(TrackerSection.settings),
+                  semanticsSortOrder: syncPillOrder,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: _desktopTopBarControlHeight,
+                  child: orderedControl(
+                    searchOrder,
+                    Semantics(
+                      label: l10n.searchIssues,
+                      sortKey: OrdinalSortKey(searchOrder),
+                      textField: true,
+                      child: TextField(
+                        controller: TextEditingController(text: viewModel.jql),
+                        onSubmitted: viewModel.updateQuery,
+                        maxLines: 1,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(height: 1),
+                        textAlignVertical: TextAlignVertical.center,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          isCollapsed: true,
+                          constraints: const BoxConstraints.tightFor(
+                            height: _desktopTopBarControlHeight,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: TrackStateIcon(
+                              TrackStateIconGlyph.search,
+                              color: colors.muted,
+                              size: _desktopTopBarIconSize,
+                              semanticLabel: l10n.searchIssues,
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints.tightFor(
+                            width: _desktopTopBarControlHeight,
+                            height: _desktopTopBarControlHeight,
+                          ),
+                          hintText: l10n.jqlPlaceholder,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              buildHeaderActions(),
+            ],
+          );
+        },
       ),
     );
   }
@@ -4623,6 +4618,7 @@ class _RepositoryAccessBanner extends StatelessWidget {
                 tab: ProjectSettingsTab.attachments,
               )
             : () => _showRepositoryAccessDialog(context, viewModel),
+        actionTraversalOrderBase: 11,
       ),
     );
   }
@@ -4639,6 +4635,7 @@ class _AccessCallout extends StatelessWidget {
     this.onPrimaryAction,
     this.secondaryActionLabel,
     this.onSecondaryAction,
+    this.actionTraversalOrderBase,
   });
 
   final String semanticLabel;
@@ -4650,6 +4647,7 @@ class _AccessCallout extends StatelessWidget {
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
   final VoidCallback? onSecondaryAction;
+  final double? actionTraversalOrderBase;
 
   @override
   Widget build(BuildContext context) {
@@ -4660,7 +4658,6 @@ class _AccessCallout extends StatelessWidget {
     };
     return Semantics(
       container: true,
-      focusable: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
       label: '$semanticLabel $title $message',
@@ -4702,24 +4699,32 @@ class _AccessCallout extends StatelessWidget {
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (primaryActionLabel != null && onPrimaryAction != null)
-                    OutlinedButton(
-                      onPressed: onPrimaryAction,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: colors.text,
-                        side: BorderSide(color: accentColor),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (primaryActionLabel != null && onPrimaryAction != null)
+                      _OrderedFocusAction(
+                        order: actionTraversalOrderBase,
+                        child: OutlinedButton(
+                          onPressed: onPrimaryAction,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: colors.text,
+                            side: BorderSide(color: accentColor),
+                          ),
+                          child: Text(primaryActionLabel!),
+                        ),
                       ),
-                      child: Text(primaryActionLabel!),
-                    ),
-                  if (secondaryActionLabel != null && onSecondaryAction != null)
-                    FilledButton(
-                      onPressed: onSecondaryAction,
-                      child: Text(secondaryActionLabel!),
-                    ),
+                    if (secondaryActionLabel != null && onSecondaryAction != null)
+                      _OrderedFocusAction(
+                        order: actionTraversalOrderBase == null
+                            ? null
+                            : actionTraversalOrderBase! + 1,
+                        child: FilledButton(
+                          onPressed: onSecondaryAction,
+                          child: Text(secondaryActionLabel!),
+                        ),
+                      ),
                 ],
               ),
             ],
@@ -4731,6 +4736,24 @@ class _AccessCallout extends StatelessWidget {
 }
 
 enum _AccessCalloutTone { warning, success }
+
+class _OrderedFocusAction extends StatelessWidget {
+  const _OrderedFocusAction({required this.child, this.order});
+
+  final Widget child;
+  final double? order;
+
+  @override
+  Widget build(BuildContext context) {
+    if (order == null) {
+      return child;
+    }
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(order!),
+      child: child,
+    );
+  }
+}
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({required this.viewModel});
@@ -6377,9 +6400,15 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        _WorkspaceStateBadge(label: typeLabel, active: isActive),
+                        _WorkspaceStateBadge(
+                          label: typeLabel,
+                          active: isActive,
+                        ),
                         const SizedBox(width: 8),
-                        _WorkspaceStateBadge(label: stateLabel, active: isActive),
+                        _WorkspaceStateBadge(
+                          label: stateLabel,
+                          active: isActive,
+                        ),
                       ],
                     ),
                   ),
@@ -9444,91 +9473,95 @@ class _IssueList extends StatelessWidget {
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       explicitChildNodes: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          FocusTraversalOrder(
-            order: const NumericFocusOrder(1),
-            child: Shortcuts(
-              shortcuts: const <ShortcutActivator, Intent>{
-                SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
-                SingleActivator(LogicalKeyboardKey.tab, shift: true):
-                    PreviousFocusIntent(),
-              },
-              child: TextField(
-                controller: TextEditingController(text: viewModel.jql),
-                onSubmitted: viewModel.updateQuery,
-                decoration: InputDecoration(
-                  labelText: l10n.searchIssues,
-                  hintText: l10n.jqlPlaceholder,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(1),
+              child: Shortcuts(
+                shortcuts: const <ShortcutActivator, Intent>{
+                  SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
+                  SingleActivator(LogicalKeyboardKey.tab, shift: true):
+                      PreviousFocusIntent(),
+                },
+                child: TextField(
+                  controller: TextEditingController(text: viewModel.jql),
+                  onSubmitted: viewModel.updateQuery,
+                  decoration: InputDecoration(
+                    labelText: l10n.searchIssues,
+                    hintText: l10n.jqlPlaceholder,
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (showSearchBootstrapLoading) ...[
-            _SectionLoadingBanner(
-              semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
-              label: l10n.loading,
             ),
             const SizedBox(height: 12),
-          ],
-          if (visibleResults.isEmpty)
-            Text(l10n.noResults)
-          else ...[
-            if (!showSearchBootstrapLoading &&
-                searchResults.length < viewModel.totalSearchResults)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  l10n.showingResults(
-                    searchResults.length,
-                    viewModel.totalSearchResults,
+            if (showSearchBootstrapLoading) ...[
+              _SectionLoadingBanner(
+                semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
+                label: l10n.loading,
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (visibleResults.isEmpty)
+              Text(l10n.noResults)
+            else ...[
+              if (!showSearchBootstrapLoading &&
+                  searchResults.length < viewModel.totalSearchResults)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    l10n.showingResults(
+                      searchResults.length,
+                      viewModel.totalSearchResults,
+                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelMedium?.copyWith(color: colors.muted),
                   ),
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
                 ),
-              ),
-            for (var index = 0; index < visibleResults.length; index += 1)
-              FocusTraversalOrder(
-                order: NumericFocusOrder(index + 2.0),
-                child: _IssueListRow(
-                  issue: visibleResults[index],
-                  selected:
-                      visibleResults[index].key == viewModel.selectedIssue?.key,
-                  project: viewModel.project,
-                  onSelect: viewModel.selectIssue,
-                  trailingAction: showSearchBootstrapLoading
-                      ? _LoadingPill(
-                          semanticLabel:
-                              'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
-                          label: l10n.loading,
-                        )
-                      : null,
+              for (var index = 0; index < visibleResults.length; index += 1)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(index + 2.0),
+                  child: _IssueListRow(
+                    issue: visibleResults[index],
+                    selected:
+                        visibleResults[index].key ==
+                        viewModel.selectedIssue?.key,
+                    project: viewModel.project,
+                    onSelect: viewModel.selectIssue,
+                    trailingAction: showSearchBootstrapLoading
+                        ? _LoadingPill(
+                            semanticLabel:
+                                'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
+                            label: l10n.loading,
+                          )
+                        : null,
+                  ),
                 ),
-              ),
-            if (viewModel.hasMoreSearchResults)
-              FocusTraversalOrder(
-                order: NumericFocusOrder(searchResults.length + 2.0),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Semantics(
-                    container: true,
-                    button: true,
-                    label: l10n.loadMoreIssues,
-                    child: OutlinedButton(
-                      onPressed: viewModel.isLoadingMoreSearchResults
-                          ? null
-                          : viewModel.loadMoreSearchResults,
-                      style: _searchLoadMoreButtonStyle(colors),
-                      child: ExcludeSemantics(child: Text(l10n.loadMore)),
+              if (viewModel.hasMoreSearchResults)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(searchResults.length + 2.0),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Semantics(
+                      container: true,
+                      button: true,
+                      label: l10n.loadMoreIssues,
+                      child: OutlinedButton(
+                        onPressed: viewModel.isLoadingMoreSearchResults
+                            ? null
+                            : viewModel.loadMoreSearchResults,
+                        style: _searchLoadMoreButtonStyle(colors),
+                        child: ExcludeSemantics(child: Text(l10n.loadMore)),
+                      ),
                     ),
                   ),
                 ),
-              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -10751,48 +10784,44 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
                 return BorderSide(color: colors.primary);
               }),
             ),
-            child: Semantics(
-              label: summary.semanticLabel,
-              excludeSemantics: true,
-              child: Row(
-                mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-                children: [
-                  TrackStateIcon(
-                    summary.icon,
-                    color: onPrimary,
-                    size: compact ? 18 : _desktopTopBarIconSize,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: compact
-                        ? Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                summary.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: nameStyle,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                summary.detailLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: detailStyle,
-                              ),
-                            ],
-                          )
-                        : Text(
-                            summary.textLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: nameStyle,
-                          ),
-                  ),
-                ],
-              ),
+            child: Row(
+              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+              children: [
+                TrackStateIcon(
+                  summary.icon,
+                  color: onPrimary,
+                  size: compact ? 18 : _desktopTopBarIconSize,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: compact
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              summary.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: nameStyle,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              summary.detailLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: detailStyle,
+                            ),
+                          ],
+                        )
+                      : Text(
+                          summary.textLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: nameStyle,
+                        ),
+                ),
+              ],
             ),
           ),
         ),
@@ -10866,6 +10895,7 @@ class _IconButtonSurface extends StatelessWidget {
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
+        excludeFromSemantics: true,
         onTap: onPressed,
         child: Container(
           width: size,
@@ -10913,6 +10943,7 @@ class _CompactActionIconButton extends StatelessWidget {
       label: label,
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
+        excludeFromSemantics: true,
         onTap: onPressed,
         child: Padding(
           padding: const EdgeInsets.all(6),
@@ -12428,7 +12459,9 @@ class _NavButton extends StatelessWidget {
         selected: selected,
         label: item.label,
         child: InkWell(
+          canRequestFocus: !selected,
           borderRadius: BorderRadius.circular(10),
+          excludeFromSemantics: true,
           onTap: onPressed,
           child: ExcludeSemantics(
             child: Container(
@@ -12562,6 +12595,7 @@ class _SyncPill extends StatelessWidget {
           child: InkWell(
             key: const ValueKey('workspace-sync-pill'),
             borderRadius: BorderRadius.circular(999),
+            excludeFromSemantics: true,
             onTap: onPressed,
             child: Container(
               constraints: height == null
@@ -13640,6 +13674,15 @@ String _statusLabel(AppLocalizations l10n, IssueStatus status) =>
       IssueStatus.inProgress => l10n.inProgress,
       IssueStatus.inReview => l10n.inReview,
       IssueStatus.done => l10n.done,
+    };
+
+double _desktopPrimaryNavigationOrder(TrackerSection section) =>
+    switch (section) {
+      TrackerSection.dashboard => 2,
+      TrackerSection.board => 3,
+      TrackerSection.search => 4,
+      TrackerSection.hierarchy => 5,
+      TrackerSection.settings => 6,
     };
 
 List<_NavItem> _navItems(AppLocalizations l10n) => [
