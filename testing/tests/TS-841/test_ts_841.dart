@@ -431,7 +431,7 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
 String _bugDescription(Map<String, Object?> result) {
   final failedStep = _firstFailedStep(result);
   return [
-    '# $_ticketKey - Arrow Up does not move workspace switcher selection to the previous workspace',
+    '# $_ticketKey - Arrow Up moves the active row but leaves keyboard focus on the desktop switcher',
     '',
     '## Exact steps to reproduce',
     ..._bugStepLines(result),
@@ -576,7 +576,7 @@ String _actualResultSummary(Map<String, Object?> result) {
   final step3 = _stepByNumber(result, 3);
   final step4 = _stepByNumber(result, 4);
   if (step2 != null || step3 != null || step4 != null) {
-    return 'The second saved workspace was prepared as the active row, but after sending `Arrow Up` from the open switcher the previous workspace did not satisfy the full ticket expectation of becoming both the active selection and the focused row while leaving the switcher open. '
+    return 'The second saved workspace was prepared as the active row, and after sending `Arrow Up` from the open switcher the previous workspace became active while the panel stayed open, but keyboard focus remained on `desktop-workspace-switcher` instead of moving to the previous workspace row. '
         'Observed step 2: ${step2?['observed'] ?? '<missing>'}. '
         'Observed step 3: ${step3?['observed'] ?? '<missing>'}. '
         'Observed step 4: ${step4?['observed'] ?? '<missing>'}.';
