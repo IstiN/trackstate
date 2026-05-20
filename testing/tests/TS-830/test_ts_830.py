@@ -36,6 +36,7 @@ DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TOP_BAR_TAB_COUNT = 20
 TRIGGER_TAB_COUNT = 24
 INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
+FIRST_TOP_BAR_CONTROL_LABEL = "Create issue"
 
 REQUEST_STEPS = [
     "Launch the application in a desktop browser.",
@@ -176,7 +177,7 @@ def main() -> None:
             )
 
             try:
-                sequence = page.collect_tab_sequence_from_search(
+                sequence = page.collect_tab_sequence_from_first_top_bar_control(
                     tab_count=TOP_BAR_TAB_COUNT,
                 )
                 order_summary = _assert_top_bar_focus_order(sequence)
@@ -208,7 +209,7 @@ def main() -> None:
             )
 
             try:
-                page.focus_search_field()
+                page.focus_first_top_bar_control()
                 trigger_focus = page.observe_trigger_keyboard_focus(
                     tab_count=TRIGGER_TAB_COUNT,
                 )
@@ -281,6 +282,7 @@ def _assert_top_bar_focus_order(
         raise AssertionError(
             "Step 3 failed: no keyboard focus sequence was captured from the top bar.",
         )
+    _assert_started_from_first_top_bar_control(sequence, step_number=3)
     if _label_index(distinct_labels, lambda label: label == "Settings") is None:
         raise AssertionError(
             "Step 3 failed: the captured top-bar keyboard sequence did not include "
@@ -382,6 +384,7 @@ def _label_index(
 def _assert_visible_focus_indicator(
     observation: WorkspaceTriggerKeyboardFocusObservation,
 ) -> str:
+    _assert_started_from_first_top_bar_control(observation.focus_sequence, step_number=4)
     if observation.active_label_after_focus is None or not observation.active_label_after_focus.startswith(
         "Workspace switcher:"
     ):
@@ -402,9 +405,34 @@ def _assert_visible_focus_indicator(
     return _trigger_focus_summary(observation)
 
 
+def _assert_started_from_first_top_bar_control(
+    sequence: tuple[FocusNavigationStep, ...],
+    *,
+    step_number: int,
+) -> None:
+    if not sequence:
+        raise AssertionError(
+            f"Step {step_number} failed: no keyboard focus sequence was captured from "
+            "the first top-bar control.",
+        )
+    starting_label = _normalize_focus_label(sequence[0].before_label)
+    if starting_label != FIRST_TOP_BAR_CONTROL_LABEL:
+        raise AssertionError(
+            f"Step {step_number} failed: keyboard navigation did not start from the "
+            f'first top-bar control "{FIRST_TOP_BAR_CONTROL_LABEL}".\n'
+            f"Observed starting label: {starting_label or '<none>'!r}\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed distinct sequence: {_distinct_focus_sequence_summary(sequence)}",
+        )
+
+
+def _normalize_focus_label(label: str | None) -> str:
+    return (label or "").replace("\n", " ").strip()
+
+
 def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
     return " -> ".join(
-        f"{step.step}:{(step.after_label or '<none>').replace(chr(10), ' ')}"
+        f"{step.step}:{_normalize_focus_label(step.after_label or '<none>')}"
         for step in sequence
     )
 
@@ -910,9 +938,10 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     return (
-        "Fixed: restored the explicit `Dashboard` navigation before collecting the "
-        "tab-order and focus-ring evidence so Steps 3 and 4 start from the stable "
-        "desktop top-bar surface instead of whichever panel happened to be active. "
+        "Fixed: Steps 3 and 4 now explicitly anchor keyboard navigation at the first "
+        "top-bar control (`Create issue`) before tabbing, so the captured order and "
+        "focus-ring evidence match the exact TS-830 user journey instead of starting "
+        "from the Search field. "
         f"{rerun_summary}"
     )
 
