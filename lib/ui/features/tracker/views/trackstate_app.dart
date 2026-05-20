@@ -3527,6 +3527,8 @@ class _TopBar extends StatelessWidget {
           final addWorkspaceOrder = compact ? 3.0 : 1.5;
           final workspaceSwitcherOrder = compact ? 5.0 : 7.0;
           final searchOrder = compact ? 2.0 : 8.0;
+          final themeToggleOrder = compact ? null : 9.0;
+          final syncPillOrder = compact ? null : 10.0;
           Widget buildHeaderActions() {
             return Row(
               mainAxisSize: MainAxisSize.min,
@@ -3621,8 +3623,9 @@ class _TopBar extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(width: 8),
-                ExcludeFocus(
-                  child: _IconButtonSurface(
+                orderedControl(
+                  themeToggleOrder ?? searchOrder + 1,
+                  _IconButtonSurface(
                     label: viewModel.themePreference == ThemePreference.dark
                         ? l10n.lightTheme
                         : l10n.darkTheme,
@@ -3631,6 +3634,7 @@ class _TopBar extends StatelessWidget {
                         : TrackStateIconGlyph.moon,
                     onPressed: viewModel.toggleTheme,
                     size: compact ? null : _desktopTopBarControlHeight,
+                    semanticsSortOrder: themeToggleOrder,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -3748,13 +3752,15 @@ class _TopBar extends StatelessWidget {
 
           return Row(
             children: [
-              ExcludeFocus(
-                child: _SyncPill(
+              orderedControl(
+                syncPillOrder ?? searchOrder + 1,
+                _SyncPill(
                   label: _workspaceSyncLabel(l10n, viewModel),
                   tone: _workspaceSyncTone(viewModel),
                   height: _desktopTopBarControlHeight,
                   onPressed: () =>
                       viewModel.selectSection(TrackerSection.settings),
+                  semanticsSortOrder: syncPillOrder,
                 ),
               ),
               const SizedBox(width: 12),
@@ -4612,7 +4618,7 @@ class _RepositoryAccessBanner extends StatelessWidget {
                 tab: ProjectSettingsTab.attachments,
               )
             : () => _showRepositoryAccessDialog(context, viewModel),
-        excludeActionsFromTraversal: true,
+        actionTraversalOrderBase: 11,
       ),
     );
   }
@@ -4629,7 +4635,7 @@ class _AccessCallout extends StatelessWidget {
     this.onPrimaryAction,
     this.secondaryActionLabel,
     this.onSecondaryAction,
-    this.excludeActionsFromTraversal = false,
+    this.actionTraversalOrderBase,
   });
 
   final String semanticLabel;
@@ -4641,7 +4647,7 @@ class _AccessCallout extends StatelessWidget {
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
   final VoidCallback? onSecondaryAction;
-  final bool excludeActionsFromTraversal;
+  final double? actionTraversalOrderBase;
 
   @override
   Widget build(BuildContext context) {
@@ -4693,32 +4699,32 @@ class _AccessCallout extends StatelessWidget {
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (primaryActionLabel != null && onPrimaryAction != null)
-                    Focus(
-                      canRequestFocus: !excludeActionsFromTraversal,
-                      descendantsAreFocusable: !excludeActionsFromTraversal,
-                      child: OutlinedButton(
-                        onPressed: onPrimaryAction,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: accentColor),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (primaryActionLabel != null && onPrimaryAction != null)
+                      _OrderedFocusAction(
+                        order: actionTraversalOrderBase,
+                        child: OutlinedButton(
+                          onPressed: onPrimaryAction,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: colors.text,
+                            side: BorderSide(color: accentColor),
+                          ),
+                          child: Text(primaryActionLabel!),
                         ),
-                        child: Text(primaryActionLabel!),
                       ),
-                    ),
-                  if (secondaryActionLabel != null && onSecondaryAction != null)
-                    Focus(
-                      canRequestFocus: !excludeActionsFromTraversal,
-                      descendantsAreFocusable: !excludeActionsFromTraversal,
-                      child: FilledButton(
-                        onPressed: onSecondaryAction,
-                        child: Text(secondaryActionLabel!),
+                    if (secondaryActionLabel != null && onSecondaryAction != null)
+                      _OrderedFocusAction(
+                        order: actionTraversalOrderBase == null
+                            ? null
+                            : actionTraversalOrderBase! + 1,
+                        child: FilledButton(
+                          onPressed: onSecondaryAction,
+                          child: Text(secondaryActionLabel!),
+                        ),
                       ),
-                    ),
                 ],
               ),
             ],
@@ -4730,6 +4736,24 @@ class _AccessCallout extends StatelessWidget {
 }
 
 enum _AccessCalloutTone { warning, success }
+
+class _OrderedFocusAction extends StatelessWidget {
+  const _OrderedFocusAction({required this.child, this.order});
+
+  final Widget child;
+  final double? order;
+
+  @override
+  Widget build(BuildContext context) {
+    if (order == null) {
+      return child;
+    }
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(order!),
+      child: child,
+    );
+  }
+}
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({required this.viewModel});
@@ -12536,12 +12560,14 @@ class _SyncPill extends StatelessWidget {
     required this.tone,
     this.height,
     this.onPressed,
+    this.semanticsSortOrder,
   });
 
   final String label;
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -12562,6 +12588,7 @@ class _SyncPill extends StatelessWidget {
       button: onPressed != null,
       container: true,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
           color: Colors.transparent,
