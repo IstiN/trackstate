@@ -810,7 +810,7 @@ class LiveWorkspaceSwitcherPage:
         return self.observe_background_scroll()
 
     def navigate_to_section(self, label: str) -> None:
-        clicked = self._session.evaluate(
+        bounds = self._session.evaluate(
             """
             (label) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
@@ -829,19 +829,23 @@ class LiveWorkspaceSwitcherPage:
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).find((element) => isVisible(element) && normalize(element.innerText) === label);
               if (!candidate) {
-                return false;
+                return null;
               }
-              candidate.click();
-              return true;
+              const rect = candidate.getBoundingClientRect();
+              return {
+                x: rect.left + (rect.width / 2),
+                y: rect.top + (rect.height / 2),
+              };
             }
             """,
             arg=label,
         )
-        if clicked is not True:
+        if not isinstance(bounds, dict):
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        self._session.mouse_click(float(bounds["x"]), float(bounds["y"]))
         try:
             self._session.wait_for_function(
                 """

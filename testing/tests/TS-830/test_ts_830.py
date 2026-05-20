@@ -110,6 +110,7 @@ def main() -> None:
                         f"Observed body text:\n{runtime.body_text}",
                     )
                 page.dismiss_connection_banner()
+                page.navigate_to_section("Dashboard")
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 trigger = page.observe_trigger()
                 result["trigger_observation"] = _trigger_payload(trigger)
@@ -909,11 +910,10 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     return (
-        "Fixed: Step 3 now requires the workspace switcher to be directly adjacent to "
-        "the expected neighbors (`Settings` immediately before it and the Search "
-        "control immediately after it), and the search-label matcher now recognizes "
-        "the live labels already used in this flow, including `Search issues` and "
-        f"`JQL Search`. {rerun_summary}"
+        "Fixed: restored the explicit `Dashboard` navigation before collecting the "
+        "tab-order and focus-ring evidence so Steps 3 and 4 start from the stable "
+        "desktop top-bar surface instead of whichever panel happened to be active. "
+        f"{rerun_summary}"
     )
 
 
