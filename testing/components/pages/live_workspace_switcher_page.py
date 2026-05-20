@@ -482,6 +482,7 @@ class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
     _top_bar_button_selector = 'flt-semantics[role="button"]'
+    _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
     _button_selector = 'flt-semantics[role="button"]'
     _switcher_heading = "Workspace switcher"
@@ -810,7 +811,7 @@ class LiveWorkspaceSwitcherPage:
         return self.observe_background_scroll()
 
     def navigate_to_section(self, label: str) -> None:
-        clicked = self._session.evaluate(
+        bounds = self._session.evaluate(
             """
             (label) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
@@ -829,19 +830,23 @@ class LiveWorkspaceSwitcherPage:
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).find((element) => isVisible(element) && normalize(element.innerText) === label);
               if (!candidate) {
-                return false;
+                return null;
               }
-              candidate.click();
-              return true;
+              const rect = candidate.getBoundingClientRect();
+              return {
+                x: rect.left + (rect.width / 2),
+                y: rect.top + (rect.height / 2),
+              };
             }
             """,
             arg=label,
         )
-        if clicked is not True:
+        if not isinstance(bounds, dict):
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        self._session.mouse_click(float(bounds["x"]), float(bounds["y"]))
         try:
             self._session.wait_for_function(
                 """
@@ -862,8 +867,47 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
+    def clear_focus(self) -> None:
+        self._session.evaluate(
+            """
+            () => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement) {
+                active.blur();
+              }
+              return true;
+            }
+            """,
+        )
+
     def focus_search_field(self, *, timeout_ms: int = 30_000) -> None:
         self._session.focus(self._search_input_selector, timeout_ms=timeout_ms)
+
+    def focus_first_top_bar_control(self, *, timeout_ms: int = 30_000) -> None:
+        self.clear_focus()
+        try:
+            self._session.focus(
+                self._top_bar_button_selector,
+                has_text=self._first_top_bar_control_label,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The hosted desktop shell did not expose the expected first top-bar "
+                f'control "{self._first_top_bar_control_label}" for the keyboard '
+                "navigation start point.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+        active = self._session.active_element()
+        if active.accessible_name != self._first_top_bar_control_label:
+            raise AssertionError(
+                "Keyboard navigation did not start from the expected first top-bar "
+                f'control "{self._first_top_bar_control_label}".\n'
+                f"Observed active element: label={active.accessible_name!r}, "
+                f"role={active.role!r}, tag={active.tag_name!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
     def focus_workspace_trigger(
         self,
@@ -923,6 +967,15 @@ class LiveWorkspaceSwitcherPage:
         tab_count: int,
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
+        return self._collect_tab_sequence(tab_count=tab_count, timeout_ms=timeout_ms)
+
+    def collect_tab_sequence_from_first_top_bar_control(
+        self,
+        *,
+        tab_count: int,
+        timeout_ms: int = 30_000,
+    ) -> tuple[FocusNavigationStep, ...]:
+        self.focus_first_top_bar_control(timeout_ms=timeout_ms)
         return self._collect_tab_sequence(tab_count=tab_count, timeout_ms=timeout_ms)
 
     def active_element(self) -> FocusedElementObservation:
