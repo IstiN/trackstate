@@ -2430,17 +2430,17 @@ void main() {
       final thirdSem = thirdRowSemanticsNode.evaluate().single;
 
       expect(
-        mainSem.hasFlag(SemanticsFlag.isFocusable),
+        mainSem.getSemanticsData().flagsCollection.isFocusable,
         isTrue,
         reason: 'Active workspace row should be focusable.',
       );
       expect(
-        altSem.hasFlag(SemanticsFlag.isFocusable),
+        altSem.getSemanticsData().flagsCollection.isFocusable,
         isFalse,
         reason: 'Inactive workspace row should NOT be focusable.',
       );
       expect(
-        thirdSem.hasFlag(SemanticsFlag.isFocusable),
+        thirdSem.getSemanticsData().flagsCollection.isFocusable,
         isFalse,
         reason: 'Inactive workspace row should NOT be focusable.',
       );
@@ -2479,18 +2479,18 @@ void main() {
       final thirdSemAfter = thirdRowSemanticsNodeAfter.evaluate().single;
 
       expect(
-        mainSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        mainSemAfter.getSemanticsData().flagsCollection.isFocusable,
         isFalse,
         reason:
             'Previously active row should lose focusable after selection moves.',
       );
       expect(
-        altSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        altSemAfter.getSemanticsData().flagsCollection.isFocusable,
         isTrue,
         reason: 'Newly active workspace row should be focusable.',
       );
       expect(
-        thirdSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        thirdSemAfter.getSemanticsData().flagsCollection.isFocusable,
         isFalse,
         reason:
             'Inactive workspace row should remain not focusable after selection changes.',
