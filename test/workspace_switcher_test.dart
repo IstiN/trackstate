@@ -1743,6 +1743,112 @@ void main() {
   );
 
   testWidgets(
+    'desktop keyboard traversal keeps Settings, workspace switcher, and search adjacent',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        final candidates = <String, Finder>{
+          'Create issue': _findSemanticsByLabel('Create issue', button: true),
+          'Add workspace': _findSemanticsByLabel('Add workspace', button: true),
+          'Board': _findSemanticsByLabel('Board', button: true),
+          'JQL Search': _findSemanticsByLabel('JQL Search', button: true),
+          'Hierarchy': _findSemanticsByLabel('Hierarchy', button: true),
+          'Settings': _findSemanticsByLabel('Settings', button: true),
+          'Workspace switcher': find.byKey(
+            const ValueKey('workspace-switcher-trigger'),
+          ),
+          'Search issues': _findSemanticsByLabel(
+            'Search issues',
+            textField: true,
+          ),
+        };
+
+        await tester.tap(candidates['Search issues']!);
+        await tester.pump();
+        expect(_focusedLabel(tester, candidates), 'Search issues');
+
+        final reachedCreateIssue = await _focusByTabUntil(
+          tester,
+          isFocused: () => _focusedLabel(tester, candidates) == 'Create issue',
+        );
+        expect(reachedCreateIssue, isTrue);
+
+        final observed = <String>['Create issue'];
+        for (var index = 0; index < 16; index += 1) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          final label = _focusedLabel(tester, candidates);
+          if (label == null) {
+            continue;
+          }
+          if (observed.isEmpty || observed.last != label) {
+            observed.add(label);
+          }
+          if (label == 'Search issues') {
+            break;
+          }
+        }
+
+        expect(
+          observed,
+          containsAllInOrder([
+            'Create issue',
+            'Add workspace',
+            'Board',
+            'JQL Search',
+            'Hierarchy',
+            'Settings',
+            'Workspace switcher',
+            'Search issues',
+          ]),
+        );
+        final workspaceIndex = observed.indexOf('Workspace switcher');
+        expect(workspaceIndex, greaterThan(0));
+        expect(observed[workspaceIndex - 1], 'Settings');
+        expect(observed[workspaceIndex + 1], 'Search issues');
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'workspace switcher keeps desktop and sheet keyboard focus traversal logical',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -2664,6 +2770,17 @@ Finder _findSemanticsWithSortOrder({
         (textField == null || widget.properties.textField == textField),
     description:
         'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder))',
+  );
+}
+
+Finder _findSemanticsByLabel(String label, {bool? button, bool? textField}) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        (button == null || widget.properties.button == button) &&
+        (textField == null || widget.properties.textField == textField),
+    description: 'Semantics(label: $label)',
   );
 }
 

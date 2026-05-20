@@ -1735,11 +1735,43 @@ class _TrackerHome extends StatelessWidget {
                           attachmentPicker: attachmentPicker,
                         )
                       : _BrowserDesktopPrimaryNavigationTabOrderBinder(
-                          settingsLabel: l10n.settings,
-                          workspaceSwitcherLabelPrefix: l10n.workspaceSwitcher,
-                          searchControlLabels: [
-                            l10n.searchIssues,
-                            l10n.jqlSearch,
+                          orderedTargets: [
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.createIssue,
+                            ),
+                            if (canOpenWorkspaceOnboarding)
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.addWorkspace,
+                              ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.dashboard,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.board,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.jqlSearch,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.hierarchy,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.settings,
+                            ),
+                            const browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
+                              'Workspace switcher:',
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.searchIssues,
+                            ),
                           ],
                           child: _DesktopShell(
                             viewModel: viewModel,
@@ -3054,15 +3086,14 @@ class _SelectSectionIntent extends Intent {
 class _BrowserDesktopPrimaryNavigationTabOrderBinder extends StatefulWidget {
   const _BrowserDesktopPrimaryNavigationTabOrderBinder({
     required this.child,
-    required this.settingsLabel,
-    required this.workspaceSwitcherLabelPrefix,
-    required this.searchControlLabels,
+    required this.orderedTargets,
   });
 
   final Widget child;
-  final String settingsLabel;
-  final String workspaceSwitcherLabelPrefix;
-  final List<String> searchControlLabels;
+  final List<
+    browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget
+  >
+  orderedTargets;
 
   @override
   State<_BrowserDesktopPrimaryNavigationTabOrderBinder> createState() =>
@@ -3085,10 +3116,7 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
     covariant _BrowserDesktopPrimaryNavigationTabOrderBinder oldWidget,
   ) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.settingsLabel == widget.settingsLabel &&
-        oldWidget.workspaceSwitcherLabelPrefix ==
-            widget.workspaceSwitcherLabelPrefix &&
-        listEquals(oldWidget.searchControlLabels, widget.searchControlLabels)) {
+    if (listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
       return;
     }
     _restartSubscription();
@@ -3108,9 +3136,7 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
     }
     _subscription = browser_workspace_switcher_focus_monitor
         .createBrowserDesktopPrimaryNavigationTabOrderSubscription(
-          settingsLabel: widget.settingsLabel,
-          workspaceSwitcherLabelPrefix: widget.workspaceSwitcherLabelPrefix,
-          searchControlLabels: widget.searchControlLabels,
+          orderedTargets: widget.orderedTargets,
         );
   }
 
@@ -3573,10 +3599,12 @@ class _Sidebar extends StatelessWidget {
                       semanticsSortOrder: _desktopPrimaryNavigationOrder(
                         item.section,
                       ),
+                      semanticsIdentifier: item.semanticsIdentifier,
                       focusNode: item.section == TrackerSection.settings
                           ? desktopSettingsFocusNode
                           : null,
-                      onTabForward: item.section == TrackerSection.settings
+                      onTabForward:
+                          !kIsWeb && item.section == TrackerSection.settings
                           ? onAdvanceFromSettings
                           : null,
                       onPressed: () => viewModel.selectSection(item.section),
@@ -3692,13 +3720,15 @@ class _TopBar extends StatelessWidget {
           final syncPillOrder = compact ? null : 10.0;
           final desktopWorkspaceSwitcherBindings =
               <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.tab): () =>
-                    desktopSearchFocusNode.requestFocus(),
-                const SingleActivator(
-                  LogicalKeyboardKey.tab,
-                  shift: true,
-                ): () =>
-                    desktopSettingsFocusNode.requestFocus(),
+                if (!kIsWeb)
+                  const SingleActivator(LogicalKeyboardKey.tab): () =>
+                      desktopSearchFocusNode.requestFocus(),
+                if (!kIsWeb)
+                  const SingleActivator(
+                    LogicalKeyboardKey.tab,
+                    shift: true,
+                  ): () =>
+                      desktopSettingsFocusNode.requestFocus(),
               };
           if (isDesktopWorkspaceSwitcherVisible) {
             desktopWorkspaceSwitcherBindings
@@ -3722,6 +3752,8 @@ class _TopBar extends StatelessWidget {
                       glyph: TrackStateIconGlyph.plus,
                       onPressed: openCreateIssue,
                       semanticsSortOrder: createIssueOrder,
+                      semanticsIdentifier:
+                          browserDesktopCreateIssueSemanticsIdentifier,
                       size: compact ? null : _desktopTopBarControlHeight,
                     ),
                   )
@@ -3734,6 +3766,8 @@ class _TopBar extends StatelessWidget {
                       onPressed: openCreateIssue,
                       height: _desktopTopBarControlHeight,
                       semanticsSortOrder: createIssueOrder,
+                      semanticsIdentifier:
+                          browserDesktopCreateIssueSemanticsIdentifier,
                     ),
                   ),
                 if (canOpenWorkspaceOnboarding) ...[
@@ -3746,6 +3780,8 @@ class _TopBar extends StatelessWidget {
                         glyph: TrackStateIconGlyph.repository,
                         onPressed: openWorkspaceOnboarding,
                         semanticsSortOrder: addWorkspaceOrder,
+                        semanticsIdentifier:
+                            browserDesktopAddWorkspaceSemanticsIdentifier,
                         size: compact ? null : _desktopTopBarControlHeight,
                       ),
                     )
@@ -3758,6 +3794,8 @@ class _TopBar extends StatelessWidget {
                         onPressed: openWorkspaceOnboarding,
                         height: _desktopTopBarControlHeight,
                         semanticsSortOrder: addWorkspaceOrder,
+                        semanticsIdentifier:
+                            browserDesktopAddWorkspaceSemanticsIdentifier,
                       ),
                     ),
                 ],
@@ -3781,6 +3819,8 @@ class _TopBar extends StatelessWidget {
                                     expanded: isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     semanticsSortOrder: workspaceSwitcherOrder,
+                                    semanticsIdentifier:
+                                        browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                                     controlsNodes: const {
                                       browserWorkspaceSwitcherSemanticsIdentifier,
                                     },
@@ -3796,6 +3836,8 @@ class _TopBar extends StatelessWidget {
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
                                     semanticsSortOrder: workspaceSwitcherOrder,
+                                    semanticsIdentifier:
+                                        browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                                     controlsNodes: const {
                                       browserWorkspaceSwitcherSemanticsIdentifier,
                                     },
@@ -3936,6 +3978,8 @@ class _TopBar extends StatelessWidget {
                         compact: true,
                         condensed: false,
                         onPressed: openWorkspaceSwitcher,
+                        semanticsIdentifier:
+                            browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                         focusNode: workspaceSwitcherTriggerFocusNode,
                       ),
                     ),
@@ -3967,15 +4011,23 @@ class _TopBar extends StatelessWidget {
                   child: orderedControl(
                     searchOrder,
                     CallbackShortcuts(
-                      bindings: <ShortcutActivator, VoidCallback>{
-                        const SingleActivator(
-                          LogicalKeyboardKey.tab,
-                          shift: true,
-                        ): () =>
-                            workspaceSwitcherTriggerFocusNode.requestFocus(),
-                      },
+                      bindings: !kIsWeb
+                          ? <ShortcutActivator, VoidCallback>{
+                              const SingleActivator(
+                                LogicalKeyboardKey.tab,
+                                shift: true,
+                              ): () => workspaceSwitcherTriggerFocusNode
+                                  .requestFocus(),
+                            }
+                          : const <ShortcutActivator, VoidCallback>{},
                       child: Semantics(
+                        focusable: true,
+                        identifier:
+                            browserDesktopSearchInputSemanticsIdentifier,
                         label: l10n.searchIssues,
+                        onDidGainAccessibilityFocus: kIsWeb
+                            ? desktopSearchFocusNode.requestFocus
+                            : null,
                         sortKey: OrdinalSortKey(searchOrder),
                         textField: true,
                         child: TextField(
@@ -10835,6 +10887,7 @@ class _PrimaryButton extends StatelessWidget {
     this.semanticLabel,
     this.focusNode,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
     this.controlsNodes,
   });
 
@@ -10847,6 +10900,7 @@ class _PrimaryButton extends StatelessWidget {
   final String? semanticLabel;
   final FocusNode? focusNode;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
   final Set<String>? controlsNodes;
 
   @override
@@ -10859,6 +10913,7 @@ class _PrimaryButton extends StatelessWidget {
       enabled: enabled,
       focusable: enabled,
       expanded: expanded,
+      identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       controlsNodes: controlsNodes,
@@ -10901,6 +10956,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     this.expanded,
     this.focusNode,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
     this.controlsNodes,
   });
 
@@ -10911,6 +10967,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   final bool? expanded;
   final FocusNode? focusNode;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
   final Set<String>? controlsNodes;
 
   @override
@@ -10943,6 +11000,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         enabled: enabled,
         focusable: enabled,
         expanded: expanded,
+        identifier: semanticsIdentifier,
         label: summary.semanticLabel,
         sortKey: _semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
@@ -11051,6 +11109,7 @@ class _SecondaryButton extends StatelessWidget {
     required this.onPressed,
     this.height,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
   });
 
   final Key? buttonKey;
@@ -11059,12 +11118,14 @@ class _SecondaryButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final double? height;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
       button: true,
+      identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: OutlinedButton.icon(
@@ -11089,6 +11150,7 @@ class _IconButtonSurface extends StatelessWidget {
     required this.onPressed,
     this.size,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
   });
 
   final String label;
@@ -11096,6 +11158,7 @@ class _IconButtonSurface extends StatelessWidget {
   final VoidCallback? onPressed;
   final double? size;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
 
   @override
   Widget build(BuildContext context) {
@@ -11104,6 +11167,7 @@ class _IconButtonSurface extends StatelessWidget {
     return Semantics(
       button: true,
       enabled: enabled,
+      identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: InkWell(
@@ -12656,6 +12720,7 @@ class _NavButton extends StatelessWidget {
     required this.item,
     required this.selected,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
     this.focusNode,
     this.onTabForward,
     required this.onPressed,
@@ -12664,6 +12729,7 @@ class _NavButton extends StatelessWidget {
   final _NavItem item;
   final bool selected;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
   final FocusNode? focusNode;
   final VoidCallback? onTabForward;
   final VoidCallback onPressed;
@@ -12676,6 +12742,7 @@ class _NavButton extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: selected,
+        identifier: semanticsIdentifier,
         label: item.label,
         sortKey: _semanticsSortKey(semanticsSortOrder),
         child: CallbackShortcuts(
@@ -13923,25 +13990,44 @@ List<_NavItem> _navItems(AppLocalizations l10n) => [
     l10n.dashboard,
     TrackerSection.dashboard,
     TrackStateIconGlyph.dashboard,
+    semanticsIdentifier: browserDesktopDashboardSemanticsIdentifier,
   ),
-  _NavItem(l10n.board, TrackerSection.board, TrackStateIconGlyph.board),
-  _NavItem(l10n.jqlSearch, TrackerSection.search, TrackStateIconGlyph.search),
+  _NavItem(
+    l10n.board,
+    TrackerSection.board,
+    TrackStateIconGlyph.board,
+    semanticsIdentifier: browserDesktopBoardSemanticsIdentifier,
+  ),
+  _NavItem(
+    l10n.jqlSearch,
+    TrackerSection.search,
+    TrackStateIconGlyph.search,
+    semanticsIdentifier: browserDesktopSearchSectionSemanticsIdentifier,
+  ),
   _NavItem(
     l10n.hierarchy,
     TrackerSection.hierarchy,
     TrackStateIconGlyph.hierarchy,
+    semanticsIdentifier: browserDesktopHierarchySemanticsIdentifier,
   ),
   _NavItem(
     l10n.settings,
     TrackerSection.settings,
     TrackStateIconGlyph.settings,
+    semanticsIdentifier: browserDesktopSettingsSemanticsIdentifier,
   ),
 ];
 
 class _NavItem {
-  const _NavItem(this.label, this.section, this.glyph);
+  const _NavItem(
+    this.label,
+    this.section,
+    this.glyph, {
+    this.semanticsIdentifier,
+  });
 
   final String label;
   final TrackerSection section;
   final TrackStateIconGlyph glyph;
+  final String? semanticsIdentifier;
 }
