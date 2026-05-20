@@ -1823,11 +1823,12 @@ class _TrackerHome extends StatelessWidget {
                                 .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
                               l10n.settings,
                             ),
-                            const browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
-                              'Workspace switcher:',
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
+                              '${l10n.workspaceSwitcher}:',
                             ),
                             browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
                               l10n.searchIssues,
                             ),
                           ],
@@ -4078,54 +4079,63 @@ class _TopBar extends StatelessWidget {
                                   .requestFocus(),
                             }
                           : const <ShortcutActivator, VoidCallback>{},
-                      child: Semantics(
-                        focusable: true,
-                        identifier:
-                            browserDesktopSearchInputSemanticsIdentifier,
-                        label: l10n.searchIssues,
-                        onDidGainAccessibilityFocus: kIsWeb
-                            ? desktopSearchFocusNode.requestFocus
-                            : null,
-                        sortKey: OrdinalSortKey(searchOrder),
-                        textField: true,
-                        child: TextField(
-                          focusNode: desktopSearchFocusNode,
-                          controller: TextEditingController(
-                            text: viewModel.jql,
-                          ),
-                          onSubmitted: viewModel.updateQuery,
-                          maxLines: 1,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodyMedium?.copyWith(height: 1),
-                          textAlignVertical: TextAlignVertical.center,
-                          decoration: InputDecoration(
-                            isDense: true,
-                            isCollapsed: true,
-                            constraints: const BoxConstraints.tightFor(
-                              height: _desktopTopBarControlHeight,
+                      child: Builder(
+                        builder: (context) {
+                          final desktopSearchField = TextField(
+                            focusNode: desktopSearchFocusNode,
+                            controller: TextEditingController(
+                              text: viewModel.jql,
                             ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            prefixIcon: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: TrackStateIcon(
-                                TrackStateIconGlyph.search,
-                                color: colors.muted,
-                                size: _desktopTopBarIconSize,
-                                semanticLabel: l10n.searchIssues,
+                            onSubmitted: viewModel.updateQuery,
+                            maxLines: 1,
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(height: 1),
+                            textAlignVertical: TextAlignVertical.center,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              isCollapsed: true,
+                              constraints: const BoxConstraints.tightFor(
+                                height: _desktopTopBarControlHeight,
                               ),
-                            ),
-                            prefixIconConstraints:
-                                const BoxConstraints.tightFor(
-                                  width: _desktopTopBarControlHeight,
-                                  height: _desktopTopBarControlHeight,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              prefixIcon: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: TrackStateIcon(
+                                  TrackStateIconGlyph.search,
+                                  color: colors.muted,
+                                  size: _desktopTopBarIconSize,
+                                  semanticLabel: l10n.searchIssues,
                                 ),
-                            hintText: l10n.jqlPlaceholder,
-                          ),
-                        ),
+                              ),
+                              prefixIconConstraints:
+                                  const BoxConstraints.tightFor(
+                                    width: _desktopTopBarControlHeight,
+                                    height: _desktopTopBarControlHeight,
+                                  ),
+                              hintText: l10n.jqlPlaceholder,
+                            ),
+                          );
+                          if (kIsWeb) {
+                            return Semantics(
+                              label: l10n.searchIssues,
+                              textField: true,
+                              child: desktopSearchField,
+                            );
+                          }
+                          return Semantics(
+                            focusable: true,
+                            identifier:
+                                browserDesktopSearchInputSemanticsIdentifier,
+                            label: l10n.searchIssues,
+                            sortKey: OrdinalSortKey(searchOrder),
+                            textField: true,
+                            child: desktopSearchField,
+                          );
+                        },
                       ),
                     ),
                   ),

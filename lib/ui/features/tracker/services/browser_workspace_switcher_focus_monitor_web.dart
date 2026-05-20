@@ -166,55 +166,28 @@ createBrowserDesktopPrimaryNavigationTabOrderSubscription({
         keyboardEvent.metaKey) {
       return;
     }
-    final activeElement = web.document.activeElement;
-    if (activeElement == null) {
-      return;
-    }
-    final activeText = _normalizeLabel(activeElement.textContent ?? '');
-    final activeLabel = _normalizeLabel(
-      _elementAccessibleLabel(activeElement as web.HTMLElement),
+    final resolvedTargets = _resolveDesktopPrimaryNavigationTargets(
+      orderedTargets,
     );
-    if (!keyboardEvent.shiftKey &&
-        activeText == _normalizeLabel('Hierarchy') &&
-        _focusVisibleButtonWithExactText('Settings')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
+    if (resolvedTargets.isEmpty) {
       return;
     }
-    if (!keyboardEvent.shiftKey &&
-        activeText == _normalizeLabel('Settings') &&
-        _focusVisibleButtonWithTextPrefix('Workspace switcher:')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
+    final activeIndex = _activeDesktopPrimaryNavigationTargetIndex(
+      navigationTargets: resolvedTargets,
+      activeElement: web.document.activeElement,
+    );
+    if (activeIndex == null) {
       return;
     }
-    if (keyboardEvent.shiftKey &&
-        activeText.startsWith(_normalizeLabel('Workspace switcher:')) &&
-        _focusVisibleButtonWithExactText('Settings')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
+    final nextIndex = keyboardEvent.shiftKey
+        ? activeIndex - 1
+        : activeIndex + 1;
+    if (nextIndex < 0 || nextIndex >= resolvedTargets.length) {
       return;
     }
-    if (keyboardEvent.shiftKey &&
-        activeText == _normalizeLabel('Settings') &&
-        _focusVisibleButtonWithExactText('Hierarchy')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-      return;
-    }
-    if (!keyboardEvent.shiftKey &&
-        activeText.startsWith(_normalizeLabel('Workspace switcher:')) &&
-        _focusSearchInputByLabel('Search issues')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-      return;
-    }
-    if (keyboardEvent.shiftKey &&
-        activeLabel == _normalizeLabel('Search issues') &&
-        _focusVisibleButtonWithTextPrefix('Workspace switcher:')) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-    }
+    keyboardEvent.preventDefault();
+    keyboardEvent.stopPropagation();
+    resolvedTargets[nextIndex].focus();
   }).toJS;
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   return BrowserDesktopPrimaryNavigationTabOrderSubscription(
@@ -266,8 +239,9 @@ void syncBrowserWorkspaceSwitcherRowTabIndices({
   required String activeWorkspaceId,
 }) {
   final prefix = browserWorkspaceSwitcherRowSemanticsIdentifierPrefix;
-  final activeIdentifier =
-      browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId);
+  final activeIdentifier = browserWorkspaceSwitcherRowSemanticsIdentifier(
+    activeWorkspaceId,
+  );
   final elements = web.document.querySelectorAll(
     '[flt-semantics-identifier^="$prefix"]',
   );
@@ -290,8 +264,19 @@ void _applyDesktopPrimaryNavigationTabOrder(
   List<BrowserDesktopPrimaryNavigationTabOrderTarget> orderedTargets,
 ) {
   _restoreManagedDesktopPrimaryNavigationTabOrder();
+  final resolvedTargets = _resolveDesktopPrimaryNavigationTargets(
+    orderedTargets,
+  );
+  for (var index = 0; index < resolvedTargets.length; index += 1) {
+    _setManagedTabIndex(resolvedTargets[index], index + 1);
+  }
+}
+
+List<web.HTMLElement> _resolveDesktopPrimaryNavigationTargets(
+  List<BrowserDesktopPrimaryNavigationTabOrderTarget> orderedTargets,
+) {
   final assignedElements = <web.Element>[];
-  var tabIndex = 1;
+  final resolvedTargets = <web.HTMLElement>[];
   for (final target in orderedTargets) {
     final element = _resolveDesktopPrimaryNavigationTarget(
       target: target,
@@ -300,10 +285,26 @@ void _applyDesktopPrimaryNavigationTabOrder(
     if (element == null) {
       continue;
     }
-    _setManagedTabIndex(element, tabIndex);
     assignedElements.add(element);
-    tabIndex += 1;
+    resolvedTargets.add(element);
   }
+  return resolvedTargets;
+}
+
+int? _activeDesktopPrimaryNavigationTargetIndex({
+  required List<web.HTMLElement> navigationTargets,
+  required web.Element? activeElement,
+}) {
+  if (activeElement == null) {
+    return null;
+  }
+  for (var index = 0; index < navigationTargets.length; index += 1) {
+    final candidate = navigationTargets[index];
+    if (candidate == activeElement || candidate.contains(activeElement)) {
+      return index;
+    }
+  }
+  return null;
 }
 
 web.HTMLElement? _resolveDesktopPrimaryNavigationTarget({
@@ -396,7 +397,7 @@ web.HTMLElement? _firstVisibleFocusableElementWithAccessibleLabel({
 }) {
   final normalizedAccessibleLabel = _normalizeLabel(accessibleLabel);
   final candidates = web.document.querySelectorAll(
-    'flt-semantics[tabindex], input[aria-label], textarea[aria-label]',
+    'flt-semantics[role="button"], [role="button"], input[aria-label], textarea[aria-label]',
   );
   for (var index = 0; index < candidates.length; index += 1) {
     final candidateNode = candidates.item(index);
@@ -517,93 +518,6 @@ String _searchBridgeLabel(web.HTMLElement bridgeElement) {
     return _elementAccessibleLabel(candidate);
   }
   return '';
-}
-
-bool _focusVisibleButtonWithExactText(String text) {
-  final button = _firstVisibleButtonWithText(
-    text: text,
-    allowPrefixMatch: false,
-  );
-  if (button == null) {
-    return false;
-  }
-  button.focus();
-  return true;
-}
-
-bool _focusVisibleButtonWithTextPrefix(String text) {
-  final button = _firstVisibleButtonWithText(
-    text: text,
-    allowPrefixMatch: true,
-  );
-  if (button == null) {
-    return false;
-  }
-  button.focus();
-  return true;
-}
-
-web.HTMLElement? _firstVisibleButtonWithText({
-  required String text,
-  required bool allowPrefixMatch,
-}) {
-  final normalizedText = _normalizeLabel(text);
-  final candidates = web.document.querySelectorAll(
-    'flt-semantics[role="button"], [role="button"]',
-  );
-  for (var index = 0; index < candidates.length; index += 1) {
-    final candidateNode = candidates.item(index);
-    if (candidateNode == null) {
-      continue;
-    }
-    final candidate = candidateNode as web.HTMLElement;
-    if (!_isVisible(candidate)) {
-      continue;
-    }
-    final candidateText = _normalizeLabel(candidate.textContent ?? '');
-    final matches = allowPrefixMatch
-        ? candidateText.startsWith(normalizedText)
-        : candidateText == normalizedText;
-    if (!matches) {
-      continue;
-    }
-    return candidate;
-  }
-  return null;
-}
-
-bool _focusSearchInputByLabel(String label) {
-  final searchBridge = _firstSearchBridgeElement();
-  if (searchBridge != null) {
-    searchBridge.focus();
-    return true;
-  }
-  final searchInput = _firstVisibleFocusableElementWithAccessibleLabel(
-    accessibleLabel: label,
-    assignedElements: const <web.Element>[],
-  );
-  if (searchInput == null) {
-    return false;
-  }
-  searchInput.focus();
-  return true;
-}
-
-web.HTMLElement? _firstSearchBridgeElement() {
-  final bridges = web.document.querySelectorAll(
-    '[flt-semantics-identifier="$browserDesktopSearchInputSemanticsIdentifier"]',
-  );
-  for (var index = 0; index < bridges.length; index += 1) {
-    final bridgeNode = bridges.item(index);
-    if (bridgeNode == null) {
-      continue;
-    }
-    final bridge = bridgeNode as web.HTMLElement;
-    if (_isVisible(bridge)) {
-      return bridge;
-    }
-  }
-  return null;
 }
 
 void _setManagedAttribute({
