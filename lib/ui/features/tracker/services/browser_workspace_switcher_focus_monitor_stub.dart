@@ -8,6 +8,10 @@ class BrowserWorkspaceSwitcherFocusRequest {
   void cancel() {}
 }
 
+class BrowserDesktopPrimaryNavigationTabOrderSubscription {
+  void cancel() {}
+}
+
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
@@ -22,3 +26,10 @@ BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
 void syncBrowserWorkspaceSwitcherRowTabIndices({
   required String activeWorkspaceId,
 }) {}
+
+BrowserDesktopPrimaryNavigationTabOrderSubscription
+createBrowserDesktopPrimaryNavigationTabOrderSubscription({
+  required String settingsLabel,
+  required String workspaceSwitcherLabelPrefix,
+  required List<String> searchControlLabels,
+}) => BrowserDesktopPrimaryNavigationTabOrderSubscription();

@@ -1919,6 +1919,22 @@ void main() {
           findsOneWidget,
         );
         expect(
+          _findSemanticsWithSortOrder(label: 'Board', sortOrder: 3),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'JQL Search', sortOrder: 4),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Hierarchy', sortOrder: 5),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Settings', sortOrder: 6),
+          findsOneWidget,
+        );
+        expect(
           _findSemanticsWithSortOrder(label: 'Add workspace', sortOrder: 1.5),
           findsOneWidget,
         );
