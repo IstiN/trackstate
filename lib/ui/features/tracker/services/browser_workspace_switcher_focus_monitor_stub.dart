@@ -11,10 +11,17 @@ class BrowserWorkspaceSwitcherFocusRequest {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
-}) => BrowserWorkspaceSwitcherFocusMonitorSubscription();
+  required void Function(String key) onBrowserBoundaryKey,
+}) {
+  _keep(onBrowserTab);
+  _keep(onBrowserBoundaryKey);
+  return BrowserWorkspaceSwitcherFocusMonitorSubscription();
+}
 
 bool isBrowserFocusWithinWorkspaceSwitcher() => false;
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
   required String semanticsIdentifier,
 }) => BrowserWorkspaceSwitcherFocusRequest();
+
+void _keep(Object? _) {}

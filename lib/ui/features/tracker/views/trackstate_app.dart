@@ -1142,6 +1142,17 @@ class _TrackStateAppState extends State<TrackStateApp>
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
                 });
               },
+              onBrowserBoundaryKey: (key) {
+                if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                switch (key) {
+                  case 'Home':
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: true));
+                  case 'End':
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: false));
+                }
+              },
             );
   }
 
@@ -1332,6 +1343,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                 },
                 onMoveWorkspaceSelection: (step) =>
                     unawaited(_switchToAdjacentWorkspace(step: step)),
+                onSelectFirstWorkspace: () =>
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: true)),
+                onSelectLastWorkspace: () =>
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: false)),
               ),
             ),
           ),
@@ -1350,6 +1365,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                   unawaited(_switchToAdjacentWorkspace(step: 1)),
               const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                   unawaited(_switchToAdjacentWorkspace(step: -1)),
+              const SingleActivator(LogicalKeyboardKey.home): () =>
+                  unawaited(_switchToBoundaryWorkspace(selectFirst: true)),
+              const SingleActivator(LogicalKeyboardKey.end): () =>
+                  unawaited(_switchToBoundaryWorkspace(selectFirst: false)),
             }
           : const <ShortcutActivator, VoidCallback>{},
       child: FocusScope(
@@ -1416,6 +1435,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     await _switchToWorkspace(
       profiles[nextIndex],
       workspaceSwitcherFocusWorkspaceId: profiles[nextIndex].id,
+    );
+  }
+
+  Future<void> _switchToBoundaryWorkspace({required bool selectFirst}) async {
+    final profiles = _workspaceState.profiles;
+    if (!_isDesktopWorkspaceSwitcherVisible || profiles.isEmpty) {
+      return;
+    }
+    final workspace = selectFirst ? profiles.first : profiles.last;
+    await _switchToWorkspace(
+      workspace,
+      workspaceSwitcherFocusWorkspaceId: workspace.id,
     );
   }
 
@@ -5962,6 +5993,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.onDeleteWorkspace,
     required this.onAddWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
   });
 
   final Key? sheetKey;
@@ -5977,6 +6010,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final WorkspaceProfileCreator onAddWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
 
   @override
   State<_WorkspaceSwitcherSheet> createState() =>
@@ -6170,6 +6205,10 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                   widget.onDeleteWorkspace(workspace),
                               onMoveWorkspaceSelection:
                                   widget.onMoveWorkspaceSelection,
+                              onSelectFirstWorkspace:
+                                  widget.onSelectFirstWorkspace,
+                              onSelectLastWorkspace:
+                                  widget.onSelectLastWorkspace,
                               onSummaryFocusRequesterChanged: (requestFocus) {
                                 if (requestFocus == null) {
                                   _workspaceRowFocusRequesters.remove(
@@ -6272,6 +6311,8 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     required this.focusOrderBase,
     required this.onDelete,
     required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
     required this.onSummaryFocusRequesterChanged,
     this.primaryActionLabel,
     this.onPrimaryAction,
@@ -6284,6 +6325,8 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final double focusOrderBase;
   final VoidCallback onDelete;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
   final ValueChanged<VoidCallback?> onSummaryFocusRequesterChanged;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
@@ -6378,6 +6421,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                         widget.onMoveWorkspaceSelection(1),
                     const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                         widget.onMoveWorkspaceSelection(-1),
+                    const SingleActivator(LogicalKeyboardKey.home):
+                        widget.onSelectFirstWorkspace,
+                    const SingleActivator(LogicalKeyboardKey.end):
+                        widget.onSelectLastWorkspace,
                   },
                   child: OutlinedButton(
                     focusNode: _summaryFocusNode,

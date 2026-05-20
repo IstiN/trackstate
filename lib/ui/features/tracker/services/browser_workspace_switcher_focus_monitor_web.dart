@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:js_interop';
 
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web/web.dart' as web;
@@ -6,12 +7,12 @@ import 'package:web/web.dart' as web;
 import 'browser_workspace_switcher_focus_matcher.dart';
 
 class BrowserWorkspaceSwitcherFocusMonitorSubscription {
-  BrowserWorkspaceSwitcherFocusMonitorSubscription(this._subscription);
+  BrowserWorkspaceSwitcherFocusMonitorSubscription(this._cancel);
 
-  final StreamSubscription<web.KeyboardEvent> _subscription;
+  final void Function() _cancel;
 
   void cancel() {
-    unawaited(_subscription.cancel());
+    _cancel();
   }
 }
 
@@ -29,14 +30,24 @@ class BrowserWorkspaceSwitcherFocusRequest {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
+  required void Function(String key) onBrowserBoundaryKey,
 }) {
-  final subscription = web.window.onKeyDown.listen((event) {
-    if (event.key != 'Tab') {
+  final listener = ((web.Event event) {
+    final keyboardEvent = event as web.KeyboardEvent;
+    if (keyboardEvent.key != 'Tab') {
+      if (keyboardEvent.key == 'Home' || keyboardEvent.key == 'End') {
+        keyboardEvent.preventDefault();
+        onBrowserBoundaryKey(keyboardEvent.key);
+      }
       return;
     }
     onBrowserTab();
-  });
-  return BrowserWorkspaceSwitcherFocusMonitorSubscription(subscription);
+  }).toJS;
+
+  web.window.addEventListener('keydown', listener, true.toJS);
+  return BrowserWorkspaceSwitcherFocusMonitorSubscription(
+    () => web.window.removeEventListener('keydown', listener, true.toJS),
+  );
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
