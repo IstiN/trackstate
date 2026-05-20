@@ -1,5 +1,10 @@
 const String browserWorkspaceSwitcherSemanticsIdentifier =
     'trackstate-workspace-switcher';
+const String browserWorkspaceSwitcherRowSemanticsIdentifierPrefix =
+    'trackstate-workspace-switcher-row-';
+
+String browserWorkspaceSwitcherRowSemanticsIdentifier(String workspaceId) =>
+    '$browserWorkspaceSwitcherRowSemanticsIdentifierPrefix$workspaceId';
 
 class BrowserWorkspaceSwitcherFocusAncestorSnapshot {
   const BrowserWorkspaceSwitcherFocusAncestorSnapshot({

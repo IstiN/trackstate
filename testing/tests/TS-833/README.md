@@ -9,7 +9,9 @@ The automation:
    and two preloaded saved hosted workspaces
 2. opens the desktop workspace switcher from Dashboard
 3. observes the currently selected saved workspace row before any keyboard input
-4. checks whether the active saved workspace changes from `Hosted main
+4. clicks the active saved-workspace row to engage keyboard interaction on the
+   open switcher before sending `ArrowDown`
+5. checks whether the active saved workspace changes from `Hosted main
    workspace` to `Hosted alt workspace` while the panel remains visible
 
 ## Install dependencies
