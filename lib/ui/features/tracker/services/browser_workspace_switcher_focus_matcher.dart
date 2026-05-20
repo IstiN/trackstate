@@ -45,3 +45,20 @@ bool browserFocusWithinWorkspaceSwitcher({
   }
   return false;
 }
+
+bool browserFocusWithinWorkspaceSwitcherRow({
+  required Iterable<BrowserWorkspaceSwitcherFocusAncestorSnapshot> ancestors,
+}) {
+  for (final ancestor in ancestors) {
+    final semanticsIdentifier = ancestor.semanticsIdentifier?.trim();
+    if (semanticsIdentifier == null) {
+      continue;
+    }
+    if (semanticsIdentifier.startsWith(
+      browserWorkspaceSwitcherRowSemanticsIdentifierPrefix,
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
