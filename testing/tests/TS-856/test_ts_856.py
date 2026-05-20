@@ -44,7 +44,7 @@ DEFAULT_BRANCH = "main"
 FIRST_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-856-alt"
-LINKED_BUGS = ["TS-863", "TS-852"]
+LINKED_BUGS = ["TS-866", "TS-865", "TS-863", "TS-852"]
 
 PRECONDITIONS = [
     "At least two workspaces are saved in the account.",
@@ -777,7 +777,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             else f"- Re-run failed: {_failed_step_summary(result)}"
         ),
         "",
-        "## Files Modified",
+        "## Test assets",
         "- `testing/tests/TS-856/config.yaml`",
         "- `testing/tests/TS-856/README.md`",
         "- `testing/tests/TS-856/test_ts_856.py`",
