@@ -1062,6 +1062,114 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher Arrow Down moves focus to the next row and switches once',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'ts-825-alt',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+      final hostedRepositoryLoads = <String>[];
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                hostedRepositoryLoads.add(repository);
+                return DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                );
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final switcherTrigger = find.byKey(
+        const ValueKey('workspace-switcher-trigger'),
+      );
+      final switcherSheet = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      final mainRow = find.byKey(
+        const ValueKey('workspace-hosted:main/repo@main'),
+      );
+      final altRow = find.byKey(
+        const ValueKey('workspace-hosted:alt/repo@main'),
+      );
+
+      expect(hostedRepositoryLoads, ['main/repo']);
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Workspace switcher:')).last);
+      await tester.pumpAndSettle();
+
+      expect(switcherSheet, findsOneWidget);
+      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'desktop-workspace-switcher',
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+      expect(
+        service.selectedProfileIds
+            .where((workspaceId) => workspaceId == 'hosted:alt/repo@main')
+            .length,
+        1,
+      );
+      expect(hostedRepositoryLoads, ['main/repo', 'alt/repo']);
+      expect(switcherSheet, findsOneWidget);
+      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'workspace-switcher-row-summary-hosted:alt/repo@main',
+      );
+      expect(_focusWithinFinder(tester, altRow), isTrue);
+      expect(
+        find.descendant(of: mainRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: altRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher Arrow Up moves focus to the previous saved workspace row',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
@@ -2153,6 +2261,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   _MemoryWorkspaceProfileService(this.state);
 
   WorkspaceProfilesState state;
+  final List<String> selectedProfileIds = <String>[];
 
   @override
   Future<WorkspaceProfile> createProfile(
@@ -2214,6 +2323,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
 
   @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
+    selectedProfileIds.add(workspaceId);
     state = state.copyWith(activeWorkspaceId: workspaceId);
     return state;
   }

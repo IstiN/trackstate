@@ -102,6 +102,20 @@ class WorkspaceTriggerAriaControlsObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsTargetObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_element_found: bool
+    controlled_element_visible: bool
+    controlled_element_id: str | None
+    controlled_element_role: str | None
+    controlled_element_tag_name: str | None
+    controlled_element_text: str
+    trigger_outer_html: str
+    controlled_element_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSurfaceReferenceObservation:
     trigger_label: str
     trigger_aria_controls: str | None
@@ -476,6 +490,9 @@ class LiveWorkspaceSwitcherPage:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
         self._project_settings_page = self._settings_page(tracker_page)
+
+    def _switcher_text_field_selector(self, label: str) -> str:
+        return f'input[aria-label="{label}"]'
 
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
@@ -1185,7 +1202,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> FocusedElementObservation:
         try:
             self._session.focus(
-                f'input[aria-label="{label}"]',
+                self._switcher_text_field_selector(label),
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -1195,6 +1212,24 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self._session.active_element()
+
+    def read_switcher_text_field_value(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            return self._session.read_value(
+                self._switcher_text_field_selector(label),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a readable "{label}" text '
+                "field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
         self._session.press_key(key, timeout_ms=timeout_ms)
@@ -2114,6 +2149,102 @@ class LiveWorkspaceSwitcherPage:
             outer_html=str(payload.get("outerHtml", "")),
         )
 
+    def observe_trigger_aria_controls_target(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerAriaControlsTargetObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledElement = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledElementFound: Boolean(controlledElement),
+                    controlledElementVisible: Boolean(controlledElement) && isVisible(controlledElement),
+                    controlledElementId: controlledElement?.id || null,
+                    controlledElementRole: controlledElement?.getAttribute?.('role') || null,
+                    controlledElementTagName: controlledElement?.tagName || null,
+                    controlledElementText: normalize(
+                      controlledElement?.innerText || controlledElement?.textContent || '',
+                    ),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    controlledElementOuterHtml: controlledElement?.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsTargetObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_element_found=bool(payload.get("controlledElementFound")),
+            controlled_element_visible=bool(payload.get("controlledElementVisible")),
+            controlled_element_id=(
+                str(payload.get("controlledElementId"))
+                if payload.get("controlledElementId") is not None
+                else None
+            ),
+            controlled_element_role=(
+                str(payload.get("controlledElementRole"))
+                if payload.get("controlledElementRole") is not None
+                else None
+            ),
+            controlled_element_tag_name=(
+                str(payload.get("controlledElementTagName"))
+                if payload.get("controlledElementTagName") is not None
+                else None
+            ),
+            controlled_element_text=str(payload.get("controlledElementText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            controlled_element_outer_html=str(payload.get("controlledElementOuterHtml", "")),
+        )
+
     def observe_surface_reference(
         self,
         *,
@@ -2415,6 +2546,44 @@ class LiveWorkspaceSwitcherPage:
             ),
         )
 
+    def press_enter_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Enter", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Enter on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
     def wait_for_dismissal_after_trigger_space(
         self,
         *,
@@ -2435,6 +2604,39 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, dict):
             raise AssertionError(
                 "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_enter(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Enter on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Enter again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
                 "observation."
             )
         return WorkspaceSwitcherTriggerDismissObservation(

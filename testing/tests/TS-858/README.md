@@ -1,6 +1,6 @@
-# TS-844 test automation
+# TS-858 test automation
 
-Verifies that pressing `Space` on the already-focused desktop workspace switcher
+Verifies that pressing `Enter` on the already-focused desktop workspace switcher
 trigger closes the open workspace switcher surface and returns the trigger to its
 collapsed state.
 
@@ -9,15 +9,15 @@ The automation:
 2. navigates to Dashboard and resizes to a desktop viewport
 3. uses a real keyboard navigation path until the workspace switcher trigger owns
    keyboard focus
-4. presses `Space` once to open the workspace switcher surface while the trigger
-   keeps focus and exposes `aria-expanded="true"`
-5. presses `Space` again on the same focused trigger and checks whether the
-   visible surface dismisses immediately with `aria-expanded="false"`
+4. presses `Enter` once to open the workspace switcher surface while the trigger
+   keeps focus
+5. presses `Enter` again on the same focused trigger and checks whether the
+   visible surface dismisses immediately
 
 ## Run this test
 
 ```bash
-mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-844/test_ts_844.py
+mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-858/test_ts_858.py
 ```
 
 ## Required environment and config
@@ -30,8 +30,8 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-844/test_ts_844.py
 
 ```text
 Pass: after the workspace switcher surface is open and the trigger still owns
-keyboard focus, pressing Space again closes the visible surface and returns the
-trigger to its collapsed state with `aria-expanded="false"`.
+keyboard focus, pressing Enter again closes the visible surface and returns the
+trigger to its collapsed state.
 
 Fail: the surface stays visible, focus leaves the trigger unexpectedly, or the
 toggle interaction does not collapse the open switcher.

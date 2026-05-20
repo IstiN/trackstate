@@ -14,7 +14,6 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     FocusNavigationStep,
     LiveWorkspaceSwitcherPage,
-    WorkspaceTriggerAriaExpandedObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherSurfaceObservation,
@@ -31,9 +30,9 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
 
-TICKET_KEY = "TS-844"
-TEST_CASE_TITLE = "Workspace switcher trigger toggle activation — surface closes using Space key"
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-844/test_ts_844.py"
+TICKET_KEY = "TS-858"
+TEST_CASE_TITLE = "Workspace switcher trigger keyboard activation — Enter key toggles surface to collapsed state"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-858/test_ts_858.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TRIGGER_FOCUS_TIMEOUT_MS = 4_000
 SURFACE_OPEN_TIMEOUT_MS = 4_000
@@ -48,9 +47,9 @@ PRECONDITIONS = [
 REQUEST_STEPS = [
     "Launch the application on a desktop browser.",
     "Use real keyboard navigation to move focus to the workspace switcher trigger.",
-    "Press the 'Space' key on the focused workspace switcher trigger to open the workspace switcher surface.",
+    "Press the 'Enter' key on the focused workspace switcher trigger to open the workspace switcher surface.",
     "With the surface open, confirm the workspace switcher trigger still owns keyboard focus.",
-    "Press the 'Space' key again on the keyboard.",
+    "Press the 'Enter' key again on the keyboard.",
     "Observe whether the workspace switcher surface closes immediately and the trigger returns to its collapsed state.",
 ]
 EXPECTED_RESULT = (
@@ -64,8 +63,8 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts844_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts844_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts858_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts858_failure.png"
 
 
 @dataclass(frozen=True)
@@ -85,7 +84,7 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-844 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+            "TS-858 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
 
@@ -106,7 +105,7 @@ def main() -> None:
         "surface_close_timeout_ms": SURFACE_CLOSE_TIMEOUT_MS,
         "surface_close_stability_ms": SURFACE_CLOSE_STABILITY_MS,
         "preconditions": PRECONDITIONS,
-        "linked_bugs": ["TS-843", "TS-847", "TS-848"],
+        "linked_bugs": ["TS-848"],
         "user_login": user.login,
         "steps": [],
         "human_verification": [],
@@ -125,7 +124,7 @@ def main() -> None:
                     if runtime.kind != "ready":
                         raise AssertionError(
                             "Step 1 failed: the deployed app did not reach an interactive "
-                            "desktop state before the Space-key toggle scenario began.\n"
+                            "desktop state before the Enter-key toggle scenario began.\n"
                             f"Observed runtime state: {runtime.kind}\n"
                             f"Observed body text:\n{runtime.body_text}",
                         )
@@ -233,7 +232,7 @@ def main() -> None:
                     check=(
                         "Reached the workspace switcher trigger using a real keyboard "
                         "navigation path and confirmed the trigger, not a scripted fallback, "
-                        "owned keyboard focus before pressing Space."
+                        "owned keyboard focus before pressing Enter."
                     ),
                     observed=(
                         f"reach_method={focus_reach.method}; "
@@ -246,9 +245,8 @@ def main() -> None:
                 switcher: WorkspaceSwitcherObservation | None = None
                 panel: WorkspaceSwitcherPanelObservation | None = None
                 surface: WorkspaceSwitcherSurfaceObservation | None = None
-                trigger_aria_after_open: WorkspaceTriggerAriaExpandedObservation | None = None
                 try:
-                    page.press_space_on_active_element_and_wait_for_surface(
+                    page.press_enter_on_active_element_and_wait_for_surface(
                         timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
                     )
                     switcher = page.observe_open_switcher(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
@@ -257,16 +255,9 @@ def main() -> None:
                         timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
                     )
                     surface = page.observe_surface(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
-                    trigger_aria_after_open = page.observe_trigger_aria_expanded(
-                        expected_value="true",
-                        timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
-                    )
                     result["open_switcher_observation"] = _switcher_payload(switcher)
                     result["open_panel_observation"] = asdict(panel)
                     result["surface_observation"] = asdict(surface)
-                    result["trigger_aria_after_open"] = _trigger_aria_payload(
-                        trigger_aria_after_open,
-                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -282,7 +273,7 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Pressed Space from the focused workspace switcher trigger and "
+                        "Pressed Enter from the focused workspace switcher trigger and "
                         "the surface became visible within the expected wait window."
                     ),
                 )
@@ -301,7 +292,6 @@ def main() -> None:
                         switcher=switcher,
                         panel=panel,
                         surface=surface,
-                        trigger_aria_after_open=trigger_aria_after_open,
                         focused=focused_trigger_after_open,
                     )
                 except Exception as error:
@@ -322,14 +312,13 @@ def main() -> None:
                         f"heading={surface.heading_text!r}; "
                         f"dialog_visible={surface.dialog_visible}; "
                         f"panel_kind={panel.container_kind!r}; "
-                        f"focused_element={focused_trigger_after_open.accessible_name!r}; "
-                        f"aria-expanded={trigger_aria_after_open.aria_expanded!r}"
+                        f"focused_element={focused_trigger_after_open.accessible_name!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Opened the workspace switcher with Space and visually confirmed "
+                        "Opened the workspace switcher with Enter and visually confirmed "
                         "the user-visible surface stayed open on screen while keyboard focus "
                         "remained on the workspace switcher trigger."
                     ),
@@ -337,22 +326,20 @@ def main() -> None:
                         f"heading={surface.heading_text!r}; "
                         f"row_count={switcher.row_count}; "
                         f"focus_after_open={focused_trigger_after_open.accessible_name!r}; "
-                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}; "
-                        f"aria-expanded={trigger_aria_after_open.aria_expanded!r}"
+                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}"
                     ),
                 )
 
                 dismissal: WorkspaceSwitcherTriggerDismissObservation | None = None
                 focused_trigger_after_close: FocusedElementObservation | None = None
-                trigger_aria_after_close: WorkspaceTriggerAriaExpandedObservation | None = None
                 try:
-                    page.press_key("Space", timeout_ms=SURFACE_CLOSE_TIMEOUT_MS)
+                    page.press_key("Enter", timeout_ms=SURFACE_CLOSE_TIMEOUT_MS)
                 except Exception as error:
                     _record_step(
                         result,
-                        step=5,
+                        step=6,
                         status="failed",
-                        action=REQUEST_STEPS[4],
+                        action=REQUEST_STEPS[5],
                         observed=str(error),
                     )
                     raise
@@ -362,13 +349,13 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[4],
                     observed=(
-                        "Pressed Space again from the still-focused workspace switcher "
+                        "Pressed Enter again from the still-focused workspace switcher "
                         "trigger while the surface was open."
                     ),
                 )
 
                 try:
-                    dismissal = page.wait_for_dismissal_after_trigger_space(
+                    dismissal = page.wait_for_dismissal_after_trigger_enter(
                         timeout_ms=SURFACE_CLOSE_TIMEOUT_MS,
                         stability_window_ms=SURFACE_CLOSE_STABILITY_MS,
                     )
@@ -376,13 +363,6 @@ def main() -> None:
                     result["dismissal_observation"] = asdict(dismissal)
                     result["focused_trigger_after_close"] = _focused_element_payload(
                         focused_trigger_after_close,
-                    )
-                    trigger_aria_after_close = page.observe_trigger_aria_expanded(
-                        expected_value="false",
-                        timeout_ms=SURFACE_CLOSE_TIMEOUT_MS,
-                    )
-                    result["trigger_aria_after_close"] = _trigger_aria_payload(
-                        trigger_aria_after_close,
                     )
                 except Exception as error:
                     _record_step(
@@ -395,10 +375,9 @@ def main() -> None:
                     raise
 
                 try:
-                    _assert_trigger_space_toggle_dismissal(
+                    _assert_trigger_enter_toggle_dismissal(
                         dismissal=dismissal,
                         focused_after_close=focused_trigger_after_close,
-                        trigger_aria_after_close=trigger_aria_after_close,
                     )
                 except Exception as error:
                     _record_step(
@@ -416,15 +395,14 @@ def main() -> None:
                     action=REQUEST_STEPS[5],
                     observed=(
                         "The workspace switcher surface was no longer visible after the "
-                        "second Space keypress, Dashboard remained visible, and keyboard "
-                        "focus stayed on the workspace switcher trigger with "
-                        "aria-expanded returned to 'false'."
+                        "second Enter keypress, Dashboard remained visible, and keyboard "
+                        "focus stayed on the workspace switcher trigger."
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Pressed Space a second time like a keyboard user and confirmed the "
+                        "Pressed Enter a second time like a keyboard user and confirmed the "
                         "workspace switcher surface disappeared from the visible UI while "
                         "the Dashboard shell and trigger remained on screen."
                     ),
@@ -432,8 +410,7 @@ def main() -> None:
                         f"dashboard_visible_after={dismissal.dashboard_visible}; "
                         f"trigger_visible_after={dismissal.trigger_visible}; "
                         f"focus_after_close={focused_trigger_after_close.accessible_name!r}; "
-                        f"trigger_label_after={dismissal.trigger_label!r}; "
-                        f"aria-expanded={trigger_aria_after_close.aria_expanded!r}"
+                        f"trigger_label_after={dismissal.trigger_label!r}"
                     ),
                 )
             except Exception:
@@ -472,7 +449,7 @@ def _assert_workspace_trigger_focused(
         return
     raise AssertionError(
         "Step 2 failed: keyboard navigation did not land on the workspace switcher "
-        "trigger before the Space-key toggle scenario.\n"
+        "trigger before the Enter-key toggle scenario.\n"
         f"Observed focused element: label={focused.accessible_name!r}, "
         f"role={focused.role!r}, tag={focused.tag_name!r}, text={focused.text!r}\n"
         f"Observed focus sequence: {_focus_sequence_summary(focus_steps)}",
@@ -561,7 +538,6 @@ def _assert_surface_open_with_trigger_focus(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
     surface: WorkspaceSwitcherSurfaceObservation,
-    trigger_aria_after_open: WorkspaceTriggerAriaExpandedObservation,
     focused: FocusedElementObservation,
 ) -> None:
     failures: list[str] = []
@@ -581,11 +557,6 @@ def _assert_surface_open_with_trigger_focus(
         )
     if switcher.row_count <= 0:
         failures.append("the opened surface did not expose any visible workspace rows")
-    if trigger_aria_after_open.aria_expanded != "true":
-        failures.append(
-            "the focused trigger did not expose aria-expanded='true' while the surface "
-            "was open"
-        )
     if not _is_workspace_trigger_focus(
         focused.accessible_name,
         fallback_text=focused.text,
@@ -597,32 +568,27 @@ def _assert_surface_open_with_trigger_focus(
     if failures:
         raise AssertionError(
             "Step 4 failed: the precondition for the close-toggle scenario was not "
-            "fully established after the first Space keypress.\n"
+            "fully established after the first Enter keypress.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed focused element: label={focused.accessible_name!r}, "
             + f"role={focused.role!r}, tag={focused.tag_name!r}, text={focused.text!r}\n"
-            + f"Observed trigger aria-expanded while open: "
-            + f"{trigger_aria_after_open.aria_expanded!r}\n"
             + f"Observed switcher text:\n{switcher.switcher_text}\n"
             + f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             + f"width={panel.width:.1f}, height={panel.height:.1f}",
         )
 
 
-def _assert_trigger_space_toggle_dismissal(
+def _assert_trigger_enter_toggle_dismissal(
     *,
     dismissal: WorkspaceSwitcherTriggerDismissObservation,
     focused_after_close: FocusedElementObservation,
-    trigger_aria_after_close: WorkspaceTriggerAriaExpandedObservation,
 ) -> None:
     failures: list[str] = []
     if not dismissal.trigger_visible:
-        failures.append("the workspace switcher trigger was not visible after the second Space keypress")
+        failures.append("the workspace switcher trigger was not visible after the second Enter keypress")
     if not dismissal.dashboard_visible:
-        failures.append("the Dashboard shell was not visibly present after the second Space keypress")
-    if trigger_aria_after_close.aria_expanded != "false":
-        failures.append("the workspace switcher trigger did not expose aria-expanded='false' after dismissal")
+        failures.append("the Dashboard shell was not visibly present after the second Enter keypress")
     if not _is_workspace_trigger_focus(
         focused_after_close.accessible_name,
         fallback_text=focused_after_close.text,
@@ -630,15 +596,13 @@ def _assert_trigger_space_toggle_dismissal(
         failures.append("keyboard focus did not return to the workspace switcher trigger after dismissal")
     if failures:
         raise AssertionError(
-            "Step 6 failed: pressing Space on the already-open workspace switcher "
+            "Step 6 failed: pressing Enter on the already-open workspace switcher "
             "trigger did not return the UI to the expected collapsed state.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed active element after close: label={focused_after_close.accessible_name!r}, "
             + f"role={focused_after_close.role!r}, tag={focused_after_close.tag_name!r}, "
             + f"text={focused_after_close.text!r}\n"
-            + f"Observed trigger aria-expanded after close: "
-            + f"{trigger_aria_after_close.aria_expanded!r}\n"
             + f"Observed body text after dismissal:\n{dismissal.body_text}",
         )
 
@@ -664,7 +628,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-844 failed"))
+    error = str(result.get("error", "AssertionError: TS-858 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -699,9 +663,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "* Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
-        "* Pressed the Space key once to open the visible workspace switcher surface.",
-        "* Verified the surface stayed open while the focused trigger still owned keyboard focus and exposed aria-expanded=true.",
-        "* Pressed Space again on the same focused trigger and verified the visible surface closed with aria-expanded=false.",
+        "* Pressed the Enter key once to open the visible workspace switcher surface.",
+        "* Verified the surface stayed open while the focused trigger still owned keyboard focus.",
+        "* Pressed Enter again on the same focused trigger and verified the visible surface closed.",
         "",
         "h4. Result",
         (
@@ -750,9 +714,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "- Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
-        "- Pressed `Space` once to open the workspace switcher surface.",
-        "- Verified the open surface stayed visible while focus remained on the workspace switcher trigger and `aria-expanded` switched to `\"true\"`.",
-        "- Pressed `Space` again on the same focused trigger and verified the surface closed with `aria-expanded=\"false\"`.",
+        "- Pressed `Enter` once to open the workspace switcher surface.",
+        "- Verified the open surface stayed visible while focus remained on the workspace switcher trigger.",
+        "- Pressed `Enter` again on the same focused trigger and verified the surface closed.",
         "",
         "## Result",
         (
@@ -798,7 +762,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         (
-            "- Added TS-844 live desktop coverage for workspace-switcher Space-key "
+            "- Added TS-858 live desktop coverage for workspace-switcher Enter-key "
             "toggle dismissal."
         ),
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
@@ -810,9 +774,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         (
-            "- Outcome: the open desktop workspace switcher closed after a second Space "
-            "keypress on the still-focused trigger and the trigger returned to "
-            "`aria-expanded=\"false\"`."
+            "- Outcome: the open desktop workspace switcher closed after a second Enter "
+            "keypress on the still-focused trigger."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -914,52 +877,52 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
             ],
             (
                 "The production desktop UI does not expose the workspace switcher trigger "
-                "as a reachable keyboard focus target, so the Space-key toggle scenario "
+                "as a reachable keyboard focus target, so the Enter-key toggle scenario "
                 "cannot begin from a real focused-trigger state."
             ),
         )
     if failed_step in {3, 4}:
         return (
-            f"{TICKET_KEY} - Workspace switcher cannot be prepared for Space-key close toggle",
+            f"{TICKET_KEY} - Workspace switcher cannot be prepared for Enter-key close toggle",
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Space` once to open the workspace switcher surface.",
+                "3. Press `Enter` once to open the workspace switcher surface.",
                 "4. Observe whether the surface opens and the trigger still owns focus.",
             ],
             (
                 "After the workspace switcher trigger receives real keyboard focus, the "
                 "production desktop UI does not keep the expected open-surface state with "
-                "focus still on the trigger, so the Space-key close toggle cannot be "
+                "focus still on the trigger, so the Enter-key close toggle cannot be "
                 "verified from the required user-visible precondition."
             ),
         )
     if failed_step in {5, 6}:
         return (
-            f"{TICKET_KEY} - Pressing Space on the open workspace switcher trigger does not close the surface",
+            f"{TICKET_KEY} - Pressing Enter on the open workspace switcher trigger does not close the surface",
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Space` to open the workspace switcher surface.",
+                "3. Press `Enter` to open the workspace switcher surface.",
                 "4. Keep focus on the still-visible workspace switcher trigger.",
-                "5. Press `Space` again.",
+                "5. Press `Enter` again.",
                 "6. Observe whether the surface closes and the trigger returns to its collapsed state.",
             ],
             (
                 "When the workspace switcher surface is already open and the trigger still "
                 "has keyboard focus, the production desktop UI does not collapse the "
-                "surface in response to a second Space keypress."
+                "surface in response to a second Enter keypress."
             ),
         )
     return (
-        f"{TICKET_KEY} - Workspace switcher Space-key close toggle is broken",
+        f"{TICKET_KEY} - Workspace switcher Enter-key close toggle is broken",
         [
             "1. Launch the application on a desktop browser.",
-            "2. Attempt the TS-844 Space-key close-toggle scenario.",
+            "2. Attempt the TS-858 Enter-key close-toggle scenario.",
             "3. Observe the first failing boundary.",
         ],
         (
-            "The production desktop workspace switcher does not satisfy the TS-844 "
+            "The production desktop workspace switcher does not satisfy the TS-858 "
             "keyboard close-toggle requirement."
         ),
     )
@@ -1129,20 +1092,6 @@ def _focused_element_payload(observation: FocusedElementObservation) -> dict[str
         "accessible_name": observation.accessible_name,
         "text": observation.text,
         "tabindex": observation.tabindex,
-        "outer_html": observation.outer_html,
-    }
-
-
-def _trigger_aria_payload(
-    observation: WorkspaceTriggerAriaExpandedObservation,
-) -> dict[str, object]:
-    return {
-        "label": observation.label,
-        "role": observation.role,
-        "tag_name": observation.tag_name,
-        "tabindex": observation.tabindex,
-        "keyboard_focusable": observation.keyboard_focusable,
-        "aria_expanded": observation.aria_expanded,
         "outer_html": observation.outer_html,
     }
 

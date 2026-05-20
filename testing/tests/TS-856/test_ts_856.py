@@ -778,6 +778,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         "",
         "## Files Modified",
+        "- `testing/tests/TS-856/config.yaml`",
+        "- `testing/tests/TS-856/README.md`",
         "- `testing/tests/TS-856/test_ts_856.py`",
         "",
         "## Coverage",
@@ -819,6 +821,13 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",
             f"- Actual: {_actual_result_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            "The workspace switcher updates its active selection on Arrow Down, but the "
+            "production focus-management path does not move primary keyboard focus from "
+            "the workspace-switcher trigger to the next saved-workspace row button. The "
+            "public UI therefore fails the expected FocusTraversalPolicy behavior from the "
+            "original ticket precondition without any extra pointer interaction.",
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -986,8 +995,6 @@ def _actual_result_summary(result: dict[str, object]) -> str:
         f"`row_contains_active={row_contains_active}` instead of moving focus to the "
         f"{SECOND_WORKSPACE_DISPLAY_NAME!r} row button."
     )
-
-
 def _step_status(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
