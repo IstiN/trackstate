@@ -73,6 +73,49 @@ void main() {
   );
 
   testWidgets(
+    'desktop primary navigation keeps reverse Tab order between Search issues, workspace switcher, and Settings',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        final focusCandidates = <String, Finder>{
+          'Search issues': find.byType(TextField),
+          'Settings': find.bySemanticsLabel(RegExp('^Settings\$')).last,
+          'Workspace switcher': find.byKey(
+            const ValueKey('workspace-switcher-trigger'),
+          ),
+        };
+
+        await tester.tap(focusCandidates['Search issues']!);
+        await tester.pump();
+
+        final reverseOrder = <String>[_focusedLabel(tester, focusCandidates)!];
+        await _sendShiftTab(tester);
+        reverseOrder.add(_focusedLabel(tester, focusCandidates)!);
+        await _sendShiftTab(tester);
+        reverseOrder.add(_focusedLabel(tester, focusCandidates)!);
+
+        expect(reverseOrder, const <String>[
+          'Search issues',
+          'Workspace switcher',
+          'Settings',
+        ]);
+      } finally {
+        semantics.dispose();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'desktop tab order reaches secondary header controls and repository banner actions after search',
     (tester) async {
       const attachmentRestrictedPermission = RepositoryPermission(
@@ -139,6 +182,13 @@ void main() {
       }
     },
   );
+}
+
+Future<void> _sendShiftTab(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.pump();
 }
 
 Future<List<String>> _collectFocusOrder(
