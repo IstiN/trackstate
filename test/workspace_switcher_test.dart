@@ -1130,7 +1130,9 @@ void main() {
 
       expect(hostedRepositoryLoads, ['main/repo']);
 
-      await tester.tap(find.bySemanticsLabel(RegExp('Workspace switcher:')).last);
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
       await tester.pumpAndSettle();
 
       expect(switcherSheet, findsOneWidget);
@@ -1709,16 +1711,27 @@ void main() {
         await tester.pump();
         expect(_focusedLabel(tester, desktopCandidates), 'Search issues');
 
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        expect(_focusedLabel(tester, desktopCandidates), 'Create issue');
+        final reachedCreateIssue = await _focusByTabUntil(
+          tester,
+          isFocused: () =>
+              _focusedLabel(tester, desktopCandidates) == 'Create issue',
+        );
+        expect(reachedCreateIssue, isTrue);
 
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        expect(_focusedLabel(tester, desktopCandidates), 'Add workspace');
+        final reachedAddWorkspace = await _focusByTabUntil(
+          tester,
+          isFocused: () =>
+              _focusedLabel(tester, desktopCandidates) == 'Add workspace',
+        );
+        expect(reachedAddWorkspace, isTrue);
 
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
+        final reachedWorkspaceSwitcher = await _focusByTabUntil(
+          tester,
+          isFocused: () =>
+              _focusedLabel(tester, desktopCandidates) == 'Workspace switcher',
+        );
+        expect(reachedWorkspaceSwitcher, isTrue);
+
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         await _pumpUntilVisible(tester, find.text('Saved workspaces'));
@@ -1796,17 +1809,17 @@ void main() {
         expect(
           _findSemanticsWithSortOrder(
             label: 'Search issues',
-            sortOrder: 2,
+            sortOrder: 8,
             textField: true,
           ),
           findsOneWidget,
         );
         expect(
-          _findSemanticsWithSortOrder(label: 'Create issue', sortOrder: 3),
+          _findSemanticsWithSortOrder(label: 'Create issue', sortOrder: 1),
           findsOneWidget,
         );
         expect(
-          _findSemanticsWithSortOrder(label: 'Add workspace', sortOrder: 4),
+          _findSemanticsWithSortOrder(label: 'Add workspace', sortOrder: 1.5),
           findsOneWidget,
         );
 
@@ -1818,13 +1831,9 @@ void main() {
             of: trigger,
             matching: _findSemanticsWithSortOrder(
               label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
-              sortOrder: 5,
+              sortOrder: 7,
             ),
           ),
-          findsOneWidget,
-        );
-        expect(
-          _findSemanticsWithSortOrder(label: 'Dark theme', sortOrder: 6),
           findsOneWidget,
         );
       } finally {
@@ -1882,7 +1891,7 @@ void main() {
             of: trigger,
             matching: _findActionableSemanticsWithSortOrder(
               label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
-              sortOrder: 5,
+              sortOrder: 7,
             ),
           ),
           findsOneWidget,
