@@ -105,7 +105,7 @@ def main() -> None:
         "surface_close_timeout_ms": SURFACE_CLOSE_TIMEOUT_MS,
         "surface_close_stability_ms": SURFACE_CLOSE_STABILITY_MS,
         "preconditions": PRECONDITIONS,
-        "linked_bugs": ["TS-848"],
+        "linked_bugs": ["TS-862", "TS-848"],
         "user_login": user.login,
         "steps": [],
         "human_verification": [],
