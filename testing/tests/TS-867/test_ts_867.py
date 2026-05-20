@@ -48,7 +48,7 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-867-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-867-third"
-LINKED_BUGS = ["TS-866"]
+LINKED_BUGS = ["TS-866", "TS-870"]
 
 PRECONDITIONS = [
     "At least three saved workspaces exist.",
