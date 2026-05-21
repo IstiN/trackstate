@@ -7,6 +7,7 @@ import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
+import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/issue_mutation_models.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
@@ -330,18 +331,29 @@ void main() {
   test(
     'view model restores hosted auth for a saved local workspace from a legacy repository token',
     () async {
-      SharedPreferences.setMockInitialValues({
-        'trackstate.githubToken.trackstate.trackstate': 'legacy-token',
-      });
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final authStore = _LegacyRepositoryFallbackAuthStore(
+        repository: 'trackstate/trackstate',
+        workspaceId: workspaceId,
+        token: 'legacy-token',
+      );
+      final repository = _LocalHostedAccessRepository();
       final viewModel = TrackerViewModel(
-        repository: const DemoTrackStateRepository(),
-        workspaceId: 'local:/tmp/trackstate-demo@main',
+        repository: repository,
+        authStore: authStore,
+        workspaceId: workspaceId,
       );
 
       await viewModel.load();
 
       expect(viewModel.isConnected, isTrue);
       expect(viewModel.connectedUser?.login, 'demo-user');
+      expect(authStore.readScopes, [
+        (repository: 'trackstate/trackstate', workspaceId: workspaceId),
+      ]);
+      expect(repository.connectCount, 2);
+      expect(repository.lastConnection?.repository, 'trackstate/trackstate');
+      expect(repository.lastConnection?.token, 'legacy-token');
     },
   );
 
@@ -1716,6 +1728,66 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _LocalHostedAccessRepository extends _LocalRuntimeRepository {
+  RepositoryConnection? lastConnection;
+  int connectCount = 0;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    connectCount += 1;
+    lastConnection = connection;
+    if (connection.token == 'legacy-token') {
+      return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+    }
+    return super.connect(connection);
+  }
+}
+
+class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
+  _LegacyRepositoryFallbackAuthStore({
+    required this.repository,
+    required this.workspaceId,
+    required this.token,
+  });
+
+  final String repository;
+  final String workspaceId;
+  final String token;
+  final List<({String? repository, String? workspaceId})> readScopes =
+      <({String? repository, String? workspaceId})>[];
+
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {}
+
+  @override
+  Future<String?> migrateLegacyRepositoryToken({
+    required String repository,
+    required String workspaceId,
+  }) async => null;
+
+  @override
+  Future<void> moveToken({
+    required String fromWorkspaceId,
+    required String toWorkspaceId,
+  }) async {}
+
+  @override
+  Future<String?> readToken({String? repository, String? workspaceId}) async {
+    readScopes.add((repository: repository, workspaceId: workspaceId));
+    if (repository == this.repository && workspaceId == this.workspaceId) {
+      return token;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveToken(
+    String token, {
+    String? repository,
+    String? workspaceId,
+  }) async {}
 }
 
 class _ThrowingSearchRepository extends _LocalRuntimeRepository {
