@@ -124,6 +124,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  final Set<String> _preservedUnavailableLocalWorkspaceIds = <String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
   browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
   _desktopWorkspaceSwitcherScrollSnapshot;
@@ -177,6 +178,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
+    _preservedUnavailableLocalWorkspaceIds.clear();
     _isDesktopWorkspaceSwitcherVisible = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
@@ -301,11 +303,15 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
-        localWorkspaceAvailability[workspace.id] = true;
+        localWorkspaceAvailability[workspace.id] =
+            !_preservedUnavailableLocalWorkspaceIds.contains(workspace.id);
         continue;
       }
-      localWorkspaceAvailability[workspace.id] =
-          await _validateLocalWorkspaceAvailability(workspace);
+      final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
+      localWorkspaceAvailability[workspace.id] = isAvailable;
+      if (isAvailable) {
+        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
+      }
     }
     if (!mounted) {
       return;
@@ -357,6 +363,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
             workspace.id == activeWorkspaceId && workspace.isLocal,
+        preserveActiveLocalSelectionOnStartupFailure:
+            workspace.id == activeWorkspaceId && workspace.isLocal,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -395,6 +403,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     required TrackerViewModel previousViewModel,
     required bool showFailureMessage,
     bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
+    bool preserveActiveLocalSelectionOnStartupFailure = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -416,6 +425,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       await nextViewModel.load();
       if (nextViewModel.snapshot != null) {
+        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
         _workspaceValidationFailures.remove(workspace.id);
         return _PreparedWorkspaceSwitch(
           viewModel: nextViewModel,
@@ -426,12 +436,20 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
-      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-          _isUnsupportedActiveLocalStartupAccess(reason)) {
+      if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         nextViewModel.dispose();
+        if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+            _isUnsupportedActiveLocalStartupAccess(reason)) {
+          return _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+          );
+        }
+        _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          markUnavailable: true,
         );
       }
       nextViewModel.dispose();
@@ -446,14 +464,22 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     } on Object catch (error) {
-      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-          error is UnsupportedError) {
+      final reason = _normalizeWorkspaceFailureReason(error);
+      if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
+        if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+            error is UnsupportedError) {
+          return _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+          );
+        }
+        _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          markUnavailable: true,
         );
       }
-      final reason = _normalizeWorkspaceFailureReason(error);
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
         previousViewModel.showMessage(
@@ -470,13 +496,31 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
     TrackerViewModel previousViewModel,
+    {bool markUnavailable = false}
   ) async {
     if (previousViewModel.snapshot == null) {
       await previousViewModel.load();
     }
-    _workspaceValidationFailures.remove(workspace.id);
+    final preservedViewModel = previousViewModel.workspaceId == workspace.id
+        ? previousViewModel
+        : _createViewModel(
+            repository: previousViewModel.repository,
+            previous: previousViewModel,
+            autoLoad: false,
+            workspaceId: workspace.id,
+          );
+    if (!identical(preservedViewModel, previousViewModel) &&
+        preservedViewModel.snapshot == null) {
+      await preservedViewModel.load();
+    }
+    if (markUnavailable) {
+      _preservedUnavailableLocalWorkspaceIds.add(workspace.id);
+    } else {
+      _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
+      _workspaceValidationFailures.remove(workspace.id);
+    }
     return _PreparedWorkspaceSwitch(
-      viewModel: previousViewModel,
+      viewModel: preservedViewModel,
       workspace: workspace,
       localConfigurationKey: null,
     );
@@ -638,7 +682,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       Duration(milliseconds: 600),
     ];
     const maxStartupRevalidationWait = Duration(seconds: 10);
-    final stopwatch = Stopwatch()..start();
+    var elapsedWait = Duration.zero;
     var attempt = 0;
     while (true) {
       final validationReady = await _tryAwaitActiveLocalWorkspaceOpen(
@@ -650,15 +694,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      final remaining = maxStartupRevalidationWait - stopwatch.elapsed;
+      final remaining = maxStartupRevalidationWait - elapsedWait;
       if (remaining <= Duration.zero) {
         return;
       }
       final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
-      await Future<void>.delayed(remaining < delay ? remaining : delay);
+      final appliedDelay = remaining < delay ? remaining : delay;
+      await Future<void>.delayed(appliedDelay);
       if (!mounted) {
         return;
       }
+      elapsedWait += appliedDelay;
       attempt += 1;
     }
   }
@@ -1642,6 +1688,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  localWorkspaceAvailability: _localWorkspaceAvailability,
                   workspaceSwitcherTriggerKey:
                       _workspaceSwitcherTriggerAnchorKey,
                   workspaceSwitcherTriggerFocusNode:
@@ -1688,6 +1735,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -1715,6 +1763,7 @@ class _TrackerHome extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -1812,6 +1861,7 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          localWorkspaceAvailability: localWorkspaceAvailability,
                           workspaceSwitcherTriggerKey:
                               workspaceSwitcherTriggerKey,
                           workspaceSwitcherTriggerFocusNode:
@@ -1888,6 +1938,8 @@ class _TrackerHome extends StatelessWidget {
                           child: _DesktopShell(
                             viewModel: viewModel,
                             workspaces: workspaces,
+                            localWorkspaceAvailability:
+                                localWorkspaceAvailability,
                             workspaceSwitcherTriggerKey:
                                 workspaceSwitcherTriggerKey,
                             workspaceSwitcherTriggerFocusNode:
@@ -3260,6 +3312,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3287,6 +3340,7 @@ class _DesktopShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3328,6 +3382,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            localWorkspaceAvailability: localWorkspaceAvailability,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             workspaceSwitcherTriggerFocusNode:
                 workspaceSwitcherTriggerFocusNode,
@@ -3366,6 +3421,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3393,6 +3449,7 @@ class _MobileShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3422,6 +3479,7 @@ class _MobileShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      localWorkspaceAvailability: localWorkspaceAvailability,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
       desktopSearchFocusNode: desktopSearchFocusNode,
@@ -3454,6 +3512,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3482,6 +3541,7 @@ class _TrackerMainPane extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3526,6 +3586,7 @@ class _TrackerMainPane extends StatelessWidget {
               _TopBar(
                 viewModel: viewModel,
                 workspaces: workspaces,
+                localWorkspaceAvailability: localWorkspaceAvailability,
                 compact: compact,
                 isDesktopWorkspaceSwitcherVisible:
                     isDesktopWorkspaceSwitcherVisible,
@@ -3759,6 +3820,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.isDesktopWorkspaceSwitcherVisible,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -3774,6 +3836,7 @@ class _TopBar extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final bool isDesktopWorkspaceSwitcherVisible;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -3795,6 +3858,7 @@ class _TopBar extends StatelessWidget {
       l10n,
       viewModel,
       workspaces,
+      localWorkspaceAvailability,
     );
     final openCreateIssue = viewModel.isSaving
         ? null
@@ -4249,6 +4313,7 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
   WorkspaceProfilesState workspaces,
+  Map<String, bool> localWorkspaceAvailability,
 ) {
   final activeWorkspace = workspaces.activeWorkspace;
   final displayName = activeWorkspace?.displayName.isNotEmpty == true
@@ -4262,6 +4327,7 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
     l10n,
     viewModel,
     activeWorkspace: activeWorkspace,
+    localWorkspaceAvailability: localWorkspaceAvailability,
   );
   return _WorkspaceDisplaySummary(
     displayName: displayName,
@@ -4277,8 +4343,13 @@ String _activeWorkspaceStateLabel(
   AppLocalizations l10n,
   TrackerViewModel viewModel, {
   WorkspaceProfile? activeWorkspace,
+  Map<String, bool> localWorkspaceAvailability = const <String, bool>{},
 }) {
   if (activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence) {
+    if (activeWorkspace != null &&
+        localWorkspaceAvailability[activeWorkspace.id] == false) {
+      return l10n.workspaceStateUnavailable;
+    }
     return l10n.workspaceStateLocalGit;
   }
   return switch (viewModel.hostedRepositoryAccessMode) {
@@ -6409,6 +6480,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       l10n,
       widget.viewModel,
       widget.workspaces,
+      widget.localWorkspaceAvailability,
     );
     final workspaceRowActionCount = widget.workspaces.profiles.length * 3;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
@@ -6952,6 +7024,7 @@ String _workspaceStateLabel(
       l10n,
       viewModel,
       activeWorkspace: workspace,
+      localWorkspaceAvailability: localWorkspaceAvailability,
     );
   }
   if (workspace.isLocal) {

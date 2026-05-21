@@ -362,6 +362,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _disposed = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
+  TrackStateRepository get repository => _repository;
   TrackerSection get section => _section;
   ThemePreference get themePreference => _themePreference;
   String get jql => _jql;
