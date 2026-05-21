@@ -522,6 +522,9 @@ class LiveWorkspaceSwitcherPage:
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
 
+    def dismiss_project_settings_surface(self, *, timeout_ms: int = 30_000) -> None:
+        self._project_settings_page.dismiss_if_open(timeout_ms=timeout_ms)
+
     def set_viewport(self, *, width: int, height: int, timeout_ms: int = 15_000) -> None:
         self._session.set_viewport_size(width=width, height=height)
         try:
