@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import threading
+import time
+from urllib.parse import urlparse
+
+from playwright.sync_api import Route
+
+from testing.tests.support.stored_workspace_profiles_runtime import (
+    StoredWorkspaceProfilesRuntime,
+)
+
+
+class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        workspace_state: dict[str, object],
+        auth_delay_seconds: float,
+        delayed_paths: tuple[str, ...] = ("/user",),
+    ) -> None:
+        super().__init__(
+            repository=repository,
+            token=token,
+            workspace_state=workspace_state,
+        )
+        self._auth_delay_seconds = float(auth_delay_seconds)
+        self._delayed_paths = delayed_paths
+        self._auth_request_started = threading.Event()
+        self._auth_request_released = threading.Event()
+        self._delay_lock = threading.Lock()
+        self._pending_delayed_requests = 0
+        self.auth_probe_started_at_monotonic: float | None = None
+        self.auth_probe_released_at_monotonic: float | None = None
+        self.github_request_urls: list[str] = []
+        self.delayed_request_urls: list[str] = []
+
+    def wait_for_auth_probe_start(self, *, timeout_seconds: float) -> bool:
+        return self._auth_request_started.wait(timeout_seconds)
+
+    def wait_for_auth_probe_release(self, *, timeout_seconds: float) -> bool:
+        return self._auth_request_released.wait(timeout_seconds)
+
+    @property
+    def auth_probe_pending(self) -> bool:
+        with self._delay_lock:
+            return self._pending_delayed_requests > 0
+
+    def _handle_github_api_route(self, route: Route) -> None:
+        request_url = route.request.url
+        self.github_request_urls.append(request_url)
+        if self._matches_delayed_path(request_url):
+            self.delayed_request_urls.append(request_url)
+            with self._delay_lock:
+                self._pending_delayed_requests += 1
+                if self.auth_probe_started_at_monotonic is None:
+                    self.auth_probe_started_at_monotonic = time.monotonic()
+                self._auth_request_started.set()
+            try:
+                time.sleep(self._auth_delay_seconds)
+            finally:
+                with self._delay_lock:
+                    self._pending_delayed_requests -= 1
+                    if self._pending_delayed_requests == 0:
+                        self.auth_probe_released_at_monotonic = time.monotonic()
+                        self._auth_request_released.set()
+        self._continue_github_api_route(route)
+
+    def _matches_delayed_path(self, request_url: str) -> bool:
+        path = urlparse(request_url).path.rstrip("/") or "/"
+        return any(
+            path == delayed_path or path.endswith(delayed_path)
+            for delayed_path in self._delayed_paths
+        )
