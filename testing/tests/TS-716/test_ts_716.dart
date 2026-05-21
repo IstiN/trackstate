@@ -27,6 +27,7 @@ void main() {
                 Ts716WorkspaceSyncAccessibilityRepository.hostedTokenValue,
           },
         );
+        await robot.resize(const Size(1440, 900));
 
         await _pumpUntil(
           tester,
