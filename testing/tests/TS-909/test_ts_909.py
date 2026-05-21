@@ -260,6 +260,12 @@ def _evaluate_pull_request_compose_surface(
                     "url": observation.url,
                     "matched_text": observation.matched_text,
                     "body_text_excerpt": _snippet(observation.body_text),
+                    "description_selector": observation.description_selector,
+                    "description_value_excerpt": (
+                        _snippet(observation.description_value)
+                        if isinstance(observation.description_value, str)
+                        else None
+                    ),
                 }
             )
             if observation.matched_text == "Open a pull request":
@@ -277,6 +283,8 @@ def _evaluate_pull_request_compose_surface(
                 "matched_text": last_observation.matched_text,
                 "body_text": last_observation.body_text,
                 "screenshot_path": last_observation.screenshot_path,
+                "description_value": last_observation.description_value,
+                "description_selector": last_observation.description_selector,
             }
             result["screenshot"] = last_observation.screenshot_path
         _record_step(
@@ -301,6 +309,8 @@ def _evaluate_pull_request_compose_surface(
         "matched_text": successful_observation.matched_text,
         "body_text": successful_observation.body_text,
         "screenshot_path": successful_observation.screenshot_path,
+        "description_value": successful_observation.description_value,
+        "description_selector": successful_observation.description_selector,
     }
     result["compare_url"] = successful_observation.url
     result["screenshot"] = successful_observation.screenshot_path
@@ -315,7 +325,9 @@ def _evaluate_pull_request_compose_surface(
             f"Repository: {verification.target_repository}\n"
             f"Base branch: {default_branch}\n"
             f"Head branch: {successful_head_branch}\n"
-            f"Compose URL: {successful_observation.url}"
+            f"Compose URL: {successful_observation.url}\n"
+            f"Description field selector: "
+            f"{successful_observation.description_selector or '<not exposed>'}"
         ),
     )
     _record_human_verification(
@@ -328,6 +340,10 @@ def _evaluate_pull_request_compose_surface(
             f"Visible page URL: {successful_observation.url}\n"
             f"Matched visible text: {successful_observation.matched_text}\n"
             f"Visible body text excerpt: {_snippet(successful_observation.body_text)}\n"
+            f"Description field selector: "
+            f"{successful_observation.description_selector or '<not exposed>'}\n"
+            f"Description value excerpt: "
+            f"{_snippet(successful_observation.description_value) if isinstance(successful_observation.description_value, str) else '<not exposed>'}\n"
             f"Screenshot: {successful_observation.screenshot_path or '<not captured>'}"
         ),
     )
@@ -339,13 +355,14 @@ def _evaluate_template_body(
     verification: PullRequestTemplateChecklistVerificationResult,
     config: PullRequestTemplateChecklistConfig,
 ) -> None:
-    body_source_name, body_source_path, body_source_text = _resolved_template_body_source(
+    body_source_name, body_source_path, body_source_field, body_source_text = _resolved_template_body_source(
         result=result,
-        verification=verification,
     )
     result["selected_template_source"] = body_source_name
     if body_source_path is not None:
         result["selected_template_path"] = body_source_path
+    if body_source_field is not None:
+        result["selected_template_field"] = body_source_field
     if body_source_text is not None:
         result["selected_template_text"] = body_source_text
 
@@ -356,10 +373,11 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "GitHub did not expose any recognized PR template body for the live "
-                "compose flow. The compare surface opened, but the repository's "
-                "`pullRequestTemplates` GraphQL field was empty, so the automation could "
-                "not verify an accessibility checklist in the generated PR description.\n"
+                "The live `Open a pull request` surface did not expose a readable PR "
+                "description field value, so the automation could not verify that GitHub "
+                "auto-populated an accessibility checklist in the generated PR body.\n"
+                f"Description field selector: {body_source_field or '<not exposed>'}\n"
+                f"Compose URL: {result.get('compare_url', '<unavailable>')}\n"
                 f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}\n"
                 f"Candidate file observations: {json.dumps(result['candidate_template_paths'], indent=2)}"
             ),
@@ -370,8 +388,9 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact DOM-order checklist item could not be present because GitHub "
-                "did not expose any recognized PR template body for the compose flow.\n"
+                "The exact DOM-order checklist item could not be present because the live "
+                "compose surface did not expose a readable PR description field value.\n"
+                f"Description field selector: {body_source_field or '<not exposed>'}\n"
                 f"Required item: {config.required_checklist_item}"
             ),
         )
@@ -388,10 +407,11 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "The PR description body source resolved by GitHub did not include an "
-                "accessibility checklist marker.\n"
+                "The actual PR description value from the live compose page did not "
+                "include an accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
+                f"Compose URL: {body_source_path}\n"
+                f"Description field selector: {body_source_field}\n"
                 f"Expected markers: {list(config.accessibility_section_markers)}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -404,10 +424,11 @@ def _evaluate_template_body(
             status="passed",
             action=TICKET_STEPS[1],
             observed=(
-                "The PR description body source resolved by GitHub includes an "
+                "The actual PR description value from the live compose page includes an "
                 "accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
+                f"Compose URL: {body_source_path}\n"
+                f"Description field selector: {body_source_field}\n"
                 f"Matched marker: {matched_marker}"
             ),
         )
@@ -419,10 +440,12 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The PR description body source resolved by GitHub did not contain the "
+                "The actual PR description value from the live compose page did not "
+                "contain the "
                 "exact required checklist item.\n"
                 f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
+                f"Compose URL: {body_source_path}\n"
+                f"Description field selector: {body_source_field}\n"
                 f"Required item: {config.required_checklist_item}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -448,10 +471,11 @@ def _evaluate_template_body(
         status="passed",
         action=TICKET_STEPS[2],
         observed=(
-            "The PR description body source resolved by GitHub contains the exact "
+            "The actual PR description value from the live compose page contains the exact "
             "required checklist item.\n"
             f"Body source: {body_source_name}\n"
-            f"Template path: {body_source_path}\n"
+            f"Compose URL: {body_source_path}\n"
+            f"Description field selector: {body_source_field}\n"
             f"Required item: {config.required_checklist_item}"
         ),
     )
@@ -460,29 +484,34 @@ def _evaluate_template_body(
 def _resolved_template_body_source(
     *,
     result: dict[str, object],
-    verification: PullRequestTemplateChecklistVerificationResult,
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None]:
     compare_surface = result.get("compare_surface", {})
     if isinstance(compare_surface, dict):
-        compare_body_text = compare_surface.get("body_text")
-        if isinstance(compare_body_text, str) and compare_body_text.strip():
-            required_item = verification.required_checklist_item
-            if required_item in compare_body_text:
-                return (
-                    "live GitHub compare page",
-                    compare_surface.get("url") if isinstance(compare_surface.get("url"), str) else None,
-                    compare_body_text,
-                )
+        description_value = compare_surface.get("description_value")
+        if isinstance(description_value, str):
+            return (
+                "live GitHub PR description field",
+                compare_surface.get("url")
+                if isinstance(compare_surface.get("url"), str)
+                else None,
+                compare_surface.get("description_selector")
+                if isinstance(compare_surface.get("description_selector"), str)
+                else None,
+                description_value,
+            )
 
-    selected_template = verification.selected_recognized_template
-    if selected_template is not None:
         return (
-            "GitHub GraphQL pullRequestTemplates",
-            selected_template.filename,
-            selected_template.body,
+            None,
+            compare_surface.get("url")
+            if isinstance(compare_surface.get("url"), str)
+            else None,
+            compare_surface.get("description_selector")
+            if isinstance(compare_surface.get("description_selector"), str)
+            else None,
+            None,
         )
 
-    return None, None, None
+    return None, None, None, None
 
 
 def _branch_names(payload: object | None) -> list[str]:
@@ -618,15 +647,16 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Queried the live GitHub repository metadata, community profile, "
             "default-branch tree, branch list, open pull requests, conventional "
-            f"template paths, and GitHub `pullRequestTemplates` for {{{{{result['repository']}}}}}."
+            f"template paths, and GitHub `pullRequestTemplates` diagnostics for {{{{{result['repository']}}}}}."
         ),
         (
             "* Opened a live GitHub compare page that reached {{Open a pull request}} "
-            "for a branch without an open PR."
+            "for a branch without an open PR and attempted to read the actual PR "
+            "description field value."
         ),
         (
-            "* Verified the accessibility checklist item against the PR body source "
-            "recognized by GitHub for that compose flow."
+            "* Verified the accessibility checklist item against the actual PR "
+            "description value exposed by the compose page."
         ),
         "",
         "*Observed result*",
@@ -666,10 +696,10 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         (
             f"- Queried the live GitHub repository metadata, community profile, "
             f"default-branch tree, branch list, open pull requests, conventional "
-            f"template paths, and GitHub `pullRequestTemplates` for `{result['repository']}`."
+            f"template paths, and GitHub `pullRequestTemplates` diagnostics for `{result['repository']}`."
         ),
-        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR.",
-        "- Verified the accessibility checklist item against the PR body source recognized by GitHub for that compose flow.",
+        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR and attempted to read the actual PR description field value.",
+        "- Verified the accessibility checklist item against the actual PR description value exposed by the compose page.",
         "",
         "### Observed result",
         "- Matched the expected result." if passed else "- Did not match the expected result.",
@@ -710,7 +740,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             if passed
             else (
                 "- Result: GitHub did not expose the required PR-template checklist "
-                "item in the PR body source used for the live compose flow."
+                "item in the actual PR description field used for the live compose flow."
             )
         ),
         f"- Compose URL: `{result.get('compare_url', '<unavailable>')}`",
@@ -738,8 +768,8 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Summary",
         (
-            "The live GitHub PR compose flow for `IstiN/trackstate` does not expose a "
-            "recognized PR template body that contains the required manual "
+            "The live GitHub PR compose flow for `IstiN/trackstate` does not expose an "
+            "actual PR description field value that contains the required manual "
             "accessibility DOM-order checklist item."
         ),
         "",
@@ -763,15 +793,16 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual result",
         (
-            "GitHub either exposed no recognized pull-request template body through "
-            "`repository.pullRequestTemplates` or the recognized body omitted the "
+            "GitHub either did not expose a readable PR description field value on the "
+            "live compose surface or the extracted description value omitted the "
             "required checklist marker/item, so the live compose flow could not prove "
             "the required accessibility verification step."
         ),
         "",
         "## Missing / broken production capability",
         (
-            "The repository's live GitHub PR creation flow does not expose a PR body "
+            "The repository's live GitHub PR creation flow does not expose a PR "
+            "description field value "
             "source containing the required manual DOM-order accessibility checklist "
             "item for reviewers."
         ),
@@ -796,6 +827,14 @@ def _bug_description(result: dict[str, object]) -> str:
         (
             f"- Compose matched text: `{compare_surface.get('matched_text', '<unavailable>')}`"
         ),
+        (
+            f"- Compose description selector: "
+            f"`{compare_surface.get('description_selector', '<not exposed>')}`"
+        ),
+        "- Compose description excerpt:",
+        "```text",
+        _snippet(str(compare_surface.get("description_value", "<not exposed>")), limit=1_000),
+        "```",
         f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
         "- Recognized pull-request templates:",
         "```json",

@@ -7,7 +7,7 @@ dependencies:
   - Playwright Chromium runtime for browser verification of the live GitHub file page
 notes:
   - Verifies the live repository state on GitHub rather than local checkout files.
-  - Treats the PR template as the implementation source for the auto-populated GitHub PR description body.
+  - Treats the actual GitHub compose-page PR description field value as the source of truth; repository template probes are diagnostics only.
 runtime_inputs:
   repository: IstiN/trackstate
   expected_default_branch: main

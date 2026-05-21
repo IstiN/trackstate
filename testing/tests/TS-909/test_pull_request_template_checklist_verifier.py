@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 
+from testing.components.pages.github_pull_request_compose_page import (
+    GitHubPullRequestComposePage,
+)
 from testing.components.services.pull_request_template_checklist_verifier import (
     PullRequestTemplateChecklistVerifier,
 )
@@ -10,6 +13,7 @@ from testing.core.config.pull_request_template_checklist_config import (
     PullRequestTemplateChecklistConfig,
 )
 from testing.core.models.cli_command_result import CliCommandResult
+from testing.core.interfaces.web_app_session import WaitMatch, WebAppTimeoutError
 
 
 class _FakeProbe:
@@ -100,6 +104,56 @@ class _FakeProbe:
         )
 
 
+class _FakeComposeSession:
+    def __init__(
+        self,
+        *,
+        evaluate_payload: object | None = None,
+        read_values: dict[str, str] | None = None,
+        body_text: str = "Open a pull request",
+    ) -> None:
+        self._evaluate_payload = evaluate_payload
+        self._read_values = read_values or {}
+        self._body_text = body_text
+
+    def goto(self, url: str, *, wait_until: str = "domcontentloaded", timeout_ms: int = 120_000) -> None:
+        del url, wait_until, timeout_ms
+
+    def wait_for_any_text(
+        self,
+        texts,
+        *,
+        timeout_ms: int = 90_000,
+    ) -> WaitMatch:
+        del timeout_ms
+        return WaitMatch(matched_text=str(texts[0]), body_text=self._body_text)
+
+    def evaluate(self, expression: str, *, arg: object | None = None) -> object:
+        del expression, arg
+        if isinstance(self._evaluate_payload, Exception):
+            raise self._evaluate_payload
+        return self._evaluate_payload
+
+    def read_value(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del has_text, index, timeout_ms
+        if selector not in self._read_values:
+            raise WebAppTimeoutError(f'missing selector "{selector}"')
+        return self._read_values[selector]
+
+    def body_text(self) -> str:
+        return self._body_text
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        del path, full_page
+
+
 class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
     def setUp(self) -> None:
         self.verifier = PullRequestTemplateChecklistVerifier(_FakeProbe())
@@ -137,6 +191,59 @@ class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
             result.selected_recognized_template.filename,
             ".github/PULL_REQUEST_TEMPLATE/ui-layout.md",
         )
+
+    def test_compose_page_reads_description_value_from_dom_evaluation(self) -> None:
+        expected_value = (
+            "## Accessibility checklist\n"
+            "- Manual verification: DOM order matches visual hierarchy for "
+            "keyboard-accessible elements."
+        )
+        page = GitHubPullRequestComposePage(
+            _FakeComposeSession(
+                evaluate_payload={
+                    "selector": 'textarea[name="pull_request[body]"]',
+                    "value": expected_value,
+                }
+            )
+        )
+
+        observation = page.open_compose_surface(
+            repository="octocat/example",
+            base_branch="main",
+            head_branch="feature-branch",
+            expected_texts=("Open a pull request",),
+        )
+
+        self.assertEqual(
+            observation.description_selector,
+            'textarea[name="pull_request[body]"]',
+        )
+        self.assertEqual(observation.description_value, expected_value)
+
+    def test_compose_page_falls_back_to_read_value_when_dom_evaluation_is_unavailable(
+        self,
+    ) -> None:
+        expected_value = (
+            "## Accessibility checklist\n"
+            "- Manual verification: DOM order matches visual hierarchy for "
+            "keyboard-accessible elements."
+        )
+        page = GitHubPullRequestComposePage(
+            _FakeComposeSession(
+                evaluate_payload=NotImplementedError(),
+                read_values={'textarea[name*="body"]': expected_value},
+            )
+        )
+
+        observation = page.open_compose_surface(
+            repository="octocat/example",
+            base_branch="main",
+            head_branch="feature-branch",
+            expected_texts=("Open a pull request",),
+        )
+
+        self.assertEqual(observation.description_selector, 'textarea[name*="body"]')
+        self.assertEqual(observation.description_value, expected_value)
 
 
 if __name__ == "__main__":
