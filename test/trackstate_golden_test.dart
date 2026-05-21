@@ -145,6 +145,26 @@ void main() {
     );
   });
 
+  testWidgets('desktop settings admin dark golden', (tester) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const TrackStateApp(repository: DemoTrackStateRepository()),
+    );
+    await tester.pumpAndSettle();
+    await _enableDarkTheme(tester);
+    await tester.tap(find.text('Settings').first);
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(TrackStateApp),
+      matchesGoldenFile('goldens/settings_admin_dark_desktop.png'),
+    );
+  });
+
   testWidgets('create issue desktop golden', (tester) async {
     final semantics = tester.ensureSemantics();
     CreateIssueAccessibilityScreenHandle? screen;
@@ -166,6 +186,28 @@ void main() {
     }
   });
 
+  testWidgets('create issue dark desktop golden', (tester) async {
+    final semantics = tester.ensureSemantics();
+    CreateIssueAccessibilityScreenHandle? screen;
+
+    try {
+      screen = await launchCreateIssueAccessibilityFixture(
+        tester,
+        initialViewportWidth: 1440,
+        initialViewportHeight: 960,
+      );
+      await _enableDarkTheme(tester);
+
+      await expectLater(
+        screen.goldenTarget,
+        matchesGoldenFile('goldens/create_issue_dark_desktop.png'),
+      );
+    } finally {
+      await screen?.dispose();
+      semantics.dispose();
+    }
+  });
+
   testWidgets('create issue compact golden', (tester) async {
     final semantics = tester.ensureSemantics();
     CreateIssueAccessibilityScreenHandle? screen;
@@ -180,6 +222,28 @@ void main() {
       await expectLater(
         screen.goldenTarget,
         matchesGoldenFile('goldens/create_issue_compact.png'),
+      );
+    } finally {
+      await screen?.dispose();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('create issue dark compact golden', (tester) async {
+    final semantics = tester.ensureSemantics();
+    CreateIssueAccessibilityScreenHandle? screen;
+
+    try {
+      screen = await launchCreateIssueAccessibilityFixture(
+        tester,
+        initialViewportWidth: 390,
+        initialViewportHeight: 844,
+      );
+      await _enableDarkTheme(tester);
+
+      await expectLater(
+        screen.goldenTarget,
+        matchesGoldenFile('goldens/create_issue_dark_compact.png'),
       );
     } finally {
       await screen?.dispose();
@@ -218,6 +282,48 @@ void main() {
       await expectLater(
         app.goldenTarget,
         matchesGoldenFile('goldens/edit_issue_desktop.png'),
+      );
+    } finally {
+      await tester.runAsync(() async {
+        await fixture?.dispose();
+      });
+      app.resetView();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('edit issue dark desktop golden', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final app = defaultTestingDependencies.createTrackStateAppScreen(tester);
+    LocalTrackStateFixture? fixture;
+
+    try {
+      fixture = await tester.runAsync(LocalTrackStateFixture.create);
+      if (fixture == null) {
+        throw StateError('Local Git fixture creation did not complete.');
+      }
+
+      await app.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+      app.expectLocalRuntimeChrome();
+      await _enableDarkTheme(tester);
+      await app.openSection('JQL Search');
+      await app.expectIssueSearchResultVisible(
+        LocalTrackStateFixture.issueKey,
+        LocalTrackStateFixture.issueSummary,
+      );
+      await app.openIssue(
+        LocalTrackStateFixture.issueKey,
+        LocalTrackStateFixture.issueSummary,
+      );
+      await app.tapIssueDetailAction(
+        LocalTrackStateFixture.issueKey,
+        label: 'Edit',
+      );
+      await tester.pumpAndSettle();
+
+      await expectLater(
+        app.goldenTarget,
+        matchesGoldenFile('goldens/edit_issue_dark_desktop.png'),
       );
     } finally {
       await tester.runAsync(() async {
@@ -272,6 +378,13 @@ class _TolerantGoldenFileComparator extends LocalFileComparator {
     result.dispose();
     throw FlutterError(error);
   }
+}
+
+Future<void> _enableDarkTheme(WidgetTester tester) async {
+  final control = find.bySemanticsLabel('Dark theme');
+  expect(control, findsWidgets);
+  await tester.tap(control.last, warnIfMissed: false);
+  await tester.pumpAndSettle();
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {
