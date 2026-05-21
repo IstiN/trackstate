@@ -1,53 +1,54 @@
 import 'dart:io' show File;
 import 'dart:typed_data';
-import 'dart:ui' show Rect, Size;
+import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
-import '../../components/screens/issue_edit_accessibility_robot.dart';
 import '../../core/interfaces/issue_edit_accessibility_screen.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import '../../fixtures/issue_edit_accessibility_screen_fixture.dart';
 
-const _approvedDesktopGoldenPath =
-    '../../../test/goldens/edit_issue_desktop.png';
+const _approvedDesktopGoldenPath = 'goldens/edit_issue_desktop.png';
 const _approvedDesktopGoldenRepositoryPath =
-    'test/goldens/edit_issue_desktop.png';
+    'testing/tests/TS-885/goldens/edit_issue_desktop.png';
 const _requiredDesktopViewport = Size(1440, 900);
 
 void main() {
   testWidgets(
     'TS-885 Edit issue desktop surface matches the approved golden baseline',
     (tester) async {
-      final goldenSize = await tester.runAsync(
-        () => _readPngSize(_approvedDesktopGoldenRepositoryPath),
-      );
-      if (goldenSize == null) {
-        throw StateError(
-          'Reading $_approvedDesktopGoldenRepositoryPath did not complete.',
+      if (!autoUpdateGoldenFiles) {
+        final goldenSize = await tester.runAsync(
+          () => _readPngSize(_approvedDesktopGoldenRepositoryPath),
+        );
+        if (goldenSize == null) {
+          throw StateError(
+            'Reading $_approvedDesktopGoldenRepositoryPath did not complete.',
+          );
+        }
+        expect(
+          goldenSize,
+          _requiredDesktopViewport,
+          reason:
+              'TS-885 requires an approved 1440x900 desktop baseline, but '
+              '$_approvedDesktopGoldenRepositoryPath is currently '
+              '${goldenSize.width.toStringAsFixed(0)}x'
+              '${goldenSize.height.toStringAsFixed(0)}. Update the checked-in '
+              'golden asset or point this test at the approved 1440x900 '
+              'baseline before treating the pixel comparison as a product '
+              'regression signal.',
         );
       }
-      expect(
-        goldenSize,
-        _requiredDesktopViewport,
-        reason:
-            'TS-885 requires an approved 1440x900 desktop baseline, but '
-            '$_approvedDesktopGoldenRepositoryPath is currently '
-            '${goldenSize.width.toStringAsFixed(0)}x'
-            '${goldenSize.height.toStringAsFixed(0)}. Update the checked-in '
-            'golden asset or point this test at the approved 1440x900 '
-            'baseline before treating the pixel comparison as a product '
-            'regression signal.',
-      );
 
       final semantics = tester.ensureSemantics();
-      final robot = IssueEditAccessibilityRobot(tester);
       IssueEditAccessibilityScreenHandle? screen;
 
       try {
         screen = await launchIssueEditAccessibilityFixture(tester);
-        await _resizeViewport(tester, _requiredDesktopViewport);
+        await screen.resizeToViewport(
+          width: _requiredDesktopViewport.width,
+          height: _requiredDesktopViewport.height,
+        );
 
         for (final text in const [
           'Edit issue',
@@ -90,7 +91,7 @@ void main() {
               '"${LocalTrackStateFixture.originalDescription}".',
         );
 
-        final layout = _observeLayout(tester, robot);
+        final layout = screen.observeLayout();
         expect(
           layout.viewportSize,
           _requiredDesktopViewport,
@@ -123,7 +124,7 @@ void main() {
         );
 
         await expectLater(
-          find.byType(TrackStateApp),
+          screen.goldenTarget,
           matchesGoldenFile(_approvedDesktopGoldenPath),
           reason:
               'Expected Result failed: the rendered Edit issue desktop surface no '
@@ -139,55 +140,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-_EditIssueLayoutObservation _observeLayout(
-  WidgetTester tester,
-  IssueEditAccessibilityRobot robot,
-) {
-  robot.expectEditIssueSurfaceVisible();
-  final rect = tester.getRect(robot.editIssueSurface.first);
-  final viewportSize = Size(
-    tester.view.physicalSize.width / tester.view.devicePixelRatio,
-    tester.view.physicalSize.height / tester.view.devicePixelRatio,
-  );
-  return _EditIssueLayoutObservation(
-    viewportSize: viewportSize,
-    surfaceRect: rect,
-  );
-}
-
-class _EditIssueLayoutObservation {
-  const _EditIssueLayoutObservation({
-    required this.viewportSize,
-    required this.surfaceRect,
-  });
-
-  final Size viewportSize;
-  final Rect surfaceRect;
-
-  double get leftInset => surfaceRect.left;
-  double get rightInset => viewportSize.width - surfaceRect.right;
-  double get widthFraction => surfaceRect.width / viewportSize.width;
-
-  String describe() {
-    return 'viewport=${viewportSize.width.toStringAsFixed(0)}x'
-        '${viewportSize.height.toStringAsFixed(0)}, '
-        'rect=(${surfaceRect.left.toStringAsFixed(1)}, '
-        '${surfaceRect.top.toStringAsFixed(1)}) '
-        '${surfaceRect.width.toStringAsFixed(1)}x'
-        '${surfaceRect.height.toStringAsFixed(1)}, '
-        'insets=left ${leftInset.toStringAsFixed(1)}, '
-        'right ${rightInset.toStringAsFixed(1)}, '
-        'width=${(widthFraction * 100).toStringAsFixed(1)}%';
-  }
-}
-
-Future<void> _resizeViewport(WidgetTester tester, Size size) async {
-  tester.view.physicalSize = size;
-  tester.view.devicePixelRatio = 1;
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 250));
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
@@ -209,7 +161,14 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
 }
 
 Future<Size> _readPngSize(String path) async {
-  final bytes = await File(path).readAsBytes();
+  final file = File(path);
+  if (!await file.exists()) {
+    throw StateError(
+      'TS-885 requires an approved 1440x900 desktop baseline at "$path", '
+      'but no file exists there yet.',
+    );
+  }
+  final bytes = await file.readAsBytes();
   if (bytes.length < 24) {
     throw StateError(
       'PNG file "$path" is too short to contain an IHDR header.',
