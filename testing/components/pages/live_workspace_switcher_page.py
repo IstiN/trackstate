@@ -835,42 +835,22 @@ class LiveWorkspaceSwitcherPage:
         return self.observe_background_scroll()
 
     def navigate_to_section(self, label: str) -> None:
-        bounds = self._session.evaluate(
-            """
-            (label) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const candidate = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((element) => isVisible(element) && normalize(element.innerText) === label);
-              if (!candidate) {
-                return null;
-              }
-              const rect = candidate.getBoundingClientRect();
-              return {
-                x: rect.left + (rect.width / 2),
-                y: rect.top + (rect.height / 2),
-              };
-            }
-            """,
-            arg=label,
-        )
-        if not isinstance(bounds, dict):
+        if self._session.count(self._button_selector, has_text=label) == 0:
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(float(bounds["x"]), float(bounds["y"]))
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=label,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The hosted tracker did not expose a clickable "{label}" navigation entry.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
         try:
             self._session.wait_for_function(
                 """
@@ -935,7 +915,6 @@ class LiveWorkspaceSwitcherPage:
                 f"role={active.role!r}, tag={active.tag_name!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-
     def focus_workspace_trigger(
         self,
         *,
