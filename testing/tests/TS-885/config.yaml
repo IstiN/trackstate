@@ -1,0 +1,9 @@
+test_id: TS-885
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the shared Issue Edit accessibility fixture to open a seeded local issue and launch the Edit issue side-sheet through the same user-visible flow covered by the ticket.
+  - Verifies user-visible Edit issue labels, the seeded Summary and Description field values, and the right-docked desktop side-sheet layout before comparing against the approved edit_issue_desktop golden baseline.
+  - Uses the existing approved desktop golden asset at test/goldens/edit_issue_desktop.png for the 1440px-wide Edit issue layout.
