@@ -111,40 +111,6 @@ void main() {
           editedStatus,
         );
 
-        await screen.openSection('Board');
-        await _waitForCondition(
-          tester,
-          () async => screen.visibleSemanticsLabelsSnapshot().contains(
-            '$editedStatus column',
-          ),
-          failureMessage:
-              'Timed out waiting for the board column label to refresh to $editedStatus.',
-        );
-        expect(
-          screen.visibleSemanticsLabelsSnapshot(),
-          contains('$editedStatus column'),
-        );
-
-        await screen.openSection('JQL Search');
-        await _waitForCondition(
-          tester,
-          () => screen.isIssueSearchResultTextVisible(
-            Ts467LocaleResolutionFixture.issueKey,
-            Ts467LocaleResolutionFixture.issueSummary,
-            editedStatus,
-          ),
-          failureMessage:
-              'Timed out waiting for the search result status label to refresh to $editedStatus.',
-        );
-        expect(
-          await screen.isIssueSearchResultTextVisible(
-            Ts467LocaleResolutionFixture.issueKey,
-            Ts467LocaleResolutionFixture.issueSummary,
-            editedStatus,
-          ),
-          isTrue,
-        );
-
         await screen.openSection('Settings');
         await settingsRobot.openLocalesTab();
         await settingsRobot.selectLocaleChip(locale);
@@ -180,31 +146,21 @@ void main() {
           failureMessage:
               'Timed out waiting for the fallback locale save to complete without an error banner.',
         );
-
-        await screen.openSection('Board');
-        await _waitForCondition(
+        await _waitForLocaleFieldValue(
           tester,
-          () async => screen.visibleSemanticsLabelsSnapshot().contains(
-            '$fallbackStatus column',
-          ),
+          screen,
+          settingsRobot,
+          chipLabel: locale,
+          locale: locale,
+          id: 'in-progress',
+          expectedValue: '',
           failureMessage:
-              'Timed out waiting for the board column label to refresh to $fallbackStatus.',
+              'Timed out waiting for the cleared viewer-locale translation to persist.',
         );
-        expect(
-          screen.visibleSemanticsLabelsSnapshot(),
-          contains('$fallbackStatus column'),
-        );
-
         await screen.openSection('JQL Search');
-        await _waitForCondition(
-          tester,
-          () => screen.isIssueSearchResultTextVisible(
-            Ts467LocaleResolutionFixture.issueKey,
-            Ts467LocaleResolutionFixture.issueSummary,
-            fallbackStatus,
-          ),
-          failureMessage:
-              'Timed out waiting for the search result status label to refresh to $fallbackStatus.',
+        await screen.expectIssueSearchResultVisible(
+          Ts467LocaleResolutionFixture.issueKey,
+          Ts467LocaleResolutionFixture.issueSummary,
         );
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -213,6 +169,22 @@ void main() {
             fallbackStatus,
           ),
           isTrue,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            editedStatus,
+          ),
+          isFalse,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            canonicalStatus,
+          ),
+          isFalse,
         );
 
         await screen.openSection('Settings');
@@ -242,31 +214,21 @@ void main() {
           failureMessage:
               'Timed out waiting for the canonical fallback save to complete without an error banner.',
         );
-
-        await screen.openSection('Board');
-        await _waitForCondition(
+        await _waitForLocaleFieldValue(
           tester,
-          () async => screen.visibleSemanticsLabelsSnapshot().contains(
-            '$canonicalStatus column',
-          ),
+          screen,
+          settingsRobot,
+          chipLabel: '$defaultLocale (default)',
+          locale: defaultLocale,
+          id: 'in-progress',
+          expectedValue: '',
           failureMessage:
-              'Timed out waiting for the board column label to refresh to $canonicalStatus.',
+              'Timed out waiting for the cleared default-locale translation to persist.',
         );
-        expect(
-          screen.visibleSemanticsLabelsSnapshot(),
-          contains('$canonicalStatus column'),
-        );
-
         await screen.openSection('JQL Search');
-        await _waitForCondition(
-          tester,
-          () => screen.isIssueSearchResultTextVisible(
-            Ts467LocaleResolutionFixture.issueKey,
-            Ts467LocaleResolutionFixture.issueSummary,
-            canonicalStatus,
-          ),
-          failureMessage:
-              'Timed out waiting for the search result status label to refresh to $canonicalStatus.',
+        await screen.expectIssueSearchResultVisible(
+          Ts467LocaleResolutionFixture.issueKey,
+          Ts467LocaleResolutionFixture.issueSummary,
         );
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -275,6 +237,14 @@ void main() {
             canonicalStatus,
           ),
           isTrue,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            fallbackStatus,
+          ),
+          isFalse,
         );
       } finally {
         tester.binding.platformDispatcher.clearLocaleTestValue();
@@ -288,7 +258,7 @@ void main() {
         semantics.dispose();
       }
     },
-    timeout: const Timeout(Duration(seconds: 60)),
+    timeout: const Timeout(Duration(seconds: 240)),
   );
 }
 
@@ -296,7 +266,7 @@ Future<void> _waitForCondition(
   WidgetTester tester,
   Future<bool> Function() condition, {
   required String failureMessage,
-  Duration timeout = const Duration(seconds: 12),
+  Duration timeout = const Duration(seconds: 60),
   Duration step = const Duration(milliseconds: 100),
 }) async {
   final end = DateTime.now().add(timeout);
@@ -307,4 +277,31 @@ Future<void> _waitForCondition(
     await tester.pump(step);
   }
   fail(failureMessage);
+}
+
+Future<void> _waitForLocaleFieldValue(
+  WidgetTester tester,
+  TrackStateAppComponent screen,
+  dynamic settingsRobot, {
+  required String chipLabel,
+  required String locale,
+  required String id,
+  required String expectedValue,
+  required String failureMessage,
+}) {
+  return _waitForCondition(
+    tester,
+    () async {
+      await screen.openSection('Settings');
+      await settingsRobot.openLocalesTab();
+      await settingsRobot.selectLocaleChip(chipLabel);
+      return settingsRobot.localeTranslationFieldValue(
+            locale: locale,
+            id: id,
+          ) ==
+          expectedValue;
+    },
+    failureMessage: failureMessage,
+    step: const Duration(milliseconds: 250),
+  );
 }

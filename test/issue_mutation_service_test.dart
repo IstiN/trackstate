@@ -743,7 +743,11 @@ Future<void> _deleteDirectoryIfPresent(Directory directory) async {
   if (!directory.existsSync()) {
     return;
   }
-  await directory.delete(recursive: true);
+  try {
+    await directory.delete(recursive: true);
+  } on PathNotFoundException {
+    // Another cleanup path may have already removed the temp fixture directory.
+  }
 }
 
 Map<String, String> _mutationFixtureFiles() {
