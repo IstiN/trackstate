@@ -1,0 +1,87 @@
+# Test Automation — Critical Anti-Patterns
+
+These patterns caused 8–13 review rework cycles. Read and avoid them.
+
+## 1. Never hard-stop on an early step
+
+```mermaid
+flowchart TD
+  Step1([Step 1 assertion]) --> Fail{Step 1\nfails?}
+  Fail -->|Yes| Record["Record failure evidence\nbut continue remaining steps\nif they are independent"]
+  Fail -->|No| Step2[Continue to Step 2]
+  Step2 --> StepN[... all remaining steps]
+  StepN --> Result{Any step\nfailed?}
+  Result -->|Yes| FailReport["Report ALL failures\nnot just the first one"]
+  Result -->|No| Pass([PASS])
+```
+
+**Rule**: If Step 1 fails but Steps 2–5 are independent, execute all of them. Report the full picture. The reviewer needs to see if it's one bug or five.
+
+**Exception**: If a step creates preconditions for the next (e.g., "open panel" before "click button inside"), hard-stop is acceptable.
+
+## 2. Viewport must match the ticket EXACTLY
+
+```mermaid
+flowchart TD
+  Read([Read ticket]) --> VP{Ticket specifies\nviewport size?}
+  VP -->|"e.g. 1440x900"| Set["page.set_viewport_size(1440, 900)\nOR testWidgets tester.view.physicalSize"]
+  VP -->|No specific size| Default["Use project default:\n1440x900 desktop / 390x844 mobile"]
+  Set --> Golden{Golden comparison?}
+  Golden -->|Yes| Check["Assert golden file dimensions\nmatch viewport BEFORE comparing"]
+  Golden -->|No| Continue([Continue])
+```
+
+**Rule**: If the golden file is 1440x960 but ticket says 1440x900, the golden is STALE. Fail fast with an actionable message, don't silently compare mismatched sizes.
+
+## 3. Assertion direction must match ticket order
+
+```mermaid
+flowchart TD
+  Ticket["Ticket: A appears BEFORE B\nin tab order"] --> Assert{Assertion?}
+  Assert -->|"assert index_A < index_B"| GOOD["✅ Correct direction"]
+  Assert -->|"assert index_B < index_A"| BAD["❌ REVERSED\nReviewer WILL reject"]
+  Assert -->|"assert index_A != index_B"| WEAK["❌ TOO WEAK\nDoesn't prove order"]
+```
+
+**Rule**: Re-read the ticket Expected Result immediately before writing the assertion. Copy the exact order relationship.
+
+## 4. Tab order: require ADJACENCY not just ordering
+
+If ticket says "A is immediately before B":
+- ❌ `assert index_a < index_b` — allows gaps (other elements between)
+- ✅ `assert index_b == index_a + 1` — proves direct adjacency
+
+## 5. Label matchers must recognize ALL live variants
+
+The production UI may render different label text across runs:
+- `"Search issues"`, `"JQL Search"`, `"Search"` — all refer to the same control
+
+```python
+# ❌ WRONG — matches only one variant
+search = page.get_by_role("button", name="Search issues")
+
+# ✅ CORRECT — matches known variants
+search = page.get_by_role("button", name=re.compile(r"Search|JQL Search|Search issues"))
+```
+
+**Rule**: Check the ticket history and prior run logs for all observed label variants before writing a matcher.
+
+## 6. Always write pass artifacts on success
+
+Every test MUST produce on success:
+- `outputs/test_automation_result.json` with `"status": "passed"`
+- `outputs/response.md` with summary
+- Remove stale `outputs/bug_description.md` if present
+
+A test that passes silently (no artifacts) will never report success to the pipeline.
+
+## 7. Accessibility assertions must be SPECIFIC
+
+```mermaid
+flowchart TD
+  A11y([Accessibility check]) --> Type{What to verify?}
+  Type -->|"Error announced\nto screen reader"| Must["MUST verify:\n1. aria-describedby OR aria-errormessage\n   links error text to field\n2. Error text content reachable\n3. Live region OR focus on error"]
+  Type -->|"aria-invalid=true\n+ focus on field"| WEAK["❌ TOO WEAK\nScreen reader says 'invalid'\nbut never reads the error message"]
+```
+
+**Rule**: `aria-invalid` alone is never sufficient for "error feedback is accessible". The actual error text must be programmatically associated.
