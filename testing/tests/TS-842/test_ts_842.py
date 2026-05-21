@@ -88,7 +88,7 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "key_stability_ms": KEY_STABILITY_MS,
-        "linked_bugs": ["TS-836"],
+        "linked_bugs": ["TS-836", "TS-851", "TS-852"],
         "preloaded_workspace_state": workspace_state,
         "user_login": user.login,
         "steps": [],
@@ -211,6 +211,11 @@ def main() -> None:
                     trial=trial,
                 )
 
+                last_row_focus = _focus_last_workspace_row_for_boundary(
+                    page=page,
+                    panel=panel,
+                    saved_workspace_rows=page.observe_saved_workspace_rows(timeout_ms=4_000),
+                )
                 if trial == 1:
                     _record_step(
                         result,
@@ -218,11 +223,13 @@ def main() -> None:
                         status="passed",
                         action=(
                             "Establish the ticket precondition by moving selection to the "
-                            "last saved workspace row."
+                            "last saved workspace row and restoring row-owned keyboard focus."
                         ),
                         observed=(
                             f"last_workspace={last_row_observation['active_workspace_name']!r}; "
-                            f"focus_owned_by_switcher={last_row_observation['focus']['focus_owned_by_switcher']}; "
+                            f"focus_owned_by_switcher={last_row_focus['focus_owned_by_switcher']}; "
+                            f"active_within_switcher={last_row_focus['active_within_switcher']}; "
+                            f"focus_label={last_row_focus['active_label']!r}; "
                             f"panel_hidden_after_arrow={last_row_observation['monitor']['ever_hidden_after_visible']}"
                         ),
                     )
@@ -230,11 +237,13 @@ def main() -> None:
                         result,
                         check=(
                             "Used keyboard navigation to highlight the last saved workspace "
-                            "row before the boundary Arrow Down press."
+                            "row, then confirmed the row itself visibly held keyboard focus "
+                            "before the boundary Arrow Down press."
                         ),
                         observed=(
                             f"last_row_active={last_row_observation['active_workspace_name']!r}; "
                             f"visible_rows={len(last_row_observation['saved_workspace_rows'])}; "
+                            f"focus_label={last_row_focus['active_label']!r}; "
                             f"text_excerpt={_snippet(str(last_row_observation['switcher']['switcher_text']))!r}"
                         ),
                     )
@@ -301,8 +310,13 @@ def main() -> None:
             ),
         )
         if page is not None:
-            page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-            result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+            try:
+                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+            except Exception as screenshot_error:
+                result["screenshot_error"] = (
+                    f"{type(screenshot_error).__name__}: {screenshot_error}"
+                )
         _write_pass_outputs(result)
         print(f"{TICKET_KEY} passed")
     except AssertionError as error:
@@ -496,6 +510,57 @@ def _assert_boundary_focus_precondition(
         )
 
 
+def _focus_last_workspace_row_for_boundary(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
+    saved_workspace_rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> dict[str, object]:
+    last_workspace = _selected_saved_workspace(saved_workspace_rows)
+    if last_workspace is None:
+        raise AssertionError(
+            "Step 3 failed: no saved workspace row remained active before the boundary "
+            "Arrow Down press.\n"
+            f"Observed rows: {json.dumps(_saved_workspace_rows_payload(saved_workspace_rows), indent=2)}",
+        )
+    if last_workspace.display_name != LAST_WORKSPACE_DISPLAY_NAME:
+        raise AssertionError(
+            "Step 3 failed: the last saved workspace row was not the active selection "
+            "before the boundary Arrow Down press.\n"
+            f"Observed active workspace: {last_workspace.display_name!r}\n"
+            f"Observed rows: {json.dumps(_saved_workspace_rows_payload(saved_workspace_rows), indent=2)}",
+        )
+
+    expected_label = _saved_workspace_row_focus_label(last_workspace)
+    page.focus_switcher_button(
+        expected_label,
+        panel=panel,
+        timeout_ms=4_000,
+    )
+    observation = page.observe_focus_ownership(panel=panel)
+    failures: list[str] = []
+    if not observation.focus_owned_by_switcher:
+        failures.append("keyboard focus was not owned by the workspace switcher")
+    if not observation.active_within_switcher:
+        failures.append("the active element was not inside the open workspace switcher")
+    if observation.active_on_trigger:
+        failures.append("keyboard focus fell back to the workspace-switcher trigger")
+    if observation.active_label != expected_label:
+        failures.append(
+            f"the focused element label was {observation.active_label!r} instead of "
+            f"{expected_label!r}",
+        )
+    if failures:
+        raise AssertionError(
+            "Step 3 failed: the last saved workspace row could not be focused as the "
+            "boundary-navigation precondition.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + f"Observed rows: {json.dumps(_saved_workspace_rows_payload(saved_workspace_rows), indent=2)}"
+        )
+    return _focus_ownership_payload(observation)
+
+
 def _assert_boundary_behavior(*, observation: dict[str, object]) -> None:
     _assert_key_kept_panel_open(key="Arrow Down", observation=observation)
     active_workspace_name = observation["active_workspace_name"]
@@ -651,7 +716,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "* Opened the desktop workspace switcher from Dashboard.",
-        "* Established the last saved workspace row as the current selection/highlight.",
+        "* Established the last saved workspace row as the current selection/highlight and restored keyboard focus to that row.",
         "* Pressed Arrow Down from the last saved workspace row across fresh live trials.",
         "* Checked that the panel stayed open, the selection stayed within the visible list boundaries, and keyboard focus did not escape to the global view.",
         "",
@@ -702,7 +767,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "- Opened the desktop workspace switcher from Dashboard.",
-        "- Established the last saved workspace row as the current selection/highlight.",
+        "- Established the last saved workspace row as the current selection/highlight and restored keyboard focus to that row.",
         "- Pressed Arrow Down from the last saved workspace row across fresh live trials.",
         "- Checked that the panel stayed open, the selection stayed within the list boundaries, and keyboard focus did not escape to the global page.",
         "",
@@ -790,17 +855,26 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Steps to reproduce",
             "1. Open the workspace switcher panel.",
-            f"2. Ensure the last saved workspace row ({LAST_WORKSPACE_DISPLAY_NAME}) is currently selected/highlighted.",
+            (
+                f"2. Ensure the last saved workspace row ({LAST_WORKSPACE_DISPLAY_NAME}) is "
+                "currently selected/highlighted and that keyboard focus is on that row."
+            ),
             "3. Press the `Arrow Down` key once.",
             "",
             "## Exact steps from the automated run with observations",
             "1. ✅ Opened the deployed TrackState app, navigated to Dashboard, and opened the desktop workspace switcher.",
             "2. ✅ Clicked the active saved-workspace row and confirmed keyboard focus was owned by the open switcher.",
-            f"3. ✅ Established the last-row precondition by moving selection to {LAST_WORKSPACE_DISPLAY_NAME!r}.",
             (
-                f"4. ❌ Boundary trial {failing_trial} failed when pressing Arrow Down from the last row.\n"
-                f"   Actual: {_failed_step_summary(result)}"
+                f"3. ✅ Established the last-row precondition by moving selection to "
+                f"{LAST_WORKSPACE_DISPLAY_NAME!r} and restoring keyboard focus to that row."
             ),
+            "4. ❌ Pressed the `Arrow Down` key once from the focused last row.",
+            (
+                f"   Actual: boundary trial {failing_trial} switched the visible active row "
+                f"to {(_extract_boundary_trial(result) or {}).get('active_workspace_name')!r} "
+                f"while keyboard focus escaped to `{((_extract_boundary_trial(result) or {}).get('focus') or {}).get('active_tag_name', '<unknown>')}` outside the open switcher."
+            ),
+            f"   Assertion: {_failed_step_summary(result)}",
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -810,9 +884,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",
             (
-                "- Actual: the workspace switcher stayed open and still showed a valid row, "
-                "but keyboard focus escaped the switcher instead of remaining on a "
-                "switcher-owned element."
+                "- Actual: the workspace switcher stayed open and the visible selection "
+                f"wrapped to {(_extract_boundary_trial(result) or {}).get('active_workspace_name')!r}, "
+                f"but keyboard focus escaped the switcher and landed on `{((_extract_boundary_trial(result) or {}).get('focus') or {}).get('active_tag_name', '<unknown>')}` "
+                "instead of remaining on a switcher-owned element."
             ),
             "",
             "## Environment details",
@@ -844,6 +919,11 @@ def _failed_step_summary(result: dict[str, object]) -> str:
                     f"{step.get('observed')}"
                 )
     return str(result.get("error", "No failure details recorded."))
+
+
+def _extract_boundary_trial(result: dict[str, object]) -> dict[str, object] | None:
+    trial = result.get("failing_trial_observation")
+    return trial if isinstance(trial, dict) else None
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -951,6 +1031,17 @@ def _workspace_state(repository: str) -> dict[str, object]:
             },
         ],
     }
+
+
+def _saved_workspace_row_focus_label(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation,
+) -> str:
+    segments = [row.display_name]
+    if row.target_type_label:
+        segments.append(row.target_type_label)
+    if row.state_label:
+        segments.append(row.state_label)
+    return ", ".join(segments) + f", {row.detail_text}"
 
 
 def _saved_workspace_rows_payload(

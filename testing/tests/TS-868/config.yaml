@@ -1,0 +1,27 @@
+test_id: TS-868
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Python 3 available on PATH
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Runs against the deployed TrackState app via the shared live-web Playwright harness.
+  - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from Dashboard.
+  - Establishes the ticket precondition by moving selection and keyboard focus to the second saved workspace row.
+  - Verifies Home moves both the active selection and DOM focus to the first saved workspace row while the switcher remains open.
+  - Verifies End moves both the active selection and DOM focus to the last saved workspace row while the switcher remains open.
+runtime_inputs:
+  workspace_count: 3
+  first_workspace_kind: hosted
+  second_workspace_kind: hosted
+  third_workspace_kind: hosted
+  initial_active_workspace: first
+  precondition_action: Arrow Down to second row
+  keyboard_actions:
+    - Home
+    - End
+  expected_result: Home moves selection and focus to the first row, End moves selection and focus to the last row, and the switcher remains open
+  run_command: mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-868/test_ts_868.py

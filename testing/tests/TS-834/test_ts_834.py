@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -215,15 +216,7 @@ def main() -> None:
                         expected_scroll_y=baseline_scroll.scroll_y,
                     )
                 except Exception as error:
-                    result["product_gap"] = (
-                        "On the scrollable Settings surface, pressing Arrow Down inside "
-                        "the desktop workspace switcher leaves the active saved "
-                        "workspace selection unchanged even when the key is driven from "
-                        "a verified in-panel button inside the switcher. "
-                        f"The active workspace stays on {result['active_workspace_before_arrow']!r} "
-                        f"instead of moving to {SECONDARY_WORKSPACE_DISPLAY_NAME!r}, "
-                        "even though the background scroll position stays fixed."
-                    )
+                    result["product_gap"] = _product_gap_summary(result)
                     _record_step(
                         result,
                         step=2,
@@ -609,7 +602,12 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-834 failed"))
+    raw_error = str(result.get("error", "TS-834 failed"))
+    first_line = raw_error.splitlines()[0] if raw_error else ""
+    has_error_prefix = bool(
+        re.match(r"^[A-Za-z_][A-Za-z0-9_]*(Error|Exception): ", first_line),
+    )
+    error = raw_error if has_error_prefix else f"AssertionError: {raw_error}"
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -803,7 +801,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Arrow Down in workspace switcher does not advance selection on the scrollable Settings surface",
+            f"# {_bug_title(result)}",
             "",
             "## Steps to reproduce",
             *[f"{index}. {step}" for index, step in enumerate(REQUEST_STEPS, start=1)],
@@ -948,25 +946,136 @@ def _failed_step_summary(result: dict[str, object]) -> str:
 
 
 def _response_failure_summary(result: dict[str, object]) -> str:
+    analysis = _arrow_down_failure_analysis(result)
+    focus_label = analysis["focus_label"]
+    focus_owned = analysis["focus_owned"]
+    active_after = analysis["active_after"]
+    scroll_before = analysis["scroll_before"]
+    scroll_after = analysis["scroll_after"]
+    selection_ok = analysis["selection_ok"]
+    scroll_ok = analysis["scroll_ok"]
+    focus_prefix = (
+        f"focus was on {focus_label!r} with switcher-owned focus={focus_owned}; "
+    )
+    if selection_ok and not scroll_ok:
+        return (
+            f"{focus_prefix}`ArrowDown` moved the active workspace to "
+            f"{active_after!r}, but background scroll jumped from "
+            f"{scroll_before!r}px to {scroll_after!r}px."
+        )
+    if not selection_ok and scroll_ok:
+        return (
+            f"{focus_prefix}`ArrowDown` kept the active workspace on "
+            f"{result.get('active_workspace_before_arrow')!r} instead of "
+            f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r}, while background scroll stayed at "
+            f"{scroll_after!r}px."
+        )
+    if not selection_ok and not scroll_ok:
+        return (
+            f"{focus_prefix}`ArrowDown` left the active workspace on "
+            f"{result.get('active_workspace_before_arrow')!r} instead of "
+            f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r}, and background scroll jumped from "
+            f"{scroll_before!r}px to {scroll_after!r}px."
+        )
     arrow_down = result.get("arrow_down_observation")
     if not isinstance(arrow_down, dict):
         return _failed_step_summary(result)
-    before_focus = arrow_down.get("before_key_focus")
-    after_scroll = arrow_down.get("after_scroll")
-    focus_label = None
-    focus_owned = None
-    if isinstance(before_focus, dict):
-        focus_label = before_focus.get("active_label")
-        focus_owned = before_focus.get("focus_owned_by_switcher")
-    scroll_after = None
-    if isinstance(after_scroll, dict):
-        scroll_after = after_scroll.get("scroll_y")
     return (
         f"focus was on {focus_label!r} with switcher-owned focus={focus_owned}; "
-        f"`ArrowDown` kept the active workspace on "
-        f"{result.get('active_workspace_before_arrow')!r} instead of "
-        f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r}, and background scroll stayed at "
-        f"{scroll_after!r}px."
+        f"`ArrowDown` preserved the expected selection and background scroll state."
+    )
+
+
+def _arrow_down_failure_analysis(result: dict[str, object]) -> dict[str, object]:
+    arrow_down = result.get("arrow_down_observation")
+    active_after = None
+    focus_label = None
+    focus_owned = None
+    scroll_before = None
+    scroll_after = None
+    if isinstance(arrow_down, dict):
+        active_after = arrow_down.get("active_workspace_name")
+        before_focus = arrow_down.get("before_key_focus")
+        before_scroll = arrow_down.get("before_scroll")
+        after_scroll = arrow_down.get("after_scroll")
+        if isinstance(before_focus, dict):
+            focus_label = before_focus.get("active_label")
+            focus_owned = before_focus.get("focus_owned_by_switcher")
+        if isinstance(before_scroll, dict):
+            scroll_before = before_scroll.get("scroll_y")
+        if isinstance(after_scroll, dict):
+            scroll_after = after_scroll.get("scroll_y")
+    selection_ok = active_after == SECONDARY_WORKSPACE_DISPLAY_NAME
+    scroll_ok = False
+    if scroll_before is not None and scroll_after is not None:
+        scroll_ok = abs(float(scroll_after) - float(scroll_before)) <= SCROLL_TOLERANCE_PX
+    return {
+        "active_after": active_after,
+        "focus_label": focus_label,
+        "focus_owned": focus_owned,
+        "scroll_before": scroll_before,
+        "scroll_after": scroll_after,
+        "selection_ok": selection_ok,
+        "scroll_ok": scroll_ok,
+    }
+
+
+def _product_gap_summary(result: dict[str, object]) -> str:
+    analysis = _arrow_down_failure_analysis(result)
+    before_active = result.get("active_workspace_before_arrow")
+    active_after = analysis["active_after"]
+    scroll_before = analysis["scroll_before"]
+    scroll_after = analysis["scroll_after"]
+    selection_ok = analysis["selection_ok"]
+    scroll_ok = analysis["scroll_ok"]
+    if selection_ok and not scroll_ok:
+        return (
+            "On the scrollable Settings surface, pressing Arrow Down inside the "
+            "desktop workspace switcher advances the active saved workspace from "
+            f"{before_active!r} to {active_after!r}, but the background page scroll "
+            f"jumps from {scroll_before!r}px to {scroll_after!r}px instead of staying fixed."
+        )
+    if not selection_ok and scroll_ok:
+        return (
+            "On the scrollable Settings surface, pressing Arrow Down inside the "
+            "desktop workspace switcher leaves the active saved workspace selection "
+            "unchanged even when the key is driven from a verified in-panel button "
+            f"inside the switcher. The active workspace stays on {before_active!r} "
+            f"instead of moving to {SECONDARY_WORKSPACE_DISPLAY_NAME!r}, while the "
+            f"background scroll position stays fixed at {scroll_after!r}px."
+        )
+    if not selection_ok and not scroll_ok:
+        return (
+            "On the scrollable Settings surface, pressing Arrow Down inside the "
+            "desktop workspace switcher does not keep the interaction scoped to the "
+            "expected in-panel behavior: the active saved workspace stays on "
+            f"{before_active!r} instead of moving to {SECONDARY_WORKSPACE_DISPLAY_NAME!r}, "
+            f"and the background page scroll jumps from {scroll_before!r}px to "
+            f"{scroll_after!r}px."
+        )
+    return (
+        "The desktop workspace switcher does not keep Arrow Down fully scoped to the "
+        "expected in-panel navigation behavior on the scrollable Settings surface."
+    )
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    analysis = _arrow_down_failure_analysis(result)
+    selection_ok = analysis["selection_ok"]
+    scroll_ok = analysis["scroll_ok"]
+    if selection_ok and not scroll_ok:
+        return (
+            f"{TICKET_KEY} - Arrow Down in workspace switcher scrolls the background "
+            "Settings surface"
+        )
+    if not selection_ok and scroll_ok:
+        return (
+            f"{TICKET_KEY} - Arrow Down in workspace switcher does not advance "
+            "selection on the scrollable Settings surface"
+        )
+    return (
+        f"{TICKET_KEY} - Arrow Down in workspace switcher does not keep navigation "
+        "scoped to the scrollable Settings surface"
     )
 
 

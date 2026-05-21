@@ -9,8 +9,10 @@ The automation:
    and two preloaded saved hosted workspaces
 2. opens the desktop workspace switcher from Dashboard
 3. focuses the active saved-workspace row and advances selection until the last
-   saved workspace is highlighted
-4. presses `ArrowDown` on the last saved workspace row across several fresh live
+    saved workspace is highlighted
+4. explicitly restores keyboard focus onto the selected last saved-workspace row
+   before pressing `ArrowDown`
+5. presses `ArrowDown` on the last saved workspace row across several fresh live
    trials to confirm the boundary behavior remains stable
 
 ## Install dependencies
