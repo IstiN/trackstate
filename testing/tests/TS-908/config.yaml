@@ -1,0 +1,24 @@
+test_id: TS-908
+type: api
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - GitHub CLI authenticated for repository metadata and ruleset inspection
+  - Playwright for human-style GitHub workflow page verification
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  expected_accessibility_markers:
+    - axe-core
+    - accessibility
+    - wcag
+    - contrast
+    - aria-label
+    - aria label
+    - semantics label
+  ui_timeout_seconds: 60
+notes:
+  - Read-only verification only. This automation does not create branches, commits, or pull requests.
+  - Confirms whether the live pull-request workflow and required checks expose any accessibility gate capable of blocking contrast or ARIA defects.
