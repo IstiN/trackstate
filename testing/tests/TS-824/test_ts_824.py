@@ -644,6 +644,9 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: TS-824 failed"))
+    error_prefix = error.split(":", 1)[0]
+    if ":" not in error or not error_prefix.endswith(("Error", "Exception")):
+        error = f"AssertionError: {error}"
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -904,7 +907,6 @@ def _discussion_threads() -> list[dict[str, object]]:
         thread
         for thread in threads
         if isinstance(thread, dict)
-        and thread.get("resolved") is False
         and thread.get("rootCommentId") is not None
         and thread.get("threadId") is not None
     ]
