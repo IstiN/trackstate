@@ -1181,10 +1181,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           ? browser_workspace_switcher_focus_monitor
                 .captureBrowserViewportScrollSnapshot()
           : null;
-      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
-      if (activeWorkspaceId != null) {
-        _workspaceSwitcherRowFocusRequestVersion += 1;
-      }
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1196,7 +1193,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               activeWorkspaceId: activeWorkspaceId,
             );
       }
-      _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+      _workspaceSwitcherTriggerFocusNode.requestFocus();
     });
   }
 

@@ -263,6 +263,51 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'desktop workspace switcher keeps focus on the trigger when opened',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
+        final searchField = find.byType(TextField).first;
+
+        await tester.tap(trigger);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsOneWidget,
+        );
+        expect(
+          _focusWithinFinder(tester, trigger),
+          isTrue,
+          reason:
+              'Opening the desktop workspace switcher should keep focus on the '
+              'trigger so the next Tab can leave the component.',
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+
+        expect(_focusWithinFinder(tester, searchField), isTrue);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 Future<void> _focusByTabUntil(
