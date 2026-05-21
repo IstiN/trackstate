@@ -28,8 +28,8 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    StoredWorkspaceProfilesRuntime,
+from testing.tests.support.ts723_workspace_restore_runtime import (  # noqa: E402
+    Ts723WorkspaceRestoreRuntime,
 )
 
 TICKET_KEY = "TS-893"
@@ -44,7 +44,8 @@ LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
-BUSY_RELEASE_SECONDS = 2.5
+PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS = 15
+PRE_RELEASE_RECOVERY_SIGNAL = "Sync error, attention needed"
 LINKED_BUGS = ["TS-882", "TS-896"]
 RESTORE_MESSAGE_WAIT_SECONDS = 20
 
@@ -74,7 +75,7 @@ EXPECTED_RESULT = (
 @dataclass
 class _TransientBusyWorkspaceBlocker:
     path: Path
-    release_after_seconds: float
+    release_after_seconds: float | None = None
 
     def __post_init__(self) -> None:
         self.original_mode: int | None = None
@@ -89,8 +90,9 @@ class _TransientBusyWorkspaceBlocker:
         self.original_mode = stat.S_IMODE(os.stat(self.path).st_mode)
         os.chmod(self.path, self.blocked_mode)
         self.blocked_at_monotonic = time.monotonic()
-        self._thread = threading.Thread(target=self._delayed_release, daemon=True)
-        self._thread.start()
+        if self.release_after_seconds is not None:
+            self._thread = threading.Thread(target=self._delayed_release, daemon=True)
+            self._thread.start()
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
@@ -116,6 +118,9 @@ class _TransientBusyWorkspaceBlocker:
 
     def wait_for_release(self, *, timeout_seconds: float) -> bool:
         return self._released.wait(timeout_seconds)
+
+    def release(self) -> None:
+        self._restore_now()
 
     def snapshot(self) -> dict[str, object]:
         current_mode = stat.S_IMODE(os.stat(self.path).st_mode)
@@ -151,7 +156,6 @@ def main() -> None:
     prepared_local_workspace = _prepare_local_workspace_repository()
     blocker = _TransientBusyWorkspaceBlocker(
         path=Path(LOCAL_TARGET),
-        release_after_seconds=BUSY_RELEASE_SECONDS,
     )
 
     result: dict[str, object] = {
@@ -170,7 +174,7 @@ def main() -> None:
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
-        "busy_release_seconds": BUSY_RELEASE_SECONDS,
+        "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
         "restore_message_wait_seconds": RESTORE_MESSAGE_WAIT_SECONDS,
         "steps": [],
         "human_verification": [],
@@ -178,28 +182,29 @@ def main() -> None:
 
     page: LiveWorkspaceSwitcherPage | None = None
     try:
+        runtime = Ts723WorkspaceRestoreRuntime(
+            repository=config.repository,
+            token=token,
+            workspace_state=workspace_state,
+        )
         with blocker:
             result["busy_blocker_initial"] = blocker.snapshot()
             with create_live_tracker_app(
                 config,
-                runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                    repository=config.repository,
-                    token=token,
-                    workspace_state=workspace_state,
-                ),
+                runtime_factory=lambda: runtime,
             ) as tracker_page:
                 page = LiveWorkspaceSwitcherPage(tracker_page)
                 try:
-                    runtime = tracker_page.open()
-                    result["runtime_state"] = runtime.kind
-                    result["runtime_body_text"] = runtime.body_text
-                    if runtime.kind != "ready":
+                    runtime_observation = tracker_page.open()
+                    result["runtime_state"] = runtime_observation.kind
+                    result["runtime_body_text"] = runtime_observation.body_text
+                    if runtime_observation.kind != "ready":
                         raise AssertionError(
                             "Precondition failed: the deployed app did not reach the "
                             "interactive shell with the signed-in active-local workspace "
                             "preload.\n"
-                            f"Observed runtime state: {runtime.kind}\n"
-                            f"Observed body text:\n{runtime.body_text}",
+                            f"Observed runtime state: {runtime_observation.kind}\n"
+                            f"Observed body text:\n{runtime_observation.body_text}",
                         )
 
                     page.dismiss_connection_banner()
@@ -212,14 +217,29 @@ def main() -> None:
                         observed=(
                             "Opened the deployed app in Chromium with a stored signed-in "
                             "GitHub session, preloaded the active local workspace in "
-                            "browser storage, and temporarily revoked access to the "
+                            "browser storage, and kept access revoked for the "
                             f"prepared local git folder at {LOCAL_TARGET!r} to simulate a transient busy state."
                         ),
                     )
 
-                    released = blocker.wait_for_release(
-                        timeout_seconds=BUSY_RELEASE_SECONDS + 15,
+                    pre_release_trigger = page.observe_trigger(
+                        timeout_ms=int(PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS * 1000),
                     )
+                    result["pre_release_trigger_observation"] = _trigger_payload(
+                        pre_release_trigger,
+                    )
+                    pre_release_body_text = page.current_body_text()
+                    pre_release_signal_visible = (
+                        PRE_RELEASE_RECOVERY_SIGNAL in pre_release_trigger.top_button_labels
+                        or PRE_RELEASE_RECOVERY_SIGNAL in pre_release_body_text
+                    )
+                    result["pre_release_body_text"] = pre_release_body_text
+                    result["pre_release_recovery_signal_visible"] = (
+                        pre_release_signal_visible
+                    )
+                    result["busy_blocker_before_release"] = blocker.snapshot()
+                    blocker.release()
+                    released = blocker.wait_for_release(timeout_seconds=5)
                     result["busy_blocker_final"] = blocker.snapshot()
                     result["busy_state_released"] = released
                     if blocker.release_error is not None:
@@ -239,8 +259,13 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[1],
                         observed=(
-                            "Restored access to the prepared local workspace during the "
-                            f"startup retry window after approximately {BUSY_RELEASE_SECONDS} seconds.\n"
+                            "Kept the local workspace blocked until the header workspace "
+                            "trigger was already observable, confirmed the visible "
+                            f"{PRE_RELEASE_RECOVERY_SIGNAL!r} signal while access was still "
+                            "blocked, then restored access while startup recovery was still "
+                            "in progress.\n"
+                            f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
+                            f"pre_release_signal_visible={pre_release_signal_visible}\n"
                             f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                         ),
                     )
@@ -250,24 +275,28 @@ def main() -> None:
                         timeout_ms=int(RESTORE_MESSAGE_WAIT_SECONDS * 1000),
                     )
                     result["restore_message"] = restore_message
-                    if restore_message is None:
+                    if not pre_release_signal_visible and restore_message is None:
                         _record_step(
                             result,
                             step=3,
                             status="failed",
                             action=REQUEST_STEPS[2],
                             observed=(
-                                "After the busy state was released, startup never exposed "
-                                "the recovery message that proves the blocked local workspace "
-                                "was skipped during restore before recovery.\n"
-                                f"Observed body text:\n{page.current_body_text()}"
+                                "After the busy state was released, startup reached the "
+                                "final restored Local Git state without exposing either the "
+                                "pre-release sync error signal or a restore banner, so the "
+                                "test could not prove the transient failure path was "
+                                "exercised.\n"
+                                f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
+                                f"Observed pre_release_body_text:\n{pre_release_body_text}"
                             ),
                         )
                         raise AssertionError(
-                            "Step 3 failed: startup restored without exposing the visible "
-                            "recovery message that proves the transient busy local "
-                            "workspace was skipped during restore.\n"
-                            f"Observed body text:\n{page.current_body_text()}"
+                            "Step 3 failed: the scenario restored to Local Git without "
+                            "capturing overlap evidence for the transient busy startup "
+                            "path.\n"
+                            f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
+                            f"Observed pre_release_body_text:\n{pre_release_body_text}"
                         )
 
                     restored, trigger = poll_until(
@@ -286,10 +315,12 @@ def main() -> None:
                             action=REQUEST_STEPS[2],
                             observed=(
                                 "After the busy state was released, the application shell "
-                                "exposed the restore-recovery message and the workspace "
-                                "switcher trigger restored the prepared local workspace "
+                                "restored the prepared local workspace in the workspace "
+                                "switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
-                                f"Observed restore_message={restore_message!r}; "
+                                f"Observed pre_release_signal_visible={pre_release_signal_visible}; "
+                                f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
+                                f"restore_message={restore_message!r}; "
                                 f"trigger label={trigger.semantic_label!r}; "
                                 f"trigger_text={trigger.visible_text!r}"
                             ),
@@ -302,10 +333,12 @@ def main() -> None:
                             action=REQUEST_STEPS[2],
                             observed=(
                                 "After the busy state was released, the application shell "
-                                "exposed the restore-recovery message but the workspace "
-                                "switcher trigger never restored the prepared local workspace "
+                                "never restored the prepared local workspace in the "
+                                "workspace switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
-                                f"Observed restore_message={restore_message!r}; "
+                                f"Observed pre_release_signal_visible={pre_release_signal_visible}; "
+                                f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
+                                f"restore_message={restore_message!r}; "
                                 f"trigger label={trigger.semantic_label!r}; "
                                 f"trigger_text={trigger.visible_text!r}"
                             ),
@@ -344,11 +377,14 @@ def main() -> None:
                     _record_human_verification(
                         result,
                         check=(
-                            "Waited after the busy-state release for a visible recovery "
-                            "message proving startup skipped the blocked local workspace "
-                            "during restore."
+                            "Viewed the header workspace trigger while the local workspace "
+                            "was still blocked and confirmed the visible pre-release error "
+                            "signal before releasing access, then checked it again after "
+                            "recovery."
                         ),
                         observed=(
+                            f"pre_release_signal_visible={pre_release_signal_visible}; "
+                            f"pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                             f"restore_message={restore_message!r}; "
                             f"busy_blocker={json.dumps(blocker.snapshot(), ensure_ascii=True)}"
                         ),
@@ -375,6 +411,11 @@ def main() -> None:
                             f"active_local_row={json.dumps(_row_payload(local_row), ensure_ascii=True)}"
                         ),
                     )
+                    result["console_events"] = [
+                        {"level": event.level, "text": event.text}
+                        for event in runtime.console_events
+                    ]
+                    result["page_errors"] = list(runtime.page_errors)
 
                     try:
                         _assert_active_local_restore(
@@ -789,8 +830,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
-        f"* Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
-        "* Captured the visible restore recovery message to prove startup skipped the blocked local workspace during restore before it recovered.",
+        "* Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
+        "* Required overlap evidence from a visible pre-release sync-error signal while the workspace was still blocked, and also recorded any visible restore recovery message without requiring that banner for a pass.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -837,8 +878,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
-        f"- Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
-        "- Captured the visible restore recovery message to prove startup skipped the blocked local workspace during restore before it recovered.",
+        "- Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
+        "- Required overlap evidence from a visible pre-release sync-error signal while the workspace was still blocked, and also recorded any visible restore recovery message without requiring that banner for a pass.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",

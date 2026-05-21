@@ -9,7 +9,7 @@ notes:
   - Opens the deployed TrackState web app with a stored signed-in GitHub token.
   - Preloads an active local workspace plus one hosted workspace in browser storage.
   - Uses the default desktop viewport of 1440x900 for this ticket.
-  - Simulates a transiently busy local workspace by temporarily revoking filesystem access to the prepared local repository during startup, then restoring it during the retry window.
-  - Captures the visible "Skipped ... during restore" recovery message so the test proves startup observed the blocked workspace before the final restore.
+  - Simulates a transiently busy local workspace by revoking filesystem access to the prepared local repository, keeping it blocked until the header trigger is visible, then restoring access during startup recovery.
+  - Requires the visible "Sync error, attention needed" signal while the workspace is still blocked, and records any visible "Skipped ... during restore" banner without requiring that banner for the expected-result assertion.
   - Waits after the busy-state release for the workspace switcher trigger to restore the local workspace instead of asserting immediately.
   - Covers the deployed fixes linked from TS-882 and TS-896.
