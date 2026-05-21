@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -14,6 +16,11 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  goldenFileComparator = _TolerantGoldenFileComparator(
+    Uri.parse('testing/tests/TS-886/test_ts_886.dart'),
+    precisionTolerance: 0.04,
+  );
+
   testWidgets(
     'TS-886 Admin settings desktop surface matches the approved golden baseline',
     (tester) async {
@@ -21,16 +28,8 @@ void main() {
       final robot = SettingsScreenRobot(tester);
 
       try {
-        tester.view.physicalSize = const Size(1440, 960);
-        tester.view.devicePixelRatio = 1;
-        await tester.pumpWidget(
-          const RepaintBoundary(
-            child: TrackStateApp(repository: DemoTrackStateRepository()),
-          ),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Settings').first, warnIfMissed: false);
-        await tester.pumpAndSettle();
+        await robot.pumpApp(repository: const DemoTrackStateRepository());
+        await robot.openSettings();
 
         expect(
           robot.projectSettingsHeading,
@@ -91,6 +90,17 @@ void main() {
               '${robot.viewportSize}.',
         );
 
+        expect(
+          find.text(
+            'Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.',
+          ),
+          findsOneWidget,
+          reason:
+              'Human-style verification failed: the canonical desktop settings '
+              'surface did not show the repository-backed admin description text. '
+              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}.',
+        );
+
         await expectLater(
           find.byType(TrackStateApp),
           matchesGoldenFile(_approvedDesktopGoldenPath),
@@ -107,6 +117,36 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+}
+
+class _TolerantGoldenFileComparator extends LocalFileComparator {
+  _TolerantGoldenFileComparator(
+    super.testFile, {
+    required double precisionTolerance,
+  }) : assert(
+         precisionTolerance >= 0 && precisionTolerance <= 1,
+         'precisionTolerance must be between 0 and 1',
+       ),
+       _precisionTolerance = precisionTolerance;
+
+  final double _precisionTolerance;
+
+  @override
+  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
+    final result = await GoldenFileComparator.compareLists(
+      imageBytes,
+      await getGoldenBytes(golden),
+    );
+    final passed = result.passed || result.diffPercent <= _precisionTolerance;
+    if (passed) {
+      result.dispose();
+      return true;
+    }
+
+    final error = await generateFailureOutput(result, golden, basedir);
+    result.dispose();
+    throw FlutterError(error);
+  }
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {

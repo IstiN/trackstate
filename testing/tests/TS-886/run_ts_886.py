@@ -86,10 +86,11 @@ def main() -> None:
                 ),
                 observed=(
                     "Before the golden assertion failed, the automation reached the "
-                    'visible Settings administration surface and verified the "Project '
-                    'Settings" heading, the "Project settings administration" heading, '
-                    'the Statuses/Workflows/Issue Types/Fields tabs, and the "Save '
-                    f'settings"/"Reset" actions. The final screenshot still differed '
+                    'visible Settings administration surface and verified the '
+                    '"Project Settings" heading, the "Project settings administration" '
+                    'heading, the Statuses/Workflows/Issue Types/Fields tabs, the '
+                    '"Save settings"/"Reset" actions, and the repository-backed '
+                    'administration description text. The final screenshot still differed '
                     f"from the approved baseline by {result.get('golden_diff_percent', '<unknown>')}% "
                     f"({result.get('golden_diff_pixels', '<unknown>')} px). Failure artifacts: "
                     f"{result['failure_artifacts']}."
@@ -103,8 +104,8 @@ def main() -> None:
             status="passed",
             action=REQUEST_STEPS[0],
             observed=(
-                "Opened the seeded local-Git TrackState app and navigated from the "
-                "primary navigation to Settings without errors."
+                "Opened the canonical desktop settings surface and navigated from "
+                "the primary navigation to Settings without errors."
             ),
         )
         _record_step(
@@ -147,8 +148,9 @@ def main() -> None:
             observed=(
                 'The visible screen exposed the Settings navigation state, the '
                 '"Project Settings" and "Project settings administration" headings, '
-                'the Statuses/Workflows/Issue Types/Fields tabs, and seeded rows such '
-                'as "To Do", "Delivery workflow", "Story", and "Summary".'
+                'the Statuses/Workflows/Issue Types/Fields tabs, the "Save settings"/'
+                '"Reset" actions, and the repository-backed administration '
+                'description text.'
             ),
         )
         _write_pass_outputs(result)
@@ -247,8 +249,8 @@ def _matched_step_number(combined_output: str) -> int | None:
 def _pre_golden_pass_observation(step: int) -> str:
     if step == 1:
         return (
-            "Opened the app and navigated to Settings from the primary navigation "
-            "without errors."
+            "Opened the canonical desktop settings surface and navigated to "
+            "Settings from the primary navigation without errors."
         )
     if step == 2:
         return (
@@ -407,6 +409,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Environment:** {result.get('environment')} | {result.get('os')}",
         f"**Approved Golden:** `{APPROVED_GOLDEN}` ({APPROVED_VIEWPORT})",
         f"**Status:** {'passed' if passed else 'failed'}",
+        "",
+        "## Rework summary",
+        "- Reused the shared `SettingsScreenRobot` flow and the repo-matching tolerant golden comparator for the approved desktop Settings surface.",
+        "- Updated the generated result text to describe only the canonical surface and assertions the automation actually exercised.",
         "",
         "## Automation checks",
     ]
