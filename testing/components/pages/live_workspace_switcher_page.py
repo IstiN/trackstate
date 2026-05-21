@@ -891,6 +891,9 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
+    def open_settings(self) -> str:
+        return self._project_settings_page.open_settings()
+
     def clear_focus(self) -> None:
         self._session.evaluate(
             """
@@ -1672,6 +1675,45 @@ class LiveWorkspaceSwitcherPage:
                         display_name,
                     ),
                 )
+        if not parsed_rows:
+            body_lines = [
+                re.sub(r"^(.+)\s+\1$", r"\1", " ".join(line.split()).strip())
+                for line in body_text.splitlines()
+                if line.strip()
+            ]
+            body_heading_indexes = [
+                index for index, line in enumerate(body_lines) if line == self._switcher_heading
+            ]
+            if body_heading_indexes:
+                candidate_lines = body_lines[body_heading_indexes[-1] + 1 :]
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    summary_line = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if (
+                        "Branch:" in summary_line
+                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and delete_label.startswith("Delete: ")
+                    ):
+                        summary_parts = [
+                            part.strip() for part in summary_line.split(",") if part.strip()
+                        ]
+                        if len(summary_parts) >= 4:
+                            parsed_rows.append(
+                                (
+                                    summary_parts[0],
+                                    ", ".join(summary_parts[3:]),
+                                    summary_parts[1],
+                                    summary_parts[2],
+                                    (action_label, delete_label),
+                                    action_label == "Active",
+                                    summary_line,
+                                ),
+                            )
+                            index += 3
+                            continue
+                    index += 1
         for (
             display_name,
             detail_text,
@@ -1683,7 +1725,14 @@ class LiveWorkspaceSwitcherPage:
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ displayName, locatorText, detailText, actionLabels, deleteLabel }) => {
+                ({
+                  displayName,
+                  locatorText,
+                  detailText,
+                  actionLabels,
+                  deleteLabel,
+                  targetTypeLabel,
+                }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1702,6 +1751,9 @@ class LiveWorkspaceSwitcherPage:
                     return rect.width * rect.height;
                   };
                   const rectFor = (element) => element.getBoundingClientRect();
+                  const normalizedActions = (actionLabels || [])
+                    .map((label) => normalize(label))
+                    .filter((label) => label.length > 0);
                   const unionRect = (elements) => {
                     if (!elements.length) {
                       return null;
@@ -1725,7 +1777,8 @@ class LiveWorkspaceSwitcherPage:
                     return text.includes(displayName)
                       && (!locatorText || text.includes(locatorText))
                       && text.includes(detailText)
-                      && actionLabels.every((label) => !label || text.includes(label))
+                      && (!targetTypeLabel || text.includes(targetTypeLabel))
+                      && normalizedActions.every((label) => !label || text.includes(label))
                       && (!deleteLabel || text.includes(deleteLabel));
                   };
                   const anchors = Array.from(document.querySelectorAll('*'))
@@ -1738,8 +1791,8 @@ class LiveWorkspaceSwitcherPage:
                         || text === displayName
                         || text === deleteLabel
                         || ariaLabel === deleteLabel
-                        || actionLabels.includes(text)
-                        || actionLabels.includes(ariaLabel)
+                        || normalizedActions.includes(text)
+                        || normalizedActions.includes(ariaLabel)
                       );
                     })
                     .sort((left, right) => areaFor(left) - areaFor(right));
@@ -1750,7 +1803,7 @@ class LiveWorkspaceSwitcherPage:
                   const actionAnchor = anchors.find((element) => {
                     const text = textFor(element);
                     const ariaLabel = normalize(element.getAttribute('aria-label') || '');
-                    return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                    return normalizedActions.includes(text) || normalizedActions.includes(ariaLabel);
                   }) || null;
                   const deleteAnchor = anchors.find((element) => {
                     const text = textFor(element);
@@ -1806,6 +1859,7 @@ class LiveWorkspaceSwitcherPage:
                     "detailText": detail_text,
                     "actionLabels": list(action_labels),
                     "deleteLabel": action_labels[-1] if action_labels else "",
+                    "targetTypeLabel": target_type_label,
                 },
             )
             if not isinstance(bounds, dict):
