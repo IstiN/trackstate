@@ -553,8 +553,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
-        normalizedReason.contains('unsupported operation') ||
+        normalizedReason.contains('unsupported operation: process.run') ||
         normalizedReason.contains('process.run') ||
+        normalizedReason.contains('unsupported operation') ||
         normalizedReason.contains('process.start') ||
         normalizedReason.contains('not supported on the web') ||
         normalizedReason.contains('local git runtime is not available') ||
@@ -758,6 +759,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     return reason.contains('file system access') ||
         reason.contains('handle revalidation') ||
         reason.contains('revalidation') ||
+        reason.contains('busy') ||
+        reason.contains('temporar') ||
+        reason.contains('transient') ||
+        reason.contains('locked') ||
+        reason.contains('unavailable') ||
         reason.contains('permission') ||
         reason.contains('pending');
   }
