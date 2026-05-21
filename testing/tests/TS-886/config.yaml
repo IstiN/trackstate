@@ -1,0 +1,9 @@
+test_id: TS-886
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the same demo repository state as the approved desktop settings-admin golden so the ticket compares the exact production surface that owns the stored baseline.
+  - Verifies the user-visible Settings admin headings, tabs, and primary actions before comparing the full desktop surface with the approved baseline in test/goldens/settings_admin_desktop.png.
+  - Uses the repo-approved desktop golden dimensions of 1440x960 that correspond to the stored baseline asset.
