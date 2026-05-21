@@ -84,6 +84,20 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             json_payload=payload,
         )
 
+    def community_profile(self, repository: str) -> CliCommandResult:
+        command = ("gh", "api", f"repos/{repository}/community/profile")
+        result = self._run(command)
+        payload: dict[str, object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
     def get_contents(
         self,
         repository: str,
