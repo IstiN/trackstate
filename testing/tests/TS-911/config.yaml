@@ -1,0 +1,11 @@
+test_id: TS-911
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from Dashboard and confirms the first saved workspace row owns keyboard focus.
+  - Presses Shift+Tab from that first internal row and verifies focus wraps to the last visible internal control instead of escaping to the app shell.
