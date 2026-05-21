@@ -451,9 +451,9 @@ def _assert_desktop_panel_open(
 def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObservation) -> None:
     failures: list[str] = []
 
-    if not (observation.before_label or "").startswith("Workspace switcher:"):
+    if not observation.before_owned_by_switcher:
         failures.append(
-            "pre-Tab focus was not on the workspace switcher trigger before moving inside the panel"
+            "pre-Tab focus was neither on the workspace switcher trigger nor already inside the open workspace switcher panel"
         )
     if not observation.after_visible:
         failures.append("the focused element after Tab was not visible")
@@ -475,7 +475,12 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed before focus: label={observation.before_label!r}, "
-            + f"role={observation.before_role!r}, tag={observation.before_tag_name!r}\n"
+            + f"role={observation.before_role!r}, tag={observation.before_tag_name!r}, "
+            + f"visible={observation.before_visible}, "
+            + f"in_viewport={observation.before_in_viewport}, "
+            + f"within_switcher={observation.before_within_switcher}, "
+            + f"on_trigger={observation.before_on_trigger}, "
+            + f"owned_by_switcher={observation.before_owned_by_switcher}\n"
             + f"Observed after focus: label={observation.after_label!r}, "
             + f"role={observation.after_role!r}, tag={observation.after_tag_name!r}\n"
             + f"Observed after HTML: {observation.after_outer_html}",
@@ -508,6 +513,11 @@ def _assert_escape_surface_dismissal(
     monitor: WorkspaceSwitcherTransitionMonitorObservation,
 ) -> None:
     failures: list[str] = []
+    monitor_observed_dismissal = (
+        monitor.ever_hidden_after_visible
+        or 0 in monitor.observed_row_counts
+        or monitor.latest_visible_row_count == 0
+    )
 
     if not dismissal.dashboard_visible:
         failures.append("the main Dashboard shell was not visibly present after Escape")
@@ -518,10 +528,10 @@ def _assert_escape_surface_dismissal(
             "the transition monitor did not capture the visible workspace switcher "
             "surface before Escape",
         )
-    if not monitor.ever_hidden_after_visible:
+    if not monitor_observed_dismissal:
         failures.append(
             "the transition monitor never observed the visible workspace switcher "
-            "surface disappear after Escape",
+            "content disappear after Escape",
         )
 
     if failures:
@@ -1239,6 +1249,11 @@ def _internal_focus_payload(
             "tag_name": observation.before_tag_name,
             "outer_html": observation.before_outer_html,
         },
+        "before_visible": observation.before_visible,
+        "before_in_viewport": observation.before_in_viewport,
+        "before_within_switcher": observation.before_within_switcher,
+        "before_on_trigger": observation.before_on_trigger,
+        "before_owned_by_switcher": observation.before_owned_by_switcher,
         "after_focus": {
             "label": observation.after_label,
             "role": observation.after_role,

@@ -424,38 +424,32 @@ class LiveWorkspaceSwitcherPage:
         self._session.mouse_move(1, 1)
 
     def navigate_to_section(self, label: str) -> None:
-        clicked = self._session.evaluate(
+        active = self._session.evaluate(
             """
             (label) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const candidate = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((element) => isVisible(element) && normalize(element.innerText) === label);
-              if (!candidate) {
-                return false;
-              }
-              candidate.click();
-              return true;
+              return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .some((element) =>
+                  normalize(element.innerText) === label
+                  && element.getAttribute('aria-current') === 'true');
             }
             """,
             arg=label,
         )
-        if clicked is not True:
+        if active is True:
+            return
+        try:
+            self._session.focus(
+                'flt-semantics[role="button"]',
+                has_text=label,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
-            )
+            ) from error
+        self._session.press_key("Enter", timeout_ms=30_000)
         try:
             self._session.wait_for_function(
                 """
