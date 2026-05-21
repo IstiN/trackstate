@@ -365,6 +365,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             workspace.id == activeWorkspaceId && workspace.isLocal,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId && workspace.isLocal,
+        deferAccessRestore: true,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -404,6 +405,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     required bool showFailureMessage,
     bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
     bool preserveActiveLocalSelectionOnStartupFailure = false,
+    bool deferAccessRestore = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -423,7 +425,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: workspace.id,
       );
-      await nextViewModel.load();
+      await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot != null) {
         _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
         _workspaceValidationFailures.remove(workspace.id);
@@ -443,12 +445,14 @@ class _TrackStateAppState extends State<TrackStateApp>
           return _preserveActiveLocalWorkspaceSelection(
             workspace,
             previousViewModel,
+            deferAccessRestore: deferAccessRestore,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
           markUnavailable: true,
         );
       }
@@ -471,12 +475,14 @@ class _TrackStateAppState extends State<TrackStateApp>
           return _preserveActiveLocalWorkspaceSelection(
             workspace,
             previousViewModel,
+            deferAccessRestore: deferAccessRestore,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
           markUnavailable: true,
         );
       }
@@ -495,11 +501,13 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
-    TrackerViewModel previousViewModel,
-    {bool markUnavailable = false}
-  ) async {
+    TrackerViewModel previousViewModel, {
+    bool deferAccessRestore = false,
+    bool markUnavailable = false,
+  }) async {
+    previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      await previousViewModel.load();
+      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
@@ -511,7 +519,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           );
     if (!identical(preservedViewModel, previousViewModel) &&
         preservedViewModel.snapshot == null) {
-      await preservedViewModel.load();
+      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     if (markUnavailable) {
       _preservedUnavailableLocalWorkspaceIds.add(workspace.id);
@@ -531,6 +539,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
+        normalizedReason.contains('unsupported operation') ||
+        normalizedReason.contains('process.run') ||
+        normalizedReason.contains('process.start') ||
+        normalizedReason.contains('not supported on the web') ||
         normalizedReason.contains('local git runtime is not available') ||
         (normalizedReason.contains('local') &&
             normalizedReason.contains('not available in this build'));
@@ -623,7 +635,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       setState(() {
         _workspaceProfilesReady = true;
       });
-      await viewModel.load();
+      await viewModel.load(deferAccessRestore: true);
       return;
     }
     if (loadedState.hasProfiles) {
@@ -645,7 +657,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       });
       return;
     }
-    await viewModel.load();
+    await viewModel.load(deferAccessRestore: true);
     await _ensureCurrentContextWorkspaceMigration();
     if (!mounted) {
       return;
@@ -1861,7 +1873,8 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
-                          localWorkspaceAvailability: localWorkspaceAvailability,
+                          localWorkspaceAvailability:
+                              localWorkspaceAvailability,
                           workspaceSwitcherTriggerKey:
                               workspaceSwitcherTriggerKey,
                           workspaceSwitcherTriggerFocusNode:
@@ -11227,10 +11240,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           Size(0, compact ? 44 : _desktopTopBarControlHeight),
         ),
         maximumSize: WidgetStatePropertyAll(
-          Size(
-            double.infinity,
-            compact ? 44 : _desktopTopBarControlHeight,
-          ),
+          Size(double.infinity, compact ? 44 : _desktopTopBarControlHeight),
         ),
         padding: WidgetStatePropertyAll(
           EdgeInsets.symmetric(
@@ -11306,7 +11316,9 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
             maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
           ),
-          child: kIsWeb ? ExcludeSemantics(child: triggerButton) : triggerButton,
+          child: kIsWeb
+              ? ExcludeSemantics(child: triggerButton)
+              : triggerButton,
         ),
       ),
     );
