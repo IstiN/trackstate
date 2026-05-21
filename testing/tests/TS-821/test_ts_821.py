@@ -527,9 +527,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
-        "## Rework summary",
-        "- Removed the `FLUTTER-VIEW` fallback that could mark the pre-Tab blur setup as switcher-owned even when the ownership probe failed.",
-        "- TS-821 now proceeds only when the blur helper can positively prove switcher-owned focus via switcher-specific signals before pressing `Tab`.",
+        "## Automation update",
+        "- Reused the existing live Playwright TS-821 coverage under `testing/tests/TS-821/`.",
+        "- Updated the shared workspace-switcher navigation helper to use a real Playwright click for the Dashboard nav, matching the current deployed Flutter web behavior.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -579,8 +579,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Removed the `FLUTTER-VIEW` fallback that could turn a failed pre-Tab ownership probe into a false success.",
-        "- TS-821 now only treats the blur setup as valid when the ownership probe positively attributes focus to the switcher or its trigger.",
+        "- Reused the existing live Playwright TS-821 automation and kept the ticket-specific coverage in `testing/tests/TS-821/`.",
+        "- Updated the shared workspace-switcher navigation helper so Dashboard activation uses a real Playwright click against the current deployed UI.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -695,11 +695,11 @@ def _step3_product_bug_description(result: dict[str, object]) -> str:
             "",
             "## Missing or broken production capability",
             (
-                "The live workspace switcher flow does not expose a production-visible "
-                "keyboard focus handoff from the open switcher to an external control. "
-                "After opening the panel and sending `Tab`, focus remains on the root "
-                "`FLUTTER-VIEW` element instead of advancing to a visible external "
-                "interactive control such as `Board` or `Create issue`."
+                "The live workspace switcher flow does not hand keyboard focus to a "
+                "clearly external, user-visible control after `Tab`. In this run, focus "
+                "left the selected workspace row but landed on the `Repository` input "
+                "while the probe still classified that target as being within the open "
+                "switcher bounds, so the required external blur path was not reached."
             ),
             "",
             "## Failing command",

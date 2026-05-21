@@ -341,38 +341,22 @@ class LiveWorkspaceSwitcherPage:
         self._session.mouse_move(1, 1)
 
     def navigate_to_section(self, label: str) -> None:
-        clicked = self._session.evaluate(
-            """
-            (label) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const candidate = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((element) => isVisible(element) && normalize(element.innerText) === label);
-              if (!candidate) {
-                return false;
-              }
-              candidate.click();
-              return true;
-            }
-            """,
-            arg=label,
-        )
-        if clicked is not True:
+        if self._session.count(self._button_selector, has_text=label) == 0:
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=label,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The hosted tracker did not expose a clickable "{label}" navigation entry.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
         try:
             self._session.wait_for_function(
                 """
