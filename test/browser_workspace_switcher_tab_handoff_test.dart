@@ -136,7 +136,7 @@ void main() {
     );
   });
 
-  test('Tab from the open trigger hands focus to the first control outside the switcher', () {
+  test('Tab from the open trigger hands focus to the selected workspace row', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
         focusStops: const [
@@ -172,11 +172,11 @@ void main() {
         currentIndex: 0,
         backwards: false,
       ),
-      3,
+      1,
     );
   });
 
-  test('Shift+Tab from the first external control returns to the open trigger', () {
+  test('Shift+Tab from the selected workspace row returns to the open trigger', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
         focusStops: const [
@@ -209,7 +209,7 @@ void main() {
             isWorkspaceSwitcherTrigger: false,
           ),
         ],
-        currentIndex: 3,
+        currentIndex: 1,
         backwards: true,
       ),
       0,

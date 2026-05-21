@@ -20,6 +20,10 @@ const String _expectedResult =
     "Issue-A remains selected with the highlight visible in the list. The detail surface updates to show the new information. No 'issue no longer available' notification is displayed, confirming the fix does not trigger on standard updates.";
 const String _missingNoticeFragment = 'no longer available';
 const Duration _syncObservationTimeout = Duration(seconds: 20);
+const int _refreshWaitReviewCommentId = 3284697382;
+const String _refreshWaitReviewThreadId = 'PRRT_kwDOSU6Gf86D83T3';
+const int _bannerWindowReviewCommentId = 3284697495;
+const String _bannerWindowReviewThreadId = 'PRRT_kwDOSU6Gf86D83VL';
 const List<String> _requestSteps = <String>[
   "Simulate a background sync where Issue-A's description or summary is updated, but it still matches the current JQL and remains in the repository index.",
   'Observe the selection highlight in the results list.',
@@ -134,11 +138,12 @@ void main() {
         }
 
         await repository.emitIssueUpdateSync();
-        final selectedRowUpdated = await _pumpUntil(
+        final refreshWindow = await _observeRefreshWindow(
           tester,
-          condition: () => _hasUpdatedSelectedRow(app),
+          app: app,
           timeout: _syncObservationTimeout,
         );
+        final selectedRowUpdated = refreshWindow.selectedRowUpdated;
 
         final updatedSelectionObservation = await app
             .readIssueSearchResultSelectionObservation(
@@ -163,7 +168,20 @@ void main() {
         );
         final updatedVisibleResults = app
             .visibleIssueSearchResultLabelsSnapshot();
+        result['selected_row_updated'] = selectedRowUpdated;
+        result['updated_detail_state_reached'] =
+            refreshWindow.updatedDetailStateReached;
+        result['refresh_probe_count'] = refreshWindow.probeCount;
+        result['missing_notice_visible_during_refresh'] =
+            refreshWindow.notificationVisibleDuringRefresh;
+        result['missing_notice_first_visible_observation'] =
+            refreshWindow.firstVisibleObservation;
+        result['missing_notice_first_visible_texts'] =
+            refreshWindow.firstVisibleTexts;
+        result['missing_notice_first_visible_semantics'] =
+            refreshWindow.firstVisibleSemantics;
         final step2Passed =
+            selectedRowUpdated &&
             selectedAfterRefresh &&
             updatedSummaryVisibleInRow &&
             !oldSummaryStillVisible &&
@@ -172,9 +190,11 @@ void main() {
               initialSelectionObservation,
             );
         final step2Observed =
+            'selected_row_updated=$selectedRowUpdated; '
             'selected_after_refresh=$selectedAfterRefresh; '
             'updated_summary_visible_in_row=$updatedSummaryVisibleInRow; '
             'old_summary_still_visible=$oldSummaryStillVisible; '
+            'refresh_probe_count=${refreshWindow.probeCount}; '
             'selection_before=${initialSelectionObservation.describe()}; '
             'selection_after=${updatedSelectionObservation.describe()}; '
             'visible_results=${_formatSnapshot(updatedVisibleResults)}';
@@ -195,11 +215,8 @@ void main() {
         final detailStillVisible = await app.isIssueDetailVisible(
           Ts903UpdatedIssueSyncRepository.issueKey,
         );
-        final updatedDetailStateReached = await _pumpUntil(
-          tester,
-          condition: () => _hasUpdatedDetailState(app),
-          timeout: _syncObservationTimeout,
-        );
+        final updatedDetailStateReached =
+            refreshWindow.updatedDetailStateReached;
         final updatedDescriptionVisible =
             await _detailContainsUpdatedDescription(app);
         final missingNoticeVisibleAfterRefresh = await app
@@ -213,14 +230,20 @@ void main() {
         result['visible_semantics_after_refresh'] = updatedVisibleSemantics;
         result['updated_jql_value'] = updatedSearchValue;
         final step3Passed =
+            updatedDetailStateReached &&
             detailStillVisible &&
             updatedDescriptionVisible &&
+            !refreshWindow.notificationVisibleDuringRefresh &&
             !missingNoticeVisibleAfterRefresh;
         final step3Observed =
             'updated_detail_state_reached=$updatedDetailStateReached; '
             'detail_visible=$detailStillVisible; '
             'updated_description_visible=$updatedDescriptionVisible; '
-            'missing_notice_visible=$missingNoticeVisibleAfterRefresh; '
+            'missing_notice_visible_during_refresh=${refreshWindow.notificationVisibleDuringRefresh}; '
+            'missing_notice_visible_after_refresh=$missingNoticeVisibleAfterRefresh; '
+            'missing_notice_first_visible_observation=${refreshWindow.firstVisibleObservation ?? '<none>'}; '
+            'missing_notice_first_visible_texts=${_formatSnapshot(refreshWindow.firstVisibleTexts)}; '
+            'missing_notice_first_visible_semantics=${_formatSnapshot(refreshWindow.firstVisibleSemantics)}; '
             'jql_value=${updatedSearchValue ?? '<missing>'}; '
             'visible_texts=${_formatSnapshot(updatedVisibleTexts)}; '
             'visible_semantics=${_formatSnapshot(updatedVisibleSemantics)}';
@@ -257,6 +280,12 @@ void main() {
       } catch (error, stackTrace) {
         result['error'] = '${error.runtimeType}: $error';
         result['traceback'] = stackTrace.toString();
+        result['visible_results_at_failure'] = app
+            .visibleIssueSearchResultLabelsSnapshot();
+        result['visible_texts_at_failure'] = app.visibleTextsSnapshot();
+        result['visible_semantics_at_failure'] = app
+            .visibleSemanticsLabelsSnapshot();
+        result['jql_value_at_failure'] = await app.readJqlSearchFieldValue();
         _writeFailureOutputs(result);
         Error.throwWithStackTrace(error, stackTrace);
       } finally {
@@ -270,6 +299,7 @@ void main() {
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
@@ -306,18 +336,9 @@ void _recordHumanVerification(
 }
 
 Future<bool> _hasUpdatedSelectedRow(TrackStateAppComponent app) async {
-  final visibleResults = app.visibleIssueSearchResultLabelsSnapshot();
   return await app.isIssueSearchResultSelected(
         Ts903UpdatedIssueSyncRepository.issueKey,
         Ts903UpdatedIssueSyncRepository.updatedIssueSummary,
-      ) &&
-      _snapshotContains(
-        visibleResults,
-        'Open ${Ts903UpdatedIssueSyncRepository.issueKey} ${Ts903UpdatedIssueSyncRepository.updatedIssueSummary}',
-      ) &&
-      !_snapshotContains(
-        visibleResults,
-        'Open ${Ts903UpdatedIssueSyncRepository.issueKey} ${Ts903UpdatedIssueSyncRepository.initialIssueSummary}',
       ) &&
       !await app.isMessageBannerVisibleContaining(_missingNoticeFragment);
 }
@@ -340,26 +361,74 @@ Future<bool> _hasUpdatedDetailState(TrackStateAppComponent app) async {
       !await app.isMessageBannerVisibleContaining(_missingNoticeFragment);
 }
 
+Future<_RefreshWindowObservation> _observeRefreshWindow(
+  WidgetTester tester, {
+  required TrackStateAppComponent app,
+  required Duration timeout,
+}) async {
+  const probeInterval = Duration(milliseconds: 100);
+  var selectedRowUpdated = false;
+  var updatedDetailStateReached = false;
+  var notificationVisibleDuringRefresh = false;
+  String? firstVisibleObservation;
+  List<String> firstVisibleTexts = const <String>[];
+  List<String> firstVisibleSemantics = const <String>[];
+  var probeCount = 0;
+  var remaining = timeout;
+
+  while (true) {
+    probeCount += 1;
+    await tester.pump();
+    selectedRowUpdated =
+        selectedRowUpdated || await _hasUpdatedSelectedRow(app);
+    updatedDetailStateReached =
+        updatedDetailStateReached || await _hasUpdatedDetailState(app);
+
+    final bannerVisible = await app.isMessageBannerVisibleContaining(
+      _missingNoticeFragment,
+    );
+    if (bannerVisible && !notificationVisibleDuringRefresh) {
+      notificationVisibleDuringRefresh = true;
+      final visibleResults = app.visibleIssueSearchResultLabelsSnapshot();
+      final visibleTexts = app.visibleTextsSnapshot();
+      final visibleSemantics = app.visibleSemanticsLabelsSnapshot();
+      firstVisibleObservation =
+          'selected_row_updated=$selectedRowUpdated; '
+          'updated_detail_state_reached=$updatedDetailStateReached; '
+          'visible_results=${_formatSnapshot(visibleResults)}';
+      firstVisibleTexts = visibleTexts;
+      firstVisibleSemantics = visibleSemantics;
+    }
+
+    if (selectedRowUpdated && updatedDetailStateReached) {
+      break;
+    }
+
+    if (remaining <= Duration.zero) {
+      break;
+    }
+
+    final pumpDuration = remaining < probeInterval ? remaining : probeInterval;
+    await tester.pump(pumpDuration);
+    remaining -= pumpDuration;
+  }
+
+  return _RefreshWindowObservation(
+    selectedRowUpdated: selectedRowUpdated,
+    updatedDetailStateReached: updatedDetailStateReached,
+    notificationVisibleDuringRefresh: notificationVisibleDuringRefresh,
+    firstVisibleObservation: firstVisibleObservation,
+    firstVisibleTexts: firstVisibleTexts,
+    firstVisibleSemantics: firstVisibleSemantics,
+    probeCount: probeCount,
+  );
+}
+
 bool _snapshotContains(List<String> values, String expected) {
   for (final value in values) {
     if (value.contains(expected)) {
       return true;
     }
-  }
-  return false;
-}
-
-Future<bool> _pumpUntil(
-  WidgetTester tester, {
-  required Future<bool> Function() condition,
-  required Duration timeout,
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    if (await condition()) {
-      return true;
-    }
-    await tester.pump(const Duration(milliseconds: 100));
   }
   return false;
 }
@@ -374,6 +443,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
 }
 
@@ -385,6 +455,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
@@ -569,6 +640,26 @@ String _bugDescription(Map<String, Object?> result) {
   return '${lines.join('\n')}\n';
 }
 
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final refreshWaitReply = passed
+      ? 'Fixed: TS-903 now requires both refresh wait helpers to succeed before the related steps can pass, so a timeout can no longer be hidden by a later settled snapshot. The rerun passed.'
+      : 'Fixed: TS-903 now requires both refresh wait helpers to succeed before the related steps can pass, so a timeout can no longer be hidden by a later settled snapshot. The rerun still fails with: ${result['error'] ?? 'see attached failure output'}.';
+  final bannerReply = passed
+      ? 'Fixed: TS-903 now observes the full update-refresh window and fails if the `issue no longer available` banner appears at any point, not just in the final settled state. The rerun passed.'
+      : 'Fixed: TS-903 now observes the full update-refresh window and fails if the `issue no longer available` banner appears at any point, not just in the final settled state. The rerun still fails with: ${result['error'] ?? 'see attached failure output'}.';
+  final summaryReply = passed
+      ? 'Fixed: addressed the review feedback by enforcing the sync waits and sampling the unavailable banner across the entire refresh window. The latest TS-903 rerun passed.'
+      : 'Fixed the TS-903 test validity gaps called out in review, but the latest rerun still exposes a failing product-visible result: ${result['error'] ?? 'see attached failure output'}.';
+
+  return '${jsonEncode(<String, Object?>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': _refreshWaitReviewCommentId, 'threadId': _refreshWaitReviewThreadId, 'reply': refreshWaitReply},
+      <String, Object?>{'inReplyToId': _bannerWindowReviewCommentId, 'threadId': _bannerWindowReviewThreadId, 'reply': bannerReply},
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': summaryReply},
+    ],
+  })}\n';
+}
+
 List<String> _jiraStepLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   return <String>[
@@ -685,4 +776,24 @@ String _formatSnapshot(List<String> values, {int limit = 24}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+class _RefreshWindowObservation {
+  const _RefreshWindowObservation({
+    required this.selectedRowUpdated,
+    required this.updatedDetailStateReached,
+    required this.notificationVisibleDuringRefresh,
+    required this.firstVisibleObservation,
+    required this.firstVisibleTexts,
+    required this.firstVisibleSemantics,
+    required this.probeCount,
+  });
+
+  final bool selectedRowUpdated;
+  final bool updatedDetailStateReached;
+  final bool notificationVisibleDuringRefresh;
+  final String? firstVisibleObservation;
+  final List<String> firstVisibleTexts;
+  final List<String> firstVisibleSemantics;
+  final int probeCount;
 }
