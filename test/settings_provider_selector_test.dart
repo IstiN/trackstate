@@ -269,21 +269,21 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Project settings administration'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Statuses'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Workflows'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Issue Types'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Fields'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Priorities'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Components'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Versions'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Attachments'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Locales'), findsOneWidget);
+        expect(_settingsTab('Statuses'), findsOneWidget);
+        expect(_settingsTab('Workflows'), findsOneWidget);
+        expect(_settingsTab('Issue Types'), findsOneWidget);
+        expect(_settingsTab('Fields'), findsOneWidget);
+        expect(_settingsTab('Priorities'), findsOneWidget);
+        expect(_settingsTab('Components'), findsOneWidget);
+        expect(_settingsTab('Versions'), findsOneWidget);
+        expect(_settingsTab('Attachments'), findsOneWidget);
+        expect(_settingsTab('Locales'), findsOneWidget);
 
-        await tester.tap(find.widgetWithText(Tab, 'Fields'));
+        await tester.tap(_settingsTab('Fields'));
         await tester.pumpAndSettle();
         expect(find.bySemanticsLabel('Delete field Summary'), findsNothing);
 
-        await tester.tap(find.widgetWithText(Tab, 'Statuses'));
+        await tester.tap(_settingsTab('Statuses'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add status'));
         await tester.pumpAndSettle();
@@ -330,7 +330,7 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final localesTab = find.widgetWithText(Tab, 'Locales');
+        final localesTab = _settingsTab('Locales');
         await tester.ensureVisible(localesTab);
         await tester.tap(localesTab);
         await tester.pumpAndSettle();
@@ -504,7 +504,7 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final attachmentsTab = find.widgetWithText(Tab, 'Attachments');
+        final attachmentsTab = _settingsTab('Attachments');
         await tester.ensureVisible(attachmentsTab);
         await tester.tap(attachmentsTab);
         await tester.pumpAndSettle();
@@ -553,7 +553,7 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final localesTab = find.widgetWithText(Tab, 'Locales');
+        final localesTab = _settingsTab('Locales');
         await tester.ensureVisible(localesTab);
         await tester.tap(localesTab);
         await tester.pumpAndSettle();
@@ -590,6 +590,9 @@ void main() {
     },
   );
 }
+
+Finder _settingsTab(String label) =>
+    find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
 class _EditableSettingsWidgetRepository
     implements TrackStateRepository, ProjectSettingsRepository {
