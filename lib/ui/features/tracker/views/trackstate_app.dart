@@ -357,6 +357,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
             workspace.id == activeWorkspaceId && workspace.isLocal,
+        deferAccessRestore: true,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -395,6 +396,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     required TrackerViewModel previousViewModel,
     required bool showFailureMessage,
     bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
+    bool deferAccessRestore = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -414,7 +416,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: workspace.id,
       );
-      await nextViewModel.load();
+      await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot != null) {
         _workspaceValidationFailures.remove(workspace.id);
         return _PreparedWorkspaceSwitch(
@@ -432,6 +434,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
         );
       }
       nextViewModel.dispose();
@@ -451,6 +454,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
         );
       }
       final reason = _normalizeWorkspaceFailureReason(error);
@@ -469,10 +473,12 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
-    TrackerViewModel previousViewModel,
-  ) async {
+    TrackerViewModel previousViewModel, {
+    bool deferAccessRestore = false,
+  }) async {
+    previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      await previousViewModel.load();
+      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     _workspaceValidationFailures.remove(workspace.id);
     return _PreparedWorkspaceSwitch(
@@ -487,9 +493,13 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
+        normalizedReason.contains('unsupported operation') ||
+        normalizedReason.contains('process.run') ||
+        normalizedReason.contains('process.start') ||
+        normalizedReason.contains('not supported on the web') ||
         normalizedReason.contains('local git runtime is not available') ||
         (normalizedReason.contains('local') &&
-            normalizedReason.contains('not available in this build'));
+           normalizedReason.contains('not available in this build'));
   }
 
   void _rememberWorkspaceValidationFailure(
@@ -579,7 +589,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       setState(() {
         _workspaceProfilesReady = true;
       });
-      await viewModel.load();
+      await viewModel.load(deferAccessRestore: true);
       return;
     }
     if (loadedState.hasProfiles) {
@@ -601,7 +611,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       });
       return;
     }
-    await viewModel.load();
+    await viewModel.load(deferAccessRestore: true);
     await _ensureCurrentContextWorkspaceMigration();
     if (!mounted) {
       return;
