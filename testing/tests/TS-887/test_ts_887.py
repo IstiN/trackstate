@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -23,6 +24,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.color_contrast import RgbColor, rgb_to_hex  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-887"
@@ -47,6 +49,7 @@ REQUEST_STEPS = (
 )
 SUMMARY_REQUIRED_FRAGMENT = "Summary is required"
 MIN_TEXT_CONTRAST = 4.5
+EXPECTED_ERROR_THEME_HEXES = {"#c25742", "#e8a085"}
 
 
 def main() -> None:
@@ -74,6 +77,7 @@ def main() -> None:
         "issue_summary": issue_fixture.summary,
         "browser": "Chromium (Playwright)",
         "os": platform.platform(),
+        "expected_error_theme_hexes": sorted(EXPECTED_ERROR_THEME_HEXES),
         "steps": [],
         "human_verification": [],
     }
@@ -215,6 +219,21 @@ def main() -> None:
                     action=REQUEST_STEPS[2],
                     observed=_step_three_observation(validation),
                 )
+
+                if not _uses_error_theme_token(validation):
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=_error_theme_failure_observation(validation),
+                    )
+                    _mark_unreached_steps(result, first_unreached=5)
+                    raise AssertionError(
+                        "Step 4 failed: the visible Summary-required validation message did "
+                        "not use the expected TrackState error theme token.\n"
+                        f"Validation payload: {_validation_payload(validation)}",
+                    )
 
                 if not _meets_text_contrast_requirement(validation):
                     _record_step(
@@ -427,6 +446,69 @@ def _meets_text_contrast_requirement(
     )
 
 
+def _uses_error_theme_token(validation: SummaryRequiredValidationObservation) -> bool:
+    if validation.message is None:
+        return False
+    normalized_color = _normalized_css_color_hex(validation.message.color)
+    return normalized_color in EXPECTED_ERROR_THEME_HEXES
+
+
+def _parse_css_color(value: str | None) -> RgbColor | None:
+    normalized = _normalize_text(value).lower()
+    if not normalized:
+        return None
+    if normalized.startswith("#"):
+        hex_value = normalized.removeprefix("#")
+        if len(hex_value) == 3:
+            hex_value = "".join(character * 2 for character in hex_value)
+        if len(hex_value) != 6:
+            return None
+        try:
+            return (
+                int(hex_value[0:2], 16),
+                int(hex_value[2:4], 16),
+                int(hex_value[4:6], 16),
+            )
+        except ValueError:
+            return None
+    match = re.fullmatch(
+        r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)",
+        normalized,
+    )
+    if match is None:
+        return None
+    red, green, blue = (int(group) for group in match.groups())
+    if any(channel > 255 for channel in (red, green, blue)):
+        return None
+    return red, green, blue
+
+
+def _normalized_css_color_hex(value: str | None) -> str | None:
+    parsed = _parse_css_color(value)
+    if parsed is None:
+        return None
+    return rgb_to_hex(parsed).lower()
+
+
+def _error_theme_failure_observation(
+    validation: SummaryRequiredValidationObservation,
+) -> str:
+    if validation.message is None:
+        return (
+            "No visible validation message element was available to confirm the expected "
+            "TrackState error theme token after Save was clicked."
+        )
+    normalized_color = _normalized_css_color_hex(validation.message.color)
+    return (
+        "The visible Summary-required validation text did not use the expected "
+        "TrackState error theme token. "
+        f"text={validation.message.text!r}, rendered_color={validation.message.color!r}, "
+        f"normalized_color={normalized_color!r}, "
+        f"expected_error_colors={sorted(EXPECTED_ERROR_THEME_HEXES)!r}, "
+        f"background={validation.message.background_color!r}."
+    )
+
+
 def _contrast_failure_observation(
     validation: SummaryRequiredValidationObservation,
 ) -> str:
@@ -445,10 +527,12 @@ def _contrast_failure_observation(
 
 def _step_four_observation(validation: SummaryRequiredValidationObservation) -> str:
     assert validation.message is not None
+    normalized_color = _normalized_css_color_hex(validation.message.color)
     return (
-        "The visible Summary-required validation text met WCAG AA contrast. "
+        "The visible Summary-required validation text used the expected TrackState error "
+        "theme token and met WCAG AA contrast. "
         f"text={validation.message.text!r}, contrast_ratio={validation.message.contrast_ratio:.2f}:1, "
-        f"foreground={validation.message.color!r}, "
+        f"foreground={validation.message.color!r}, normalized_foreground={normalized_color!r}, "
         f"background={validation.message.background_color!r}."
     )
 
@@ -661,6 +745,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "### Rework updates",
         "- Matched Summary-validation message discovery to the ticket fragment `Summary is required`, so compliant shorter copy is still detected for contrast measurement.",
         "- Tightened the accessibility assertion so Step 5 now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content.",
+        "- Added an error-token assertion so the visible validation text must render with the TrackState error theme color (`#c25742` light / `#e8a085` dark), not just any readable color.",
         "- Added the standard pass-path artifact writer, stale bug cleanup, and review-reply output so the workflow can record a real pass once the product bug is fixed.",
         "",
         "### Automation",
@@ -708,6 +793,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "*Fixes applied*",
         "* Relaxed visible-message discovery to the ticket fragment {{Summary is required}} so compliant shorter copy is still measured.",
         "* Tightened Step 5 so the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
+        "* Added an assertion that the visible validation text uses the TrackState error theme token colors (`#c25742` / `#e8a085`) rather than any arbitrary high-contrast color.",
         "* Added pass-path artifact writing plus stale bug cleanup and review replies.",
         "",
         "*New test result*",
@@ -735,6 +821,17 @@ def _write_review_replies() -> None:
         json.dumps(
             {
                 "replies": [
+                    {
+                        "inReplyToId": 3282755133,
+                        "threadId": "PRRT_kwDOSU6Gf86D3eir",
+                        "reply": (
+                            "Fixed: Step 4 now asserts the visible Summary validation text uses "
+                            "the TrackState error theme token, normalizing the computed CSS "
+                            "foreground color and requiring the expected error values "
+                            "(`#c25742` in light mode or `#e8a085` in dark mode`) before the "
+                            "contrast check can pass."
+                        ),
+                    },
                     {
                         "inReplyToId": 3282703459,
                         "threadId": "PRRT_kwDOSU6Gf86D3VGB",
