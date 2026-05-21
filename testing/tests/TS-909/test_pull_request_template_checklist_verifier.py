@@ -14,6 +14,10 @@ from testing.core.config.pull_request_template_checklist_config import (
 )
 from testing.core.models.cli_command_result import CliCommandResult
 from testing.core.interfaces.web_app_session import WaitMatch, WebAppTimeoutError
+from testing.tests.support.github_pull_request_compose_page_factory import (
+    GitHubPullRequestComposePageContext,
+    GitHubPullRequestComposeRuntimeUnavailableError,
+)
 
 
 class _FakeProbe:
@@ -244,6 +248,19 @@ class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
 
         self.assertEqual(observation.description_selector, 'textarea[name*="body"]')
         self.assertEqual(observation.description_value, expected_value)
+
+    def test_compose_page_factory_requires_playwright_runtime(self) -> None:
+        def missing_runtime():
+            raise GitHubPullRequestComposeRuntimeUnavailableError("playwright required")
+
+        context = GitHubPullRequestComposePageContext(runtime_factory=missing_runtime)
+
+        with self.assertRaisesRegex(
+            GitHubPullRequestComposeRuntimeUnavailableError,
+            "playwright required",
+        ):
+            with context:
+                self.fail("context manager should not yield without a browser runtime")
 
 
 if __name__ == "__main__":

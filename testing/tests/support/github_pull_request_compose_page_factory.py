@@ -11,6 +11,10 @@ from testing.core.interfaces.web_app_session import WebAppSession
 WebAppRuntimeFactory = Callable[[], AbstractContextManager[WebAppSession]]
 
 
+class GitHubPullRequestComposeRuntimeUnavailableError(RuntimeError):
+    """Raised when TS-909 cannot create a browser runtime that can prove the flow."""
+
+
 class GitHubPullRequestComposePageContext(
     AbstractContextManager[GitHubPullRequestComposePage]
 ):
@@ -47,8 +51,9 @@ def _default_runtime_factory() -> AbstractContextManager[WebAppSession]:
 
         return PlaywrightWebAppRuntime()
     except ModuleNotFoundError:
-        from testing.frameworks.python.urllib_web_app_session import (
-            UrllibWebAppRuntime,
-        )
-
-        return UrllibWebAppRuntime()
+        raise GitHubPullRequestComposeRuntimeUnavailableError(
+            "TS-909 requires a Playwright browser runtime to verify GitHub's live "
+            "pull-request compose form. Install Playwright and Chromium before "
+            "running this test; the unauthenticated urllib fallback is not a "
+            "valid proof source for the PR body."
+        ) from None

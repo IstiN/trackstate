@@ -17,6 +17,9 @@ The automation checks the live implementation in three ways:
 3. The checklist assertions use the actual compose-page description value, while
    the repository file probes and `pullRequestTemplates` query remain diagnostics
    for template-path selection.
+4. The test requires a Playwright browser runtime; the unauthenticated `urllib`
+   fallback is intentionally disallowed because it cannot prove the live GitHub
+   compose form body.
 
 ## Run
 

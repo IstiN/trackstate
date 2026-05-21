@@ -141,7 +141,7 @@ class GitHubPullRequestComposePage:
                       const ariaLabel = element.getAttribute("aria-label") || "";
                       const placeholder = element.getAttribute("placeholder") || "";
                       const descriptor = `${name} ${id} ${ariaLabel} ${placeholder}`.toLowerCase();
-                      let score = element.tagName === "TEXTAREA" ? 2 : 0;
+                      let score = 0;
                       if (descriptor.includes("pull_request")) score += 6;
                       if (descriptor.includes("issue")) score += 5;
                       if (descriptor.includes("body")) score += 5;
@@ -150,6 +150,7 @@ class GitHubPullRequestComposePage:
                       if (score <= 0) {
                         return null;
                       }
+                      if (element.tagName === "TEXTAREA") score += 2;
                       let selector = element.tagName.toLowerCase();
                       if (id) {
                         selector += `#${id}`;

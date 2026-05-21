@@ -20,6 +20,7 @@ from testing.core.models.pull_request_template_checklist_result import (  # noqa
     PullRequestTemplateChecklistVerificationResult,
 )
 from testing.tests.support.github_pull_request_compose_page_factory import (  # noqa: E402
+    GitHubPullRequestComposeRuntimeUnavailableError,
     create_github_pull_request_compose_page,
 )
 from testing.tests.support.project_cli_probe_factory import create_project_cli_probe  # noqa: E402
@@ -69,13 +70,14 @@ def main() -> None:
         "expected_default_branch": config.expected_default_branch,
         "required_checklist_item": config.required_checklist_item,
         "run_command": RUN_COMMAND,
-        "browser": "Chromium (Playwright if available, urllib fallback otherwise)",
+        "browser": "Chromium (Playwright required)",
         "os": platform.platform(),
         "linked_bugs": ["TS-905"],
         "ticket_steps": list(TICKET_STEPS),
         "expected_result": EXPECTED_RESULT,
         "steps": [],
         "human_verification": [],
+        "failure_kind": "product",
     }
 
     try:
@@ -243,39 +245,54 @@ def _evaluate_pull_request_compose_surface(
         "Choose different branches or forks above to discuss and review changes.",
         "Comparing changes",
     )
-
-    with create_github_pull_request_compose_page() as compose_page:
-        for head_branch in candidate_heads[:10]:
-            observation = compose_page.open_compose_surface(
-                repository=verification.target_repository,
-                base_branch=default_branch,
-                head_branch=head_branch,
-                expected_texts=expected_surface_texts,
-                screenshot_path=None,
-            )
-            last_observation = observation
-            compare_attempts.append(
-                {
-                    "head_branch": head_branch,
-                    "url": observation.url,
-                    "matched_text": observation.matched_text,
-                    "body_text_excerpt": _snippet(observation.body_text),
-                    "description_selector": observation.description_selector,
-                    "description_value_excerpt": (
-                        _snippet(observation.description_value)
-                        if isinstance(observation.description_value, str)
-                        else None
-                    ),
-                }
-            )
-            if observation.matched_text == "Open a pull request":
-                successful_observation = observation
-                successful_head_branch = head_branch
-                break
+    try:
+        with create_github_pull_request_compose_page() as compose_page:
+            for head_branch in candidate_heads[:10]:
+                observation = compose_page.open_compose_surface(
+                    repository=verification.target_repository,
+                    base_branch=default_branch,
+                    head_branch=head_branch,
+                    expected_texts=expected_surface_texts,
+                    screenshot_path=None,
+                )
+                last_observation = observation
+                compare_attempts.append(
+                    {
+                        "head_branch": head_branch,
+                        "url": observation.url,
+                        "matched_text": observation.matched_text,
+                        "body_text_excerpt": _snippet(observation.body_text),
+                        "description_selector": observation.description_selector,
+                        "description_value_excerpt": (
+                            _snippet(observation.description_value)
+                            if isinstance(observation.description_value, str)
+                            else None
+                        ),
+                    }
+                )
+                if _looks_like_unauthenticated_compare_surface(observation.body_text):
+                    result["failure_kind"] = "setup"
+                    break
+                if observation.matched_text == "Open a pull request":
+                    successful_observation = observation
+                    successful_head_branch = head_branch
+                    break
+    except GitHubPullRequestComposeRuntimeUnavailableError as error:
+        result["failure_kind"] = "setup"
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=TICKET_STEPS[0],
+            observed=str(error),
+        )
+        return
 
     result["compare_attempts"] = compare_attempts
 
     if successful_observation is None or successful_head_branch is None:
+        if _looks_like_unauthenticated_github_browser(compare_attempts):
+            result["failure_kind"] = "setup"
         if last_observation is not None:
             result["compare_surface"] = {
                 "head_branch": candidate_heads[min(len(compare_attempts), len(candidate_heads)) - 1],
@@ -287,16 +304,25 @@ def _evaluate_pull_request_compose_surface(
                 "description_selector": last_observation.description_selector,
             }
             result["screenshot"] = last_observation.screenshot_path
+        failure_prefix = (
+            "The automation did not have an authenticated GitHub browser session, so "
+            "it could not reach the live `Open a pull request` compose form needed to "
+            "inspect the generated PR description body.\n"
+            if result.get("failure_kind") == "setup"
+            else (
+                "The automation exercised live GitHub compare pages, but none reached "
+                "the `Open a pull request` compose surface needed to inspect the "
+                "generated PR description body.\n"
+            )
+        )
         _record_step(
             result,
             step=1,
             status="failed",
             action=TICKET_STEPS[0],
             observed=(
-                "The automation exercised live GitHub compare pages, but none reached "
-                "the `Open a pull request` compose surface needed to inspect the "
-                "generated PR description body.\n"
-                f"Repository: {verification.target_repository}\n"
+                failure_prefix
+                + f"Repository: {verification.target_repository}\n"
                 f"Default branch: {default_branch}\n"
                 f"Attempt summaries: {json.dumps(compare_attempts, indent=2)}"
             ),
@@ -635,11 +661,25 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if result.get("failure_kind") == "product":
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
+    attempted_compose_check = (
+        "* Opened a live GitHub compare page that reached {{Open a pull request}} "
+        "for a branch without an open PR and attempted to read the actual PR "
+        "description field value."
+        if passed or result.get("compare_url")
+        else (
+            "* Attempted to open a live GitHub compare page for a branch without an "
+            "open PR, but the run did not reach an authenticated {{Open a pull "
+            "request}} form."
+        )
+    )
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
@@ -649,11 +689,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "default-branch tree, branch list, open pull requests, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for {{{{{result['repository']}}}}}."
         ),
-        (
-            "* Opened a live GitHub compare page that reached {{Open a pull request}} "
-            "for a branch without an open PR and attempted to read the actual PR "
-            "description field value."
-        ),
+        attempted_compose_check,
         (
             "* Verified the accessibility checklist item against the actual PR "
             "description value exposed by the compose page."
@@ -689,6 +725,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     status = "Passed" if passed else "Failed"
+    attempted_compose_check = (
+        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR and attempted to read the actual PR description field value."
+        if passed or result.get("compare_url")
+        else (
+            "- Attempted to open a live GitHub compare page for a branch without an open PR, but the run did not reach an authenticated `Open a pull request` form."
+        )
+    )
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
@@ -698,7 +741,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"default-branch tree, branch list, open pull requests, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for `{result['repository']}`."
         ),
-        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR and attempted to read the actual PR description field value.",
+        attempted_compose_check,
         "- Verified the accessibility checklist item against the actual PR description value exposed by the compose page.",
         "",
         "### Observed result",
@@ -731,6 +774,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
+    failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
@@ -739,8 +783,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             "- Result: GitHub exposed the required PR-template checklist item in the PR body source."
             if passed
             else (
+                "- Result: the runner could not reach an authenticated GitHub `Open a pull request` form, so this run is a setup limitation rather than a proven product defect."
+                if failure_kind == "setup"
+                else (
                 "- Result: GitHub did not expose the required PR-template checklist "
                 "item in the actual PR description field used for the live compose flow."
+                )
             )
         ),
         f"- Compose URL: `{result.get('compare_url', '<unavailable>')}`",
@@ -893,6 +941,25 @@ def _snippet(text: str, *, limit: int = 400) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - 3] + "..."
+
+
+def _looks_like_unauthenticated_github_browser(
+    compare_attempts: list[dict[str, object]],
+) -> bool:
+    if not compare_attempts:
+        return False
+    for attempt in compare_attempts:
+        body_text_excerpt = attempt.get("body_text_excerpt")
+        if not isinstance(body_text_excerpt, str):
+            continue
+        if _looks_like_unauthenticated_compare_surface(body_text_excerpt):
+            return True
+    return False
+
+
+def _looks_like_unauthenticated_compare_surface(body_text: str) -> bool:
+    lowered_body = body_text.lower()
+    return "sign in" in lowered_body and "comparing changes" in lowered_body
 
 
 if __name__ == "__main__":
