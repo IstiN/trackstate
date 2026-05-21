@@ -465,6 +465,18 @@ def _ensure_active_local_precondition(
             }
     )
     result["precondition_local_row_before_switch"] = local_row_summary
+    _record_human_verification(
+        result,
+        check=(
+            "Waited for startup restoration, then opened the workspace switcher to "
+            "inspect the visible active workspace state before the ticket steps."
+        ),
+        observed=(
+            f"trigger_label={trigger.semantic_label!r}; "
+            f"local_row={json.dumps(local_row_summary, indent=2)}; "
+            f"switcher_text={switcher.switcher_text!r}"
+        ),
+    )
     if local_row is not None and local_row.state_label == "Local Git":
         try:
             trigger = page.switch_to_workspace(
@@ -829,8 +841,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 {
                     "prepared_local_workspace": result.get("prepared_local_workspace"),
                     "trigger_observation": result.get("trigger_observation"),
-                    "precondition_switcher_observation": result.get(
-                        "precondition_switcher_observation"
+                    "precondition_switcher_before_switch": result.get(
+                        "precondition_switcher_before_switch"
+                    ),
+                    "precondition_local_row_before_switch": result.get(
+                        "precondition_local_row_before_switch"
                     ),
                     "active_local_row": result.get("active_local_row"),
                     "switcher_observation": result.get("switcher_observation"),
