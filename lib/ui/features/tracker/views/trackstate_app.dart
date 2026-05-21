@@ -553,8 +553,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
-        normalizedReason.contains('unsupported operation') ||
+        normalizedReason.contains('unsupported operation: process.run') ||
         normalizedReason.contains('process.run') ||
+        normalizedReason.contains('unsupported operation') ||
         normalizedReason.contains('process.start') ||
         normalizedReason.contains('not supported on the web') ||
         normalizedReason.contains('local git runtime is not available') ||
@@ -758,6 +759,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     return reason.contains('file system access') ||
         reason.contains('handle revalidation') ||
         reason.contains('revalidation') ||
+        reason.contains('busy') ||
+        reason.contains('temporar') ||
+        reason.contains('transient') ||
+        reason.contains('locked') ||
+        reason.contains('unavailable') ||
         reason.contains('permission') ||
         reason.contains('pending');
   }
@@ -11676,6 +11682,8 @@ class _LabelTokenField extends StatelessWidget {
         Semantics(
           label: label,
           textField: true,
+          enabled: enabled,
+          value: controller.text,
           child: TextField(
             controller: controller,
             enabled: enabled,
@@ -12068,6 +12076,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: summaryLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _summaryController.text,
                                 child: TextField(
                                   controller: _summaryController,
                                   enabled: canEditFields,
@@ -12080,6 +12090,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: l10n.description,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _descriptionController.text,
                                 child: TextField(
                                   controller: _descriptionController,
                                   minLines: 3,
@@ -12200,6 +12212,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: assigneeLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _assigneeController.text,
                                 child: TextField(
                                   controller: _assigneeController,
                                   enabled: canEditFields,
@@ -12772,6 +12786,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: summaryLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _summaryController.text,
                                 child: TextField(
                                   controller: _summaryController,
                                   enabled: canEditFields,
@@ -12791,6 +12807,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: l10n.description,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _descriptionController.text,
                                 child: TextField(
                                   controller: _descriptionController,
                                   minLines: 4,
@@ -12833,6 +12851,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: assigneeLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _assigneeController.text,
                                 child: TextField(
                                   controller: _assigneeController,
                                   enabled: canEditFields,
@@ -13511,6 +13531,8 @@ class _CommentsTab extends StatelessWidget {
         Semantics(
           label: l10n.comments,
           textField: true,
+          enabled: !isSaving && !isLoading && !writeBlocked,
+          value: controller.text,
           child: TextField(
             controller: controller,
             minLines: 3,
