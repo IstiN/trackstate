@@ -1059,7 +1059,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 def _bug_description(result: dict[str, object]) -> str:
     lines = [
-        f"# {TICKET_KEY} - Workspace switcher becomes available only after delayed auth is ready during startup restoration",
+        f"# {TICKET_KEY} - {_bug_title(result)}",
         "",
         "## Summary",
         _failed_step_summary(result),
@@ -1092,6 +1092,21 @@ def _bug_description(result: dict[str, object]) -> str:
     if result.get("screenshot"):
         lines.append(f"- Screenshot: `{result['screenshot']}`")
     return "\n".join(lines) + "\n"
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    mode = _step_two_failure_mode(result)
+    if mode == "auth-probe-never-started":
+        return (
+            "Delayed GitHub /user verification never starts during active local "
+            "workspace startup restoration"
+        )
+    if mode == "switcher-available-after-auth-ready":
+        return (
+            "Workspace switcher becomes available only after delayed auth is ready "
+            "during startup restoration"
+        )
+    return "Delayed-auth startup restoration does not reach the expected Local Git transition"
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
@@ -1135,9 +1150,30 @@ def _actual_result(result: dict[str, object]) -> str:
             and step.get("step") == 2
             and step.get("status") == "failed"
         ):
+            mode = _step_two_failure_mode(result)
+            if mode == "auth-probe-never-started":
+                return (
+                    "Workspace switcher opened from the startup shell, but the delayed "
+                    "GitHub `/user` verification request never started for the active "
+                    "local workspace. "
+                    f"Trigger visible after startup: {trigger_observed_after_start_seconds!r} seconds. "
+                    f"Delayed `/user` probe started after: {auth_probe_started_after_start_seconds!r} seconds. "
+                    f"Delayed `/user` probe released after: {auth_probe_released_after_start_seconds!r} seconds. "
+                    f"Observed step-2 failure: {step.get('observed')}"
+                )
+            if mode == "switcher-available-after-auth-ready":
+                return (
+                    "The delayed GitHub `/user` auth probe was already finished by the "
+                    "time Workspace switcher became usable for inspection, so the "
+                    "pending-auth phase could not be observed. "
+                    f"Trigger visible after startup: {trigger_observed_after_start_seconds!r} seconds. "
+                    f"Delayed `/user` probe started after: {auth_probe_started_after_start_seconds!r} seconds. "
+                    f"Delayed `/user` probe released after: {auth_probe_released_after_start_seconds!r} seconds. "
+                    f"Observed step-2 failure: {step.get('observed')}"
+                )
             return (
-                "The startup shell did not expose Workspace switcher early enough to "
-                "inspect the pending-auth phase. "
+                "The delayed-auth startup flow failed during the step-2 pending-phase "
+                "inspection. "
                 f"Trigger visible after startup: {trigger_observed_after_start_seconds!r} seconds. "
                 f"Delayed `/user` probe started after: {auth_probe_started_after_start_seconds!r} seconds. "
                 f"Delayed `/user` probe released after: {auth_probe_released_after_start_seconds!r} seconds. "
@@ -1155,6 +1191,29 @@ def _actual_result(result: dict[str, object]) -> str:
             f"Final local row: {json.dumps(final_local_row, ensure_ascii=True)}."
         )
     return str(result.get("error", "The delayed-auth startup flow failed."))
+
+
+def _step_two_failure_mode(result: dict[str, object]) -> str | None:
+    for step in result.get("steps", []):
+        if (
+            isinstance(step, dict)
+            and step.get("step") == 2
+            and step.get("status") == "failed"
+        ):
+            observed = str(step.get("observed", ""))
+            if (
+                result.get("auth_probe_started_after_start_seconds") is None
+                or "never started" in observed
+            ):
+                return "auth-probe-never-started"
+            if (
+                result.get("auth_probe_released_after_start_seconds") is not None
+                or "already completed" in observed
+                or "opened only after" in observed
+            ):
+                return "switcher-available-after-auth-ready"
+            return "step-two-pending-phase-failure"
+    return None
 
 
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
