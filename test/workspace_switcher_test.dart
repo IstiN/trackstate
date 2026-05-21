@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -21,6 +23,122 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  testWidgets(
+    'startup restore exposes the local workspace switcher state before delayed auth completes',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: activeLocalWorkspaceId,
+              displayName: 'Active local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/trackstate-demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:stable/repo@main',
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: activeLocalWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens[activeLocalWorkspaceId] = 'github-token';
+      final delayedRepository = _DelayedConnectTrackStateRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: service,
+          authStore: authStore,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => _QueuedLoadTrackStateRepository(
+                loadResults: [
+                  UnsupportedError(
+                    'Unsupported operation: Process.run is not supported on the web.',
+                  ),
+                ],
+              ),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: Active local workspace, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Unavailable')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Connect GitHub')),
+        findsNothing,
+      );
+
+      delayedRepository.completeConnect();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: Active local workspace, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'startup restore skips an invalid workspace and opens the next valid saved workspace',
@@ -3395,4 +3513,24 @@ class _QueuedLoadTrackStateRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _DelayedConnectTrackStateRepository extends DemoTrackStateRepository {
+  _DelayedConnectTrackStateRepository({required super.snapshot});
+
+  final Completer<RepositoryUser> _connectCompleter =
+      Completer<RepositoryUser>();
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) =>
+      _connectCompleter.future;
+
+  void completeConnect() {
+    if (_connectCompleter.isCompleted) {
+      return;
+    }
+    _connectCompleter.complete(
+      const RepositoryUser(login: 'demo-user', displayName: 'Demo User'),
+    );
+  }
 }
