@@ -6,7 +6,26 @@ import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web/web.dart' as web;
 
 import 'browser_workspace_switcher_focus_matcher.dart';
+import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
+
+class BrowserViewportScrollSnapshot {
+  const BrowserViewportScrollSnapshot(this._targets);
+
+  final List<_BrowserViewportTrackedScrollTarget> _targets;
+
+  bool get isEmpty => _targets.isEmpty;
+}
+
+class _BrowserViewportTrackedScrollTarget {
+  const _BrowserViewportTrackedScrollTarget({
+    required this.target,
+    this.element,
+  });
+
+  final BrowserWorkspaceSwitcherTrackedScrollTarget target;
+  final web.HTMLElement? element;
+}
 
 class BrowserWorkspaceSwitcherFocusMonitorSubscription {
   BrowserWorkspaceSwitcherFocusMonitorSubscription(this._cancel);
@@ -129,28 +148,73 @@ bool isBrowserFocusWithinWorkspaceSwitcher() {
   );
 }
 
-double captureBrowserViewportScrollY() {
-  final target = _resolveBackgroundScrollTarget();
-  if (target.useWindow) {
-    return web.window.scrollY;
+BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
+  final elementCandidates = _backgroundScrollElementCandidates();
+  final targets = captureBrowserWorkspaceSwitcherScrollTargets(
+    windowCandidate: _windowBackgroundScrollCandidate(),
+    elementCandidates: [
+      for (final candidate in elementCandidates) candidate.candidate,
+    ],
+  );
+  if (targets.isEmpty) {
+    return const BrowserViewportScrollSnapshot([]);
   }
-  return target.element?.scrollTop.toDouble() ?? 0;
+  final elementsByKey = <String, web.HTMLElement>{
+    for (final candidate in elementCandidates)
+      candidate.candidate.key: candidate.element,
+  };
+  return BrowserViewportScrollSnapshot([
+    for (final target in targets)
+      _BrowserViewportTrackedScrollTarget(
+        target: target,
+        element: target.isWindow ? null : elementsByKey[target.key],
+      ),
+  ]);
 }
 
-void restoreBrowserViewportScrollY({required double scrollY}) {
+void restoreBrowserViewportScrollSnapshot({
+  required BrowserViewportScrollSnapshot snapshot,
+}) {
+  if (snapshot.isEmpty) {
+    return;
+  }
   Timer? timer;
   var attemptCount = 0;
 
   void restore() {
     attemptCount += 1;
-    final target = _resolveBackgroundScrollTarget();
-    if (target.useWindow) {
-      web.window.scrollTo(web.window.scrollX.toJS, scrollY);
-    } else {
-      target.element?.scrollTop = scrollY.toInt();
+    final currentElementScrollYByKey = <String, double>{};
+    for (final target in snapshot._targets) {
+      final element = target.element;
+      if (element == null || !element.isConnected) {
+        continue;
+      }
+      currentElementScrollYByKey[target.target.key] = element.scrollTop
+          .toDouble();
     }
-    final restoredScrollY = captureBrowserViewportScrollY();
-    if ((restoredScrollY - scrollY).abs() <= 1 || attemptCount >= 12) {
+    final targetsToRestore =
+        browserWorkspaceSwitcherScrollTargetsNeedingRestore(
+          capturedTargets: [
+            for (final target in snapshot._targets) target.target,
+          ],
+          currentWindowScrollY: web.window.scrollY,
+          currentElementScrollYByKey: currentElementScrollYByKey,
+        );
+    for (final target in targetsToRestore) {
+      if (target.isWindow) {
+        web.window.scrollTo(web.window.scrollX.toJS, target.scrollY);
+        continue;
+      }
+      final element = _snapshotElementForKey(
+        snapshot: snapshot,
+        key: target.key,
+      );
+      if (element == null || !element.isConnected) {
+        continue;
+      }
+      element.scrollTop = target.scrollY.round();
+    }
+    if (targetsToRestore.isEmpty || attemptCount >= 12) {
       timer?.cancel();
       timer = null;
     }
@@ -160,34 +224,7 @@ void restoreBrowserViewportScrollY({required double scrollY}) {
   Timer.run(restore);
 }
 
-class _BrowserBackgroundScrollTarget {
-  const _BrowserBackgroundScrollTarget({required this.useWindow, this.element});
-
-  final bool useWindow;
-  final web.Element? element;
-}
-
-class _BrowserBackgroundScrollCandidate {
-  const _BrowserBackgroundScrollCandidate({
-    required this.element,
-    required this.scrollHeight,
-    required this.clientHeight,
-    required this.overflowY,
-    required this.width,
-    required this.height,
-    required this.text,
-  });
-
-  final web.Element element;
-  final double scrollHeight;
-  final double clientHeight;
-  final String overflowY;
-  final double width;
-  final double height;
-  final String text;
-}
-
-_BrowserBackgroundScrollTarget _resolveBackgroundScrollTarget() {
+BrowserWorkspaceSwitcherScrollCandidate _windowBackgroundScrollCandidate() {
   final scrollingElement =
       web.document.scrollingElement ??
       web.document.documentElement ??
@@ -201,62 +238,116 @@ _BrowserBackgroundScrollTarget _resolveBackgroundScrollTarget() {
   );
   final windowViewportHeight = web.window.innerHeight.toDouble();
   final windowMaxScrollY = math.max(
-    0,
+    0.0,
     windowScrollHeight - windowViewportHeight,
   );
-  final candidates = <_BrowserBackgroundScrollCandidate>[];
-  final nodes = web.document.querySelectorAll('*');
+  return BrowserWorkspaceSwitcherScrollCandidate(
+    key: 'window',
+    scrollY: web.window.scrollY,
+    maxScrollY: windowMaxScrollY,
+    width: web.window.innerWidth.toDouble(),
+    height: windowViewportHeight,
+    explicitlyScrollable: true,
+    isWindow: true,
+  );
+}
+
+class _BrowserBackgroundScrollElementCandidate {
+  const _BrowserBackgroundScrollElementCandidate({
+    required this.candidate,
+    required this.element,
+  });
+
+  final BrowserWorkspaceSwitcherScrollCandidate candidate;
+  final web.HTMLElement element;
+}
+
+List<_BrowserBackgroundScrollElementCandidate>
+_backgroundScrollElementCandidates() {
+  final minimumWidth = math.min(web.window.innerWidth * 0.35, 280);
+  final minimumHeight = math.min(web.window.innerHeight * 0.35, 200);
+  final candidates = <_BrowserBackgroundScrollElementCandidate>[];
+  final seenKeys = <String>{};
+  final nodes = web.document.querySelectorAll(
+    [
+      'flt-semantics-host',
+      'flt-semantics',
+      'main',
+      'section',
+      '[role="main"]',
+      '[style*="overflow"]',
+      '[class*="scroll"]',
+      '[class*="viewport"]',
+    ].join(','),
+  );
   for (var index = 0; index < nodes.length; index += 1) {
     final node = nodes.item(index);
     if (node == null) {
       continue;
     }
-    final element = node as web.Element;
+    final element = node as web.HTMLElement;
     if (!_isVisible(element)) {
       continue;
     }
     final rect = element.getBoundingClientRect();
     final style = web.window.getComputedStyle(element);
-    final htmlElement = element as web.HTMLElement;
-    final candidate = _BrowserBackgroundScrollCandidate(
-      element: element,
-      scrollHeight: element.scrollHeight.toDouble(),
-      clientHeight: element.clientHeight.toDouble(),
-      overflowY: style.overflowY,
-      width: rect.width,
-      height: rect.height,
-      text: _normalizeText(htmlElement.innerText),
-    );
-    if (candidate.scrollHeight - candidate.clientHeight <= 40 ||
-        candidate.width < math.min(web.window.innerWidth * 0.35, 280) ||
-        candidate.height < math.min(web.window.innerHeight * 0.35, 200) ||
-        candidate.text.startsWith('Workspace switcher')) {
+    if (rect.width < minimumWidth || rect.height < minimumHeight) {
       continue;
     }
-    candidates.add(candidate);
+    final key = _browserBackgroundScrollCandidateKey(
+      element: element,
+      index: index,
+    );
+    if (!seenKeys.add(key)) {
+      continue;
+    }
+    final candidate = BrowserWorkspaceSwitcherScrollCandidate(
+      key: key,
+      scrollY: element.scrollTop.toDouble(),
+      maxScrollY: math.max(
+        0,
+        element.scrollHeight.toDouble() - element.clientHeight.toDouble(),
+      ),
+      width: rect.width,
+      height: rect.height,
+      explicitlyScrollable:
+          style.overflowY == 'scroll' || style.overflowY == 'auto',
+      textSummary: _normalizeText(element.innerText),
+    );
+    candidates.add(
+      _BrowserBackgroundScrollElementCandidate(
+        candidate: candidate,
+        element: element,
+      ),
+    );
   }
-  candidates.sort(
-    (left, right) => _candidateScore(right).compareTo(_candidateScore(left)),
-  );
-  final bestCandidate = candidates.isEmpty ? null : candidates.first;
-  final useWindow =
-      windowMaxScrollY > 0 ||
-      bestCandidate == null ||
-      windowMaxScrollY >=
-          math.max(80, bestCandidate.scrollHeight - bestCandidate.clientHeight);
-  return _BrowserBackgroundScrollTarget(
-    useWindow: useWindow,
-    element: bestCandidate?.element,
-  );
+  return candidates;
 }
 
-double _candidateScore(_BrowserBackgroundScrollCandidate candidate) {
-  final area = candidate.width * candidate.height;
-  final overflowBonus =
-      candidate.overflowY == 'scroll' || candidate.overflowY == 'auto'
-      ? 1000000
-      : 0;
-  return overflowBonus + area + candidate.scrollHeight;
+web.HTMLElement? _snapshotElementForKey({
+  required BrowserViewportScrollSnapshot snapshot,
+  required String key,
+}) {
+  for (final candidate in snapshot._targets) {
+    if (candidate.target.key == key) {
+      return candidate.element;
+    }
+  }
+  return null;
+}
+
+String _browserBackgroundScrollCandidateKey({
+  required web.HTMLElement element,
+  required int index,
+}) {
+  final semanticsIdentifier = element.getAttribute('flt-semantics-identifier');
+  if (semanticsIdentifier case final value? when value.trim().isNotEmpty) {
+    return 'semantics:$value';
+  }
+  if (element.id case final value when value.trim().isNotEmpty) {
+    return 'id:${element.localName}:$value';
+  }
+  return 'element:${element.localName}:$index';
 }
 
 String _normalizeText(String? value) {

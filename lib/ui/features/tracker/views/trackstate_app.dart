@@ -125,7 +125,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
-  double? _desktopWorkspaceSwitcherScrollY;
+  browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
+  _desktopWorkspaceSwitcherScrollSnapshot;
   String? _requestedWorkspaceSwitcherRowFocusId;
   int _workspaceSwitcherRowFocusRequestVersion = 0;
   final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
@@ -842,10 +843,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     String? workspaceSwitcherFocusWorkspaceId,
   }) async {
-    final preservedBrowserScrollY = _isDesktopWorkspaceSwitcherVisible && kIsWeb
-        ? (_desktopWorkspaceSwitcherScrollY ??
+    final preservedBrowserScrollSnapshot =
+        _isDesktopWorkspaceSwitcherVisible && kIsWeb
+        ? (_desktopWorkspaceSwitcherScrollSnapshot ??
               browser_workspace_switcher_focus_monitor
-                  .captureBrowserViewportScrollY())
+                  .captureBrowserViewportScrollSnapshot())
         : null;
     final previousViewModel = viewModel;
     final prepared = await _prepareWorkspaceSwitch(
@@ -864,7 +866,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       previousViewModel: previousViewModel,
       workspaceState: selectedState,
       workspaceSwitcherFocusWorkspaceId: workspaceSwitcherFocusWorkspaceId,
-      preservedBrowserScrollY: preservedBrowserScrollY,
+      preservedBrowserScrollSnapshot: preservedBrowserScrollSnapshot,
     );
   }
 
@@ -873,7 +875,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     required TrackerViewModel previousViewModel,
     WorkspaceProfilesState? workspaceState,
     String? workspaceSwitcherFocusWorkspaceId,
-    double? preservedBrowserScrollY,
+    browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
+    preservedBrowserScrollSnapshot,
   }) async {
     if (!mounted) {
       prepared.viewModel.dispose();
@@ -921,9 +924,11 @@ class _TrackStateAppState extends State<TrackStateApp>
             workspaceSwitcherFocusWorkspaceId,
           ),
         );
-        if (preservedBrowserScrollY != null) {
+        if (preservedBrowserScrollSnapshot != null) {
           browser_workspace_switcher_focus_monitor
-              .restoreBrowserViewportScrollY(scrollY: preservedBrowserScrollY);
+              .restoreBrowserViewportScrollSnapshot(
+                snapshot: preservedBrowserScrollSnapshot,
+              );
         }
       });
     } else if (_isDesktopWorkspaceSwitcherVisible &&
@@ -933,9 +938,11 @@ class _TrackStateAppState extends State<TrackStateApp>
           return;
         }
         _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
-        if (preservedBrowserScrollY != null) {
+        if (preservedBrowserScrollSnapshot != null) {
           browser_workspace_switcher_focus_monitor
-              .restoreBrowserViewportScrollY(scrollY: preservedBrowserScrollY);
+              .restoreBrowserViewportScrollSnapshot(
+                snapshot: preservedBrowserScrollSnapshot,
+              );
         }
       });
     }
@@ -1142,9 +1149,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       _desktopWorkspaceSwitcherProfileOrder = [
         for (final profile in _workspaceState.profiles) profile.id,
       ];
-      _desktopWorkspaceSwitcherScrollY = kIsWeb
+      _desktopWorkspaceSwitcherScrollSnapshot = kIsWeb
           ? browser_workspace_switcher_focus_monitor
-                .captureBrowserViewportScrollY()
+                .captureBrowserViewportScrollSnapshot()
           : null;
       _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
       if (activeWorkspaceId != null) {
@@ -1229,7 +1236,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
       _desktopWorkspaceSwitcherProfileOrder = null;
-      _desktopWorkspaceSwitcherScrollY = null;
+      _desktopWorkspaceSwitcherScrollSnapshot = null;
       _requestedWorkspaceSwitcherRowFocusId = null;
     });
     if (!restoreTriggerFocus) {
