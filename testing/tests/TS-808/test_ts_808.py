@@ -17,10 +17,14 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
+from testing.components.pages.live_project_settings_page import (  # noqa: E402
+    LiveProjectSettingsPage,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
@@ -36,12 +40,14 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
+TRIGGER_WAIT_SECONDS = 90
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_failure.png"
@@ -87,6 +93,7 @@ def main() -> None:
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
+        "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "steps": [],
         "human_verification": [],
     }
@@ -115,6 +122,7 @@ def main() -> None:
                         f"Observed body text:\n{runtime.body_text}",
                     )
 
+                settings_page = LiveProjectSettingsPage(tracker_page)
                 page.dismiss_connection_banner()
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 initial_trigger = page.observe_trigger()
@@ -122,8 +130,8 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the signed-in shell before step 1 and captured the active "
-                        "workspace trigger state."
+                        "Viewed the live shell before the ticket steps and captured the "
+                        "current workspace trigger state."
                     ),
                     observed=(
                         f"trigger_label={initial_trigger.semantic_label!r}; "
@@ -134,6 +142,10 @@ def main() -> None:
                 try:
                     trigger = _ensure_active_local_precondition(
                         page=page,
+                        settings_page=settings_page,
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
                         initial_trigger=initial_trigger,
                         result=result,
                     )
@@ -408,28 +420,92 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
 def _ensure_active_local_precondition(
     *,
     page: LiveWorkspaceSwitcherPage,
+    settings_page: LiveProjectSettingsPage,
+    token: str,
+    repository: str,
+    user_login: str,
     initial_trigger: WorkspaceSwitcherTriggerObservation,
     result: dict[str, object],
 ) -> WorkspaceSwitcherTriggerObservation:
-    if _trigger_matches_active_local_precondition(initial_trigger):
-        return initial_trigger
+    trigger = initial_trigger
+    current_body_text = page.current_body_text()
+    if "Connect GitHub" in current_body_text:
+        connection_body_text = settings_page.ensure_connected(
+            token=token,
+            repository=repository,
+            user_login=user_login,
+        )
+        result["precondition_connection_body_text"] = connection_body_text
+        page.dismiss_connection_banner()
+        trigger = page.observe_trigger()
+        result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
+
+    restored, trigger = poll_until(
+        probe=lambda: page.observe_trigger(timeout_ms=10_000),
+        is_satisfied=_trigger_matches_active_local_precondition,
+        timeout_seconds=TRIGGER_WAIT_SECONDS,
+        interval_seconds=5,
+    )
+    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
+    result["precondition_restored_within_wait"] = restored
+    if _trigger_matches_active_local_precondition(trigger):
+        return trigger
 
     switcher = page.open_and_observe()
-    result["precondition_switcher_observation"] = _switcher_payload(switcher)
+    result["precondition_switcher_before_switch"] = _switcher_payload(switcher)
     local_row = _find_named_local_row(switcher)
     local_row_summary = (
         _row_payload(local_row)
         if local_row is not None
         else {
-            "matched_display_name": LOCAL_DISPLAY_NAME,
-            "matched_target": LOCAL_TARGET,
-            "available_rows": [_row_payload(row) for row in switcher.rows],
-        }
+                "matched_display_name": LOCAL_DISPLAY_NAME,
+                "matched_target": LOCAL_TARGET,
+                "available_rows": [_row_payload(row) for row in switcher.rows],
+                "switcher_text": switcher.switcher_text,
+            }
     )
+    result["precondition_local_row_before_switch"] = local_row_summary
+    if local_row is not None and local_row.state_label == "Local Git":
+        try:
+            trigger = page.switch_to_workspace(
+                display_name=LOCAL_DISPLAY_NAME,
+                target_type_label="Local",
+                detail_contains=LOCAL_TARGET,
+                expected_state_label="Local Git",
+            )
+        except AssertionError as error:
+            raise AssertionError(
+                "Precondition failed before step 1: startup did not restore the prepared "
+                f"active local workspace within {TRIGGER_WAIT_SECONDS} seconds, and the "
+                "app could not activate the local workspace manually before the TS-808 "
+                "checks began.\n"
+                f"Observed trigger label after wait: {trigger.semantic_label!r}\n"
+                f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
+                f"Observed switcher text:\n{switcher.switcher_text}\n"
+                f"{error}"
+            ) from error
+        result["precondition_trigger_after_switch"] = _trigger_payload(trigger)
+        if "Connect GitHub" in page.current_body_text():
+            connection_body_text = settings_page.ensure_connected(
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+            result["precondition_connection_body_text_after_switch"] = (
+                connection_body_text
+            )
+            page.dismiss_connection_banner()
+            trigger = page.observe_trigger()
+            result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
+        if _trigger_matches_active_local_precondition(trigger):
+            return trigger
+
     raise AssertionError(
-        "Precondition failed before step 1: the app did not start with the prepared "
-        "signed-in active local workspace already selected in the `Local Git` state.\n"
-        f"Observed trigger label: {initial_trigger.semantic_label!r}\n"
+        "Precondition failed before step 1: after waiting "
+        f"{TRIGGER_WAIT_SECONDS} seconds for startup restoration, the app still could "
+        "not reach the prepared signed-in active local workspace state required for "
+        "TS-808.\n"
+        f"Observed trigger label after wait: {trigger.semantic_label!r}\n"
         f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
@@ -545,6 +621,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    REVIEW_REPLIES_PATH.write_text('{"replies":[]}\n', encoding="utf-8")
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
@@ -566,6 +643,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    REVIEW_REPLIES_PATH.write_text('{"replies":[]}\n', encoding="utf-8")
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
@@ -581,7 +659,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
+        "* Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and the configured GitHub credentials available for the signed-in precondition flow.",
         "* Opened *Workspace switcher* and verified the selected row represented the active local workspace in the visible {{Local Git}} state.",
         "* Verified the selected active local row did not expose any visible {{Connect GitHub}} action, button, or visible row text while signed in.",
         "",
@@ -626,7 +704,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
+        "- Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and the configured GitHub credentials available for the signed-in precondition flow.",
         "- Opened **Workspace switcher** and verified the selected row represented the active local workspace in the visible `Local Git` state.",
         "- Verified the selected active local row did not expose any visible `Connect GitHub` action, button, or visible row text while signed in.",
         "",
@@ -672,7 +750,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-808 live workspace-switcher coverage for the signed-in active-local workspace state.",
+        "- Added TS-808 live workspace-switcher coverage for the signed-in active-local workspace state, including precondition handling that tries to switch to the prepared local workspace before the ticket steps.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -856,8 +934,8 @@ def _bug_title(result: dict[str, object]) -> str:
         )
     if "Precondition failed before step 1" in error:
         return (
-            f"{TICKET_KEY} - Signed-in active local workspace was not restored before "
-            "workspace-switcher verification"
+            f"{TICKET_KEY} - Startup did not restore the signed-in active local "
+            "workspace before verification"
         )
     return (
         f"{TICKET_KEY} - Active local workspace did not meet the signed-in Local Git "
@@ -882,10 +960,10 @@ def _bug_capability_gap(result: dict[str, object]) -> str:
         )
     if "Precondition failed before step 1" in error:
         return (
-            "The app did not restore the prepared active local workspace as the current "
-            "signed-in workspace before the ticket steps started, even though browser "
-            "storage pointed at the local workspace and the local path existed as a git "
-            "repository."
+            "After waiting for startup restoration, the app still could not reach the "
+            "signed-in active local workspace state needed for the TS-808 row-level "
+            "visibility check. The trigger remained on the hosted workspace and the "
+            "prepared local row did not become the active `Local Git` workspace."
         )
     return (
         "The TS-808 scenario could not reach the expected signed-in active local "

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
+import '../../core/models/issue_edit_layout_observation.dart';
 import '../../core/models/issue_edit_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
@@ -92,6 +93,34 @@ class IssueEditAccessibilityRobot {
     if (editIssueSurface.evaluate().isEmpty) {
       throw StateError('The Edit issue surface is not visible.');
     }
+  }
+
+  Future<void> resizeToViewport({
+    required double width,
+    required double height,
+  }) async {
+    tester.view.physicalSize = Size(width, height);
+    tester.view.devicePixelRatio = 1;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+  }
+
+  IssueEditLayoutObservation observeLayout() {
+    expectEditIssueSurfaceVisible();
+    final rect = tester.getRect(editIssueSurface.first);
+    final viewportWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final viewportHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    return IssueEditLayoutObservation(
+      viewportWidth: viewportWidth,
+      viewportHeight: viewportHeight,
+      surfaceLeft: rect.left,
+      surfaceTop: rect.top,
+      surfaceWidth: rect.width,
+      surfaceHeight: rect.height,
+    );
   }
 
   bool showsText(String text) =>

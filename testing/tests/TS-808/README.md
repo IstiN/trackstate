@@ -2,7 +2,9 @@
 
 Verifies that the live desktop TrackState workspace switcher hides the
 **Connect GitHub** control for the currently active local workspace when the
-user is already signed in to GitHub.
+user is already signed in to GitHub. The setup switches to the prepared local
+workspace and completes the local GitHub connection before the ticket steps if
+the live app still exposes **Connect GitHub** during setup.
 
 ## Install dependencies
 

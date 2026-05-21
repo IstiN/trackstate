@@ -422,7 +422,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
-  @override
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
