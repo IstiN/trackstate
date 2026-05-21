@@ -11,6 +11,7 @@ launchCreateIssueAccessibilityFixture(
   WidgetTester tester, {
   double? initialViewportWidth,
   double? initialViewportHeight,
+  bool startInDarkTheme = false,
 }) async {
   SharedPreferences.setMockInitialValues({});
 
@@ -22,6 +23,7 @@ launchCreateIssueAccessibilityFixture(
   await screen.launch(
     initialViewportWidth: initialViewportWidth,
     initialViewportHeight: initialViewportHeight,
+    startInDarkTheme: startInDarkTheme,
   );
   return screen;
 }

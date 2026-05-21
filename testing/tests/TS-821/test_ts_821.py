@@ -529,6 +529,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Rework summary",
         "- Removed the `FLUTTER-VIEW` fallback that could mark the pre-Tab blur setup as switcher-owned even when the ownership probe failed.",
+        "- Kept the shared Dashboard navigation helper on a real Playwright click so the live test still opens the current deployed desktop view reliably.",
         "- TS-821 now proceeds only when the blur helper can positively prove switcher-owned focus via switcher-specific signals before pressing `Tab`.",
         "",
         "## What was automated",
@@ -580,6 +581,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         "- Removed the `FLUTTER-VIEW` fallback that could turn a failed pre-Tab ownership probe into a false success.",
+        "- Kept the shared Dashboard navigation helper on a real Playwright click for the current deployed UI.",
         "- TS-821 now only treats the blur setup as valid when the ownership probe positively attributes focus to the switcher or its trigger.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
@@ -695,11 +697,11 @@ def _step3_product_bug_description(result: dict[str, object]) -> str:
             "",
             "## Missing or broken production capability",
             (
-                "The live workspace switcher flow does not expose a production-visible "
-                "keyboard focus handoff from the open switcher to an external control. "
-                "After opening the panel and sending `Tab`, focus remains on the root "
-                "`FLUTTER-VIEW` element instead of advancing to a visible external "
-                "interactive control such as `Board` or `Create issue`."
+                "The live workspace switcher flow does not hand keyboard focus to a "
+                "clearly external, user-visible control after `Tab`. In this run, focus "
+                "left the selected workspace row but landed on the `Repository` input "
+                "while the probe still classified that target as being within the open "
+                "switcher bounds, so the required external blur path was not reached."
             ),
             "",
             "## Failing command",
