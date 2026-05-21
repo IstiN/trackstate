@@ -132,7 +132,7 @@ def main() -> None:
                     )
 
                 page.dismiss_connection_banner()
-                page.navigate_to_section("Settings")
+                page.open_settings()
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 trigger = page.observe_trigger()
                 result["trigger_observation"] = _trigger_payload(trigger)
@@ -313,6 +313,8 @@ def _prepare_scrollable_open_switcher(
     focus_before_arrow = _focus_saved_workspace_action_button(
         page=page,
         panel=panel,
+        active_workspace=active_workspace,
+        rows=saved_workspace_rows,
     )
     baseline_scroll = page.observe_background_scroll()
 
@@ -332,8 +334,34 @@ def _focus_saved_workspace_action_button(
     *,
     page: LiveWorkspaceSwitcherPage,
     panel: WorkspaceSwitcherPanelObservation,
+    active_workspace: WorkspaceSwitcherSavedWorkspaceRowObservation,
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
     max_tabs: int = 12,
 ) -> dict[str, object]:
+    preferred_labels: list[str] = ["Save and switch"]
+    preferred_labels.extend(
+        label for label in active_workspace.action_labels if label != "Active"
+    )
+    for row in rows:
+        preferred_labels.extend(
+            label
+            for label in row.action_labels
+            if label != "Active" and label not in preferred_labels
+        )
+    for label in preferred_labels:
+        try:
+            observation = page.focus_switcher_button(
+                label,
+                panel=panel,
+                timeout_ms=2_000,
+            )
+        except AssertionError:
+            continue
+        payload = _switcher_focus_payload(observation)
+        payload["focus_strategy"] = "direct-button-focus"
+        payload["target_button_label"] = label
+        return payload
+
     page.focus_workspace_trigger(panel=panel)
     focus_steps: list[dict[str, object]] = []
     for tab_index in range(1, max_tabs + 1):
@@ -348,6 +376,7 @@ def _focus_saved_workspace_action_button(
             and payload.get("active_role") == "button"
         ):
             payload["focus_steps"] = focus_steps
+            payload["focus_strategy"] = "tab-navigation"
             return payload
     raise AssertionError(
         "Step 1 failed: keyboard Tab navigation did not reach any in-panel button "
@@ -365,6 +394,18 @@ def _press_arrow_down_and_observe(
     before_key_focus = page.observe_switcher_focus_target(panel=panel)
     page.start_transition_monitor()
     page.press_key("ArrowDown")
+    page.wait_for_surface_to_remain_open(
+        stability_ms=KEY_STABILITY_MS,
+        timeout_ms=4_000,
+    )
+    active_workspace_wait_error: str | None = None
+    try:
+        page.wait_for_active_saved_workspace(
+            SECONDARY_WORKSPACE_DISPLAY_NAME,
+            timeout_ms=10_000,
+        )
+    except AssertionError as error:
+        active_workspace_wait_error = str(error)
     switcher = page.observe_open_switcher(timeout_ms=4_000)
     panel = page.observe_open_panel(
         expected_container_kinds=("anchored-panel", "surface"),
@@ -387,6 +428,7 @@ def _press_arrow_down_and_observe(
         "after_scroll": _background_scroll_payload(after_scroll),
         "scroll_delta": after_scroll.scroll_y - before_scroll.scroll_y,
         "monitor": _monitor_payload(monitor),
+        "active_workspace_wait_error": active_workspace_wait_error,
     }
 
 
@@ -453,6 +495,7 @@ def _assert_arrow_down_navigated_without_background_scroll(
     before_scroll = observation["before_scroll"]
     after_scroll = observation["after_scroll"]
     scroll_delta = float(observation["scroll_delta"])
+    active_workspace_wait_error = observation.get("active_workspace_wait_error")
     assert isinstance(switcher, dict)
     assert isinstance(panel, dict)
     assert isinstance(monitor, dict)
@@ -487,6 +530,8 @@ def _assert_arrow_down_navigated_without_background_scroll(
             f"the active saved workspace became {active_workspace_name!r} instead of "
             f"{expected_active_workspace!r}",
         )
+    if active_workspace_wait_error:
+        failures.append(str(active_workspace_wait_error))
     after_scroll_y = float(after_scroll.get("scroll_y", 0.0))
     if abs(after_scroll_y - expected_scroll_y) > SCROLL_TOLERANCE_PX:
         failures.append(
