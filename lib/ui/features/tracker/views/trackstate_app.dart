@@ -1126,10 +1126,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _desktopWorkspaceSwitcherProfileOrder = [
         for (final profile in _workspaceState.profiles) profile.id,
       ];
-      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
-      if (activeWorkspaceId != null) {
-        _workspaceSwitcherRowFocusRequestVersion += 1;
-      }
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1141,7 +1138,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               activeWorkspaceId: activeWorkspaceId,
             );
       }
-      _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+      _workspaceSwitcherTriggerFocusNode.requestFocus();
     });
   }
 

@@ -1137,11 +1137,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(switcherSheet, findsOneWidget);
-      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
-      expect(
-        FocusManager.instance.primaryFocus?.debugLabel,
-        'desktop-workspace-switcher',
-      );
+      expect(_focusWithinFinder(tester, switcherTrigger), isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
