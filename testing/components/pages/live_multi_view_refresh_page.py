@@ -64,6 +64,20 @@ class EditSurfaceObservation:
         return self.viewport_height - (self.top + self.height)
 
 
+@dataclass(frozen=True)
+class LabeledTextFieldObservation:
+    label: str
+    value: str
+    enabled: bool
+    disabled: bool
+    read_only: bool
+    aria_label: str | None
+    aria_invalid: str | None
+    aria_describedby: str | None
+    aria_errormessage: str | None
+    outer_html: str
+
+
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
     _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
@@ -115,6 +129,17 @@ class LiveMultiViewRefreshPage:
         self.open_issue_from_current_section(
             issue_key=issue_key,
             issue_summary=issue_summary,
+        )
+        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
+        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+
+    def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
+        self.navigate_to_section("JQL Search")
+        label = self.visible_issue_open_label(issue_key=issue_key)
+        self._session.click(
+            f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
+            timeout_ms=30_000,
         )
         self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
         self._session.click(self._edit_button_selector, timeout_ms=30_000)
@@ -248,6 +273,92 @@ class LiveMultiViewRefreshPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return payload
+
+    def observe_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        payload = self._session.evaluate(
+            """
+            ({ dialogSelector, label }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return null;
+              }
+              const selectors = [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ];
+              for (const selector of selectors) {
+                const field = root.querySelector(selector);
+                if (!field) {
+                  continue;
+                }
+                const value =
+                  'value' in field && typeof field.value === 'string'
+                    ? field.value
+                    : (field.innerText || field.textContent || '').trim();
+                return {
+                  value,
+                  enabled: !field.disabled,
+                  disabled: !!field.disabled,
+                  readOnly: !!field.readOnly,
+                  ariaLabel: field.getAttribute('aria-label'),
+                  ariaInvalid: field.getAttribute('aria-invalid'),
+                  ariaDescribedBy: field.getAttribute('aria-describedby'),
+                  ariaErrormessage: field.getAttribute('aria-errormessage'),
+                  outerHtml: field.outerHTML.slice(0, 800),
+                };
+              }
+              return null;
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector, "label": label},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Human-style verification failed: the hosted Edit issue surface did not "
+                f"expose the visible {label!r} field.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        return LabeledTextFieldObservation(
+            label=label,
+            value=str(payload.get("value", "")),
+            enabled=bool(payload.get("enabled")),
+            disabled=bool(payload.get("disabled")),
+            read_only=bool(payload.get("readOnly")),
+            aria_label=(
+                str(payload["ariaLabel"]) if payload.get("ariaLabel") is not None else None
+            ),
+            aria_invalid=(
+                str(payload["ariaInvalid"])
+                if payload.get("ariaInvalid") is not None
+                else None
+            ),
+            aria_describedby=(
+                str(payload["ariaDescribedBy"])
+                if payload.get("ariaDescribedBy") is not None
+                else None
+            ),
+            aria_errormessage=(
+                str(payload["ariaErrormessage"])
+                if payload.get("ariaErrormessage") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def clear_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        field = self.observe_labeled_text_field(label)
+        if not field.enabled:
+            raise AssertionError(
+                f"Step failed: the visible {label} field was not editable.\n"
+                f"Enabled: {field.enabled}\n"
+                f"Disabled: {field.disabled}\n"
+                f"Read-only: {field.read_only}\n"
+                f"Outer HTML: {field.outer_html}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        self._session.fill(f'input[aria-label="{self._escape(label)}"]', "", timeout_ms=30_000)
+        return self.observe_labeled_text_field(label)
 
     def open_issue_from_current_section(
         self,
@@ -805,6 +916,40 @@ class LiveMultiViewRefreshPage:
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
+
+    def visible_issue_open_label(self, *, issue_key: str) -> str:
+        payload = self._session.evaluate(
+            """
+            (issueKey) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const matches = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][aria-label^="Open "]'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.startsWith(`Open ${issueKey} `));
+              return matches[0] ?? null;
+            }
+            """,
+            arg=issue_key,
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
 
     def _wait_for_issue_projection(
         self,
@@ -1386,3 +1531,7 @@ class LiveMultiViewRefreshPage:
             'flt-semantics-img[aria-label*="Issue detail '
             f'{escaped}"]'
         )
+
+    @staticmethod
+    def _escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
