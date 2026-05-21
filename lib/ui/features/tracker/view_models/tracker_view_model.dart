@@ -1806,7 +1806,7 @@ class TrackerViewModel extends ChangeNotifier {
     final storedToken =
         callbackToken ??
         await _authStore.readToken(
-          repository: _workspaceId == null ? target.repository : null,
+          repository: target.repository,
           workspaceId: _workspaceId,
         );
     if (storedToken == null || storedToken.isEmpty) {
@@ -1866,12 +1866,15 @@ class TrackerViewModel extends ChangeNotifier {
     if (!usesLocalPersistence || _workspaceId == null) {
       return;
     }
-    final storedToken = await _authStore.readToken(workspaceId: _workspaceId);
-    if (storedToken == null || storedToken.trim().isEmpty) {
-      return;
-    }
     final target = await _connectionTarget();
     if (target == null) {
+      return;
+    }
+    final storedToken = await _authStore.readToken(
+      repository: target.repository,
+      workspaceId: _workspaceId,
+    );
+    if (storedToken == null || storedToken.trim().isEmpty) {
       return;
     }
     try {

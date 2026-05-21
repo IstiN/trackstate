@@ -328,6 +328,24 @@ void main() {
   });
 
   test(
+    'view model restores hosted auth for a saved local workspace from a legacy repository token',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'legacy-token',
+      });
+      final viewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+        workspaceId: 'local:/tmp/trackstate-demo@main',
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.connectedUser?.login, 'demo-user');
+    },
+  );
+
+  test(
     'view model connects hosted auth against the provider write branch',
     () async {
       final repository = _HostedWriteBranchRepository(
