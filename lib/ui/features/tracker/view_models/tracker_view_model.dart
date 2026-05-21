@@ -362,6 +362,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _disposed = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
+  TrackStateRepository get repository => _repository;
   TrackerSection get section => _section;
   ThemePreference get themePreference => _themePreference;
   String get jql => _jql;
@@ -532,7 +533,7 @@ class TrackerViewModel extends ChangeNotifier {
   int get inProgressIssueCount =>
       issues.where((issue) => issue.status == IssueStatus.inProgress).length;
 
-  Future<void> load() async {
+  Future<void> load({bool deferAccessRestore = false}) async {
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
       maxResults: _searchPageSize,
@@ -545,11 +546,12 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       await _loadSnapshotAndSearch();
+      Future<void>? deferredAccessRestore;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
-        await _restoreLocalHostedAccess();
+        deferredAccessRestore = _restoreLocalHostedAccess();
       } else if (supportsGitHubAuth) {
-        await _restoreGitHubConnection();
+        deferredAccessRestore = _restoreGitHubConnection();
       }
       if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
@@ -559,7 +561,13 @@ class TrackerViewModel extends ChangeNotifier {
       if (hasStartupRecovery && _snapshot != null) {
         _section = TrackerSection.settings;
       }
+      if (!deferAccessRestore && deferredAccessRestore != null) {
+        await deferredAccessRestore;
+      }
       _configureWorkspaceSync();
+      if (deferAccessRestore && deferredAccessRestore != null) {
+        unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+      }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
       if (recovery == null) {
@@ -578,10 +586,19 @@ class TrackerViewModel extends ChangeNotifier {
           _section = TrackerSection.settings;
         }
       }
+
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _finishDeferredAccessRestore(Future<void> restore) async {
+    await restore;
+    if (_disposed) {
+      return;
+    }
+    notifyListeners();
   }
 
   Future<void> retryStartupRecovery() async {

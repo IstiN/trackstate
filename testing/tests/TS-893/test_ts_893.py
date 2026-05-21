@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import dataclass
 import json
+import os
 import platform
+import stat
 import subprocess
 import sys
+import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -28,18 +32,20 @@ from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E
     StoredWorkspaceProfilesRuntime,
 )
 
-TICKET_KEY = "TS-817"
+TICKET_KEY = "TS-893"
 TEST_CASE_TITLE = (
-    "Startup with active local workspace — workspace restored as Local Git "
-    "instead of Hosted fallback"
+    "Startup with transiently busy file system handle — workspace restored as "
+    "Local Git via retry"
 )
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-817/test_ts_817.py"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
+BUSY_RELEASE_SECONDS = 2.5
+LINKED_BUGS = ["TS-882"]
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -47,20 +53,84 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts817_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts817_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts893_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts893_failure.png"
 
 REQUEST_STEPS = [
-    "Refresh the browser or restart the application to trigger the initialization routine.",
-    "Monitor the application load sequence.",
-    "Open the Workspace switcher once the application shell is interactive.",
-    "Inspect the active workspace row.",
+    "Refresh the browser to trigger the application startup.",
+    "Release the directory lock or busy state while the application is in its initialization/retry phase.",
+    "Wait for the application shell to become interactive.",
+    "Open the Workspace switcher.",
 ]
 EXPECTED_RESULT = (
-    "The prepared active local workspace is restored as the selected active row "
-    "in the 'Local Git' state. The application does not default to the 'Hosted "
-    "setup workspace' or show the local row as 'Local Unavailable'."
+    "The application successfully retries the handle revalidation and restores "
+    "the local workspace as the active `Local Git` row. The user does not see "
+    "`Local Unavailable` or a fallback to `Hosted setup workspace` once the "
+    "handle becomes available."
 )
+
+
+@dataclass
+class _TransientBusyWorkspaceBlocker:
+    path: Path
+    release_after_seconds: float
+
+    def __post_init__(self) -> None:
+        self.original_mode: int | None = None
+        self.blocked_mode = 0
+        self.blocked_at_monotonic: float | None = None
+        self.released_at_monotonic: float | None = None
+        self.release_error: str | None = None
+        self._released = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "_TransientBusyWorkspaceBlocker":
+        self.original_mode = stat.S_IMODE(os.stat(self.path).st_mode)
+        os.chmod(self.path, self.blocked_mode)
+        self.blocked_at_monotonic = time.monotonic()
+        self._thread = threading.Thread(target=self._delayed_release, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        self._restore_now()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        return None
+
+    def _delayed_release(self) -> None:
+        try:
+            time.sleep(self.release_after_seconds)
+            self._restore_now()
+        except Exception as error:  # pragma: no cover - defensive bookkeeping
+            self.release_error = f"{type(error).__name__}: {error}"
+            self._released.set()
+
+    def _restore_now(self) -> None:
+        if self.original_mode is None or self._released.is_set():
+            return
+        os.chmod(self.path, self.original_mode)
+        self.released_at_monotonic = time.monotonic()
+        self._released.set()
+
+    def wait_for_release(self, *, timeout_seconds: float) -> bool:
+        return self._released.wait(timeout_seconds)
+
+    def snapshot(self) -> dict[str, object]:
+        current_mode = stat.S_IMODE(os.stat(self.path).st_mode)
+        return {
+            "path": str(self.path),
+            "release_after_seconds": self.release_after_seconds,
+            "original_mode_octal": (
+                oct(self.original_mode) if self.original_mode is not None else None
+            ),
+            "current_mode_octal": oct(current_mode),
+            "blocked_mode_octal": oct(self.blocked_mode),
+            "blocked_at_monotonic": self.blocked_at_monotonic,
+            "released_at_monotonic": self.released_at_monotonic,
+            "release_error": self.release_error,
+            "released": self._released.is_set(),
+        }
 
 
 def main() -> None:
@@ -73,11 +143,15 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-817 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+            "TS-893 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
+    blocker = _TransientBusyWorkspaceBlocker(
+        path=Path(LOCAL_TARGET),
+        release_after_seconds=BUSY_RELEASE_SECONDS,
+    )
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -90,213 +164,229 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
+        "linked_bugs": LINKED_BUGS,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
+        "busy_release_seconds": BUSY_RELEASE_SECONDS,
         "steps": [],
         "human_verification": [],
     }
 
     page: LiveWorkspaceSwitcherPage | None = None
     try:
-        with create_live_tracker_app(
-            config,
-            runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                repository=config.repository,
-                token=token,
-                workspace_state=workspace_state,
-            ),
-        ) as tracker_page:
-            page = LiveWorkspaceSwitcherPage(tracker_page)
-            try:
-                runtime = tracker_page.open()
-                result["runtime_state"] = runtime.kind
-                result["runtime_body_text"] = runtime.body_text
-                if runtime.kind != "ready":
-                    raise AssertionError(
-                        "Precondition failed: the deployed app did not reach the "
-                        "interactive shell with the signed-in active-local workspace "
-                        "preload.\n"
-                        f"Observed runtime state: {runtime.kind}\n"
-                        f"Observed body text:\n{runtime.body_text}",
+        with blocker:
+            result["busy_blocker_initial"] = blocker.snapshot()
+            with create_live_tracker_app(
+                config,
+                runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
+                    repository=config.repository,
+                    token=token,
+                    workspace_state=workspace_state,
+                ),
+            ) as tracker_page:
+                page = LiveWorkspaceSwitcherPage(tracker_page)
+                try:
+                    runtime = tracker_page.open()
+                    result["runtime_state"] = runtime.kind
+                    result["runtime_body_text"] = runtime.body_text
+                    if runtime.kind != "ready":
+                        raise AssertionError(
+                            "Precondition failed: the deployed app did not reach the "
+                            "interactive shell with the signed-in active-local workspace "
+                            "preload.\n"
+                            f"Observed runtime state: {runtime.kind}\n"
+                            f"Observed body text:\n{runtime.body_text}",
+                        )
+
+                    page.dismiss_connection_banner()
+                    page.set_viewport(**DESKTOP_VIEWPORT)
+                    _record_step(
+                        result,
+                        step=1,
+                        status="passed",
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "Opened the deployed app in Chromium with a stored signed-in "
+                            "GitHub session, preloaded the active local workspace in "
+                            "browser storage, and temporarily revoked access to the "
+                            f"prepared local git folder at {LOCAL_TARGET!r} to simulate a transient busy state."
+                        ),
                     )
 
-                page.dismiss_connection_banner()
-                page.set_viewport(**DESKTOP_VIEWPORT)
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action=REQUEST_STEPS[0],
-                    observed=(
-                        "Opened the deployed app in Chromium with a stored signed-in "
-                        "GitHub session, preloaded the active local workspace in "
-                        f"browser storage, and prepared the matching local git folder at {LOCAL_TARGET!r}."
-                    ),
-                )
-
-                restored, trigger = poll_until(
-                    probe=lambda: page.observe_trigger(timeout_ms=10_000),
-                    is_satisfied=_trigger_matches_expected_restore,
-                    timeout_seconds=TRIGGER_WAIT_SECONDS,
-                    interval_seconds=5,
-                )
-                result["trigger_observation"] = _trigger_payload(trigger)
-                result["startup_restored_within_wait"] = restored
-                if restored:
+                    released = blocker.wait_for_release(
+                        timeout_seconds=BUSY_RELEASE_SECONDS + 15,
+                    )
+                    result["busy_blocker_final"] = blocker.snapshot()
+                    result["busy_state_released"] = released
+                    if blocker.release_error is not None:
+                        raise AssertionError(
+                            "Step 2 failed: the test could not restore access to the "
+                            "prepared local workspace during the retry phase.\n"
+                            f"{blocker.release_error}"
+                        )
+                    if not released:
+                        raise AssertionError(
+                            "Step 2 failed: the simulated busy state was not released "
+                            "within the expected retry window.",
+                        )
                     _record_step(
                         result,
                         step=2,
                         status="passed",
                         action=REQUEST_STEPS[1],
                         observed=(
-                            "Startup completed and the workspace switcher trigger "
-                            f"restored the prepared active local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
-                            f"Observed trigger label={trigger.semantic_label!r}; "
-                            f"trigger_text={trigger.visible_text!r}"
-                        ),
-                    )
-                else:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="failed",
-                        action=REQUEST_STEPS[1],
-                        observed=(
-                            "Waited for startup restoration, but the workspace switcher "
-                            f"trigger never switched to the prepared active local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
-                            f"Observed trigger label={trigger.semantic_label!r}; "
-                            f"trigger_text={trigger.visible_text!r}"
+                            "Restored access to the prepared local workspace during the "
+                            f"startup retry window after approximately {BUSY_RELEASE_SECONDS} seconds.\n"
+                            f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                         ),
                     )
 
-                switcher_opened = False
-                try:
-                    switcher = page.open_and_observe(timeout_ms=15_000)
-                    switcher_opened = True
-                except Exception as error:
-                    result["switcher_open_error"] = (
-                        f"{type(error).__name__}: {error}"
+                    restored, trigger = poll_until(
+                        probe=lambda: page.observe_trigger(timeout_ms=10_000),
+                        is_satisfied=_trigger_matches_expected_restore,
+                        timeout_seconds=TRIGGER_WAIT_SECONDS,
+                        interval_seconds=5,
                     )
-                    _record_step(
-                        result,
-                        step=3,
-                        status="failed",
-                        action=REQUEST_STEPS[2],
-                        observed=(
-                            "The application shell became interactive enough to show the "
-                            "header trigger, but opening Workspace switcher failed.\n"
-                            f"{type(error).__name__}: {error}"
-                        ),
-                    )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed="Not reached because step 3 failed.",
-                    )
-                    raise
-
-                result["switcher_observation"] = _switcher_payload(switcher)
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=(
-                        "Opened Workspace switcher after startup.\n"
-                        f"row_count={switcher.row_count}; "
-                        f"switcher_text={switcher.switcher_text!r}"
-                    ),
-                )
-
-                local_row = _find_named_local_row(switcher)
-                selected_row = _find_selected_row(switcher) or _selected_row_from_trigger(
-                    trigger,
-                )
-                result["active_local_row"] = (
-                    _row_payload(local_row) if local_row is not None else None
-                )
-                result["selected_row"] = (
-                    _row_payload(selected_row) if selected_row is not None else None
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Viewed the startup result from the header trigger exactly as a "
-                        "user would after the app finished loading."
-                    ),
-                    observed=(
-                        f"trigger_label={trigger.semantic_label!r}; "
-                        f"trigger_text={trigger.visible_text!r}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Opened Workspace switcher and visually inspected which row was "
-                        "selected and what state labels were shown."
-                    ),
-                    observed=(
-                        f"selected_row={json.dumps(_row_payload(selected_row), ensure_ascii=True)}; "
-                        f"active_local_row={json.dumps(_row_payload(local_row), ensure_ascii=True)}"
-                    ),
-                )
-
-                try:
-                    _assert_active_local_restore(
-                        trigger=trigger,
-                        switcher=switcher,
-                        local_row=local_row,
-                        selected_row=selected_row,
-                    )
-                except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed=str(error),
-                    )
-                    raise
-
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=(
-                        "The active workspace row was the prepared local workspace and "
-                        "it remained selected in the visible `Local Git` state.\n"
-                        f"selected_row={json.dumps(_row_payload(selected_row), indent=2)}"
-                    ),
-                )
-
-                if not restored:
-                    raise AssertionError(
-                        "Step 2 failed: startup did not restore the prepared active local "
-                        "workspace into the trigger within the allowed wait window.\n"
-                        f"Observed trigger label: {trigger.semantic_label!r}\n"
-                        f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
-                        f"Observed active local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
-                        f"Observed switcher text:\n{switcher.switcher_text}"
-                    )
-
-            except Exception:
-                if page is not None:
-                    try:
-                        if not FAILURE_SCREENSHOT_PATH.exists():
-                            page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                        result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
-                    except Exception as screenshot_error:
-                        result["screenshot_error"] = (
-                            f"{type(screenshot_error).__name__}: {screenshot_error}"
+                    result["trigger_observation"] = _trigger_payload(trigger)
+                    result["startup_restored_within_wait"] = restored
+                    if restored:
+                        _record_step(
+                            result,
+                            step=3,
+                            status="passed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "After the busy state was released, the application shell "
+                                "became interactive and the workspace switcher trigger "
+                                f"restored the prepared local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
+                                f"Observed trigger label={trigger.semantic_label!r}; "
+                                f"trigger_text={trigger.visible_text!r}"
+                            ),
                         )
-                raise
-            page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-            result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+                    else:
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "After the busy state was released, the application shell "
+                                "became interactive but the workspace switcher trigger "
+                                f"never restored the prepared local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
+                                f"Observed trigger label={trigger.semantic_label!r}; "
+                                f"trigger_text={trigger.visible_text!r}"
+                            ),
+                        )
+
+                    switcher_opened = False
+                    try:
+                        switcher = page.open_and_observe(timeout_ms=15_000)
+                        switcher_opened = True
+                    except Exception as error:
+                        result["switcher_open_error"] = f"{type(error).__name__}: {error}"
+                        _record_step(
+                            result,
+                            step=4,
+                            status="failed",
+                            action=REQUEST_STEPS[3],
+                            observed=(
+                                "The application shell exposed the header trigger, but "
+                                "opening Workspace switcher failed.\n"
+                                f"{type(error).__name__}: {error}"
+                            ),
+                        )
+                        raise
+
+                    result["switcher_observation"] = _switcher_payload(switcher)
+                    local_row = _find_named_local_row(switcher)
+                    selected_row = _find_selected_row(switcher) or _selected_row_from_trigger(
+                        trigger,
+                    )
+                    result["active_local_row"] = (
+                        _row_payload(local_row) if local_row is not None else None
+                    )
+                    result["selected_row"] = (
+                        _row_payload(selected_row) if selected_row is not None else None
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the startup result from the header trigger exactly as a "
+                            "user would after the busy-state release and startup recovery window."
+                        ),
+                        observed=(
+                            f"trigger_label={trigger.semantic_label!r}; "
+                            f"trigger_text={trigger.visible_text!r}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher and visually inspected which row was "
+                            "selected and what state labels were shown for the saved local workspace."
+                        ),
+                        observed=(
+                            f"selected_row={json.dumps(_row_payload(selected_row), ensure_ascii=True)}; "
+                            f"active_local_row={json.dumps(_row_payload(local_row), ensure_ascii=True)}"
+                        ),
+                    )
+
+                    try:
+                        _assert_active_local_restore(
+                            trigger=trigger,
+                            switcher=switcher,
+                            local_row=local_row,
+                            selected_row=selected_row,
+                        )
+                    except AssertionError as error:
+                        _record_step(
+                            result,
+                            step=4,
+                            status="failed",
+                            action=REQUEST_STEPS[3],
+                            observed=str(error),
+                        )
+                        raise
+
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "Opened Workspace switcher and confirmed the prepared local "
+                            "workspace row remained selected in the visible `Local Git` "
+                            "state after the busy-state release.\n"
+                            f"selected_row={json.dumps(_row_payload(selected_row), indent=2)}"
+                        ),
+                    )
+
+                    if not restored:
+                        raise AssertionError(
+                            "Step 3 failed: startup did not restore the prepared active local "
+                            "workspace into the trigger after the temporary busy state was "
+                            "released within the allowed wait window.\n"
+                            f"Observed trigger label: {trigger.semantic_label!r}\n"
+                            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
+                            f"Observed active local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
+                            f"Observed switcher text:\n{switcher.switcher_text}"
+                        )
+
+                except Exception:
+                    if page is not None:
+                        try:
+                            if not FAILURE_SCREENSHOT_PATH.exists():
+                                page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                            result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                        except Exception as screenshot_error:
+                            result["screenshot_error"] = (
+                                f"{type(screenshot_error).__name__}: {screenshot_error}"
+                            )
+                    raise
+                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
@@ -327,7 +417,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
                 "target": LOCAL_TARGET,
                 "defaultBranch": DEFAULT_BRANCH,
                 "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-18T03:30:00.000Z",
+                "lastOpenedAt": "2026-05-21T17:10:00.000Z",
             },
             {
                 "id": hosted_id,
@@ -337,7 +427,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
                 "target": repository,
                 "defaultBranch": DEFAULT_BRANCH,
                 "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-18T03:20:00.000Z",
+                "lastOpenedAt": "2026-05-21T17:00:00.000Z",
             },
         ],
     }
@@ -356,9 +446,9 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
             text=True,
         )
 
-    marker_path = local_path / ".trackstate-ts817-precondition.txt"
+    marker_path = local_path / ".trackstate-ts893-precondition.txt"
     marker_path.write_text(
-        "Prepared for TS-817 startup active-local workspace restoration validation.\n",
+        "Prepared for TS-893 transient busy startup workspace restoration validation.\n",
         encoding="utf-8",
     )
 
@@ -388,13 +478,13 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
                 "-C",
                 str(local_path),
                 "-c",
-                "user.name=TS-817 Automation",
+                "user.name=TS-893 Automation",
                 "-c",
-                "user.email=ts817@example.com",
+                "user.email=ts893@example.com",
                 "commit",
                 "--allow-empty",
                 "-m",
-                "Prepare TS-817 local workspace",
+                "Prepare TS-893 local workspace",
             ],
             check=True,
             capture_output=True,
@@ -425,6 +515,7 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "mode_octal": oct(stat.S_IMODE(os.stat(local_path).st_mode)),
     }
 
 
@@ -448,7 +539,7 @@ def _find_named_local_row(
             and LOCAL_TARGET in row.detail_text
         ):
             return row
-    return None
+    return _fallback_local_row_from_switcher_text(switcher.switcher_text)
 
 
 def _find_selected_row(
@@ -477,6 +568,51 @@ def _selected_row_from_trigger(
     )
 
 
+def _fallback_local_row_from_switcher_text(
+    switcher_text: str,
+) -> WorkspaceSwitcherRowObservation | None:
+    normalized = " ".join(switcher_text.split())
+    detail_text = f"{LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}"
+    anchor = f"{LOCAL_DISPLAY_NAME} {detail_text} Local "
+    if anchor not in normalized:
+        return None
+
+    tail = normalized.split(anchor, 1)[1]
+    state_label = None
+    for candidate in (
+        "Local Git",
+        "Unavailable",
+        "Needs sign-in",
+        "Connected",
+        "Read-only",
+        "Attachments limited",
+    ):
+        if tail.startswith(candidate):
+            state_label = candidate
+            tail = tail[len(candidate) :].strip()
+            break
+    if state_label is None:
+        return None
+
+    action = "Active" if tail.startswith("Active") else "Open" if tail.startswith("Open") else None
+    if action is None:
+        return None
+
+    visible_text = f"{LOCAL_DISPLAY_NAME} {detail_text} Local {state_label} {tail}".strip()
+    return WorkspaceSwitcherRowObservation(
+        display_name=LOCAL_DISPLAY_NAME,
+        target_type_label="Local",
+        state_label=state_label,
+        detail_text=detail_text,
+        visible_text=visible_text,
+        selected=action == "Active",
+        semantics_label=None,
+        icon_accessibility_label=None,
+        action_labels=((action,) if action else ()),
+        button_labels=("Delete",) if action == "Active" else ((action, "Delete") if action else ()),
+    )
+
+
 def _assert_active_local_restore(
     *,
     trigger: WorkspaceSwitcherTriggerObservation,
@@ -486,23 +622,24 @@ def _assert_active_local_restore(
 ) -> None:
     if local_row is None:
         raise AssertionError(
-            "Step 4 failed: Workspace switcher did not show the prepared active "
-            "local workspace row.\n"
+            "Step 4 failed: Workspace switcher did not show the prepared local "
+            "workspace row after the busy-state release.\n"
             f"Observed trigger label: {trigger.semantic_label!r}\n"
             f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
     if local_row.state_label == "Unavailable" or "Local Unavailable" in local_row.visible_text:
         raise AssertionError(
-            "Step 4 failed: the prepared active local workspace row was visible but "
-            "rendered as `Local Unavailable` instead of `Local Git`.\n"
+            "Step 4 failed: the prepared local workspace row was visible after the "
+            "busy-state release but rendered as `Local Unavailable` instead of "
+            "`Local Git`.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
             f"Observed trigger label: {trigger.semantic_label!r}"
         )
     if local_row.state_label != "Local Git":
         raise AssertionError(
-            "Step 4 failed: the prepared active local workspace row did not reach "
-            "the `Local Git` state.\n"
+            "Step 4 failed: the prepared local workspace row did not reach the "
+            "`Local Git` state after the busy-state release.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
     if selected_row is None:
@@ -513,14 +650,15 @@ def _assert_active_local_restore(
     if selected_row.display_name != LOCAL_DISPLAY_NAME or selected_row.target_type_label != "Local":
         raise AssertionError(
             "Step 4 failed: the selected active row was not the prepared active local "
-            "workspace.\n"
+            "workspace after the busy-state release.\n"
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
     if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
         raise AssertionError(
             "Step 4 failed: the header trigger still defaulted to the hosted setup "
-            "workspace instead of the prepared active local workspace.\n"
+            "workspace instead of the prepared active local workspace after the "
+            "busy-state release.\n"
             f"Observed trigger label: {trigger.semantic_label!r}"
         )
 
@@ -577,7 +715,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-817 failed"))
+    error = str(result.get("error", "AssertionError: TS-893 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -608,9 +746,10 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
-        f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after startup for the header workspace switcher trigger to restore the active local workspace instead of asserting immediately.",
+        f"* Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
+        f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
-        "* Verified the selected row stayed in {{Local Git}} and did not fall back to {{Hosted setup workspace}} or {{Local Unavailable}}.",
+        "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -654,9 +793,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
-        f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after startup for the header workspace switcher trigger to restore the active local workspace instead of asserting immediately.",
+        f"- Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
+        f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
-        "- Verified the selected row stayed in `Local Git` and did not fall back to `Hosted setup workspace` or `Local Unavailable`.",
+        "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -700,7 +840,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-817 live startup coverage for restoring an active local workspace.",
+        "- Added TS-893 live startup coverage for transient busy local workspace restoration.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -710,7 +850,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         (
-            "- Outcome: startup restored the prepared local workspace as the active `Local Git` selection."
+            "- Outcome: startup retried after the temporary busy-state release and restored the prepared local workspace as the active `Local Git` selection."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -734,9 +874,10 @@ def _bug_description(result: dict[str, object]) -> str:
     switcher = result.get("switcher_observation")
     active_local_row = result.get("active_local_row")
     selected_row = result.get("selected_row")
+    blocker_final = result.get("busy_blocker_final")
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Startup does not restore the active local workspace as Local Git",
+            f"# {TICKET_KEY} - Startup retry does not restore the local workspace after transient busy access clears",
             "",
             "## Exact steps to reproduce",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
@@ -752,10 +893,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Actual vs Expected",
             f"- **Expected:** {EXPECTED_RESULT}",
             (
-                "- **Actual:** After startup and a "
-                f"{TRIGGER_WAIT_SECONDS}-second wait for restoration, the header trigger "
-                "still showed the hosted fallback and the prepared local workspace did "
-                "not become the selected Local Git workspace."
+                "- **Actual:** After the temporary busy state was released and the test "
+                f"waited {TRIGGER_WAIT_SECONDS} seconds for startup recovery, the header "
+                "trigger still showed the hosted fallback and the prepared local "
+                "workspace did not become the selected `Local Git` workspace."
                 if not _step_passed(result, 4)
                 else "- **Actual:** The active local workspace restored correctly."
             ),
@@ -773,6 +914,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"- **Observed active local row:** `{json.dumps(active_local_row, ensure_ascii=True)}`"
                 if active_local_row is not None
                 else "- **Observed active local row:** `<missing>`"
+            ),
+            (
+                f"- **Observed busy-state release:** `{json.dumps(blocker_final, ensure_ascii=True)}`"
+                if blocker_final is not None
+                else "- **Observed busy-state release:** `<missing>`"
             ),
             "",
             "## Environment details",
@@ -794,6 +940,8 @@ def _bug_description(result: dict[str, object]) -> str:
                 {
                     "prepared_local_workspace": result.get("prepared_local_workspace"),
                     "preloaded_workspace_state": result.get("preloaded_workspace_state"),
+                    "busy_blocker_initial": result.get("busy_blocker_initial"),
+                    "busy_blocker_final": result.get("busy_blocker_final"),
                     "trigger_observation": trigger,
                     "switcher_observation": switcher,
                     "active_local_row": active_local_row,
@@ -837,7 +985,6 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
 
 def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     screenshot = result.get("screenshot")
-    prefix = "*" if jira else "-"
     lines = ["", "h4. Screenshot" if jira else "## Screenshot"]
     lines.append(str(screenshot) if screenshot else "<no screenshot recorded>")
     lines.extend(

@@ -650,7 +650,6 @@ def _relative_startup_event_seconds(
         return None
     return round(event_monotonic - startup_started_at_monotonic, 2)
 
-
 def _trigger_matches_expected_restore(
     trigger: WorkspaceSwitcherTriggerObservation,
 ) -> bool:
