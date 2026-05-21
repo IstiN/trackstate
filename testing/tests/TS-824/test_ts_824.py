@@ -451,9 +451,9 @@ def _assert_desktop_panel_open(
 def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObservation) -> None:
     failures: list[str] = []
 
-    if not observation.before_owned_by_switcher:
+    if not observation.before_on_trigger:
         failures.append(
-            "pre-Tab focus was neither on the workspace switcher trigger nor already inside the open workspace switcher panel"
+            "pre-Tab focus was not on the workspace switcher trigger before moving inside the panel"
         )
     if not observation.after_visible:
         failures.append("the focused element after Tab was not visible")
@@ -513,11 +513,6 @@ def _assert_escape_surface_dismissal(
     monitor: WorkspaceSwitcherTransitionMonitorObservation,
 ) -> None:
     failures: list[str] = []
-    monitor_observed_dismissal = (
-        monitor.ever_hidden_after_visible
-        or 0 in monitor.observed_row_counts
-        or monitor.latest_visible_row_count == 0
-    )
 
     if not dismissal.dashboard_visible:
         failures.append("the main Dashboard shell was not visibly present after Escape")
@@ -528,10 +523,10 @@ def _assert_escape_surface_dismissal(
             "the transition monitor did not capture the visible workspace switcher "
             "surface before Escape",
         )
-    if not monitor_observed_dismissal:
+    if not monitor.ever_hidden_after_visible:
         failures.append(
             "the transition monitor never observed the visible workspace switcher "
-            "content disappear after Escape",
+            "surface disappear after Escape",
         )
 
     if failures:
@@ -725,8 +720,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Rework summary",
-        "- Resolved the `live_workspace_switcher_page.py` merge conflict by keeping the current background-scroll helpers from `main`.",
-        "- Kept the existing click-based setup navigation so TS-824 still reaches Dashboard before the keyboard-only workspace-switcher flow begins.",
+        "- Restored the Step 3 boundary so the test only passes when `Tab` moves focus from the workspace-switcher trigger into the open panel.",
+        "- Restored the Step 4 dismissal check so Escape only passes when the transition monitor sees the visible switcher surface disappear.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -776,8 +771,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Resolved the TS-824 merge conflict in `testing/components/pages/live_workspace_switcher_page.py`.",
-        "- Kept the existing click-based Dashboard setup navigation and limited keyboard assertions to the workspace-switcher flow itself.",
+        "- Restored the Step 3 trigger-owned pre-`Tab` assertion for the keyboard path into the switcher panel.",
+        "- Restored the Step 4 real-surface dismissal assertion so Escape must close the visible switcher surface, not just empty its contents.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -928,18 +923,18 @@ def _review_reply_text(
         else "Re-ran "
         f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
     )
-    if root_comment_id == 3258555749:
+    if root_comment_id == 3283970622:
         return (
-            "Fixed: TS-824 now asserts the post-Escape active element is trigger-owned "
-            "before using Enter as the follow-on usability check. "
+            "Fixed: Step 3 now requires focus to still be on the workspace-switcher "
+            "trigger before `Tab`, and only passes when that key press moves focus "
+            "into a visible internal switcher element. "
             + rerun_summary
         )
-    if root_comment_id == 3258555907:
+    if root_comment_id == 3283970736:
         return (
-            "Fixed: `outputs/bug_description.md` now derives its title, reproduction, "
-            "and missing-capability section from the first failed step, and it includes "
-            "the recorded trigger-focusability and Tab-sequence evidence when the run "
-            "stops before the Escape assertion. "
+            "Fixed: Step 4 now relies on the transition monitor's real dismissal "
+            "signal (`ever_hidden_after_visible`), so the test only passes when the "
+            "visible workspace-switcher surface actually disappears after `Escape`. "
             + rerun_summary
         )
     return "Fixed the requested TS-824 review item. " + rerun_summary
