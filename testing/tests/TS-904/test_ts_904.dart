@@ -16,6 +16,8 @@ const String _testFilePath = 'testing/tests/TS-904/test_ts_904.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-904/test_ts_904.dart --reporter expanded';
 const String _notificationFragment = 'no longer available';
+const int _inlineReviewCommentId = 3284576365;
+const String _inlineReviewThreadId = 'PRRT_kwDOSU6Gf86D8igq';
 const List<String> _requestSteps = <String>[
   'Simulate a background sync where Issue-B is removed from the repository index, but the currently selected Issue-A remains in the index.',
   'Observe the selection state of Issue-A in the results list.',
@@ -133,18 +135,18 @@ void main() {
           );
         }
 
+        final repositoryRevisionBefore =
+            result['repository_revision_before_refresh']! as String;
         repository.scheduleIssueBRemoval();
-        await _resumeApp(tester);
-        final settledStateReached = await _pumpUntil(
+        final refreshWindow = await _observeRefreshWindow(
           tester,
-          condition: () async => await _hasExpectedPostRefreshState(
-            screen,
-            repositoryRevisionBefore:
-                result['repository_revision_before_refresh']! as String,
-            repository: repository,
-          ),
+          screen: screen,
+          repositoryRevisionBefore: repositoryRevisionBefore,
+          repository: repository,
+          notificationFragment: _notificationFragment,
           timeout: const Duration(seconds: 10),
         );
+        final settledStateReached = refreshWindow.settledStateReached;
 
         final queryAfterRefresh = await screen.readJqlSearchFieldValue();
         final rowsAfterRefresh = screen
@@ -184,6 +186,7 @@ void main() {
         result['repository_revision_after_refresh'] =
             repository.repositoryRevision;
         result['settled_state_reached'] = settledStateReached;
+        result['refresh_probe_count'] = refreshWindow.probeCount;
         result['query_after_refresh'] = queryAfterRefresh ?? '<missing>';
         result['rows_after_refresh'] = rowsAfterRefresh;
         result['issue_a_selection_after_refresh'] = issueASelectionAfterRefresh
@@ -195,12 +198,21 @@ void main() {
         result['issue_a_description_visible_after_refresh'] =
             issueADescriptionVisible;
         result['notification_visible_after_refresh'] = notificationVisible;
+        result['notification_visible_during_refresh'] =
+            refreshWindow.notificationVisibleDuringRefresh;
+        result['notification_first_visible_observation'] =
+            refreshWindow.firstVisibleObservation;
+        result['notification_first_visible_texts'] =
+            refreshWindow.firstVisibleTexts;
+        result['notification_first_visible_semantics'] =
+            refreshWindow.firstVisibleSemantics;
         result['visible_texts_after_refresh'] = visibleTextsAfterRefresh;
         result['visible_semantics_after_refresh'] =
             visibleSemanticsAfterRefresh;
 
         final stepOneObserved =
             'settled_state_reached=$settledStateReached; '
+            'refresh_probe_count=${refreshWindow.probeCount}; '
             'sync_check_count=${repository.syncCheckCount}; '
             'repository_revision_before=${result['repository_revision_before_refresh']}; '
             'repository_revision_after=${repository.repositoryRevision}; '
@@ -284,10 +296,16 @@ void main() {
         }
 
         final stepFourObserved =
-            'notification_visible=$notificationVisible; '
+            'notification_visible_after_refresh=$notificationVisible; '
+            'notification_visible_during_refresh=${refreshWindow.notificationVisibleDuringRefresh}; '
+            'notification_first_visible_observation=${refreshWindow.firstVisibleObservation ?? '<none>'}; '
+            'notification_first_visible_texts=${_formatSnapshot(refreshWindow.firstVisibleTexts)}; '
+            'notification_first_visible_semantics=${_formatSnapshot(refreshWindow.firstVisibleSemantics)}; '
             'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}; '
             'visible_semantics=${_formatSnapshot(visibleSemanticsAfterRefresh)}';
-        final stepFourPassed = !notificationVisible;
+        final stepFourPassed =
+            !notificationVisible &&
+            !refreshWindow.notificationVisibleDuringRefresh;
         _recordStep(
           result,
           step: 4,
@@ -297,9 +315,9 @@ void main() {
         );
         if (!stepFourPassed) {
           failures.add(
-            'Step 4 failed: the app showed an unavailable notification even '
-            'though the active selection remained valid. Observed: '
-            '$stepFourObserved.',
+            'Step 4 failed: the app showed an unavailable notification during '
+            'or after the refresh even though the active selection remained '
+            'valid. Observed: $stepFourObserved.',
           );
         }
 
@@ -315,7 +333,8 @@ void main() {
               'issue_a_selection=${issueASelectionAfterRefresh.describe()}; '
               'issue_a_detail_visible=$issueADetailVisible; '
               'issue_b_visible=$issueBVisible; '
-              'notification_visible=$notificationVisible',
+              'notification_visible_after_refresh=$notificationVisible; '
+              'notification_visible_during_refresh=${refreshWindow.notificationVisibleDuringRefresh}',
         );
         _recordHumanVerification(
           result,
@@ -386,34 +405,13 @@ Future<bool> _hasExpectedPostRefreshState(
       query == Ts904NonSelectedIssueRemovalRepository.query;
 }
 
-Future<bool> _pumpUntil(
-  WidgetTester tester, {
-  required Future<bool> Function() condition,
-  required Duration timeout,
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    if (await condition()) {
-      return true;
-    }
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-  return false;
-}
-
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
-
-Future<void> _resumeApp(WidgetTester tester) async {
-  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 250));
-  await tester.pumpAndSettle();
-}
 
 void _recordStep(
   Map<String, Object?> result, {
@@ -456,6 +454,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
 }
 
@@ -467,6 +466,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
@@ -584,13 +584,14 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '# $_ticketKey',
     '',
     passed
-        ? 'Added coverage for removing a non-selected JQL Search result during production sync refresh without disturbing the active selection.'
-        : 'Added coverage for removing a non-selected JQL Search result during production sync refresh, but the product behavior still fails the ticket expectations.',
+        ? 'Updated the refresh assertion to watch the entire production sync window and fail on any transient unavailable-banner flash while a different issue is removed.'
+        : 'Updated the refresh assertion to watch the entire production sync window, but the product behavior still fails the ticket expectations.',
     '',
     '- Status: ${passed ? 'PASSED' : 'FAILED'}',
     '- Query: `${result['query_after_refresh'] ?? result['query_at_failure'] ?? result['query'] ?? Ts904NonSelectedIssueRemovalRepository.query}`',
     '- Repository revision before refresh: `${result['repository_revision_before_refresh'] ?? '<missing>'}`',
     '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
+    '- Notification visible during refresh: `${result['notification_visible_during_refresh'] ?? '<missing>'}`',
     '- Issue-A selection after refresh: `${result['issue_a_selection_after_refresh'] ?? '<missing>'}`',
     '- Issue-B visible after refresh: `${result['issue_b_visible_after_refresh'] ?? '<missing>'}`',
     '- Issue-A detail visible after refresh: `${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`',
@@ -652,7 +653,7 @@ String _bugDescription(Map<String, Object?> result) {
     'Issue-A remains selected and its details remain visible in the panel. Issue-B is removed from the results list. No `issue no longer available` notification is shown because the active selection is still valid.',
     '',
     '## Actual result',
-    'After the refresh, the visible query was `$observedQuery`, the visible rows were `$observedRows`, Issue-A detail visible was `${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, Issue-B detail visible was `${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, and notification visible was `${result['notification_visible_after_refresh'] ?? '<missing>'}`.',
+    'After the refresh, the visible query was `$observedQuery`, the visible rows were `$observedRows`, Issue-A detail visible was `${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, Issue-B detail visible was `${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, notification visible during refresh was `${result['notification_visible_during_refresh'] ?? '<missing>'}`, and notification visible after refresh was `${result['notification_visible_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Missing or broken production capability',
     'When the production app-resume workspace sync refresh removes a non-selected issue, the JQL Search surface should keep the current selection and avoid showing the unavailable warning. The failing run below captures the user-visible gap.',
@@ -665,8 +666,8 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** `TRACK-904-A` remains selected, its detail panel stays open, `TRACK-904-B` disappears from the visible results, and no `no longer available` banner appears.',
-    '- **Actual:** visible rows were `$observedRows`, Issue-A selection after refresh was `${result['issue_a_selection_after_refresh'] ?? '<missing>'}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, Issue-B visible was `${result['issue_b_visible_after_refresh'] ?? '<missing>'}`, and notification visible was `${result['notification_visible_after_refresh'] ?? '<missing>'}`.',
+    '- **Expected:** `TRACK-904-A` remains selected, its detail panel stays open, `TRACK-904-B` disappears from the visible results, and no `no longer available` banner appears at any point during the refresh.',
+    '- **Actual:** visible rows were `$observedRows`, Issue-A selection after refresh was `${result['issue_a_selection_after_refresh'] ?? '<missing>'}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, Issue-B visible was `${result['issue_b_visible_after_refresh'] ?? '<missing>'}`, notification visible during refresh was `${result['notification_visible_during_refresh'] ?? '<missing>'}`, and notification visible after refresh was `${result['notification_visible_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Environment',
     '- URL: local Flutter test execution',
@@ -695,11 +696,27 @@ String _bugDescription(Map<String, Object?> result) {
     'Issue-A detail visible after refresh: ${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}',
     'Issue-B detail visible after refresh: ${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}',
     'Issue-A description visible after refresh: ${result['issue_a_description_visible_after_refresh'] ?? '<missing>'}',
+    'Notification visible during refresh: ${result['notification_visible_during_refresh'] ?? '<missing>'}',
+    'Notification first visible observation: ${result['notification_first_visible_observation'] ?? '<none>'}',
+    'Notification first visible texts: ${_formatSnapshot(_stringList(result['notification_first_visible_texts']))}',
+    'Notification first visible semantics: ${_formatSnapshot(_stringList(result['notification_first_visible_semantics']))}',
     'Notification visible after refresh: ${result['notification_visible_after_refresh'] ?? '<missing>'}',
     'Visible texts after refresh: $observedTexts',
     'Visible semantics after refresh: $observedSemantics',
     '```',
   ].join('\n');
+}
+
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: TS-904 now samples the `no longer available` banner throughout the entire production app-resume refresh window and fails if it appears at any point, not just in the final settled state. The rerun passed.'
+      : 'Fixed: TS-904 now samples the `no longer available` banner throughout the entire production app-resume refresh window and fails if it appears at any point, not just in the final settled state. The rerun still exposes a product-visible failure: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object?>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': _inlineReviewCommentId, 'threadId': _inlineReviewThreadId, 'reply': reply},
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
+    ],
+  })}\n';
 }
 
 List<String> _jiraStepLines(Map<String, Object?> result) {
@@ -793,4 +810,107 @@ String _formatSnapshot(List<String> values, {int limit = 24}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<_RefreshWindowObservation> _observeRefreshWindow(
+  WidgetTester tester, {
+  required TrackStateAppComponent screen,
+  required String repositoryRevisionBefore,
+  required Ts904NonSelectedIssueRemovalRepository repository,
+  required String notificationFragment,
+  required Duration timeout,
+}) async {
+  final start = DateTime.now();
+  var probeCount = 0;
+  var notificationVisibleDuringRefresh = false;
+  String? firstVisibleObservation;
+  List<String> firstVisibleTexts = const <String>[];
+  List<String> firstVisibleSemantics = const <String>[];
+
+  Future<void> captureNotificationIfVisible() async {
+    probeCount += 1;
+    if (notificationVisibleDuringRefresh) {
+      return;
+    }
+    final notificationVisible = await screen.isMessageBannerVisibleContaining(
+      notificationFragment,
+    );
+    if (!notificationVisible) {
+      return;
+    }
+    notificationVisibleDuringRefresh = true;
+    firstVisibleTexts = screen.visibleTextsSnapshot();
+    firstVisibleSemantics = screen.visibleSemanticsLabelsSnapshot();
+    firstVisibleObservation =
+        'probe=$probeCount; '
+        'elapsed_ms=${DateTime.now().difference(start).inMilliseconds}; '
+        'repository_revision=${repository.repositoryRevision}; '
+        'query=${await screen.readJqlSearchFieldValue() ?? '<missing>'}; '
+        'rows=${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}';
+  }
+
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  await captureNotificationIfVisible();
+  if (await _hasExpectedPostRefreshState(
+    screen,
+    repositoryRevisionBefore: repositoryRevisionBefore,
+    repository: repository,
+  )) {
+    return _RefreshWindowObservation(
+      settledStateReached: true,
+      probeCount: probeCount,
+      notificationVisibleDuringRefresh: notificationVisibleDuringRefresh,
+      firstVisibleObservation: firstVisibleObservation,
+      firstVisibleTexts: firstVisibleTexts,
+      firstVisibleSemantics: firstVisibleSemantics,
+    );
+  }
+
+  final end = start.add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 100));
+    await captureNotificationIfVisible();
+    if (await _hasExpectedPostRefreshState(
+      screen,
+      repositoryRevisionBefore: repositoryRevisionBefore,
+      repository: repository,
+    )) {
+      return _RefreshWindowObservation(
+        settledStateReached: true,
+        probeCount: probeCount,
+        notificationVisibleDuringRefresh: notificationVisibleDuringRefresh,
+        firstVisibleObservation: firstVisibleObservation,
+        firstVisibleTexts: firstVisibleTexts,
+        firstVisibleSemantics: firstVisibleSemantics,
+      );
+    }
+  }
+
+  return _RefreshWindowObservation(
+    settledStateReached: false,
+    probeCount: probeCount,
+    notificationVisibleDuringRefresh: notificationVisibleDuringRefresh,
+    firstVisibleObservation: firstVisibleObservation,
+    firstVisibleTexts: firstVisibleTexts,
+    firstVisibleSemantics: firstVisibleSemantics,
+  );
+}
+
+class _RefreshWindowObservation {
+  const _RefreshWindowObservation({
+    required this.settledStateReached,
+    required this.probeCount,
+    required this.notificationVisibleDuringRefresh,
+    required this.firstVisibleObservation,
+    required this.firstVisibleTexts,
+    required this.firstVisibleSemantics,
+  });
+
+  final bool settledStateReached;
+  final int probeCount;
+  final bool notificationVisibleDuringRefresh;
+  final String? firstVisibleObservation;
+  final List<String> firstVisibleTexts;
+  final List<String> firstVisibleSemantics;
 }
