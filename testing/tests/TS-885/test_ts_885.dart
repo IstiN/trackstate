@@ -1,3 +1,5 @@
+import 'dart:io' show File;
+import 'dart:typed_data';
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,13 +10,37 @@ import '../../core/interfaces/issue_edit_accessibility_screen.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import '../../fixtures/issue_edit_accessibility_screen_fixture.dart';
 
-const _approvedDesktopGoldenPath = '../../../test/goldens/edit_issue_desktop.png';
+const _approvedDesktopGoldenPath =
+    '../../../test/goldens/edit_issue_desktop.png';
+const _approvedDesktopGoldenRepositoryPath =
+    'test/goldens/edit_issue_desktop.png';
 const _requiredDesktopViewport = Size(1440, 900);
 
 void main() {
   testWidgets(
     'TS-885 Edit issue desktop surface matches the approved golden baseline',
     (tester) async {
+      final goldenSize = await tester.runAsync(
+        () => _readPngSize(_approvedDesktopGoldenRepositoryPath),
+      );
+      if (goldenSize == null) {
+        throw StateError(
+          'Reading $_approvedDesktopGoldenRepositoryPath did not complete.',
+        );
+      }
+      expect(
+        goldenSize,
+        _requiredDesktopViewport,
+        reason:
+            'TS-885 requires an approved 1440x900 desktop baseline, but '
+            '$_approvedDesktopGoldenRepositoryPath is currently '
+            '${goldenSize.width.toStringAsFixed(0)}x'
+            '${goldenSize.height.toStringAsFixed(0)}. Update the checked-in '
+            'golden asset or point this test at the approved 1440x900 '
+            'baseline before treating the pixel comparison as a product '
+            'regression signal.',
+      );
+
       final semantics = tester.ensureSemantics();
       final robot = IssueEditAccessibilityRobot(tester);
       IssueEditAccessibilityScreenHandle? screen;
@@ -180,4 +206,34 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<Size> _readPngSize(String path) async {
+  final bytes = await File(path).readAsBytes();
+  if (bytes.length < 24) {
+    throw StateError(
+      'PNG file "$path" is too short to contain an IHDR header.',
+    );
+  }
+
+  final header = bytes.sublist(0, 8);
+  const pngSignature = <int>[137, 80, 78, 71, 13, 10, 26, 10];
+  for (var index = 0; index < pngSignature.length; index++) {
+    if (header[index] != pngSignature[index]) {
+      throw StateError('File "$path" is not a valid PNG image.');
+    }
+  }
+
+  final chunkType = String.fromCharCodes(bytes.sublist(12, 16));
+  if (chunkType != 'IHDR') {
+    throw StateError('PNG file "$path" does not start with an IHDR chunk.');
+  }
+
+  final byteData = bytes.buffer.asByteData(
+    bytes.offsetInBytes,
+    bytes.lengthInBytes,
+  );
+  final width = byteData.getUint32(16);
+  final height = byteData.getUint32(20);
+  return Size(width.toDouble(), height.toDouble());
 }

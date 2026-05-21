@@ -10,7 +10,7 @@ The automation:
    golden comparison
 4. verifies the visible labels, actions, and seeded Summary/Description values
 5. captures the rendered desktop surface and compares it pixel-for-pixel with
-   `test/goldens/edit_issue_desktop.png`
+   the repository baseline at `test/goldens/edit_issue_desktop.png`
 
 ## Direct widget test command
 
@@ -26,5 +26,7 @@ labels and seeded values, and matches the approved golden baseline.
 
 Fail: required Edit issue content is missing, the side-sheet no longer lays out
 correctly at 1440x900, or the rendered surface regresses from the approved
-golden image.
+golden image. The current repository baseline at
+`test/goldens/edit_issue_desktop.png` is still `1440x960`, so TS-885 will stay
+red until the approved `1440x900` asset is checked in.
 ```
