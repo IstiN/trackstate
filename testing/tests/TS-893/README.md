@@ -1,0 +1,52 @@
+# TS-893
+
+Validates that startup retries active local workspace restoration after the local
+repository becomes temporarily unavailable during initialization, then restores
+the saved workspace as **Local Git** once access returns.
+
+The automation:
+1. opens the deployed TrackState web app in Chromium with a stored signed-in
+   GitHub session and a preloaded active local workspace profile
+2. prepares the matching local git folder on disk, temporarily revokes access
+   to it to simulate a transiently busy/unavailable file-system handle, and
+   restores access during the startup retry window
+3. waits after the busy-state release for the workspace switcher trigger to
+   restore the saved local workspace instead of asserting immediately
+4. opens **Workspace switcher** and verifies the selected active row is the
+   local workspace in the `Local Git` state rather than `Local Unavailable` or
+   the hosted fallback
+5. records the visible trigger, row state, and screenshot if the live startup
+   flow still lands on the hosted fallback or keeps the local row unavailable
+
+## Install dependencies
+
+```bash
+python3 -m pip install playwright
+python3 -m playwright install chromium
+```
+
+## Run this test
+
+```bash
+mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py
+```
+
+## Required environment and config
+
+- Python 3.12+
+- Playwright for Python with Chromium installed
+- `GH_TOKEN` or `GITHUB_TOKEN` set to a token that can open
+  `IstiN/trackstate-setup`
+- Defaults come from `testing/core/config/live_setup_test_config.py`
+
+## Expected result
+
+```text
+Pass: after the temporary busy state is released during startup, the prepared
+active local workspace is restored as the selected Local Git row and the app
+does not keep Hosted setup workspace active or show Local Unavailable.
+
+Fail: after the temporary busy state is released, startup still keeps Hosted
+setup workspace active, leaves the local row Unavailable, or otherwise does not
+restore the saved local workspace as Local Git.
+```
