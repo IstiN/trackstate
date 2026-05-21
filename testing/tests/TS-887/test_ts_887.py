@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_multi_view_refresh_page import (  # noqa: E402
     LabeledTextFieldObservation,
     LiveMultiViewRefreshPage,
+    SummaryRequiredValidationObservation,
 )
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
@@ -42,6 +43,9 @@ REQUEST_STEPS = (
     "Verify the error message meets WCAG AA contrast (4.5:1).",
     "Use a screen reader to verify that the error is announced (for example, via a live region or focus shift).",
 )
+SUMMARY_REQUIRED_MESSAGE = "Summary is required before saving."
+SUMMARY_REQUIRED_FRAGMENT = "Summary is required"
+MIN_TEXT_CONTRAST = 4.5
 
 
 def main() -> None:
@@ -153,16 +157,126 @@ def main() -> None:
                         f"Field payload: {_field_payload(cleared_field)}"
                     ),
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Cleared the visible Summary field and kept the live Edit issue "
+                        "dialog open to trigger validation the same way a user would."
+                    ),
+                    observed=(
+                        f"Summary field after clearing: {_field_payload(cleared_field)}"
+                    ),
+                )
+
+                try:
+                    validation = edit_page.trigger_required_summary_validation(
+                        expected_message=SUMMARY_REQUIRED_MESSAGE,
+                    )
+                except Exception as error:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=str(error),
+                    )
+                    _mark_unreached_steps(result, first_unreached=3)
+                    raise
+
+                result["summary_validation"] = _validation_payload(validation)
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action=REQUEST_STEPS[1],
+                    observed=_step_two_observation(validation),
+                )
+
+                if not _validation_message_matches(validation):
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=_missing_validation_message_observation(validation),
+                    )
+                    _mark_unreached_steps(result, first_unreached=4)
+                    raise AssertionError(
+                        "Step 3 failed: clicking Save did not expose the expected visible "
+                        f"Summary-required message containing {SUMMARY_REQUIRED_FRAGMENT!r}.\n"
+                        f"Validation payload: {_validation_payload(validation)}",
+                    )
+
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=REQUEST_STEPS[2],
+                    observed=_step_three_observation(validation),
+                )
+
+                if not _meets_text_contrast_requirement(validation):
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=_contrast_failure_observation(validation),
+                    )
+                    _mark_unreached_steps(result, first_unreached=5)
+                    raise AssertionError(
+                        "Step 4 failed: the visible Summary-required validation message did "
+                        f"not meet the required {MIN_TEXT_CONTRAST}:1 text contrast ratio.\n"
+                        f"Validation payload: {_validation_payload(validation)}",
+                    )
+
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action=REQUEST_STEPS[3],
+                    observed=_step_four_observation(validation),
+                )
+
+                if not _has_accessible_announcement_path(validation):
+                    _record_step(
+                        result,
+                        step=5,
+                        status="failed",
+                        action=REQUEST_STEPS[4],
+                        observed=_accessibility_failure_observation(validation),
+                    )
+                    raise AssertionError(
+                        "Step 5 failed: the Summary-required validation feedback did not "
+                        "expose a detectable assistive-technology announcement path such as "
+                        "focus returning to Summary, a linked error description, or a live "
+                        "region containing the error.\n"
+                        f"Validation payload: {_validation_payload(validation)}",
+                    )
+
+                _record_step(
+                    result,
+                    step=5,
+                    status="passed",
+                    action=REQUEST_STEPS[4],
+                    observed=_step_five_observation(validation),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Clicked Save with an empty Summary and inspected both the visible "
+                        "validation message and the accessibility feedback exposed to the "
+                        "focused control."
+                    ),
+                    observed=(
+                        f"Visible validation text: {_validation_texts(validation)}; "
+                        f"focus: {_focused_element_summary(validation)}; "
+                        f"live regions: {list(validation.live_region_texts)!r}"
+                    ),
+                )
 
                 tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-                _mark_unreached_steps(result, first_unreached=2)
-                raise AssertionError(
-                    "TS-887 currently implements the live bug reproduction through the first "
-                    "required user action. The production defect reproduced only when Step 1 "
-                    "was impossible; downstream validation checks were intentionally not run "
-                    "after the reproduction condition changed.",
-                )
             except Exception:
                 tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
@@ -205,6 +319,192 @@ def _summary_field_failure_observation(field: LabeledTextFieldObservation) -> st
         f"aria_invalid={field.aria_invalid!r}, "
         f"aria_describedby={field.aria_describedby!r}, "
         f"aria_errormessage={field.aria_errormessage!r}."
+    )
+
+
+def _validation_payload(
+    validation: SummaryRequiredValidationObservation,
+) -> dict[str, object]:
+    return {
+        "field": _field_payload(validation.field),
+        "message": (
+            None
+            if validation.message is None
+            else {
+                "text": validation.message.text,
+                "tag_name": validation.message.tag_name,
+                "role": validation.message.role,
+                "aria_live": validation.message.aria_live,
+                "element_id": validation.message.element_id,
+                "color": validation.message.color,
+                "background_color": validation.message.background_color,
+                "contrast_ratio": validation.message.contrast_ratio,
+            }
+        ),
+        "describedby_texts": list(validation.describedby_texts),
+        "errormessage_texts": list(validation.errormessage_texts),
+        "live_region_texts": list(validation.live_region_texts),
+        "active_element": {
+            "tag_name": validation.active_element.tag_name,
+            "role": validation.active_element.role,
+            "accessible_name": validation.active_element.accessible_name,
+            "text": validation.active_element.text,
+            "tabindex": validation.active_element.tabindex,
+            "outer_html": validation.active_element.outer_html,
+        },
+        "field_is_active": validation.field_is_active,
+        "dialog_text": validation.dialog_text,
+    }
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join((value or "").split())
+
+
+def _contains_summary_required(value: str | None) -> bool:
+    return SUMMARY_REQUIRED_FRAGMENT.lower() in _normalize_text(value).lower()
+
+
+def _validation_texts(
+    validation: SummaryRequiredValidationObservation,
+) -> tuple[str, ...]:
+    texts: list[str] = []
+    if validation.message is not None and validation.message.text:
+        texts.append(validation.message.text)
+    texts.extend(validation.describedby_texts)
+    texts.extend(validation.errormessage_texts)
+    texts.extend(validation.live_region_texts)
+    deduped: list[str] = []
+    for value in texts:
+        normalized = _normalize_text(value)
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return tuple(deduped)
+
+
+def _validation_message_matches(
+    validation: SummaryRequiredValidationObservation,
+) -> bool:
+    return any(_contains_summary_required(value) for value in _validation_texts(validation))
+
+
+def _step_two_observation(validation: SummaryRequiredValidationObservation) -> str:
+    return (
+        "Clicking Save kept the Edit issue dialog open and surfaced an observable "
+        f"validation state. Summary field payload: {_field_payload(validation.field)}; "
+        f"focused element: {_focused_element_summary(validation)}"
+    )
+
+
+def _step_three_observation(validation: SummaryRequiredValidationObservation) -> str:
+    return (
+        "The hosted Edit issue dialog exposed the expected Summary-required feedback. "
+        f"Observed validation texts: {_validation_texts(validation)!r}"
+    )
+
+
+def _missing_validation_message_observation(
+    validation: SummaryRequiredValidationObservation,
+) -> str:
+    return (
+        "Clicking Save exposed a validation state, but the visible/associated feedback did "
+        f"not contain {SUMMARY_REQUIRED_FRAGMENT!r}. "
+        f"Observed validation texts: {_validation_texts(validation)!r}; "
+        f"focused element: {_focused_element_summary(validation)}"
+    )
+
+
+def _meets_text_contrast_requirement(
+    validation: SummaryRequiredValidationObservation,
+) -> bool:
+    return (
+        validation.message is not None
+        and validation.message.contrast_ratio is not None
+        and validation.message.contrast_ratio >= MIN_TEXT_CONTRAST
+    )
+
+
+def _contrast_failure_observation(
+    validation: SummaryRequiredValidationObservation,
+) -> str:
+    if validation.message is None:
+        return (
+            "No visible validation message element was available to measure contrast after "
+            "Save was clicked."
+        )
+    return (
+        "The visible Summary-required validation text did not meet WCAG AA text contrast. "
+        f"text={validation.message.text!r}, contrast_ratio={validation.message.contrast_ratio}, "
+        f"foreground={validation.message.color!r}, "
+        f"background={validation.message.background_color!r}."
+    )
+
+
+def _step_four_observation(validation: SummaryRequiredValidationObservation) -> str:
+    assert validation.message is not None
+    return (
+        "The visible Summary-required validation text met WCAG AA contrast. "
+        f"text={validation.message.text!r}, contrast_ratio={validation.message.contrast_ratio:.2f}:1, "
+        f"foreground={validation.message.color!r}, "
+        f"background={validation.message.background_color!r}."
+    )
+
+
+def _has_accessible_announcement_path(
+    validation: SummaryRequiredValidationObservation,
+) -> bool:
+    live_region_feedback = any(
+        _contains_summary_required(text) for text in validation.live_region_texts
+    )
+    associated_feedback = any(
+        _contains_summary_required(text)
+        for text in (*validation.describedby_texts, *validation.errormessage_texts)
+    )
+    focus_on_summary = (
+        validation.field_is_active
+        or _contains_summary_required(validation.active_element.accessible_name)
+        or _normalize_text(validation.active_element.accessible_name).startswith("Summary")
+        or _normalize_text(validation.active_element.text).startswith("Summary")
+    )
+    invalid_summary = (validation.field.aria_invalid or "").lower() == "true"
+    return live_region_feedback or (invalid_summary and associated_feedback) or (
+        invalid_summary and focus_on_summary
+    )
+
+
+def _accessibility_failure_observation(
+    validation: SummaryRequiredValidationObservation,
+) -> str:
+    return (
+        "The Summary-required validation feedback did not expose a reliable assistive-"
+        "technology announcement path. "
+        f"aria_invalid={validation.field.aria_invalid!r}, "
+        f"aria_describedby={validation.field.aria_describedby!r}, "
+        f"aria_errormessage={validation.field.aria_errormessage!r}, "
+        f"describedby_texts={list(validation.describedby_texts)!r}, "
+        f"errormessage_texts={list(validation.errormessage_texts)!r}, "
+        f"live_region_texts={list(validation.live_region_texts)!r}, "
+        f"focused element: {_focused_element_summary(validation)}"
+    )
+
+
+def _step_five_observation(validation: SummaryRequiredValidationObservation) -> str:
+    return (
+        "The Summary-required validation feedback exposed an assistive-technology path via "
+        f"focus/ARIA associations. aria_invalid={validation.field.aria_invalid!r}, "
+        f"describedby_texts={list(validation.describedby_texts)!r}, "
+        f"errormessage_texts={list(validation.errormessage_texts)!r}, "
+        f"live_region_texts={list(validation.live_region_texts)!r}, "
+        f"focused element: {_focused_element_summary(validation)}"
+    )
+
+
+def _focused_element_summary(validation: SummaryRequiredValidationObservation) -> str:
+    active = validation.active_element
+    return (
+        f"tag={active.tag_name!r}, role={active.role!r}, "
+        f"accessible_name={active.accessible_name!r}, text={active.text!r}, "
+        f"field_is_active={validation.field_is_active}"
     )
 
 

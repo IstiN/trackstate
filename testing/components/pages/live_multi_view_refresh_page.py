@@ -6,7 +6,10 @@ from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,30 @@ class LabeledTextFieldObservation:
     aria_describedby: str | None
     aria_errormessage: str | None
     outer_html: str
+
+
+@dataclass(frozen=True)
+class ValidationMessageObservation:
+    text: str
+    tag_name: str
+    role: str | None
+    aria_live: str | None
+    element_id: str | None
+    color: str | None
+    background_color: str | None
+    contrast_ratio: float | None
+
+
+@dataclass(frozen=True)
+class SummaryRequiredValidationObservation:
+    field: LabeledTextFieldObservation
+    message: ValidationMessageObservation | None
+    describedby_texts: tuple[str, ...]
+    errormessage_texts: tuple[str, ...]
+    live_region_texts: tuple[str, ...]
+    active_element: FocusedElementObservation
+    field_is_active: bool
+    dialog_text: str
 
 
 class LiveMultiViewRefreshPage:
@@ -359,6 +386,379 @@ class LiveMultiViewRefreshPage:
             )
         self._session.fill(f'input[aria-label="{self._escape(label)}"]', "", timeout_ms=30_000)
         return self.observe_labeled_text_field(label)
+
+    def active_element(self) -> FocusedElementObservation:
+        return self._session.active_element()
+
+    def trigger_required_summary_validation(
+        self,
+        *,
+        expected_message: str,
+    ) -> SummaryRequiredValidationObservation:
+        self._session.click(
+            'flt-semantics[role="button"][aria-label="Save"]',
+            timeout_ms=30_000,
+        )
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ dialogSelector, label, expectedMessage }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return (
+                      rect.width > 0
+                      && rect.height > 0
+                      && style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number.parseFloat(style.opacity || '1') > 0
+                    );
+                  };
+                  const findField = (root) => {
+                    const selectors = [
+                      `input[aria-label="${label}"]`,
+                      `textarea[aria-label="${label}"]`,
+                      `[role="textbox"][aria-label="${label}"]`,
+                    ];
+                    for (const selector of selectors) {
+                      const field = root.querySelector(selector);
+                      if (field) {
+                        return field;
+                      }
+                    }
+                    return null;
+                  };
+                  const parseColor = (value) => {
+                    if (!value) {
+                      return null;
+                    }
+                    const match = value.match(
+                      /^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i,
+                    );
+                    if (!match) {
+                      return null;
+                    }
+                    return [
+                      Number.parseInt(match[1], 10),
+                      Number.parseInt(match[2], 10),
+                      Number.parseInt(match[3], 10),
+                    ];
+                  };
+                  const isTransparent = (value) =>
+                    !value
+                    || value === 'transparent'
+                    || /^rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0(?:\\.0+)?\\s*\\)$/i.test(value);
+                  const relativeLuminance = (color) => {
+                    const channel = (value) => {
+                      const normalized = value / 255;
+                      if (normalized <= 0.03928) {
+                        return normalized / 12.92;
+                      }
+                      return ((normalized + 0.055) / 1.055) ** 2.4;
+                    };
+                    return (
+                      (0.2126 * channel(color[0]))
+                      + (0.7152 * channel(color[1]))
+                      + (0.0722 * channel(color[2]))
+                    );
+                  };
+                  const contrastRatio = (foreground, background) => {
+                    const lighter = relativeLuminance(foreground);
+                    const darker = relativeLuminance(background);
+                    const max = lighter > darker ? lighter : darker;
+                    const min = lighter > darker ? darker : lighter;
+                    return (max + 0.05) / (min + 0.05);
+                  };
+                  const effectiveBackgroundColor = (element) => {
+                    let current = element;
+                    while (current) {
+                      const background = window.getComputedStyle(current).backgroundColor;
+                      if (!isTransparent(background)) {
+                        return background;
+                      }
+                      current = current.parentElement;
+                    }
+                    const bodyBackground = window.getComputedStyle(document.body).backgroundColor;
+                    return isTransparent(bodyBackground) ? 'rgb(255, 255, 255)' : bodyBackground;
+                  };
+                  const collectText = (element) =>
+                    normalize(
+                      element.innerText
+                        || element.textContent
+                        || element.getAttribute('aria-label')
+                        || '',
+                    );
+                  const root = document.querySelector(dialogSelector);
+                  if (!root) {
+                    return null;
+                  }
+                  const field = findField(root);
+                  if (!field) {
+                    return null;
+                  }
+                  const expected = normalize(expectedMessage).toLowerCase();
+                  const resolveIds = (attributeValue) => {
+                    const ids = normalize(attributeValue).split(' ').filter(Boolean);
+                    return ids
+                      .map((id) => document.getElementById(id))
+                      .filter((element) => !!element)
+                      .map((element) => collectText(element))
+                      .filter((text) => text.length > 0);
+                  };
+                  const describedbyTexts = resolveIds(field.getAttribute('aria-describedby'));
+                  const errormessageTexts = resolveIds(field.getAttribute('aria-errormessage'));
+                  const liveRegionTexts = Array.from(
+                    root.querySelectorAll('[aria-live], [role="alert"], [role="status"]'),
+                  )
+                    .filter((element) => isVisible(element))
+                    .map((element) => collectText(element))
+                    .filter((text) => text.length > 0);
+                  const matchingMessageElements = Array.from(root.querySelectorAll('*'))
+                    .filter((element) => isVisible(element))
+                    .map((element) => {
+                      const text = collectText(element);
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        text,
+                        textLength: text.length,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter(
+                      (candidate) =>
+                        candidate.text.length > 0
+                        && candidate.text.toLowerCase().includes(expected),
+                    )
+                    .sort((left, right) => {
+                      if (left.textLength !== right.textLength) {
+                        return left.textLength - right.textLength;
+                      }
+                      return left.area - right.area;
+                    });
+                  const messageElement =
+                    matchingMessageElements.length > 0
+                      ? matchingMessageElements[0].element
+                      : null;
+                  const message =
+                    messageElement === null
+                      ? null
+                      : (() => {
+                          const style = window.getComputedStyle(messageElement);
+                          const backgroundColor = effectiveBackgroundColor(messageElement);
+                          const foreground = parseColor(style.color);
+                          const background = parseColor(backgroundColor);
+                          return {
+                            text: collectText(messageElement),
+                            tagName: messageElement.tagName,
+                            role: messageElement.getAttribute('role'),
+                            ariaLive: messageElement.getAttribute('aria-live'),
+                            elementId: messageElement.id || null,
+                            color: style.color,
+                            backgroundColor,
+                            contrastRatio:
+                              foreground === null || background === null
+                                ? null
+                                : contrastRatio(foreground, background),
+                          };
+                        })();
+                  const fieldInvalid =
+                    String(field.getAttribute('aria-invalid') || '').toLowerCase() === 'true';
+                  const hasAssociatedFeedback = [
+                    ...(message === null ? [] : [message.text]),
+                    ...describedbyTexts,
+                    ...errormessageTexts,
+                    ...liveRegionTexts,
+                  ].some((text) => text.toLowerCase().includes(expected));
+                  if (!fieldInvalid && !hasAssociatedFeedback) {
+                    return null;
+                  }
+                  const active = document.activeElement;
+                  const activeText =
+                    active === null
+                      ? ''
+                      : normalize(
+                          active.innerText
+                            || active.textContent
+                            || active.getAttribute('aria-label')
+                            || '',
+                        );
+                  return {
+                    field: {
+                      value:
+                        'value' in field && typeof field.value === 'string'
+                          ? field.value
+                          : collectText(field),
+                      enabled: !field.disabled,
+                      disabled: !!field.disabled,
+                      readOnly: !!field.readOnly,
+                      ariaLabel: field.getAttribute('aria-label'),
+                      ariaInvalid: field.getAttribute('aria-invalid'),
+                      ariaDescribedBy: field.getAttribute('aria-describedby'),
+                      ariaErrormessage: field.getAttribute('aria-errormessage'),
+                      outerHtml: field.outerHTML.slice(0, 800),
+                    },
+                    message,
+                    describedbyTexts,
+                    errormessageTexts,
+                    liveRegionTexts,
+                    activeElement: active
+                      ? {
+                          tagName: active.tagName,
+                          role: active.getAttribute('role'),
+                          accessibleName:
+                            active.getAttribute('aria-label') || activeText || null,
+                          text: activeText,
+                          tabindex: active.getAttribute('tabindex'),
+                          outerHtml: active.outerHTML.slice(0, 400),
+                        }
+                      : {
+                          tagName: '',
+                          role: null,
+                          accessibleName: null,
+                          text: '',
+                          tabindex: null,
+                          outerHtml: '',
+                        },
+                    fieldIsActive: active === field,
+                    dialogText: collectText(root),
+                  };
+                }
+                """,
+                arg={
+                    "dialogSelector": self._dialog_group_selector,
+                    "label": "Summary",
+                    "expectedMessage": expected_message,
+                },
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step failed: clicking Save did not surface the expected Summary-required "
+                "validation feedback in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step failed: clicking Save did not produce an observable Summary-required "
+                "validation state in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        field_payload = payload.get("field")
+        active_payload = payload.get("activeElement")
+        if not isinstance(field_payload, dict) or not isinstance(active_payload, dict):
+            raise AssertionError(
+                "Step failed: the hosted Edit issue validation probe returned an incomplete "
+                "Summary validation payload.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        message_payload = payload.get("message")
+        message = (
+            None
+            if not isinstance(message_payload, dict)
+            else ValidationMessageObservation(
+                text=str(message_payload.get("text", "")),
+                tag_name=str(message_payload.get("tagName", "")),
+                role=(
+                    str(message_payload["role"])
+                    if message_payload.get("role") is not None
+                    else None
+                ),
+                aria_live=(
+                    str(message_payload["ariaLive"])
+                    if message_payload.get("ariaLive") is not None
+                    else None
+                ),
+                element_id=(
+                    str(message_payload["elementId"])
+                    if message_payload.get("elementId") is not None
+                    else None
+                ),
+                color=(
+                    str(message_payload["color"])
+                    if message_payload.get("color") is not None
+                    else None
+                ),
+                background_color=(
+                    str(message_payload["backgroundColor"])
+                    if message_payload.get("backgroundColor") is not None
+                    else None
+                ),
+                contrast_ratio=(
+                    float(message_payload["contrastRatio"])
+                    if message_payload.get("contrastRatio") is not None
+                    else None
+                ),
+            )
+        )
+        return SummaryRequiredValidationObservation(
+            field=LabeledTextFieldObservation(
+                label="Summary",
+                value=str(field_payload.get("value", "")),
+                enabled=bool(field_payload.get("enabled")),
+                disabled=bool(field_payload.get("disabled")),
+                read_only=bool(field_payload.get("readOnly")),
+                aria_label=(
+                    str(field_payload["ariaLabel"])
+                    if field_payload.get("ariaLabel") is not None
+                    else None
+                ),
+                aria_invalid=(
+                    str(field_payload["ariaInvalid"])
+                    if field_payload.get("ariaInvalid") is not None
+                    else None
+                ),
+                aria_describedby=(
+                    str(field_payload["ariaDescribedBy"])
+                    if field_payload.get("ariaDescribedBy") is not None
+                    else None
+                ),
+                aria_errormessage=(
+                    str(field_payload["ariaErrormessage"])
+                    if field_payload.get("ariaErrormessage") is not None
+                    else None
+                ),
+                outer_html=str(field_payload.get("outerHtml", "")),
+            ),
+            message=message,
+            describedby_texts=tuple(
+                str(text) for text in payload.get("describedbyTexts", []) if isinstance(text, str)
+            ),
+            errormessage_texts=tuple(
+                str(text)
+                for text in payload.get("errormessageTexts", [])
+                if isinstance(text, str)
+            ),
+            live_region_texts=tuple(
+                str(text) for text in payload.get("liveRegionTexts", []) if isinstance(text, str)
+            ),
+            active_element=FocusedElementObservation(
+                tag_name=str(active_payload.get("tagName", "")),
+                role=(
+                    str(active_payload["role"])
+                    if active_payload.get("role") is not None
+                    else None
+                ),
+                accessible_name=(
+                    str(active_payload["accessibleName"])
+                    if active_payload.get("accessibleName") is not None
+                    else None
+                ),
+                text=str(active_payload.get("text", "")),
+                tabindex=(
+                    str(active_payload["tabindex"])
+                    if active_payload.get("tabindex") is not None
+                    else None
+                ),
+                outer_html=str(active_payload.get("outerHtml", "")),
+            ),
+            field_is_active=bool(payload.get("fieldIsActive")),
+            dialog_text=str(payload.get("dialogText", "")),
+        )
 
     def open_issue_from_current_section(
         self,

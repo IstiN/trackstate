@@ -230,20 +230,30 @@ class LiveProjectSettingsPage:
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
                 if connect_via_aria:
+                    self._scroll_into_view(self._connect_selector)
                     self._session.click(self._connect_selector, timeout_ms=30_000)
                 else:
+                    connect_button_selector = (
+                        'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+                    )
+                    self._scroll_into_view(connect_button_selector)
                     self._session.click(
                         self._button_selector,
                         has_text="Connect GitHub",
                         timeout_ms=30_000,
                     )
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+            self._scroll_into_view(self._token_input_selector)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-            self._session.click(
-                self._button_selector,
-                has_text="Connect token",
-                timeout_ms=30_000,
-            )
+            if self._session.count(self._connect_token_selector) > 0:
+                self._scroll_into_view(self._connect_token_selector)
+                self._session.click(self._connect_token_selector, timeout_ms=30_000)
+            else:
+                self._session.click(
+                    self._button_selector,
+                    has_text="Connect token",
+                    timeout_ms=30_000,
+                )
 
             try:
                 self._session.wait_for_text(
