@@ -157,6 +157,35 @@ void main() {
           failureMessage:
               'Timed out waiting for the cleared viewer-locale translation to persist.',
         );
+        await screen.openSection('JQL Search');
+        await screen.expectIssueSearchResultVisible(
+          Ts467LocaleResolutionFixture.issueKey,
+          Ts467LocaleResolutionFixture.issueSummary,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            fallbackStatus,
+          ),
+          isTrue,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            editedStatus,
+          ),
+          isFalse,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            canonicalStatus,
+          ),
+          isFalse,
+        );
 
         await screen.openSection('Settings');
         await settingsRobot.openLocalesTab();
@@ -195,6 +224,27 @@ void main() {
           expectedValue: '',
           failureMessage:
               'Timed out waiting for the cleared default-locale translation to persist.',
+        );
+        await screen.openSection('JQL Search');
+        await screen.expectIssueSearchResultVisible(
+          Ts467LocaleResolutionFixture.issueKey,
+          Ts467LocaleResolutionFixture.issueSummary,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            canonicalStatus,
+          ),
+          isTrue,
+        );
+        expect(
+          await screen.isIssueSearchResultTextVisible(
+            Ts467LocaleResolutionFixture.issueKey,
+            Ts467LocaleResolutionFixture.issueSummary,
+            fallbackStatus,
+          ),
+          isFalse,
         );
       } finally {
         tester.binding.platformDispatcher.clearLocaleTestValue();
