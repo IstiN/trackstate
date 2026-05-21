@@ -8,5 +8,7 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored signed-in GitHub token.
   - Preloads an active local workspace plus one hosted workspace in browser storage.
+  - Uses the default desktop viewport of 1440x900 for this ticket.
   - Simulates a transiently busy local workspace by temporarily revoking filesystem access to the prepared local repository during startup, then restoring it during the retry window.
   - Waits after the busy-state release for the workspace switcher trigger to restore the local workspace instead of asserting immediately.
+  - Covers the deployed fixes linked from TS-882 and TS-896.

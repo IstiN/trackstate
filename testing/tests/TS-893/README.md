@@ -10,12 +10,13 @@ The automation:
 2. prepares the matching local git folder on disk, temporarily revokes access
    to it to simulate a transiently busy/unavailable file-system handle, and
    restores access during the startup retry window
-3. waits after the busy-state release for the workspace switcher trigger to
+3. runs the scenario at the default desktop viewport of `1440x900`
+4. waits after the busy-state release for the workspace switcher trigger to
    restore the saved local workspace instead of asserting immediately
-4. opens **Workspace switcher** and verifies the selected active row is the
+5. opens **Workspace switcher** and verifies the selected active row is the
    local workspace in the `Local Git` state rather than `Local Unavailable` or
    the hosted fallback
-5. records the visible trigger, row state, and screenshot if the live startup
+6. records the visible trigger, row state, and screenshot if the live startup
    flow still lands on the hosted fallback or keeps the local row unavailable
 
 ## Install dependencies

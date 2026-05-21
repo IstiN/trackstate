@@ -38,14 +38,14 @@ TEST_CASE_TITLE = (
     "Local Git via retry"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
 BUSY_RELEASE_SECONDS = 2.5
-LINKED_BUGS = ["TS-882"]
+LINKED_BUGS = ["TS-882", "TS-896"]
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -815,11 +815,6 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Step results",
         *_step_lines(result, jira=False),
-        "",
-        "## How to run",
-        "```bash",
-        RUN_COMMAND,
-        "```",
     ]
     if not passed:
         lines.extend(
