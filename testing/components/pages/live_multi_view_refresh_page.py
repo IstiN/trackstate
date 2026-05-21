@@ -393,7 +393,7 @@ class LiveMultiViewRefreshPage:
     def trigger_required_summary_validation(
         self,
         *,
-        expected_message: str,
+        message_fragment: str,
     ) -> SummaryRequiredValidationObservation:
         self._session.click(
             'flt-semantics[role="button"][aria-label="Save"]',
@@ -402,7 +402,7 @@ class LiveMultiViewRefreshPage:
         try:
             payload = self._session.wait_for_function(
                 """
-                ({ dialogSelector, label, expectedMessage }) => {
+                ({ dialogSelector, label, messageFragment }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -500,7 +500,7 @@ class LiveMultiViewRefreshPage:
                   if (!field) {
                     return null;
                   }
-                  const expected = normalize(expectedMessage).toLowerCase();
+                  const expected = normalize(messageFragment).toLowerCase();
                   const resolveIds = (attributeValue) => {
                     const ids = normalize(attributeValue).split(' ').filter(Boolean);
                     return ids
@@ -632,7 +632,7 @@ class LiveMultiViewRefreshPage:
                 arg={
                     "dialogSelector": self._dialog_group_selector,
                     "label": "Summary",
-                    "expectedMessage": expected_message,
+                    "messageFragment": message_fragment,
                 },
                 timeout_ms=15_000,
             )

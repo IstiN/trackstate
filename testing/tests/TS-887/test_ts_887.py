@@ -26,6 +26,7 @@ from testing.core.config.live_setup_test_config import load_live_setup_test_conf
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-887"
+RUN_COMMAND = "PYTHONPATH=. python3 testing/tests/TS-887/test_ts_887.py"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -33,6 +34,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts887_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts887_success.png"
 
@@ -43,7 +45,6 @@ REQUEST_STEPS = (
     "Verify the error message meets WCAG AA contrast (4.5:1).",
     "Use a screen reader to verify that the error is announced (for example, via a live region or focus shift).",
 )
-SUMMARY_REQUIRED_MESSAGE = "Summary is required before saving."
 SUMMARY_REQUIRED_FRAGMENT = "Summary is required"
 MIN_TEXT_CONTRAST = 4.5
 
@@ -170,7 +171,7 @@ def main() -> None:
 
                 try:
                     validation = edit_page.trigger_required_summary_validation(
-                        expected_message=SUMMARY_REQUIRED_MESSAGE,
+                        message_fragment=SUMMARY_REQUIRED_FRAGMENT,
                     )
                 except Exception as error:
                     _record_step(
@@ -249,8 +250,8 @@ def main() -> None:
                     raise AssertionError(
                         "Step 5 failed: the Summary-required validation feedback did not "
                         "expose a detectable assistive-technology announcement path such as "
-                        "focus returning to Summary, a linked error description, or a live "
-                        "region containing the error.\n"
+                        "a linked error description, a live region containing the error, or "
+                        "focus moving to the error content.\n"
                         f"Validation payload: {_validation_payload(validation)}",
                     )
 
@@ -286,6 +287,8 @@ def main() -> None:
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
+
+    _write_pass_outputs(result)
 
 
 def _assert_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
@@ -453,23 +456,26 @@ def _step_four_observation(validation: SummaryRequiredValidationObservation) -> 
 def _has_accessible_announcement_path(
     validation: SummaryRequiredValidationObservation,
 ) -> bool:
-    live_region_feedback = any(
-        _contains_summary_required(text) for text in validation.live_region_texts
+    return bool(_announcement_paths(validation))
+
+
+def _announcement_paths(
+    validation: SummaryRequiredValidationObservation,
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    if any(_contains_summary_required(text) for text in validation.live_region_texts):
+        paths.append("live region")
+    if any(_contains_summary_required(text) for text in validation.describedby_texts):
+        paths.append("aria-describedby")
+    if any(_contains_summary_required(text) for text in validation.errormessage_texts):
+        paths.append("aria-errormessage")
+    focused_text_candidates = (
+        validation.active_element.accessible_name,
+        validation.active_element.text,
     )
-    associated_feedback = any(
-        _contains_summary_required(text)
-        for text in (*validation.describedby_texts, *validation.errormessage_texts)
-    )
-    focus_on_summary = (
-        validation.field_is_active
-        or _contains_summary_required(validation.active_element.accessible_name)
-        or _normalize_text(validation.active_element.accessible_name).startswith("Summary")
-        or _normalize_text(validation.active_element.text).startswith("Summary")
-    )
-    invalid_summary = (validation.field.aria_invalid or "").lower() == "true"
-    return live_region_feedback or (invalid_summary and associated_feedback) or (
-        invalid_summary and focus_on_summary
-    )
+    if any(_contains_summary_required(text) for text in focused_text_candidates):
+        paths.append("focus on error content")
+    return tuple(paths)
 
 
 def _accessibility_failure_observation(
@@ -490,8 +496,9 @@ def _accessibility_failure_observation(
 
 def _step_five_observation(validation: SummaryRequiredValidationObservation) -> str:
     return (
-        "The Summary-required validation feedback exposed an assistive-technology path via "
-        f"focus/ARIA associations. aria_invalid={validation.field.aria_invalid!r}, "
+        "The Summary-required validation feedback exposed the error text to assistive "
+        f"technology via {', '.join(_announcement_paths(validation))}. "
+        f"aria_invalid={validation.field.aria_invalid!r}, "
         f"describedby_texts={list(validation.describedby_texts)!r}, "
         f"errormessage_texts={list(validation.errormessage_texts)!r}, "
         f"live_region_texts={list(validation.live_region_texts)!r}, "
@@ -573,99 +580,213 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    JIRA_COMMENT_PATH.write_text(_jira_comment(result), encoding="utf-8")
-    PR_BODY_PATH.write_text(_pr_body(result), encoding="utf-8")
-    RESPONSE_PATH.write_text(_response_summary(result), encoding="utf-8")
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies()
 
 
-def _jira_comment(result: dict[str, object]) -> str:
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies()
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
-        f"h3. {TICKET_KEY} FAILED",
+        f"h3. {TICKET_KEY} {status}",
         "",
         "*Automation coverage*",
         "* Opened the deployed hosted TrackState app.",
         "* Connected the live session with the configured GitHub token until the write-capable connected banner appeared.",
         "* Opened the live Edit issue surface for DEMO-2.",
-        "* Attempted to perform the first required user action from the ticket: clear the Summary field.",
+        "* Attempted the required user flow: clear Summary, click Save, inspect the Summary-required feedback, check contrast, and verify the accessibility announcement path.",
         "",
         "*Observed result*",
-        "* The scenario failed at Step 1 because the visible Summary field was disabled in the deployed Edit issue dialog, so the user could not clear it and could not reach the validation feedback checks.",
+        (
+            "* Matched the expected result: the hosted Edit issue flow exposed visible Summary-required validation feedback, the visible message met WCAG AA contrast, and the error text was reachable to assistive technology."
+            if passed
+            else f"* Did not match the expected result. {_failure_summary(result)}"
+        ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
             f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
             f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
         ),
-        f"* Screenshot: {{{{{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}}}}}",
+        f"* Screenshot: {{{{{screenshot_path}}}}}",
         "",
         "*Step results*",
         *_step_lines(result, jira=True),
         "",
         "*Human-style verification*",
         *_human_lines(result, jira=True),
-        "",
-        "*Exact error*",
-        "{code}",
-        str(result.get("traceback", result.get("error", ""))),
-        "{code}",
     ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
-def _pr_body(result: dict[str, object]) -> str:
+def _pr_body(result: dict[str, object], *, passed: bool) -> str:
+    status = "Passed" if passed else "Failed"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
-        f"## {TICKET_KEY} Failed",
+        f"## {TICKET_KEY} {status}",
+        "",
+        "### Rework updates",
+        "- Matched Summary-validation message discovery to the ticket fragment `Summary is required`, so compliant shorter copy is still detected for contrast measurement.",
+        "- Tightened the accessibility assertion so Step 5 now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content.",
+        "- Added the standard pass-path artifact writer, stale bug cleanup, and review-reply output so the workflow can record a real pass once the product bug is fixed.",
         "",
         "### Automation",
         "- Opened the deployed hosted TrackState app.",
         "- Connected the live session with the configured GitHub token until the connected banner appeared.",
         "- Opened the live `Edit issue` surface for `DEMO-2`.",
-        "- Attempted the first required user action from the ticket: clearing the `Summary` field.",
+        "- Exercised the ticket flow: cleared `Summary`, clicked `Save`, inspected the `Summary is required` feedback, checked contrast, and checked the accessibility announcement path.",
         "",
         "### Observed result",
-        "- The scenario failed at Step 1 because the visible `Summary` field was disabled in the deployed Edit issue dialog, so the user could not trigger the validation feedback path.",
+        (
+            "- Matched the expected result."
+            if passed
+            else f"- Did not match the expected result. {_failure_summary(result)}"
+        ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
             f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
         ),
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        f"- Screenshot: `{screenshot_path}`",
         "",
         "### Step results",
         *_step_lines(result, jira=False),
         "",
         "### Human-style verification",
         *_human_lines(result, jira=False),
-        "",
-        "### Exact error",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
     ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "### Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
-def _response_summary(result: dict[str, object]) -> str:
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
     lines = [
-        f"# {TICKET_KEY} failed",
+        f"h3. {TICKET_KEY} rework {status}",
         "",
-        "The deployed hosted Edit issue flow did not allow the required Summary-validation scenario to start.",
+        "*Fixes applied*",
+        "* Relaxed visible-message discovery to the ticket fragment {{Summary is required}} so compliant shorter copy is still measured.",
+        "* Tightened Step 5 so the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
+        "* Added pass-path artifact writing plus stale bug cleanup and review replies.",
         "",
-        "## Observed",
-        f"- Issue: `{result.get('issue_key', '')}`",
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-        f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
-        "",
-        "## Error",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "*New test result*",
+        (
+            "* PASSED — the hosted Edit issue validation flow now meets the ticket requirements end to end."
+            if passed
+            else f"* FAILED — {_failure_summary(result)}"
+        ),
     ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ]
+        )
     return "\n".join(lines) + "\n"
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3282703459,
+                        "threadId": "PRRT_kwDOSU6Gf86D3VGB",
+                        "reply": (
+                            "Fixed: the Summary validation probe now discovers the visible message using the ticket fragment `Summary is required` instead of the stricter full sentence, so compliant shorter copy is still captured for the contrast and accessibility checks."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3282703608,
+                        "threadId": "PRRT_kwDOSU6Gf86D3VH4",
+                        "reply": (
+                            "Fixed: Step 5 no longer treats `aria-invalid` plus focus on the Summary field as sufficient. It now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3282703774,
+                        "threadId": "PRRT_kwDOSU6Gf86D3VJz",
+                        "reply": (
+                            "Fixed: TS-887 now writes the standard pass artifacts on success (`test_automation_result.json`, `response.md`, `pr_body.md`, review replies), and it removes any stale `bug_description.md` when the scenario passes."
+                        ),
+                    },
+                ]
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _failure_summary(result: dict[str, object]) -> str:
+    step = _first_failed_step(result)
+    if step is not None:
+        return str(step.get("observed", result.get("error", "The scenario failed.")))
+    return str(result.get("error", "The scenario failed."))
+
+
+def _first_failed_step(result: dict[str, object]) -> dict[str, object] | None:
+    for step in result.get("steps", []):
+        if isinstance(step, dict) and step.get("status") == "failed":
+            return step
+    return None
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    failing_step = _first_failed_step(result)
+    missing_capability = (
+        "The hosted Edit issue surface does not expose a production-usable path to trigger and verify Summary validation feedback."
+        if failing_step is None
+        else f"The hosted Edit issue surface failed at Step {failing_step.get('step')}: {failing_step.get('action')}"
+    )
     lines = [
-        f"# {TICKET_KEY} - Edit issue Summary validation cannot be triggered because Summary is disabled",
+        f"# {TICKET_KEY} - Hosted Edit issue Summary validation does not meet the ticket requirements",
         "",
         "## Steps to reproduce",
         "1. Clear the content of the `Summary` field.",
@@ -681,11 +802,13 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual vs Expected",
         "- Expected: the live Edit issue surface lets the user clear Summary, click Save, see the visible `Summary is required` validation message, and verify its contrast/accessibility behavior.",
-        (
-            "- Actual: the live Edit issue surface rendered the required Summary input "
-            "as disabled, so the user could not clear it and could not reach the "
-            "validation feedback scenario."
-        ),
+        f"- Actual: {_failure_summary(result)}",
+        f"- Missing/broken production capability: {missing_capability}",
+        "",
+        "## Failing command",
+        "```bash",
+        RUN_COMMAND,
+        "```",
         "",
         "## Exact error message",
         "```text",
