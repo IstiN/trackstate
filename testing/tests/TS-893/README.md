@@ -13,9 +13,9 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup reaches the recovery path
-5. requires the visible `Sync error, attention needed` signal while the local
-  workspace is still blocked, then waits after the busy-state release for the
-  workspace switcher trigger to
+5. requires a TS-893 runtime probe for a failed File System Access operation on
+  the blocked local workspace before access is restored, then waits after the
+  busy-state release for the workspace switcher trigger to
   restore the saved local workspace instead of asserting immediately
 6. opens **Workspace switcher** and verifies the selected active row is the
   local workspace in the `Local Git` state rather than `Local Unavailable` or
