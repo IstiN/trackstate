@@ -178,7 +178,13 @@ def main() -> None:
                         focused=focused_trigger,
                         focus_steps=trigger_focus_steps,
                     )
-                    page.open_switcher(
+                    page.focus_workspace_trigger(timeout_ms=TAB_FOCUS_TIMEOUT_MS)
+                    focused_trigger = page.active_element()
+                    _assert_workspace_trigger_focused(
+                        focused=focused_trigger,
+                        focus_steps=trigger_focus_steps,
+                    )
+                    page.press_enter_on_active_element_and_wait_for_surface(
                         timeout_ms=TAB_FOCUS_TIMEOUT_MS,
                     )
                     switcher = page.observe_open_switcher(
@@ -821,8 +827,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Rework summary",
-        "- Added a deterministic trigger-focus restore after opening the panel so Step 3 always measures the required trigger-owned `Tab` transition into the switcher.",
-        "- Restored the resolved-thread filter so `review_replies.json` only targets unresolved PR review threads.",
+        "- Switched Step 2 back to keyboard activation so the workspace switcher opens from the focused trigger via `Enter`, not a mouse click.",
+        "- Kept the deterministic trigger-focus restore after open so Step 3 still measures the required trigger-owned `Tab` transition into the switcher.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -872,8 +878,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added a deterministic pre-Step-3 trigger-focus restore so the test measures the required trigger -> panel `Tab` transition even when opening the panel moves focus internally.",
-        "- Restored unresolved-thread filtering so per-thread review replies are only generated for still-open PR discussions.",
+        "- Switched Step 2 back to keyboard activation so the panel opens from the focused trigger via `Enter` instead of a click.",
+        "- Kept the deterministic pre-Step-3 trigger-focus restore so the test still measures the required trigger -> panel `Tab` transition.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -1039,6 +1045,13 @@ def _review_reply_text(
         return (
             "Fixed: `_discussion_threads()` again skips `resolved: true` entries, so "
             "`review_replies.json` only replies to unresolved GitHub review threads. "
+            + rerun_summary
+        )
+    if root_comment_id == 3284189451:
+        return (
+            "Fixed: Step 2 now opens the workspace switcher by pressing `Enter` on the "
+            "keyboard-focused trigger before the panel assertions run, so the TS-824 "
+            "flow is exercised from the required keyboard activation path. "
             + rerun_summary
         )
     return "Fixed the requested TS-824 review item. " + rerun_summary
