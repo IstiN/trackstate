@@ -28,12 +28,14 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 TICKET_KEY = "TS-888"
 TEST_CASE_TITLE = "Discoverable navigation - App shell to Settings/Admin entry path"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-888/test_ts_888.py"
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts888_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts888_failure.png"
 
@@ -59,12 +61,12 @@ TAB_EXPECTATIONS = (
     (
         "Statuses",
         None,
-        'flt-semantics[aria-label="Add status"]',
+        "Add status",
     ),
     (
         "Workflows",
         "Delivery Workflow ID: delivery-workflow • Statuses: todo, in-progress, in-review, done • Transitions: 4",
-        'flt-semantics[aria-label="Add workflow"]',
+        "Add workflow",
     ),
     (
         "Issue Types",
@@ -191,7 +193,7 @@ def main() -> None:
                 _assert_settings_surface(settings_shell)
                 settings_text = settings_page.body_text()
                 result["settings_body_text"] = settings_text
-                rendered_tab_labels = _settings_tab_labels(tracker_page)
+                rendered_tab_labels = settings_page.rendered_tab_labels()
                 result["rendered_tab_labels"] = rendered_tab_labels
                 missing_tab_labels = [
                     label
@@ -222,15 +224,13 @@ def main() -> None:
                 )
 
                 tab_observations = []
-                for label, expected_visible_text, visible_signal_selector in TAB_EXPECTATIONS:
-                    tab_observations.append(
-                        _activate_settings_tab(
-                            tracker_page=tracker_page,
-                            label=label,
-                            required_text=expected_visible_text,
-                            visible_signal_selector=visible_signal_selector,
-                        ),
+                for label, expected_visible_text, signal_label in TAB_EXPECTATIONS:
+                    observation = settings_page.observe_admin_tab(
+                        label,
+                        expected_visible_text=expected_visible_text,
+                        signal_label=signal_label,
                     )
+                    tab_observations.append(_tab_observation_payload(observation))
 
                 result["tab_observations"] = tab_observations
                 _record_step(
@@ -338,102 +338,12 @@ def _record_human_verification(
     checks.append({"check": check, "observed": observed})
 
 
-def _settings_tab_labels(tracker_page) -> list[str]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => Array.from(document.querySelectorAll('flt-semantics[role="tab"]'))
-          .map((tab) => (tab.getAttribute('aria-label') ?? '').trim())
-          .filter((label) => label.length > 0)
-        """,
-    )
-    if not isinstance(payload, list):
-        raise AssertionError(
-            "Step 4 failed: the Settings surface did not expose readable admin tab labels.\n"
-            f"Observed body text:\n{tracker_page.body_text()}",
-        )
-    return [str(item) for item in payload]
-
-
-def _activate_settings_tab(
-    *,
-    tracker_page,
-    label: str,
-    required_text: str | None,
-    visible_signal_selector: str | None,
-) -> dict[str, object]:
-    session = tracker_page.session
-    selector = f'flt-semantics[role="tab"][aria-label="{label}"]'
-    session.evaluate(
-        "(value) => document.querySelector(value)?.scrollIntoView({ block: 'center' })",
-        arg=selector,
-    )
-    rect = session.bounding_box(selector, timeout_ms=30_000)
-    session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
-    payload = session.wait_for_function(
-        """
-        ({ tabSelector, requiredText, visibleSignalSelector }) => {
-          const tab = document.querySelector(tabSelector);
-          if (!tab || tab.getAttribute('aria-selected') !== 'true') {
-            return null;
-          }
-          const bodyText = document.body?.innerText ?? '';
-          if (requiredText && !bodyText.includes(requiredText)) {
-            return null;
-          }
-          let signalText = '';
-          if (visibleSignalSelector) {
-            const signal = document.querySelector(visibleSignalSelector);
-            if (!signal) {
-              return null;
-            }
-            const rect = signal.getBoundingClientRect();
-            const style = window.getComputedStyle(signal);
-            const isVisible = rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-            if (!isVisible) {
-              return null;
-            }
-            signalText = signal.getAttribute('aria-label')
-              ?? signal.innerText
-              ?? signal.textContent
-              ?? '';
-          }
-          return {
-            selectedTab: tab.getAttribute('aria-label') ?? '',
-            bodyText,
-            signalText,
-          };
-        }
-        """,
-        arg={
-            "tabSelector": selector,
-            "requiredText": required_text,
-            "visibleSignalSelector": visible_signal_selector,
-        },
-        timeout_ms=30_000,
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "Step 5 failed: the Settings admin tab did not become visibly active.\n"
-            f"Tab: {label}\n"
-            f"Observed body text:\n{tracker_page.body_text()}",
-        )
-    selected_tab = str(payload.get("selectedTab", "")).strip()
-    if selected_tab != label:
-        raise AssertionError(
-            "Step 5 failed: clicking the Settings admin tab did not change the selected "
-            "tab.\n"
-            f"Expected selected tab: {label}\n"
-            f"Observed selected tab: {selected_tab}\n"
-            f"Observed body text:\n{tracker_page.body_text()}",
-        )
+def _tab_observation_payload(observation) -> dict[str, object]:
     return {
-        "tab": label,
-        "selected_tab": selected_tab,
-        "expected_visible_text": required_text,
-        "signal": str(payload.get("signalText", "")).strip(),
+        "tab": observation.label,
+        "selected_tab": observation.selected_tab_label,
+        "expected_visible_text": observation.expected_visible_text,
+        "signal": observation.signal_text,
     }
 
 
@@ -452,9 +362,9 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
-    PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
-    RESPONSE_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_tracker_rework_summary(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_comment_body(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -473,107 +383,105 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
-    PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
-    RESPONSE_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(
+        _tracker_rework_summary(result, passed=False),
+        encoding="utf-8",
+    )
+    PR_BODY_PATH.write_text(_pr_comment_body(result, passed=False), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
-def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+def _tracker_rework_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
-        "h3. Test Automation Result",
+        "h3. PR Rework Result",
         "",
-        f"*Status:* {'✅ PASSED' if passed else '❌ FAILED'}",
-        f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
-        "",
-        "h4. What was tested",
-        "* Discoverable navigation from the default hosted app shell to Project Settings.",
-        "* Visibility of the Settings primary navigation action before interaction.",
-        "* Visible transition into the administration workspace and interactivity of the Statuses, Workflows, and Issue Types tabs.",
-        "",
-        "h4. Result",
+        "*Fixed:* Added `testing/tests/TS-888/README.md` and moved Settings admin-tab label discovery/activation into `LiveProjectSettingsPage`, so `test_ts_888.py` now stays on page-object APIs.",
+        f"*Test Run:* `{RUN_COMMAND}`",
+        f"*Result:* {'✅ PASSED' if passed else '❌ FAILED'}",
     ]
-    for step in result.get("steps", []):
-        assert isinstance(step, dict)
-        emoji = "(/)" if step.get("status") == "passed" else "(x)"
-        lines.append(
-            f"{emoji} *Step {step.get('step')}* {step.get('action')}\n"
-            f"Observed: {step.get('observed')}"
-        )
-    lines.extend(("", "h4. Human-style verification"))
-    for check in result.get("human_verification", []):
-        assert isinstance(check, dict)
-        lines.append(f"* {check.get('check')}\nObserved: {check.get('observed')}")
-    lines.extend(
-        [
-            "",
-            "h4. Test file",
-            "{code}",
-            "testing/tests/TS-888/test_ts_888.py",
-            "{code}",
-            "",
-            "h4. Run command",
-            "{code:bash}",
-            RUN_COMMAND,
-            "{code}",
-        ],
-    )
-    if not passed:
+    if passed:
+        lines.append("*Summary:* 1 passed, 0 failed.")
+    else:
         lines.extend(
             [
-                "",
-                "h4. Failure details",
-                f"* Error: {result.get('error')}",
-                f"* Screenshot: {result.get('screenshot')}",
+                "*Summary:* 0 passed, 1 failed.",
+                f"*Error:* {result.get('error')}",
             ],
         )
     return "\n".join(lines).strip() + "\n"
 
 
-def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
-    lines = [
-        "## Test Automation Result",
-        "",
-        f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
-        f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
-        "",
-        "## What was automated",
-        "- Opened the deployed TrackState app in Chromium using the live hosted tracker harness.",
-        "- Verified the default shell visibly exposed the Settings primary navigation action.",
-        "- Clicked Settings and checked the Statuses, Workflows, and Issue Types tabs switch visibly.",
-        "",
-        "## Result",
-    ]
-    for step in result.get("steps", []):
-        assert isinstance(step, dict)
-        status = "passed" if step.get("status") == "passed" else "failed"
-        lines.append(
-            f"- **Step {step.get('step')} ({status})** {step.get('action')}  \n"
-            f"  Observed: {step.get('observed')}"
-        )
-    lines.extend(("", "## Human-style verification"))
-    for check in result.get("human_verification", []):
-        assert isinstance(check, dict)
-        lines.append(f"- **Check:** {check.get('check')}  \n  Observed: {check.get('observed')}")
-    lines.extend(
-        [
-            "",
-            "## How to run",
-            "```bash",
-            RUN_COMMAND,
-            "```",
-        ],
+def _pr_comment_body(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error')}`."
     )
+    lines = [
+        "## Rework completed",
+        "",
+        "- Added `testing/tests/TS-888/README.md` to satisfy the per-ticket folder requirements.",
+        "- Moved Settings admin-tab label discovery and activation/verification into `LiveProjectSettingsPage`, so the test no longer reaches into Playwright session internals or raw DOM selectors.",
+        f"- {rerun_summary}",
+    ]
     if not passed:
         lines.extend(
             [
                 "",
                 "## Failure details",
-                f"- **Error:** {result.get('error')}",
-                f"- **Screenshot:** `{result.get('screenshot')}`",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
             ],
         )
     return "\n".join(lines).strip() + "\n"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed: added `testing/tests/TS-888/README.md` and moved the Settings admin-tab "
+        "label discovery plus activation/verification flow into `LiveProjectSettingsPage`, "
+        "so `test_ts_888.py` now stays on reusable page-object APIs instead of raw "
+        f"Playwright session and DOM selector work. {rerun_summary}"
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:
