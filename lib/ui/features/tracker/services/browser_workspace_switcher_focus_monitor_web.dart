@@ -1,11 +1,31 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web/web.dart' as web;
 
 import 'browser_workspace_switcher_focus_matcher.dart';
+import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
+
+class BrowserViewportScrollSnapshot {
+  const BrowserViewportScrollSnapshot(this._targets);
+
+  final List<_BrowserViewportTrackedScrollTarget> _targets;
+
+  bool get isEmpty => _targets.isEmpty;
+}
+
+class _BrowserViewportTrackedScrollTarget {
+  const _BrowserViewportTrackedScrollTarget({
+    required this.target,
+    this.element,
+  });
+
+  final BrowserWorkspaceSwitcherTrackedScrollTarget target;
+  final web.HTMLElement? element;
+}
 
 class BrowserWorkspaceSwitcherFocusMonitorSubscription {
   BrowserWorkspaceSwitcherFocusMonitorSubscription(this._cancel);
@@ -90,25 +110,29 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 }) {
   final listener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
+    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
-      if (_moveBrowserWorkspaceSwitcherTabFocus(backwards: keyboardEvent.shiftKey)) {
+      if (_moveBrowserWorkspaceSwitcherTabFocus(
+        backwards: keyboardEvent.shiftKey,
+      )) {
         keyboardEvent.preventDefault();
       }
       onBrowserTab();
       return;
     }
 
-    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
-      return;
-    }
-
-    if (!browserFocusWithinWorkspaceSwitcherRow(
-      ancestors: _activeBrowserFocusAncestors(),
+    if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
+      key: keyboardEvent.key,
+      ancestors: ancestors,
     )) {
       return;
     }
 
     keyboardEvent.preventDefault();
+    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
+      return;
+    }
+
     onBrowserBoundaryKey(keyboardEvent.key);
   }).toJS;
 
@@ -122,6 +146,212 @@ bool isBrowserFocusWithinWorkspaceSwitcher() {
   return browserFocusWithinWorkspaceSwitcher(
     ancestors: _activeBrowserFocusAncestors(),
   );
+}
+
+BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
+  final elementCandidates = _backgroundScrollElementCandidates();
+  final targets = captureBrowserWorkspaceSwitcherScrollTargets(
+    windowCandidate: _windowBackgroundScrollCandidate(),
+    elementCandidates: [
+      for (final candidate in elementCandidates) candidate.candidate,
+    ],
+  );
+  if (targets.isEmpty) {
+    return const BrowserViewportScrollSnapshot([]);
+  }
+  final elementsByKey = <String, web.HTMLElement>{
+    for (final candidate in elementCandidates)
+      candidate.candidate.key: candidate.element,
+  };
+  return BrowserViewportScrollSnapshot([
+    for (final target in targets)
+      _BrowserViewportTrackedScrollTarget(
+        target: target,
+        element: target.isWindow ? null : elementsByKey[target.key],
+      ),
+  ]);
+}
+
+void restoreBrowserViewportScrollSnapshot({
+  required BrowserViewportScrollSnapshot snapshot,
+}) {
+  if (snapshot.isEmpty) {
+    return;
+  }
+  Timer? timer;
+  var attemptCount = 0;
+
+  void restore() {
+    attemptCount += 1;
+    final currentElementScrollYByKey = <String, double>{};
+    for (final target in snapshot._targets) {
+      final element = target.element;
+      if (element == null || !element.isConnected) {
+        continue;
+      }
+      currentElementScrollYByKey[target.target.key] = element.scrollTop
+          .toDouble();
+    }
+    final targetsToRestore =
+        browserWorkspaceSwitcherScrollTargetsNeedingRestore(
+          capturedTargets: [
+            for (final target in snapshot._targets) target.target,
+          ],
+          currentWindowScrollY: web.window.scrollY,
+          currentElementScrollYByKey: currentElementScrollYByKey,
+        );
+    for (final target in targetsToRestore) {
+      if (target.isWindow) {
+        web.window.scrollTo(web.window.scrollX.toJS, target.scrollY);
+        continue;
+      }
+      final element = _snapshotElementForKey(
+        snapshot: snapshot,
+        key: target.key,
+      );
+      if (element == null || !element.isConnected) {
+        continue;
+      }
+      element.scrollTop = target.scrollY.round();
+    }
+    if (targetsToRestore.isEmpty || attemptCount >= 12) {
+      timer?.cancel();
+      timer = null;
+    }
+  }
+
+  timer = Timer.periodic(const Duration(milliseconds: 16), (_) => restore());
+  Timer.run(restore);
+}
+
+BrowserWorkspaceSwitcherScrollCandidate _windowBackgroundScrollCandidate() {
+  final scrollingElement =
+      web.document.scrollingElement ??
+      web.document.documentElement ??
+      web.document.body;
+  final windowScrollHeight = math.max(
+    math.max(
+      scrollingElement?.scrollHeight.toDouble() ?? 0,
+      web.document.documentElement?.scrollHeight.toDouble() ?? 0,
+    ),
+    web.document.body?.scrollHeight.toDouble() ?? 0,
+  );
+  final windowViewportHeight = web.window.innerHeight.toDouble();
+  final windowMaxScrollY = math.max(
+    0.0,
+    windowScrollHeight - windowViewportHeight,
+  );
+  return BrowserWorkspaceSwitcherScrollCandidate(
+    key: 'window',
+    scrollY: web.window.scrollY,
+    maxScrollY: windowMaxScrollY,
+    width: web.window.innerWidth.toDouble(),
+    height: windowViewportHeight,
+    explicitlyScrollable: true,
+    isWindow: true,
+  );
+}
+
+class _BrowserBackgroundScrollElementCandidate {
+  const _BrowserBackgroundScrollElementCandidate({
+    required this.candidate,
+    required this.element,
+  });
+
+  final BrowserWorkspaceSwitcherScrollCandidate candidate;
+  final web.HTMLElement element;
+}
+
+List<_BrowserBackgroundScrollElementCandidate>
+_backgroundScrollElementCandidates() {
+  final minimumWidth = math.min(web.window.innerWidth * 0.35, 280);
+  final minimumHeight = math.min(web.window.innerHeight * 0.35, 200);
+  final candidates = <_BrowserBackgroundScrollElementCandidate>[];
+  final seenKeys = <String>{};
+  final nodes = web.document.querySelectorAll(
+    [
+      'flt-semantics-host',
+      'flt-semantics',
+      'main',
+      'section',
+      '[role="main"]',
+      '[style*="overflow"]',
+      '[class*="scroll"]',
+      '[class*="viewport"]',
+    ].join(','),
+  );
+  for (var index = 0; index < nodes.length; index += 1) {
+    final node = nodes.item(index);
+    if (node == null) {
+      continue;
+    }
+    final element = node as web.HTMLElement;
+    if (!_isVisible(element)) {
+      continue;
+    }
+    final rect = element.getBoundingClientRect();
+    final style = web.window.getComputedStyle(element);
+    if (rect.width < minimumWidth || rect.height < minimumHeight) {
+      continue;
+    }
+    final key = _browserBackgroundScrollCandidateKey(
+      element: element,
+      index: index,
+    );
+    if (!seenKeys.add(key)) {
+      continue;
+    }
+    final candidate = BrowserWorkspaceSwitcherScrollCandidate(
+      key: key,
+      scrollY: element.scrollTop.toDouble(),
+      maxScrollY: math.max(
+        0,
+        element.scrollHeight.toDouble() - element.clientHeight.toDouble(),
+      ),
+      width: rect.width,
+      height: rect.height,
+      explicitlyScrollable:
+          style.overflowY == 'scroll' || style.overflowY == 'auto',
+      textSummary: _normalizeText(element.innerText),
+    );
+    candidates.add(
+      _BrowserBackgroundScrollElementCandidate(
+        candidate: candidate,
+        element: element,
+      ),
+    );
+  }
+  return candidates;
+}
+
+web.HTMLElement? _snapshotElementForKey({
+  required BrowserViewportScrollSnapshot snapshot,
+  required String key,
+}) {
+  for (final candidate in snapshot._targets) {
+    if (candidate.target.key == key) {
+      return candidate.element;
+    }
+  }
+  return null;
+}
+
+String _browserBackgroundScrollCandidateKey({
+  required web.HTMLElement element,
+  required int index,
+}) {
+  final semanticsIdentifier = element.getAttribute('flt-semantics-identifier');
+  if (semanticsIdentifier case final value? when value.trim().isNotEmpty) {
+    return 'semantics:$value';
+  }
+  if (element.id case final value when value.trim().isNotEmpty) {
+    return 'id:${element.localName}:$value';
+  }
+  return 'element:${element.localName}:$index';
+}
+
+String _normalizeText(String? value) {
+  return (value ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
 bool _moveBrowserWorkspaceSwitcherTabFocus({required bool backwards}) {
@@ -247,7 +477,7 @@ bool _focusSemanticsElement(String semanticsIdentifier) {
       continue;
     }
     if (candidate case final web.HTMLElement htmlElement) {
-      htmlElement.focus();
+      htmlElement.focus(web.FocusOptions(preventScroll: true));
     }
     final activeElement = web.document.activeElement;
     if (activeElement == candidate || candidate.contains(activeElement)) {
@@ -410,7 +640,7 @@ int? _activeDesktopPrimaryNavigationTargetIndex({
 
 bool _focusElement(web.Element element) {
   final htmlElement = element as web.HTMLElement;
-  htmlElement.focus();
+  htmlElement.focus(web.FocusOptions(preventScroll: true));
   final activeElement = web.document.activeElement;
   return activeElement == htmlElement || htmlElement.contains(activeElement);
 }
