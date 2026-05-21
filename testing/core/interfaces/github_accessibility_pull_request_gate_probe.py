@@ -21,6 +21,8 @@ class GitHubAccessibilityPullRequestGateObservation:
     pull_request_head_branch: str
     pull_request_head_sha: str | None
     pull_request_probe_path: str
+    probe_render_host_path: str
+    probe_rendered_in_application: bool
     pull_request_file_paths: list[str]
     pull_request_state: str | None
     pull_request_mergeable_state: str | None
@@ -38,6 +40,8 @@ class GitHubAccessibilityPullRequestGateObservation:
     observed_step_names: list[str]
     observed_status_check_names: list[str]
     observed_status_check_workflow_names: list[str]
+    failed_status_check_names: list[str]
+    failed_status_check_workflow_names: list[str]
     accessibility_status_check_name: str | None
     accessibility_status_check_workflow_name: str | None
     accessibility_status_check_status: str | None
@@ -46,6 +50,9 @@ class GitHubAccessibilityPullRequestGateObservation:
     matched_accessibility_markers: list[str]
     matched_contrast_markers: list[str]
     matched_semantic_markers: list[str]
+    run_log_matched_accessibility_markers: list[str]
+    run_log_matched_contrast_markers: list[str]
+    run_log_matched_semantic_markers: list[str]
     run_log_mentions_accessibility: bool
     run_log_mentions_contrast_issue: bool
     run_log_mentions_semantic_issue: bool

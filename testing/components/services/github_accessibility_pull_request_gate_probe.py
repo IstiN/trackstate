@@ -89,6 +89,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             pull_request_probe_path=str(
                 pull_request_observation["pull_request_probe_path"]
             ),
+            probe_render_host_path=str(
+                pull_request_observation["probe_render_host_path"]
+            ),
+            probe_rendered_in_application=bool(
+                pull_request_observation["probe_rendered_in_application"]
+            ),
             pull_request_file_paths=list(pull_request_observation["pull_request_file_paths"]),
             pull_request_state=self._optional_string(
                 pull_request_observation.get("pull_request_state")
@@ -132,6 +138,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             observed_status_check_workflow_names=list(
                 pull_request_observation["observed_status_check_workflow_names"]
             ),
+            failed_status_check_names=list(
+                pull_request_observation["failed_status_check_names"]
+            ),
+            failed_status_check_workflow_names=list(
+                pull_request_observation["failed_status_check_workflow_names"]
+            ),
             accessibility_status_check_name=self._optional_string(
                 pull_request_observation.get("accessibility_status_check_name")
             ),
@@ -155,6 +167,15 @@ class GitHubAccessibilityPullRequestGateProbeService:
             ),
             matched_semantic_markers=list(
                 pull_request_observation["matched_semantic_markers"]
+            ),
+            run_log_matched_accessibility_markers=list(
+                pull_request_observation["run_log_matched_accessibility_markers"]
+            ),
+            run_log_matched_contrast_markers=list(
+                pull_request_observation["run_log_matched_contrast_markers"]
+            ),
+            run_log_matched_semantic_markers=list(
+                pull_request_observation["run_log_matched_semantic_markers"]
             ),
             run_log_mentions_accessibility=bool(
                 pull_request_observation["run_log_mentions_accessibility"]
@@ -231,8 +252,21 @@ class GitHubAccessibilityPullRequestGateProbeService:
             probe_file = temp_repository_root / self._config.probe_path
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
+            render_host_file = temp_repository_root / self._config.probe_render_host_path
+            render_host_source = self._inject_probe_into_render_host(
+                render_host_file.read_text(encoding="utf-8")
+            )
+            render_host_file.write_text(render_host_source, encoding="utf-8")
 
-            self._run_command(["git", "add", self._config.probe_path], cwd=temp_repository_root)
+            self._run_command(
+                [
+                    "git",
+                    "add",
+                    self._config.probe_path,
+                    self._config.probe_render_host_path,
+                ],
+                cwd=temp_repository_root,
+            )
             self._run_command(
                 ["git", "commit", "-m", self._config.commit_message],
                 cwd=temp_repository_root,
@@ -282,6 +316,18 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 surface_observation["status_checks"]
             )
             run_log_text, run_log_error = self._try_read_run_log(run_id)
+            run_log_matched_accessibility_markers = self._matched_markers(
+                run_log_text,
+                self._config.expected_accessibility_markers,
+            )
+            run_log_matched_contrast_markers = self._matched_markers(
+                run_log_text,
+                self._config.contrast_evidence_markers,
+            )
+            run_log_matched_semantic_markers = self._matched_markers(
+                run_log_text,
+                self._config.semantic_evidence_markers,
+            )
             evidence_text = "\n".join(
                 [
                     *surface_observation["status_check_names"],
@@ -311,6 +357,11 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "pull_request_head_branch": branch_name,
                 "pull_request_head_sha": head_sha,
                 "pull_request_probe_path": self._config.probe_path,
+                "probe_render_host_path": self._config.probe_render_host_path,
+                "probe_rendered_in_application": (
+                    self._config.probe_path in pull_request_files
+                    and self._config.probe_render_host_path in pull_request_files
+                ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
                 "pull_request_mergeable_state": surface_observation[
@@ -325,6 +376,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "observed_status_check_names": surface_observation["status_check_names"],
                 "observed_status_check_workflow_names": surface_observation[
                     "status_check_workflow_names"
+                ],
+                "failed_status_check_names": surface_observation[
+                    "failed_status_check_names"
+                ],
+                "failed_status_check_workflow_names": surface_observation[
+                    "failed_status_check_workflow_names"
                 ],
                 "accessibility_status_check_name": None
                 if accessibility_check is None
@@ -344,13 +401,26 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "matched_accessibility_markers": matched_accessibility_markers,
                 "matched_contrast_markers": matched_contrast_markers,
                 "matched_semantic_markers": matched_semantic_markers,
-                "run_log_mentions_accessibility": bool(matched_accessibility_markers),
-                "run_log_mentions_contrast_issue": bool(matched_contrast_markers),
-                "run_log_mentions_semantic_issue": bool(matched_semantic_markers),
+                "run_log_matched_accessibility_markers": (
+                    run_log_matched_accessibility_markers
+                ),
+                "run_log_matched_contrast_markers": run_log_matched_contrast_markers,
+                "run_log_matched_semantic_markers": run_log_matched_semantic_markers,
+                "run_log_mentions_accessibility": bool(
+                    run_log_matched_accessibility_markers
+                ),
+                "run_log_mentions_contrast_issue": bool(
+                    run_log_matched_contrast_markers
+                ),
+                "run_log_mentions_semantic_issue": bool(
+                    run_log_matched_semantic_markers
+                ),
                 "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
                 "run_log_error": run_log_error,
-                "probe_contains_low_contrast_indicator": True,
-                "probe_contains_semantic_label_indicator": True,
+                "probe_contains_low_contrast_indicator": (
+                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                ),
+                "probe_contains_semantic_label_indicator": "label: 'button'" in probe_source,
                 "probe_semantic_label": "button",
                 "probe_contrast_technique": (
                     "Uses `colorScheme.onSurface.withAlpha(89)` text on "
@@ -575,6 +645,24 @@ class GitHubAccessibilityPullRequestGateProbeService:
                     check["workflow_name"]
                     for check in normalized_checks
                     if isinstance(check.get("workflow_name"), str)
+                ]
+            ),
+            "failed_status_check_names": self._dedupe(
+                [
+                    check["name"]
+                    for check in normalized_checks
+                    if isinstance(check.get("name"), str)
+                    and check.get("conclusion")
+                    in {"failure", "cancelled", "timed_out", "action_required"}
+                ]
+            ),
+            "failed_status_check_workflow_names": self._dedupe(
+                [
+                    check["workflow_name"]
+                    for check in normalized_checks
+                    if isinstance(check.get("workflow_name"), str)
+                    and check.get("conclusion")
+                    in {"failure", "cancelled", "timed_out", "action_required"}
                 ]
             ),
         }
@@ -874,8 +962,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
     def _probe_source() -> str:
         return """import 'package:flutter/material.dart';
 
-class Ts908AccessibilityGateProbe extends StatelessWidget {
-  const Ts908AccessibilityGateProbe({super.key});
+class Ts908ProbeSurface extends StatelessWidget {
+  const Ts908ProbeSurface({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -899,6 +987,79 @@ class Ts908AccessibilityGateProbe extends StatelessWidget {
   }
 }
 """
+
+    def _inject_probe_into_render_host(self, source: str) -> str:
+        if "Ts908ProbeSurface" in source:
+            return source
+
+        if "package:flutter/material.dart" not in source:
+            source = source.replace(
+                "import 'package:flutter/widgets.dart';",
+                "import 'package:flutter/material.dart';",
+            )
+        if "package:flutter/material.dart" not in source:
+            source = "import 'package:flutter/material.dart';\n\n" + source.lstrip()
+
+        probe_import = f"import '{Path(self._config.probe_path).name}';"
+        if probe_import not in source:
+            source = source.replace(
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n",
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n"
+                f"{probe_import}\n",
+            )
+
+        updated_source, replacements = re.subn(
+            r"runApp\(\s*const\s+TrackStateApp\(\)\s*\);",
+            "runApp(const _Ts908RenderedProbeApp());",
+            source,
+            count=1,
+        )
+        if replacements != 1:
+            raise GitHubAccessibilityPullRequestGateError(
+                "TS-908 could not patch lib/main.dart to render the disposable probe."
+            )
+
+        return (
+            updated_source.rstrip()
+            + "\n\n"
+            + """class _Ts908RenderedProbeApp extends StatelessWidget {
+  const _Ts908RenderedProbeApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: const [
+        TrackStateApp(),
+        Positioned(
+          top: 24,
+          left: 24,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: _Ts908ProbeOverlay(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Ts908ProbeOverlay extends StatelessWidget {
+  const _Ts908ProbeOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: ThemeData(useMaterial3: true),
+      child: const Material(
+        color: Colors.transparent,
+        child: Ts908ProbeSurface(),
+      ),
+    );
+  }
+}
+"""
+        )
 
     @staticmethod
     def _job_names(jobs: list[dict[str, Any]]) -> list[str]:

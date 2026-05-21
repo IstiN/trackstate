@@ -14,6 +14,7 @@ class GitHubAccessibilityPullRequestGateConfig:
     target_workflow_name: str
     target_workflow_path: str
     probe_path: str
+    probe_render_host_path: str
     branch_prefix: str
     commit_message: str
     pull_request_title: str
@@ -55,6 +56,11 @@ class GitHubAccessibilityPullRequestGateConfig:
                 path,
             ),
             probe_path=cls._require_string(runtime_inputs, "probe_path", path),
+            probe_render_host_path=cls._require_string(
+                runtime_inputs,
+                "probe_render_host_path",
+                path,
+            ),
             branch_prefix=cls._require_string(runtime_inputs, "branch_prefix", path),
             commit_message=cls._require_string(runtime_inputs, "commit_message", path),
             pull_request_title=cls._require_string(

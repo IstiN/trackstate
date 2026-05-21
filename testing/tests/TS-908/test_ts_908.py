@@ -129,6 +129,23 @@ def _evaluate_defective_component(
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
 ) -> None:
+    if not observation.probe_rendered_in_application:
+        message = (
+            "Step 2 failed: the disposable PR did not wire the defective probe into a "
+            "rendered application surface.\n"
+            f"Probe file: {observation.pull_request_probe_path}\n"
+            f"Expected render host: {observation.probe_render_host_path}\n"
+            f"Observed PR files: {observation.pull_request_file_paths}"
+        )
+        failures.append(message)
+        _record_step(
+            result,
+            step=2,
+            status="failed",
+            action=REQUEST_STEPS[1],
+            observed=message,
+        )
+        return
     if not observation.probe_contains_low_contrast_indicator:
         message = (
             "Step 2 failed: the disposable PR probe did not include the intended low-contrast "
@@ -161,8 +178,9 @@ def _evaluate_defective_component(
         return
 
     observed = (
-        "The disposable PR probe component includes both requested defects: a reduced-"
-        f"contrast text treatment and a non-descriptive semantics label "
+        "The disposable PR renders the defective probe through "
+        f"`{observation.probe_render_host_path}` and includes both requested defects: a "
+        "reduced-contrast text treatment and a non-descriptive semantics label "
         f"`{observation.probe_semantic_label}`.\n"
         f"Contrast technique: {observation.probe_contrast_technique}"
     )
@@ -223,13 +241,11 @@ def _evaluate_accessibility_gate_result(
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
 ) -> None:
-    accessibility_failed = (
-        observation.accessibility_status_check_name is not None
-        and observation.accessibility_status_check_conclusion in FAILURE_CONCLUSIONS
-    )
-    reports_both_defects = (
-        observation.run_log_mentions_contrast_issue
-        and observation.run_log_mentions_semantic_issue
+    workflow_failed = observation.latest_pull_request_run_conclusion in FAILURE_CONCLUSIONS
+    failed_check_surface = workflow_failed or bool(observation.failed_status_check_names)
+    real_log_reports_both_defects = (
+        bool(observation.run_log_matched_contrast_markers)
+        and bool(observation.run_log_matched_semantic_markers)
     )
 
     _record_human_verification(
@@ -243,20 +259,21 @@ def _evaluate_accessibility_gate_result(
             f"`{observation.latest_pull_request_run_url}`; observed status checks: "
             f"{observation.observed_status_check_names or ['<none>']}; observed workflow "
             f"names: {observation.observed_status_check_workflow_names or ['<none>']}; "
+            f"failed status checks: {observation.failed_status_check_names or ['<none>']}; "
             f"observed jobs: {observation.observed_job_names or ['<none>']}; observed "
             f"steps: {observation.observed_step_names or ['<none>']}; log excerpt: "
             f"`{observation.run_log_excerpt or '<none>'}`."
         ),
     )
 
-    if accessibility_failed and reports_both_defects:
+    if failed_check_surface and real_log_reports_both_defects:
         observed = (
-            "The live PR checks surface exposed an accessibility failure that reported both "
-            f"defect classes.\nAccessibility check: "
-            f"{observation.accessibility_status_check_name or observation.target_workflow_name}\n"
-            f"Conclusion: {observation.accessibility_status_check_conclusion or observation.latest_pull_request_run_conclusion}\n"
-            f"Matched contrast markers: {observation.matched_contrast_markers}\n"
-            f"Matched semantic markers: {observation.matched_semantic_markers}"
+            "The live PR workflow failure output reported both requested defect classes, even "
+            "without relying on a separately named accessibility check.\n"
+            f"Failing checks: {observation.failed_status_check_names or ['<none>']}\n"
+            f"Run conclusion: {observation.latest_pull_request_run_conclusion}\n"
+            f"Run-log contrast markers: {observation.run_log_matched_contrast_markers}\n"
+            f"Run-log semantic markers: {observation.run_log_matched_semantic_markers}"
         )
         _record_step(result, step=4, status="passed", action=REQUEST_STEPS[3], observed=observed)
         return
@@ -273,12 +290,16 @@ def _evaluate_accessibility_gate_result(
         f"Accessibility workflow: {observation.accessibility_status_check_workflow_name or '<none>'}\n"
         f"Accessibility check conclusion: {observation.accessibility_status_check_conclusion or '<none>'}\n"
         f"Observed status checks: {observation.observed_status_check_names}\n"
+        f"Failed status checks: {observation.failed_status_check_names}\n"
         f"Observed workflow names: {observation.observed_status_check_workflow_names}\n"
         f"Observed jobs: {observation.observed_job_names}\n"
         f"Observed steps: {observation.observed_step_names}\n"
         f"Matched accessibility markers: {observation.matched_accessibility_markers}\n"
         f"Matched contrast markers: {observation.matched_contrast_markers}\n"
         f"Matched semantic markers: {observation.matched_semantic_markers}\n"
+        f"Run-log accessibility markers: {observation.run_log_matched_accessibility_markers}\n"
+        f"Run-log contrast markers: {observation.run_log_matched_contrast_markers}\n"
+        f"Run-log semantic markers: {observation.run_log_matched_semantic_markers}\n"
         f"Run log error: {observation.run_log_error or '<none>'}\n"
         f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
     )
@@ -338,9 +359,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Created a disposable pull request against the live repository.",
-        "* Added a real Flutter probe component with reduced text contrast and a weak semantics label.",
+        "* Patched the app entrypoint so the disposable PR renders a real Flutter probe surface with reduced text contrast and a weak semantics label.",
         "* Waited for the live pull-request workflow run to execute on that disposable PR.",
-        "* Inspected the actual PR checks surface, workflow jobs/steps, and run logs for an accessibility failure result.",
+        "* Inspected the actual PR checks surface, workflow jobs/steps, and run logs for a failing result that reported both requested defect classes.",
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -383,9 +404,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Created a disposable pull request against the live repository.",
-        "- Added a real Flutter probe component with reduced text contrast and a weak semantics label.",
+        "- Patched the app entrypoint so the disposable PR renders a real Flutter probe surface with reduced text contrast and a weak semantics label.",
         "- Waited for the live pull-request workflow run to execute on that disposable PR.",
-        "- Inspected the actual PR checks surface, workflow jobs/steps, and run logs for an accessibility failure result.",
+        "- Inspected the actual PR checks surface, workflow jobs/steps, and run logs for a failing result that reported both requested defect classes.",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -428,6 +449,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         "- Reworked TS-908 to use a disposable PR plus the live GitHub Actions run/check surface.",
+        "- The disposable PR now renders the defective probe through the app entrypoint instead of adding dead code.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -467,9 +489,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Exact test reproduction",
             (
-                "1. The automation created a disposable PR and added "
-                f"`{result.get('pull_request_probe_path', '')}` with a reduced-contrast text "
-                f"treatment plus the semantics label `{result.get('probe_semantic_label', '')}`."
+                "1. The automation created a disposable PR, added "
+                f"`{result.get('pull_request_probe_path', '')}`, and patched "
+                f"`{result.get('probe_render_host_path', '')}` so the defective probe is "
+                "rendered on app startup."
             ),
             (
                 "2. GitHub Actions executed the contributor-visible PR workflow run "
@@ -484,8 +507,8 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 "4. No failing accessibility-specific result reported both defect classes. "
                 f"Observed accessibility check: `{result.get('accessibility_status_check_name', '<none>')}`; "
-                f"contrast markers: {result.get('matched_contrast_markers', [])}; "
-                f"semantic markers: {result.get('matched_semantic_markers', [])}."
+                f"run-log contrast markers: {result.get('run_log_matched_contrast_markers', [])}; "
+                f"run-log semantic markers: {result.get('run_log_matched_semantic_markers', [])}."
             ),
             "",
             "## Expected result",

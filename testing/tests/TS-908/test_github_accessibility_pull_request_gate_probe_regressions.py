@@ -46,8 +46,10 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "pull_request_checks_url": "https://github.com/IstiN/trackstate/pull/123/checks",
             "pull_request_head_branch": "ts908-accessibility-gate-20260522000000",
             "pull_request_head_sha": "abc123",
-            "pull_request_probe_path": "lib/ts908_accessibility_gate_probe.dart",
-            "pull_request_file_paths": ["lib/ts908_accessibility_gate_probe.dart"],
+            "pull_request_probe_path": "lib/ts908_probe_surface.dart",
+            "probe_render_host_path": "lib/main.dart",
+            "probe_rendered_in_application": True,
+            "pull_request_file_paths": ["lib/main.dart", "lib/ts908_probe_surface.dart"],
             "pull_request_state": "open",
             "pull_request_mergeable_state": "clean",
             "pull_request_status_state": "success",
@@ -64,6 +66,8 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "observed_step_names": ["Analyze", "Build web app"],
             "observed_status_check_names": ["Flutter checks"],
             "observed_status_check_workflow_names": ["Flutter Required Checks"],
+            "failed_status_check_names": [],
+            "failed_status_check_workflow_names": [],
             "accessibility_status_check_name": None,
             "accessibility_status_check_workflow_name": None,
             "accessibility_status_check_status": None,
@@ -72,6 +76,9 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "matched_accessibility_markers": [],
             "matched_contrast_markers": [],
             "matched_semantic_markers": [],
+            "run_log_matched_accessibility_markers": [],
+            "run_log_matched_contrast_markers": [],
+            "run_log_matched_semantic_markers": [],
             "run_log_mentions_accessibility": False,
             "run_log_mentions_contrast_issue": False,
             "run_log_mentions_semantic_issue": False,
@@ -93,7 +100,8 @@ class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
             base_branch="main",
             target_workflow_name="Flutter Required Checks",
             target_workflow_path=".github/workflows/unit-tests.yml",
-            probe_path="lib/ts908_accessibility_gate_probe.dart",
+            probe_path="lib/ts908_probe_surface.dart",
+            probe_render_host_path="lib/main.dart",
             branch_prefix="ts908-accessibility-gate",
             commit_message="TS-908 probe: verify CI accessibility gate on disposable PR",
             pull_request_title="TS-908 disposable probe: verify CI accessibility gate",
@@ -160,8 +168,10 @@ jobs:
         self.assertEqual(observation.target_workflow_step_names, ["Analyze", "Build web app"])
         self.assertEqual(
             observation.pull_request_file_paths,
-            ["lib/ts908_accessibility_gate_probe.dart"],
+            ["lib/main.dart", "lib/ts908_probe_surface.dart"],
         )
+        self.assertEqual(observation.probe_render_host_path, "lib/main.dart")
+        self.assertTrue(observation.probe_rendered_in_application)
         self.assertEqual(observation.latest_pull_request_run_event, "pull_request")
         self.assertFalse(observation.run_log_mentions_accessibility)
         self.assertTrue(observation.cleanup_closed_pull_request)
@@ -192,6 +202,26 @@ jobs:
         assert check is not None
         self.assertEqual(check["name"], "Accessibility audit")
         self.assertEqual(check["conclusion"], "failure")
+
+    def test_inject_probe_into_render_host_wraps_app_startup(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        patched = probe._inject_probe_into_render_host(  # noqa: SLF001
+            """
+import 'package:flutter/widgets.dart';
+
+import 'ui/features/tracker/views/trackstate_app.dart';
+
+void main() {
+  runApp(const TrackStateApp());
+}
+""".strip()
+        )
+
+        self.assertIn("import 'package:flutter/material.dart';", patched)
+        self.assertIn("import 'ts908_probe_surface.dart';", patched)
+        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
+        self.assertIn("child: Ts908ProbeSurface()", patched)
 
 
 if __name__ == "__main__":
