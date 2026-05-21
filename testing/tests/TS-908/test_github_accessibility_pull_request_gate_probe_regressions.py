@@ -34,6 +34,58 @@ class _FakeGitHubApiClient:
         return json.dumps(response)
 
 
+class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
+    def __init__(self, config: GitHubAccessibilityPullRequestGateConfig) -> None:
+        super().__init__(config, github_api_client=_FakeGitHubApiClient({}))
+
+    def _create_and_observe_pull_request(self, workflow_id: int) -> dict[str, object]:
+        del workflow_id
+        return {
+            "pull_request_number": 123,
+            "pull_request_url": "https://github.com/IstiN/trackstate/pull/123",
+            "pull_request_checks_url": "https://github.com/IstiN/trackstate/pull/123/checks",
+            "pull_request_head_branch": "ts908-accessibility-gate-20260522000000",
+            "pull_request_head_sha": "abc123",
+            "pull_request_probe_path": "lib/ts908_accessibility_gate_probe.dart",
+            "pull_request_file_paths": ["lib/ts908_accessibility_gate_probe.dart"],
+            "pull_request_state": "open",
+            "pull_request_mergeable_state": "clean",
+            "pull_request_status_state": "success",
+            "latest_pull_request_run_id": 456,
+            "latest_pull_request_run_url": "https://github.com/IstiN/trackstate/actions/runs/456",
+            "latest_pull_request_run_event": "pull_request",
+            "latest_pull_request_run_status": "completed",
+            "latest_pull_request_run_conclusion": "success",
+            "observed_branch_run_names": ["Flutter Required Checks"],
+            "observed_branch_run_urls": ["https://github.com/IstiN/trackstate/actions/runs/456"],
+            "observed_branch_run_statuses": ["completed"],
+            "observed_branch_run_conclusions": ["success"],
+            "observed_job_names": ["Flutter checks"],
+            "observed_step_names": ["Analyze", "Build web app"],
+            "observed_status_check_names": ["Flutter checks"],
+            "observed_status_check_workflow_names": ["Flutter Required Checks"],
+            "accessibility_status_check_name": None,
+            "accessibility_status_check_workflow_name": None,
+            "accessibility_status_check_status": None,
+            "accessibility_status_check_conclusion": None,
+            "accessibility_status_check_url": None,
+            "matched_accessibility_markers": [],
+            "matched_contrast_markers": [],
+            "matched_semantic_markers": [],
+            "run_log_mentions_accessibility": False,
+            "run_log_mentions_contrast_issue": False,
+            "run_log_mentions_semantic_issue": False,
+            "run_log_excerpt": "",
+            "run_log_error": None,
+            "probe_contains_low_contrast_indicator": True,
+            "probe_contains_semantic_label_indicator": True,
+            "probe_semantic_label": "button",
+            "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
+            "cleanup_closed_pull_request": True,
+            "cleanup_deleted_branch": True,
+        }
+
+
 class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = GitHubAccessibilityPullRequestGateConfig(
@@ -41,21 +93,27 @@ class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
             base_branch="main",
             target_workflow_name="Flutter Required Checks",
             target_workflow_path=".github/workflows/unit-tests.yml",
+            probe_path="lib/ts908_accessibility_gate_probe.dart",
+            branch_prefix="ts908-accessibility-gate",
+            commit_message="TS-908 probe: verify CI accessibility gate on disposable PR",
+            pull_request_title="TS-908 disposable probe: verify CI accessibility gate",
+            pull_request_body="Disposable PR created by TS-908 automation.",
             expected_accessibility_markers=[
                 "axe-core",
                 "accessibility",
                 "wcag",
                 "contrast",
-                "aria-label",
-                "aria label",
-                "semantics label",
+                "aria",
+                "semantic",
             ],
-            ui_timeout_seconds=60,
+            contrast_evidence_markers=["contrast", "wcag", "4.5:1"],
+            semantic_evidence_markers=["aria", "semantic", "label"],
+            poll_interval_seconds=5,
+            run_timeout_seconds=900,
+            pull_request_timeout_seconds=180,
         )
 
-    def test_validate_reports_missing_accessibility_gate_when_pr_workflow_has_no_markers(
-        self,
-    ) -> None:
+    def test_validate_combines_workflow_contract_with_live_pr_observation(self) -> None:
         workflow_text = """
 name: Flutter Required Checks
 on:
@@ -66,12 +124,10 @@ jobs:
     name: Flutter checks
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
       - name: Analyze
         run: flutter analyze
-      - name: Run unit and golden tests
-        run: flutter test --coverage
+      - name: Build web app
+        run: flutter build web
 """.strip()
 
         probe = GitHubAccessibilityPullRequestGateProbeService(
@@ -85,40 +141,57 @@ jobs:
                                 "id": 1,
                                 "name": "Flutter Required Checks",
                                 "path": ".github/workflows/unit-tests.yml",
-                                "state": "active",
-                                "html_url": "https://github.com/IstiN/trackstate/actions/workflows/unit-tests.yml",
                             }
                         ]
                     },
                     "/repos/IstiN/trackstate/contents/.github/workflows/unit-tests.yml?ref=main": workflow_text,
-                    "/repos/IstiN/trackstate/rules/branches/main": [
-                        {
-                            "type": "required_status_checks",
-                            "parameters": {
-                                "contexts": ["Flutter checks"],
-                            },
-                        }
-                    ],
-                    "/repos/IstiN/trackstate/branches/main/protection": {
-                        "required_status_checks": {
-                            "contexts": ["Flutter checks"],
-                        }
-                    },
                 }
             ),
         )
+        probe._create_and_observe_pull_request = _StubProbeService(  # type: ignore[method-assign]
+            self.config
+        )._create_and_observe_pull_request
 
         observation = probe.validate()
 
         self.assertTrue(observation.target_workflow_present_on_default_branch)
         self.assertTrue(observation.target_workflow_declares_pull_request_trigger)
+        self.assertEqual(observation.target_workflow_job_names, ["Flutter checks"])
+        self.assertEqual(observation.target_workflow_step_names, ["Analyze", "Build web app"])
         self.assertEqual(
-            observation.pull_request_workflow_paths,
-            [".github/workflows/unit-tests.yml"],
+            observation.pull_request_file_paths,
+            ["lib/ts908_accessibility_gate_probe.dart"],
         )
-        self.assertEqual(observation.workflows_with_accessibility_markers, [])
-        self.assertFalse(observation.repository_declares_accessibility_required_check)
-        self.assertIn("Flutter checks", observation.required_check_contexts)
+        self.assertEqual(observation.latest_pull_request_run_event, "pull_request")
+        self.assertFalse(observation.run_log_mentions_accessibility)
+        self.assertTrue(observation.cleanup_closed_pull_request)
+        self.assertTrue(observation.cleanup_deleted_branch)
+
+    def test_find_accessibility_status_check_uses_actual_check_surface(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        check = probe._find_accessibility_status_check(  # noqa: SLF001
+            [
+                {
+                    "name": "Flutter checks",
+                    "workflow_name": "Flutter Required Checks",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "details_url": "https://example.test/flutter",
+                },
+                {
+                    "name": "Accessibility audit",
+                    "workflow_name": "Accessibility gate",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "details_url": "https://example.test/accessibility",
+                },
+            ]
+        )
+
+        assert check is not None
+        self.assertEqual(check["name"], "Accessibility audit")
+        self.assertEqual(check["conclusion"], "failure")
 
 
 if __name__ == "__main__":

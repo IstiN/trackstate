@@ -13,8 +13,17 @@ class GitHubAccessibilityPullRequestGateConfig:
     base_branch: str
     target_workflow_name: str
     target_workflow_path: str
+    probe_path: str
+    branch_prefix: str
+    commit_message: str
+    pull_request_title: str
+    pull_request_body: str
     expected_accessibility_markers: list[str]
-    ui_timeout_seconds: int = 60
+    contrast_evidence_markers: list[str]
+    semantic_evidence_markers: list[str]
+    poll_interval_seconds: int = 5
+    run_timeout_seconds: int = 600
+    pull_request_timeout_seconds: int = 120
 
     @classmethod
     def from_file(cls, path: Path) -> "GitHubAccessibilityPullRequestGateConfig":
@@ -45,16 +54,51 @@ class GitHubAccessibilityPullRequestGateConfig:
                 "target_workflow_path",
                 path,
             ),
+            probe_path=cls._require_string(runtime_inputs, "probe_path", path),
+            branch_prefix=cls._require_string(runtime_inputs, "branch_prefix", path),
+            commit_message=cls._require_string(runtime_inputs, "commit_message", path),
+            pull_request_title=cls._require_string(
+                runtime_inputs,
+                "pull_request_title",
+                path,
+            ),
+            pull_request_body=cls._require_string(
+                runtime_inputs,
+                "pull_request_body",
+                path,
+            ),
             expected_accessibility_markers=cls._require_string_list(
                 runtime_inputs,
                 "expected_accessibility_markers",
                 path,
             ),
-            ui_timeout_seconds=cls._require_positive_int(
+            contrast_evidence_markers=cls._require_string_list(
                 runtime_inputs,
-                "ui_timeout_seconds",
+                "contrast_evidence_markers",
                 path,
-                default=60,
+            ),
+            semantic_evidence_markers=cls._require_string_list(
+                runtime_inputs,
+                "semantic_evidence_markers",
+                path,
+            ),
+            poll_interval_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "poll_interval_seconds",
+                path,
+                default=5,
+            ),
+            run_timeout_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "run_timeout_seconds",
+                path,
+                default=600,
+            ),
+            pull_request_timeout_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "pull_request_timeout_seconds",
+                path,
+                default=120,
             ),
         )
 

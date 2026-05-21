@@ -10,22 +10,53 @@ class GitHubAccessibilityPullRequestGateObservation:
     default_branch: str
     target_workflow_name: str
     target_workflow_path: str
+    target_workflow_id: int
     target_workflow_present_on_default_branch: bool
-    target_workflow_state: str | None
-    target_workflow_html_url: str | None
     target_workflow_declares_pull_request_trigger: bool
     target_workflow_job_names: list[str]
     target_workflow_step_names: list[str]
-    default_branch_workflow_paths: list[str]
-    pull_request_workflow_paths: list[str]
-    workflows_with_accessibility_markers: list[str]
-    workflow_accessibility_markers_found: dict[str, list[str]]
-    required_rule_descriptions: list[str]
-    required_check_contexts: list[str]
-    required_check_workflow_paths: list[str]
-    required_check_workflow_names: list[str]
-    repository_declares_accessibility_required_check: bool
-    expected_accessibility_markers: list[str]
+    pull_request_number: int
+    pull_request_url: str
+    pull_request_checks_url: str
+    pull_request_head_branch: str
+    pull_request_head_sha: str | None
+    pull_request_probe_path: str
+    pull_request_file_paths: list[str]
+    pull_request_state: str | None
+    pull_request_mergeable_state: str | None
+    pull_request_status_state: str | None
+    latest_pull_request_run_id: int | None
+    latest_pull_request_run_url: str | None
+    latest_pull_request_run_event: str | None
+    latest_pull_request_run_status: str | None
+    latest_pull_request_run_conclusion: str | None
+    observed_branch_run_names: list[str]
+    observed_branch_run_urls: list[str]
+    observed_branch_run_statuses: list[str]
+    observed_branch_run_conclusions: list[str]
+    observed_job_names: list[str]
+    observed_step_names: list[str]
+    observed_status_check_names: list[str]
+    observed_status_check_workflow_names: list[str]
+    accessibility_status_check_name: str | None
+    accessibility_status_check_workflow_name: str | None
+    accessibility_status_check_status: str | None
+    accessibility_status_check_conclusion: str | None
+    accessibility_status_check_url: str | None
+    matched_accessibility_markers: list[str]
+    matched_contrast_markers: list[str]
+    matched_semantic_markers: list[str]
+    run_log_mentions_accessibility: bool
+    run_log_mentions_contrast_issue: bool
+    run_log_mentions_semantic_issue: bool
+    run_log_excerpt: str
+    run_log_error: str | None
+    probe_contains_low_contrast_indicator: bool
+    probe_contains_semantic_label_indicator: bool
+    probe_semantic_label: str
+    probe_contrast_technique: str
+    cleanup_closed_pull_request: bool
+    cleanup_deleted_branch: bool
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
