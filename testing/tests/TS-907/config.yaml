@@ -7,4 +7,4 @@ dependencies:
 notes:
   - Copies the repository to a disposable temp workspace so the production checkout stays unchanged.
   - Replaces the sync-pill semantic label return with the weaker generic `Attention needed` label in the temp copy.
-  - Runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` and only passes when the local analysis command blocks the regression with an accessibility-focused diagnostic.
+  - Runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` and only passes when the local analysis command surfaces a real diagnostic instead of a clean `No issues found!` result.

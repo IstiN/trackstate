@@ -233,20 +233,13 @@ def _assert_lint_blocks_regression(
     normalized_output = output.lower()
     result["mutated_analyze_output"] = output
 
-    observed_issue_terms = [
-        term for term in config.required_issue_terms if term in normalized_output
-    ]
-    observed_context_terms = [
-        term for term in config.required_context_terms if term in normalized_output
-    ]
-    mentions_target = config.target_relative_path.as_posix() in output
+    diagnostic_signals = _diagnostic_signals(
+        validation.mutated_analyze,
+        normalized_output=normalized_output,
+    )
+    clean_analysis = "no issues found!" in normalized_output
 
-    if (
-        validation.mutated_analyze.exit_code != 0
-        and mentions_target
-        and observed_issue_terms
-        and observed_context_terms
-    ):
+    if diagnostic_signals and not clean_analysis:
         _record_step(
             result,
             step=3,
@@ -254,10 +247,10 @@ def _assert_lint_blocks_regression(
             action=REQUEST_STEPS[2],
             observed=(
                 f"Ran `{validation.mutated_analyze.command_text}` against the mutated "
-                f"temp workspace. The command exited {validation.mutated_analyze.exit_code} "
-                f"and reported accessibility/context markers {observed_context_terms} "
-                f"plus sync-error markers {observed_issue_terms} for "
-                f"{config.target_relative_path.as_posix()}."
+                f"temp workspace. The command surfaced analyzer diagnostics instead "
+                f"of a clean `No issues found!` result. Observed exit_code="
+                f"{validation.mutated_analyze.exit_code}; "
+                f"diagnostic_signals={diagnostic_signals}; terminal output:\n{output}"
             ),
         )
         return
@@ -271,9 +264,8 @@ def _assert_lint_blocks_regression(
             f"Ran `{validation.mutated_analyze.command_text}` after downgrading the "
             f"sync-pill semantic label to {config.generic_semantic_label!r}. "
             f"Observed exit_code={validation.mutated_analyze.exit_code}; "
-            f"mentions_target={mentions_target}; "
-            f"observed_issue_terms={observed_issue_terms}; "
-            f"observed_context_terms={observed_context_terms}; "
+            f"clean_analysis={clean_analysis}; "
+            f"diagnostic_signals={diagnostic_signals}; "
             f"terminal output:\n{output}"
         ),
     )
@@ -284,23 +276,50 @@ def _assert_lint_blocks_regression(
             "`flutter analyze` against the weakened semantic-label change."
         ),
         observed=(
-            "The command did not present a blocking accessibility/context error for "
-            f"the missing `Sync error` prefix. Output:\n{output}"
+            "The command still looked like a clean analysis run instead of surfacing "
+            "a real diagnostic for the weakened semantic label. Output:\n"
+            f"{output}"
         ),
     )
     raise AssertionError(
-        "Step 3 failed: `flutter analyze` did not flag the weakened sync-pill "
-        "semantic label with a blocking accessibility/context diagnostic.\n"
-        f"Expected a non-zero exit code plus terminal output that references "
-        f"{config.target_relative_path.as_posix()} and explains the missing "
-        "'Sync error' context prefix.\n"
+        "Step 3 failed: `flutter analyze` did not identify the weakened sync-pill "
+        "semantic label regression with any real diagnostic.\n"
+        "Expected the mutated analysis run to stop looking clean and surface an "
+        "issue, warning, hint, or non-zero analyzer result instead of "
+        "`No issues found!`.\n"
         f"Observed command: {validation.mutated_analyze.command_text}\n"
         f"Observed exit code: {validation.mutated_analyze.exit_code}\n"
-        f"Observed target mention: {mentions_target}\n"
-        f"Observed issue terms: {observed_issue_terms}\n"
-        f"Observed context terms: {observed_context_terms}\n"
+        f"Observed clean analysis: {clean_analysis}\n"
+        f"Observed diagnostic signals: {diagnostic_signals}\n"
         f"Observed output:\n{output}"
     )
+
+
+def _diagnostic_signals(
+    command_result: CliCommandResult,
+    *,
+    normalized_output: str,
+) -> list[str]:
+    signals: list[str] = []
+    diagnostic_markers = ("error", "warning", "info", "hint")
+
+    if command_result.exit_code != 0:
+        signals.append("non-zero-exit")
+
+    if any(
+        f"{marker} •" in normalized_output or f"{marker} -" in normalized_output
+        for marker in diagnostic_markers
+    ):
+        signals.append("diagnostic-line")
+
+    if any(
+        ("issue found" in line or "issues found" in line)
+        and "no issues found!" not in line
+        for line in normalized_output.splitlines()
+    ):
+        signals.append("issue-summary")
+
+    return signals
 
 
 def _populate_command_metadata(

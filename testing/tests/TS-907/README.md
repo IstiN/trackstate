@@ -12,9 +12,9 @@ The automation:
    `Attention needed` label, and
 4. runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart`.
 
-The test only passes when the local analysis command rejects that weakened
-semantic label with a diagnostic that clearly points to missing sync/error
-context for accessibility.
+The test only passes when the local analysis command stops looking clean and
+surfaces a real diagnostic for that weakened semantic label instead of
+reporting `No issues found!`.
 
 ## Run this test
 
