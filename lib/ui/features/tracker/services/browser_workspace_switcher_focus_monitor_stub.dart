@@ -1,5 +1,9 @@
 import 'package:flutter/foundation.dart' show VoidCallback;
 
+class BrowserViewportScrollSnapshot {
+  const BrowserViewportScrollSnapshot();
+}
+
 class BrowserWorkspaceSwitcherFocusMonitorSubscription {
   void cancel() {}
 }
@@ -62,6 +66,15 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() => false;
+
+BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() =>
+    const BrowserViewportScrollSnapshot();
+
+void restoreBrowserViewportScrollSnapshot({
+  required BrowserViewportScrollSnapshot snapshot,
+}) {
+  _keep(snapshot);
+}
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
   required String semanticsIdentifier,
