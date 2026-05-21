@@ -6,18 +6,21 @@ the saved workspace as **Local Git** once access returns.
 
 The automation:
 1. opens the deployed TrackState web app in Chromium with a stored signed-in
-   GitHub session and a preloaded active local workspace profile
+  GitHub session and a preloaded active local workspace profile
 2. prepares the matching local git folder on disk, temporarily revokes access
-   to it to simulate a transiently busy/unavailable file-system handle, and
-   restores access during the startup retry window
+  to it to simulate a transiently busy/unavailable file-system handle, and
+  restores access during the startup retry window
 3. runs the scenario at the default desktop viewport of `1440x900`
 4. waits after the busy-state release for the workspace switcher trigger to
-   restore the saved local workspace instead of asserting immediately
-5. opens **Workspace switcher** and verifies the selected active row is the
-   local workspace in the `Local Git` state rather than `Local Unavailable` or
-   the hosted fallback
-6. records the visible trigger, row state, and screenshot if the live startup
-   flow still lands on the hosted fallback or keeps the local row unavailable
+  expose the visible recovery message proving startup skipped the blocked
+  workspace during restore
+5. waits after the busy-state release for the workspace switcher trigger to
+  restore the saved local workspace instead of asserting immediately
+6. opens **Workspace switcher** and verifies the selected active row is the
+  local workspace in the `Local Git` state rather than `Local Unavailable` or
+  the hosted fallback
+7. records the visible trigger, row state, and screenshot if the live startup
+  flow still lands on the hosted fallback or keeps the local row unavailable
 
 ## Install dependencies
 

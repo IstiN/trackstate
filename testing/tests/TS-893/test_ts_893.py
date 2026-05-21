@@ -46,6 +46,7 @@ HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
 BUSY_RELEASE_SECONDS = 2.5
 LINKED_BUGS = ["TS-882", "TS-896"]
+RESTORE_MESSAGE_WAIT_SECONDS = 20
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -170,6 +171,7 @@ def main() -> None:
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "busy_release_seconds": BUSY_RELEASE_SECONDS,
+        "restore_message_wait_seconds": RESTORE_MESSAGE_WAIT_SECONDS,
         "steps": [],
         "human_verification": [],
     }
@@ -243,6 +245,31 @@ def main() -> None:
                         ),
                     )
 
+                    restore_message = _observe_restore_message(
+                        tracker_page,
+                        timeout_ms=int(RESTORE_MESSAGE_WAIT_SECONDS * 1000),
+                    )
+                    result["restore_message"] = restore_message
+                    if restore_message is None:
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "After the busy state was released, startup never exposed "
+                                "the recovery message that proves the blocked local workspace "
+                                "was skipped during restore before recovery.\n"
+                                f"Observed body text:\n{page.current_body_text()}"
+                            ),
+                        )
+                        raise AssertionError(
+                            "Step 3 failed: startup restored without exposing the visible "
+                            "recovery message that proves the transient busy local "
+                            "workspace was skipped during restore.\n"
+                            f"Observed body text:\n{page.current_body_text()}"
+                        )
+
                     restored, trigger = poll_until(
                         probe=lambda: page.observe_trigger(timeout_ms=10_000),
                         is_satisfied=_trigger_matches_expected_restore,
@@ -259,9 +286,11 @@ def main() -> None:
                             action=REQUEST_STEPS[2],
                             observed=(
                                 "After the busy state was released, the application shell "
-                                "became interactive and the workspace switcher trigger "
-                                f"restored the prepared local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
-                                f"Observed trigger label={trigger.semantic_label!r}; "
+                                "exposed the restore-recovery message and the workspace "
+                                "switcher trigger restored the prepared local workspace "
+                                f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                f"Observed restore_message={restore_message!r}; "
+                                f"trigger label={trigger.semantic_label!r}; "
                                 f"trigger_text={trigger.visible_text!r}"
                             ),
                         )
@@ -273,9 +302,11 @@ def main() -> None:
                             action=REQUEST_STEPS[2],
                             observed=(
                                 "After the busy state was released, the application shell "
-                                "became interactive but the workspace switcher trigger "
-                                f"never restored the prepared local workspace within {TRIGGER_WAIT_SECONDS} seconds. "
-                                f"Observed trigger label={trigger.semantic_label!r}; "
+                                "exposed the restore-recovery message but the workspace "
+                                "switcher trigger never restored the prepared local workspace "
+                                f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                f"Observed restore_message={restore_message!r}; "
+                                f"trigger label={trigger.semantic_label!r}; "
                                 f"trigger_text={trigger.visible_text!r}"
                             ),
                         )
@@ -309,6 +340,18 @@ def main() -> None:
                     )
                     result["selected_row"] = (
                         _row_payload(selected_row) if selected_row is not None else None
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Waited after the busy-state release for a visible recovery "
+                            "message proving startup skipped the blocked local workspace "
+                            "during restore."
+                        ),
+                        observed=(
+                            f"restore_message={restore_message!r}; "
+                            f"busy_blocker={json.dumps(blocker.snapshot(), ensure_ascii=True)}"
+                        ),
                     )
                     _record_human_verification(
                         result,
@@ -747,6 +790,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         f"* Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
+        "* Captured the visible restore recovery message to prove startup skipped the blocked local workspace during restore before it recovered.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -794,6 +838,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         f"- Temporarily revoked access to the prepared local workspace for {BUSY_RELEASE_SECONDS} seconds during startup to simulate a transient busy file-system handle, then restored access while retry handling was expected to run.",
+        "- Captured the visible restore recovery message to prove startup skipped the blocked local workspace during restore before it recovered.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
@@ -870,6 +915,7 @@ def _bug_description(result: dict[str, object]) -> str:
     active_local_row = result.get("active_local_row")
     selected_row = result.get("selected_row")
     blocker_final = result.get("busy_blocker_final")
+    restore_message = result.get("restore_message")
     return "\n".join(
         [
             f"# {TICKET_KEY} - Startup retry does not restore the local workspace after transient busy access clears",
@@ -915,6 +961,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 if blocker_final is not None
                 else "- **Observed busy-state release:** `<missing>`"
             ),
+            (
+                f"- **Observed restore message:** `{restore_message}`"
+                if restore_message
+                else "- **Observed restore message:** `<missing>`"
+            ),
             "",
             "## Environment details",
             f"- **URL:** {result.get('app_url')}",
@@ -937,6 +988,7 @@ def _bug_description(result: dict[str, object]) -> str:
                     "preloaded_workspace_state": result.get("preloaded_workspace_state"),
                     "busy_blocker_initial": result.get("busy_blocker_initial"),
                     "busy_blocker_final": result.get("busy_blocker_final"),
+                    "restore_message": restore_message,
                     "trigger_observation": trigger,
                     "switcher_observation": switcher,
                     "active_local_row": active_local_row,
@@ -999,6 +1051,21 @@ def _failed_step_summary(result: dict[str, object]) -> str:
         if isinstance(step, dict) and step.get("status") == "failed":
             return f"Step {step.get('step')} failed: {step.get('observed')}"
     return str(result.get("error", "The scenario failed without recorded step details."))
+
+
+def _observe_restore_message(
+    tracker_page,
+    *,
+    timeout_ms: int,
+) -> str | None:
+    try:
+        observation = tracker_page.observe_workspace_restore_message(
+            workspace_name=LOCAL_DISPLAY_NAME,
+            timeout_ms=timeout_ms,
+        )
+    except Exception:
+        return None
+    return observation.message_text
 
 
 def _annotated_step_line(result: dict[str, object], step_number: int, action: str) -> str:

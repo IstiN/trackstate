@@ -124,6 +124,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  final Set<String> _preservedUnavailableLocalWorkspaceIds = <String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
   browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
   _desktopWorkspaceSwitcherScrollSnapshot;
@@ -151,12 +152,19 @@ class _TrackStateAppState extends State<TrackStateApp>
   _desktopWorkspaceSwitcherBrowserFocusMonitor;
   browser_workspace_switcher_focus_monitor.BrowserWorkspaceSwitcherFocusRequest?
   _desktopWorkspaceSwitcherBrowserFocusRequest;
+  Timer? _desktopWorkspaceSwitcherBrowserBlurCheckTimer;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _workspaceSwitcherTriggerFocusNode.addListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
+    _desktopWorkspaceSwitcherFocusScopeNode.addListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
     viewModel = _createViewModel(autoLoad: false);
     unawaited(_initializeWorkspaceProfiles());
   }
@@ -177,6 +185,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
+    _preservedUnavailableLocalWorkspaceIds.clear();
     _isDesktopWorkspaceSwitcherVisible = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
@@ -188,6 +197,13 @@ class _TrackStateAppState extends State<TrackStateApp>
     WidgetsBinding.instance.removeObserver(this);
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+    _workspaceSwitcherTriggerFocusNode.removeListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
+    _desktopWorkspaceSwitcherFocusScopeNode.removeListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
     _workspaceSwitcherTriggerFocusNode.dispose();
     _desktopSearchFocusNode.dispose();
     _desktopSettingsFocusNode.dispose();
@@ -301,11 +317,15 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
-        localWorkspaceAvailability[workspace.id] = true;
+        localWorkspaceAvailability[workspace.id] =
+            !_preservedUnavailableLocalWorkspaceIds.contains(workspace.id);
         continue;
       }
-      localWorkspaceAvailability[workspace.id] =
-          await _validateLocalWorkspaceAvailability(workspace);
+      final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
+      localWorkspaceAvailability[workspace.id] = isAvailable;
+      if (isAvailable) {
+        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
+      }
     }
     if (!mounted) {
       return;
@@ -357,6 +377,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
             workspace.id == activeWorkspaceId && workspace.isLocal,
+        preserveActiveLocalSelectionOnStartupFailure:
+            workspace.id == activeWorkspaceId && workspace.isLocal,
+        deferAccessRestore: true,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -395,6 +418,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     required TrackerViewModel previousViewModel,
     required bool showFailureMessage,
     bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
+    bool preserveActiveLocalSelectionOnStartupFailure = false,
+    bool deferAccessRestore = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -414,8 +439,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: workspace.id,
       );
-      await nextViewModel.load();
+      await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot != null) {
+        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
         _workspaceValidationFailures.remove(workspace.id);
         return _PreparedWorkspaceSwitch(
           viewModel: nextViewModel,
@@ -426,12 +452,22 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
-      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-          _isUnsupportedActiveLocalStartupAccess(reason)) {
+      if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         nextViewModel.dispose();
+        if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+            _isUnsupportedActiveLocalStartupAccess(reason)) {
+          return _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+          );
+        }
+        _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
+          markUnavailable: true,
         );
       }
       nextViewModel.dispose();
@@ -446,14 +482,24 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     } on Object catch (error) {
-      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-          error is UnsupportedError) {
+      final reason = _normalizeWorkspaceFailureReason(error);
+      if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
+        if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+            error is UnsupportedError) {
+          return _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+          );
+        }
+        _rememberWorkspaceValidationFailure(workspace, reason);
         return _preserveActiveLocalWorkspaceSelection(
           workspace,
           previousViewModel,
+          deferAccessRestore: deferAccessRestore,
+          markUnavailable: true,
         );
       }
-      final reason = _normalizeWorkspaceFailureReason(error);
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
         previousViewModel.showMessage(
@@ -469,14 +515,34 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
-    TrackerViewModel previousViewModel,
-  ) async {
+    TrackerViewModel previousViewModel, {
+    bool deferAccessRestore = false,
+    bool markUnavailable = false,
+  }) async {
+    previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      await previousViewModel.load();
+      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
     }
-    _workspaceValidationFailures.remove(workspace.id);
+    final preservedViewModel = previousViewModel.workspaceId == workspace.id
+        ? previousViewModel
+        : _createViewModel(
+            repository: previousViewModel.repository,
+            previous: previousViewModel,
+            autoLoad: false,
+            workspaceId: workspace.id,
+          );
+    if (!identical(preservedViewModel, previousViewModel) &&
+        preservedViewModel.snapshot == null) {
+      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+    }
+    if (markUnavailable) {
+      _preservedUnavailableLocalWorkspaceIds.add(workspace.id);
+    } else {
+      _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
+      _workspaceValidationFailures.remove(workspace.id);
+    }
     return _PreparedWorkspaceSwitch(
-      viewModel: previousViewModel,
+      viewModel: preservedViewModel,
       workspace: workspace,
       localConfigurationKey: null,
     );
@@ -487,6 +553,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
+        normalizedReason.contains('unsupported operation: process.run') ||
+        normalizedReason.contains('process.run') ||
+        normalizedReason.contains('unsupported operation') ||
+        normalizedReason.contains('process.start') ||
+        normalizedReason.contains('not supported on the web') ||
         normalizedReason.contains('local git runtime is not available') ||
         (normalizedReason.contains('local') &&
             normalizedReason.contains('not available in this build'));
@@ -579,7 +650,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       setState(() {
         _workspaceProfilesReady = true;
       });
-      await viewModel.load();
+      await viewModel.load(deferAccessRestore: true);
       return;
     }
     if (loadedState.hasProfiles) {
@@ -601,7 +672,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       });
       return;
     }
-    await viewModel.load();
+    await viewModel.load(deferAccessRestore: true);
     await _ensureCurrentContextWorkspaceMigration();
     if (!mounted) {
       return;
@@ -638,7 +709,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       Duration(milliseconds: 600),
     ];
     const maxStartupRevalidationWait = Duration(seconds: 10);
-    final stopwatch = Stopwatch()..start();
+    var elapsedWait = Duration.zero;
     var attempt = 0;
     while (true) {
       final validationReady = await _tryAwaitActiveLocalWorkspaceOpen(
@@ -650,15 +721,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      final remaining = maxStartupRevalidationWait - stopwatch.elapsed;
+      final remaining = maxStartupRevalidationWait - elapsedWait;
       if (remaining <= Duration.zero) {
         return;
       }
       final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
-      await Future<void>.delayed(remaining < delay ? remaining : delay);
+      final appliedDelay = remaining < delay ? remaining : delay;
+      await Future<void>.delayed(appliedDelay);
       if (!mounted) {
         return;
       }
+      elapsedWait += appliedDelay;
       attempt += 1;
     }
   }
@@ -686,6 +759,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     return reason.contains('file system access') ||
         reason.contains('handle revalidation') ||
         reason.contains('revalidation') ||
+        reason.contains('busy') ||
+        reason.contains('temporar') ||
+        reason.contains('transient') ||
+        reason.contains('locked') ||
+        reason.contains('unavailable') ||
         reason.contains('permission') ||
         reason.contains('pending');
   }
@@ -1206,16 +1284,13 @@ class _TrackStateAppState extends State<TrackStateApp>
         browser_workspace_switcher_focus_monitor
             .createBrowserWorkspaceSwitcherFocusMonitorSubscription(
               onBrowserTab: () {
-                Timer.run(() {
-                  if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
-                    return;
-                  }
-                  if (browser_workspace_switcher_focus_monitor
-                      .isBrowserFocusWithinWorkspaceSwitcher()) {
-                    return;
-                  }
-                  _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
-                });
+                _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck();
+              },
+              onBrowserFocusOutside: () {
+                if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
               },
               onBrowserBoundaryKey: (key) {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1234,6 +1309,62 @@ class _TrackStateAppState extends State<TrackStateApp>
   void _stopDesktopWorkspaceSwitcherBrowserFocusMonitor() {
     _desktopWorkspaceSwitcherBrowserFocusMonitor?.cancel();
     _desktopWorkspaceSwitcherBrowserFocusMonitor = null;
+  }
+
+  void _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck() {
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+    var attemptsRemaining = 6;
+
+    void verifyFocus() {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+        return;
+      }
+      final browserFocusWithinSwitcher =
+          browser_workspace_switcher_focus_monitor
+              .isBrowserFocusWithinWorkspaceSwitcher();
+      if (!browserFocusWithinSwitcher ||
+          !_isDesktopWorkspaceSwitcherFocused()) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+        _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+        return;
+      }
+      attemptsRemaining -= 1;
+      if (attemptsRemaining <= 0) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+      }
+    }
+
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer = Timer.periodic(
+      const Duration(milliseconds: 16),
+      (_) => verifyFocus(),
+    );
+    Timer.run(verifyFocus);
+  }
+
+  void _cancelDesktopWorkspaceSwitcherBrowserBlurCheck() {
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer?.cancel();
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer = null;
+  }
+
+  bool _isDesktopWorkspaceSwitcherFocused() {
+    return _workspaceSwitcherTriggerFocusNode.hasFocus ||
+        _desktopWorkspaceSwitcherFocusScopeNode.hasFocus;
+  }
+
+  void _handleDesktopWorkspaceSwitcherFocusChange() {
+    if (!kIsWeb || !_isDesktopWorkspaceSwitcherVisible) {
+      return;
+    }
+    Timer.run(() {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        return;
+      }
+      if (_isDesktopWorkspaceSwitcherFocused()) {
+        return;
+      }
+      _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+    });
   }
 
   void _requestDesktopWorkspaceSwitcherBrowserFocus(
@@ -1258,6 +1389,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
       _desktopWorkspaceSwitcherProfileOrder = null;
@@ -1271,7 +1403,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      _workspaceSwitcherTriggerFocusNode.requestFocus();
+      final triggerContext = _workspaceSwitcherTriggerAnchorKey.currentContext;
+      if (triggerContext != null) {
+        FocusScope.of(
+          triggerContext,
+        ).requestFocus(_workspaceSwitcherTriggerFocusNode);
+      } else {
+        _workspaceSwitcherTriggerFocusNode.requestFocus();
+      }
+      if (kIsWeb) {
+        _requestDesktopWorkspaceSwitcherBrowserFocus(
+          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+        );
+      }
     });
   }
 
@@ -1530,6 +1674,32 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  void _focusActiveWorkspaceSwitcherRow() {
+    final activeWorkspaceId = _workspaceState.activeWorkspaceId;
+    if (!_isDesktopWorkspaceSwitcherVisible || activeWorkspaceId == null) {
+      return;
+    }
+    setState(() {
+      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
+      _workspaceSwitcherRowFocusRequestVersion += 1;
+    });
+    if (!kIsWeb) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        return;
+      }
+      browser_workspace_switcher_focus_monitor
+          .syncBrowserWorkspaceSwitcherRowTabIndices(
+            activeWorkspaceId: activeWorkspaceId,
+          );
+      _requestDesktopWorkspaceSwitcherBrowserFocus(
+        browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId),
+      );
+    });
+  }
+
   List<WorkspaceProfile> _desktopWorkspaceSwitcherProfiles() {
     final storedOrder = _desktopWorkspaceSwitcherProfileOrder;
     if (!_isDesktopWorkspaceSwitcherVisible ||
@@ -1642,6 +1812,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  localWorkspaceAvailability: _localWorkspaceAvailability,
                   workspaceSwitcherTriggerKey:
                       _workspaceSwitcherTriggerAnchorKey,
                   workspaceSwitcherTriggerFocusNode:
@@ -1674,6 +1845,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onDeleteWorkspace: _deleteWorkspaceProfile,
                   onMoveWorkspaceSelection: (step) =>
                       unawaited(_switchToAdjacentWorkspace(step: step)),
+                  onFocusActiveWorkspaceSwitcherRow:
+                      _focusActiveWorkspaceSwitcherRow,
                   workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
                   onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
@@ -1688,6 +1861,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -1708,6 +1882,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -1715,6 +1890,7 @@ class _TrackerHome extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -1736,6 +1912,7 @@ class _TrackerHome extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -1812,6 +1989,8 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          localWorkspaceAvailability:
+                              localWorkspaceAvailability,
                           workspaceSwitcherTriggerKey:
                               workspaceSwitcherTriggerKey,
                           workspaceSwitcherTriggerFocusNode:
@@ -1841,11 +2020,14 @@ class _TrackerHome extends StatelessWidget {
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
                           onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                          onFocusActiveWorkspaceSwitcherRow:
+                              onFocusActiveWorkspaceSwitcherRow,
                           workspaceRestoreFailure: workspaceRestoreFailure,
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
                       : _BrowserDesktopPrimaryNavigationTabOrderBinder(
+                          enabled: !isDesktopWorkspaceSwitcherVisible,
                           orderedTargets: [
                             browser_workspace_switcher_focus_monitor
                                 .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
@@ -1888,6 +2070,8 @@ class _TrackerHome extends StatelessWidget {
                           child: _DesktopShell(
                             viewModel: viewModel,
                             workspaces: workspaces,
+                            localWorkspaceAvailability:
+                                localWorkspaceAvailability,
                             workspaceSwitcherTriggerKey:
                                 workspaceSwitcherTriggerKey,
                             workspaceSwitcherTriggerFocusNode:
@@ -1918,6 +2102,8 @@ class _TrackerHome extends StatelessWidget {
                             onSelectWorkspace: onSelectWorkspace,
                             onDeleteWorkspace: onDeleteWorkspace,
                             onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                            onFocusActiveWorkspaceSwitcherRow:
+                                onFocusActiveWorkspaceSwitcherRow,
                             workspaceRestoreFailure: workspaceRestoreFailure,
                             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                             attachmentPicker: attachmentPicker,
@@ -3198,10 +3384,12 @@ class _SelectSectionIntent extends Intent {
 class _BrowserDesktopPrimaryNavigationTabOrderBinder extends StatefulWidget {
   const _BrowserDesktopPrimaryNavigationTabOrderBinder({
     required this.child,
+    required this.enabled,
     required this.orderedTargets,
   });
 
   final Widget child;
+  final bool enabled;
   final List<
     browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget
   >
@@ -3228,7 +3416,8 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
     covariant _BrowserDesktopPrimaryNavigationTabOrderBinder oldWidget,
   ) {
     super.didUpdateWidget(oldWidget);
-    if (listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
+    if (oldWidget.enabled == widget.enabled &&
+        listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
       return;
     }
     _restartSubscription();
@@ -3242,7 +3431,7 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
 
   void _restartSubscription() {
     _subscription?.cancel();
-    if (!kIsWeb) {
+    if (!kIsWeb || !widget.enabled) {
       _subscription = null;
       return;
     }
@@ -3260,6 +3449,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3280,6 +3470,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3287,6 +3478,7 @@ class _DesktopShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3308,6 +3500,7 @@ class _DesktopShell extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3328,6 +3521,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            localWorkspaceAvailability: localWorkspaceAvailability,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             workspaceSwitcherTriggerFocusNode:
                 workspaceSwitcherTriggerFocusNode,
@@ -3352,6 +3546,8 @@ class _DesktopShell extends StatelessWidget {
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
             onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+            onFocusActiveWorkspaceSwitcherRow:
+                onFocusActiveWorkspaceSwitcherRow,
             workspaceRestoreFailure: workspaceRestoreFailure,
             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
@@ -3366,6 +3562,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3386,6 +3583,7 @@ class _MobileShell extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3393,6 +3591,7 @@ class _MobileShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3414,6 +3613,7 @@ class _MobileShell extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3422,6 +3622,7 @@ class _MobileShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      localWorkspaceAvailability: localWorkspaceAvailability,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
       desktopSearchFocusNode: desktopSearchFocusNode,
@@ -3444,6 +3645,7 @@ class _MobileShell extends StatelessWidget {
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
       onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+      onFocusActiveWorkspaceSwitcherRow: onFocusActiveWorkspaceSwitcherRow,
       workspaceRestoreFailure: workspaceRestoreFailure,
       onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
@@ -3454,6 +3656,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.desktopSearchFocusNode,
@@ -3475,6 +3678,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3482,6 +3686,7 @@ class _TrackerMainPane extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
+  final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final FocusNode desktopSearchFocusNode;
@@ -3505,6 +3710,7 @@ class _TrackerMainPane extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3526,6 +3732,7 @@ class _TrackerMainPane extends StatelessWidget {
               _TopBar(
                 viewModel: viewModel,
                 workspaces: workspaces,
+                localWorkspaceAvailability: localWorkspaceAvailability,
                 compact: compact,
                 isDesktopWorkspaceSwitcherVisible:
                     isDesktopWorkspaceSwitcherVisible,
@@ -3537,6 +3744,8 @@ class _TrackerMainPane extends StatelessWidget {
                 onOpenCreateIssue: onOpenCreateIssue,
                 onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
                 onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                onFocusActiveWorkspaceSwitcherRow:
+                    onFocusActiveWorkspaceSwitcherRow,
                 onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
                 canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
               ),
@@ -3729,6 +3938,7 @@ class _Sidebar extends StatelessWidget {
               children: [
                 _SyncPill(
                   label: _workspaceSyncLabel(l10n, viewModel),
+                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                   tone: _workspaceSyncTone(viewModel),
                   onPressed: () =>
                       viewModel.selectSection(TrackerSection.settings),
@@ -3759,6 +3969,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.workspaces,
+    required this.localWorkspaceAvailability,
     required this.isDesktopWorkspaceSwitcherVisible,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -3767,6 +3978,7 @@ class _TopBar extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     this.compact = false,
@@ -3774,6 +3986,7 @@ class _TopBar extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Map<String, bool> localWorkspaceAvailability;
   final bool isDesktopWorkspaceSwitcherVisible;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -3783,6 +3996,7 @@ class _TopBar extends StatelessWidget {
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final bool compact;
@@ -3795,6 +4009,7 @@ class _TopBar extends StatelessWidget {
       l10n,
       viewModel,
       workspaces,
+      localWorkspaceAvailability,
     );
     final openCreateIssue = viewModel.isSaving
         ? null
@@ -3845,6 +4060,9 @@ class _TopBar extends StatelessWidget {
           if (isDesktopWorkspaceSwitcherVisible) {
             desktopWorkspaceSwitcherBindings
                 .addAll(<ShortcutActivator, VoidCallback>{
+                  if (kIsWeb)
+                    const SingleActivator(LogicalKeyboardKey.tab):
+                        onFocusActiveWorkspaceSwitcherRow,
                   const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
                       onMoveWorkspaceSelection(1),
                   const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
@@ -4107,6 +4325,7 @@ class _TopBar extends StatelessWidget {
                 syncPillOrder ?? searchOrder + 1,
                 _SyncPill(
                   label: _workspaceSyncLabel(l10n, viewModel),
+                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                   tone: _workspaceSyncTone(viewModel),
                   height: _desktopTopBarControlHeight,
                   onPressed: () =>
@@ -4249,6 +4468,7 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
   WorkspaceProfilesState workspaces,
+  Map<String, bool> localWorkspaceAvailability,
 ) {
   final activeWorkspace = workspaces.activeWorkspace;
   final displayName = activeWorkspace?.displayName.isNotEmpty == true
@@ -4262,6 +4482,7 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
     l10n,
     viewModel,
     activeWorkspace: activeWorkspace,
+    localWorkspaceAvailability: localWorkspaceAvailability,
   );
   return _WorkspaceDisplaySummary(
     displayName: displayName,
@@ -4277,8 +4498,13 @@ String _activeWorkspaceStateLabel(
   AppLocalizations l10n,
   TrackerViewModel viewModel, {
   WorkspaceProfile? activeWorkspace,
+  Map<String, bool> localWorkspaceAvailability = const <String, bool>{},
 }) {
   if (activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence) {
+    if (activeWorkspace != null &&
+        localWorkspaceAvailability[activeWorkspace.id] == false) {
+      return l10n.workspaceStateUnavailable;
+    }
     return l10n.workspaceStateLocalGit;
   }
   return switch (viewModel.hostedRepositoryAccessMode) {
@@ -4577,6 +4803,19 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
     WorkspaceSyncHealth.attentionNeeded => l10n.workspaceSyncAttentionNeeded,
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
+}
+
+String _workspaceSyncSemanticLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  final label = _workspaceSyncLabel(l10n, viewModel);
+  final status = viewModel.workspaceSyncStatus;
+  if (status.health == WorkspaceSyncHealth.attentionNeeded &&
+      !status.hasPendingRefresh) {
+    return l10n.workspaceSyncAttentionNeededSemanticLabel;
+  }
+  return '${l10n.workspaceSyncSettings}, $label';
 }
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
@@ -6083,6 +6322,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
               const SizedBox(width: 12),
               _SyncPill(
                 label: _workspaceSyncLabel(l10n, viewModel),
+                semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                 tone: _workspaceSyncTone(viewModel),
               ),
             ],
@@ -6115,6 +6355,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
             _IssueDetailActionButton(
               label: actionLabel,
               onPressed: _workspaceSyncPrimaryAction(viewModel),
+              sortOrder: 10,
             ),
           ],
         ],
@@ -6409,6 +6650,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       l10n,
       widget.viewModel,
       widget.workspaces,
+      widget.localWorkspaceAvailability,
     );
     final workspaceRowActionCount = widget.workspaces.profiles.length * 3;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
@@ -6952,6 +7194,7 @@ String _workspaceStateLabel(
       l10n,
       viewModel,
       activeWorkspace: workspace,
+      localWorkspaceAvailability: localWorkspaceAvailability,
     );
   }
   if (workspace.isLocal) {
@@ -9816,11 +10059,13 @@ class _IssueDetailActionButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.emphasized = false,
+    this.sortOrder,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool emphasized;
+  final double? sortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -9851,7 +10096,19 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    return Semantics(button: true, label: label, child: button);
+    final semanticButton = Semantics(
+      button: true,
+      label: label,
+      sortKey: _semanticsSortKey(sortOrder),
+      child: button,
+    );
+    if (sortOrder == null) {
+      return semanticButton;
+    }
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(sortOrder!),
+      child: semanticButton,
+    );
   }
 }
 
@@ -11154,10 +11411,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           Size(0, compact ? 44 : _desktopTopBarControlHeight),
         ),
         maximumSize: WidgetStatePropertyAll(
-          Size(
-            double.infinity,
-            compact ? 44 : _desktopTopBarControlHeight,
-          ),
+          Size(double.infinity, compact ? 44 : _desktopTopBarControlHeight),
         ),
         padding: WidgetStatePropertyAll(
           EdgeInsets.symmetric(
@@ -11233,7 +11487,9 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
             maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
           ),
-          child: kIsWeb ? ExcludeSemantics(child: triggerButton) : triggerButton,
+          child: kIsWeb
+              ? ExcludeSemantics(child: triggerButton)
+              : triggerButton,
         ),
       ),
     );
@@ -11524,6 +11780,8 @@ class _LabelTokenField extends StatelessWidget {
         Semantics(
           label: label,
           textField: true,
+          enabled: enabled,
+          value: controller.text,
           child: TextField(
             controller: controller,
             enabled: enabled,
@@ -11916,6 +12174,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: summaryLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _summaryController.text,
                                 child: TextField(
                                   controller: _summaryController,
                                   enabled: canEditFields,
@@ -11928,6 +12188,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: l10n.description,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _descriptionController.text,
                                 child: TextField(
                                   controller: _descriptionController,
                                   minLines: 3,
@@ -12048,6 +12310,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               Semantics(
                                 label: assigneeLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _assigneeController.text,
                                 child: TextField(
                                   controller: _assigneeController,
                                   enabled: canEditFields,
@@ -12620,6 +12884,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: summaryLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _summaryController.text,
                                 child: TextField(
                                   controller: _summaryController,
                                   enabled: canEditFields,
@@ -12639,6 +12905,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: l10n.description,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _descriptionController.text,
                                 child: TextField(
                                   controller: _descriptionController,
                                   minLines: 4,
@@ -12681,6 +12949,8 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                               Semantics(
                                 label: assigneeLabel,
                                 textField: true,
+                                enabled: canEditFields,
+                                value: _assigneeController.text,
                                 child: TextField(
                                   controller: _assigneeController,
                                   enabled: canEditFields,
@@ -12999,6 +13269,7 @@ class _SyncPill extends StatelessWidget {
     required this.tone,
     this.height,
     this.onPressed,
+    this.semanticLabel,
     this.semanticsSortOrder,
   });
 
@@ -13006,27 +13277,40 @@ class _SyncPill extends StatelessWidget {
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
+  final String? semanticLabel;
   final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final theme = Theme.of(context);
+    final isLightTheme = theme.brightness == Brightness.light;
+    final attentionBackgroundColor = isLightTheme
+        ? Color.lerp(colors.error, colors.primary, 0.4)!
+        : colors.error;
+    final attentionForegroundColor = isLightTheme
+        ? theme.colorScheme.onError
+        : colors.page;
     final backgroundColor = switch (tone) {
       _SyncPillTone.healthy => colors.secondarySoft,
       _SyncPillTone.checking => colors.accentSoft,
-      _SyncPillTone.attention => colors.error.withValues(alpha: 0.14),
+      _SyncPillTone.attention => attentionBackgroundColor,
       _SyncPillTone.unavailable => colors.surfaceAlt,
     };
     final iconColor = switch (tone) {
       _SyncPillTone.healthy => colors.secondary,
       _SyncPillTone.checking => colors.accent,
-      _SyncPillTone.attention => colors.error,
+      _SyncPillTone.attention => attentionForegroundColor,
       _SyncPillTone.unavailable => colors.muted,
+    };
+    final textColor = switch (tone) {
+      _SyncPillTone.attention => attentionForegroundColor,
+      _ => colors.text,
     };
     return Semantics(
       button: onPressed != null,
       container: true,
-      label: label,
+      label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
@@ -13060,7 +13344,7 @@ class _SyncPill extends StatelessWidget {
                       label,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: colors.text,
+                        color: textColor,
                         fontWeight: FontWeight.w600,
                         height: 1,
                       ),
@@ -13359,6 +13643,8 @@ class _CommentsTab extends StatelessWidget {
         Semantics(
           label: l10n.comments,
           textField: true,
+          enabled: !isSaving && !isLoading && !writeBlocked,
+          value: controller.text,
           child: TextField(
             controller: controller,
             minLines: 3,

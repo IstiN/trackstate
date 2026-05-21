@@ -522,6 +522,9 @@ class LiveWorkspaceSwitcherPage:
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
 
+    def dismiss_project_settings_surface(self, *, timeout_ms: int = 30_000) -> None:
+        self._project_settings_page.dismiss_if_open(timeout_ms=timeout_ms)
+
     def set_viewport(self, *, width: int, height: int, timeout_ms: int = 15_000) -> None:
         self._session.set_viewport_size(width=width, height=height)
         try:
@@ -835,42 +838,22 @@ class LiveWorkspaceSwitcherPage:
         return self.observe_background_scroll()
 
     def navigate_to_section(self, label: str) -> None:
-        bounds = self._session.evaluate(
-            """
-            (label) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const candidate = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((element) => isVisible(element) && normalize(element.innerText) === label);
-              if (!candidate) {
-                return null;
-              }
-              const rect = candidate.getBoundingClientRect();
-              return {
-                x: rect.left + (rect.width / 2),
-                y: rect.top + (rect.height / 2),
-              };
-            }
-            """,
-            arg=label,
-        )
-        if not isinstance(bounds, dict):
+        if self._session.count(self._button_selector, has_text=label) == 0:
             raise AssertionError(
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(float(bounds["x"]), float(bounds["y"]))
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=label,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The hosted tracker did not expose a clickable "{label}" navigation entry.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
         try:
             self._session.wait_for_function(
                 """
@@ -935,7 +918,6 @@ class LiveWorkspaceSwitcherPage:
                 f"role={active.role!r}, tag={active.tag_name!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-
     def focus_workspace_trigger(
         self,
         *,
@@ -6709,6 +6691,15 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         if trailer in normalized:
             normalized = normalized.split(trailer, 1)[0].strip()
             break
+    rows = _rows_from_structured_switcher_text(normalized)
+    if rows:
+        return rows
+    return _rows_from_linear_switcher_text(normalized)
+
+
+def _rows_from_structured_switcher_text(
+    normalized: str,
+) -> tuple[WorkspaceSwitcherRowObservation, ...]:
     states = (
         "Attachments limited",
         "Saved hosted workspace",
@@ -6719,24 +6710,149 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         "Local Git",
     )
     escaped_states = "|".join(re.escape(state) for state in states)
-    row_pattern = re.compile(
-        rf"(?P<display>.+?), "
-        rf"(?P<target_type>Hosted|Local), "
-        rf"(?P<state>{escaped_states}), "
-        rf"(?P<detail>.+? • Branch: \S+(?: • Write Branch: \S+)?) "
-        rf"(?P<action>Active|Open: .+?) "
-        rf"(?P<delete>Delete: .+?)"
-        rf"(?= .+?, (?:Hosted|Local), (?:{escaped_states}), |$)",
+    detail_pattern = re.compile(
+        r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)",
     )
+    open_pattern = re.compile(
+        r"^(?P<action>Open(?:\s+workspace)?):\s+(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
+    )
+    detail_matches = list(detail_pattern.finditer(normalized))
+    if not detail_matches:
+        return ()
+    rows: list[WorkspaceSwitcherRowObservation | None] = [None] * len(detail_matches)
+    next_prefix_start = len(normalized)
+    for index in range(len(detail_matches) - 1, -1, -1):
+        detail_match = detail_matches[index]
+        detail_text = detail_match.group("detail").strip()
+        tail = normalized[detail_match.end() : next_prefix_start].strip()
+        if tail.startswith("Active Delete: "):
+            prefix_match = re.search(
+                rf"(?P<display>[^,:•]+), "
+                rf"(?P<target_type>Hosted|Local), "
+                rf"(?P<state>{escaped_states}),\s*$",
+                normalized[: detail_match.start()],
+            )
+            if prefix_match is None:
+                return ()
+            display_name = prefix_match.group("display").strip()
+            action_label = "Active"
+            selected = True
+        else:
+            open_match = open_pattern.match(tail)
+            if open_match is None:
+                return ()
+            display_name = open_match.group("display").strip()
+            prefix_match = re.search(
+                rf"{re.escape(display_name)}, "
+                rf"(?P<target_type>Hosted|Local), "
+                rf"(?P<state>{escaped_states}),\s*$",
+                normalized[: detail_match.start()],
+            )
+            if prefix_match is None:
+                return ()
+            action_label = _workspace_row_action_label(open_match.group("action").strip())
+            selected = False
+        target_type = prefix_match.group("target_type").strip()
+        state_label = prefix_match.group("state").strip()
+        next_prefix_start = prefix_match.start()
+        delete_text = f"Delete: {display_name}"
+        visible_action = (
+            "Active"
+            if action_label == "Active"
+            else f"{action_label}: {display_name}"
+        )
+        button_labels = (
+            ("Delete",)
+            if action_label == "Active"
+            else (action_label, "Delete")
+        )
+        rows[index] = WorkspaceSwitcherRowObservation(
+            display_name=display_name,
+            target_type_label=target_type,
+            state_label=state_label,
+            detail_text=detail_text,
+            visible_text=(
+                f"{display_name} {detail_text} {target_type} "
+                f"{state_label} {visible_action} {delete_text}"
+            ),
+            selected=selected,
+            semantics_label=None,
+            icon_accessibility_label=None,
+            action_labels=(action_label,),
+            button_labels=button_labels,
+        )
+    return tuple(row for row in rows if row is not None)
+
+
+def _rows_from_linear_switcher_text(
+    normalized: str,
+) -> tuple[WorkspaceSwitcherRowObservation, ...]:
+    states = (
+        "Attachments limited",
+        "Saved hosted workspace",
+        "Needs sign-in",
+        "Read-only",
+        "Connected",
+        "Unavailable",
+        "Local Git",
+    )
+    escaped_states = "|".join(re.escape(state) for state in states)
+    detail_pattern = re.compile(
+        r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)",
+    )
+    metadata_pattern = re.compile(
+        rf"^(?P<target_type>Hosted|Local)\s+(?P<state>{escaped_states})\s+(?P<tail>.+)$",
+    )
+    open_pattern = re.compile(
+        r"^(?P<action>Open(?:\s+workspace)?):\s+(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
+    )
+    detail_matches = list(detail_pattern.finditer(normalized))
     rows: list[WorkspaceSwitcherRowObservation] = []
-    for match in row_pattern.finditer(normalized):
-        display_name = match.group("display").strip()
-        target_type = match.group("target_type").strip()
-        state_label = match.group("state").strip()
-        detail_text = match.group("detail").strip()
-        action = match.group("action").strip()
-        delete_label = match.group("delete").strip()
-        button_labels = (delete_label,) if action == "Active" else (action, delete_label)
+    for index, detail_match in enumerate(detail_matches):
+        next_detail_start = (
+            detail_matches[index + 1].start()
+            if index + 1 < len(detail_matches)
+            else len(normalized)
+        )
+        prefix_text = normalized[: detail_match.start()].strip()
+        detail_text = detail_match.group("detail").strip()
+        trailing_text = normalized[detail_match.end() : next_detail_start].strip()
+        metadata_match = metadata_pattern.match(trailing_text)
+        if metadata_match is None:
+            continue
+        target_type = metadata_match.group("target_type").strip()
+        state_label = metadata_match.group("state").strip()
+        tail = metadata_match.group("tail").strip()
+        if tail.startswith("Active Delete: "):
+            display_name = _shared_display_name(
+                prefix_text=prefix_text,
+                candidate_text=tail.removeprefix("Active Delete: ").strip(),
+            )
+            if not display_name:
+                continue
+            action_label = "Active"
+            selected = True
+        else:
+            open_match = open_pattern.match(tail)
+            if open_match is None:
+                continue
+            display_name = open_match.group("display").strip()
+            delete_target = open_match.group("delete").strip()
+            if not delete_target.startswith(display_name):
+                display_name = _shared_display_name(
+                    prefix_text=prefix_text,
+                    candidate_text=delete_target,
+                )
+                if not display_name:
+                    continue
+            action_label = _workspace_row_action_label(open_match.group("action").strip())
+            selected = False
+        visible_action = (
+            "Active"
+            if selected
+            else f"{action_label}: {display_name}"
+        )
+        delete_text = f"Delete: {display_name}"
         rows.append(
             WorkspaceSwitcherRowObservation(
                 display_name=display_name,
@@ -6745,13 +6861,40 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
                 detail_text=detail_text,
                 visible_text=(
                     f"{display_name} {detail_text} {target_type} "
-                    f"{state_label} {action} {delete_label}"
-                ),
-                selected=action == "Active",
+                    f"{state_label} {visible_action} {delete_text}"
+                ).strip(),
+                selected=selected,
                 semantics_label=None,
                 icon_accessibility_label=None,
-                action_labels=(action,),
-                button_labels=button_labels,
+                action_labels=(action_label,),
+                button_labels=(
+                    ("Delete",)
+                    if selected
+                    else (action_label, "Delete")
+                ),
             ),
         )
     return tuple(rows)
+
+
+def _shared_display_name(*, prefix_text: str, candidate_text: str) -> str | None:
+    prefix_tokens = prefix_text.split()
+    candidate_tokens = candidate_text.split()
+    for token_count in range(
+        min(len(prefix_tokens), len(candidate_tokens)),
+        0,
+        -1,
+    ):
+        candidate = " ".join(candidate_tokens[:token_count]).strip()
+        if candidate and prefix_text.endswith(candidate):
+            return candidate
+    return None
+
+
+def _workspace_row_action_label(action_text: str) -> str:
+    normalized = action_text.strip()
+    if normalized.startswith("Open workspace"):
+        return "Open workspace"
+    if normalized.startswith("Open"):
+        return "Open"
+    return "Active"

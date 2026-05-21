@@ -296,6 +296,31 @@ class LiveProjectSettingsPage:
             return
         self._session.click(self._close_selector, timeout_ms=30_000)
 
+    def dismiss_if_open(self, *, timeout_ms: int = 30_000) -> None:
+        current_body = self.body_text()
+        if self._settings_heading not in current_body:
+            return
+        if self._session.count(self._close_selector) == 0:
+            raise AssertionError(
+                "The hosted app still showed Project Settings but did not expose the Close "
+                "action needed to return to the tracker shell.\n"
+                f"Observed body text:\n{current_body}",
+            )
+        self._session.click(self._close_selector, timeout_ms=timeout_ms)
+        try:
+            self._session.wait_for_function(
+                """
+                (settingsHeading) => !(document.body?.innerText ?? '').includes(settingsHeading)
+                """,
+                arg=self._settings_heading,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Closing the Project Settings surface did not return to the tracker shell.\n"
+                f"Observed body text:\n{self.body_text()}",
+            ) from error
+
     def open_settings(self) -> str:
         self._session.click(
             self._settings_nav_selector,
