@@ -50,8 +50,7 @@ void main() {
       const TrackStateApp(repository: DemoTrackStateRepository()),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.bySemanticsLabel('Dark theme'));
-    await tester.pumpAndSettle();
+    await _enableDarkTheme(tester);
 
     await expectLater(
       find.byType(TrackStateApp),
@@ -195,8 +194,8 @@ void main() {
         tester,
         initialViewportWidth: 1440,
         initialViewportHeight: 960,
+        startInDarkTheme: true,
       );
-      await _enableDarkTheme(tester);
 
       await expectLater(
         screen.goldenTarget,
@@ -238,8 +237,8 @@ void main() {
         tester,
         initialViewportWidth: 390,
         initialViewportHeight: 844,
+        startInDarkTheme: true,
       );
-      await _enableDarkTheme(tester);
 
       await expectLater(
         screen.goldenTarget,
@@ -381,10 +380,11 @@ class _TolerantGoldenFileComparator extends LocalFileComparator {
 }
 
 Future<void> _enableDarkTheme(WidgetTester tester) async {
-  final control = find.bySemanticsLabel('Dark theme');
+  final control = find.bySemanticsLabel(RegExp(r'^Dark theme$'));
   expect(control, findsWidgets);
   await tester.tap(control.last, warnIfMissed: false);
   await tester.pumpAndSettle();
+  expect(find.bySemanticsLabel(RegExp(r'^Light theme$')), findsWidgets);
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {
