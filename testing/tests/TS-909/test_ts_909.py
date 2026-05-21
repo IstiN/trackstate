@@ -17,11 +17,10 @@ from testing.core.config.pull_request_template_checklist_config import (  # noqa
     PullRequestTemplateChecklistConfig,
 )
 from testing.core.models.pull_request_template_checklist_result import (  # noqa: E402
-    PullRequestTemplateCandidateObservation,
     PullRequestTemplateChecklistVerificationResult,
 )
-from testing.tests.support.github_repository_file_page_factory import (  # noqa: E402
-    create_github_repository_file_page,
+from testing.tests.support.github_pull_request_compose_page_factory import (  # noqa: E402
+    create_github_pull_request_compose_page,
 )
 from testing.tests.support.project_cli_probe_factory import create_project_cli_probe  # noqa: E402
 
@@ -59,9 +58,8 @@ def main() -> None:
 
     config_path = REPO_ROOT / "testing/tests/TS-909/config.yaml"
     config = PullRequestTemplateChecklistConfig.from_file(config_path)
-    verifier = PullRequestTemplateChecklistVerifier(
-        create_project_cli_probe(REPO_ROOT),
-    )
+    probe = create_project_cli_probe(REPO_ROOT)
+    verifier = PullRequestTemplateChecklistVerifier(probe)
     verification = verifier.validate(config=config)
 
     result: dict[str, object] = {
@@ -71,7 +69,7 @@ def main() -> None:
         "expected_default_branch": config.expected_default_branch,
         "required_checklist_item": config.required_checklist_item,
         "run_command": RUN_COMMAND,
-        "browser": "Chromium (Playwright)",
+        "browser": "Chromium (Playwright if available, urllib fallback otherwise)",
         "os": platform.platform(),
         "linked_bugs": ["TS-905"],
         "ticket_steps": list(TICKET_STEPS),
@@ -81,12 +79,18 @@ def main() -> None:
     }
 
     try:
-        _evaluate_repository_state(
+        _capture_verification_metadata(
             result=result,
             verification=verification,
             config=config,
         )
-        _evaluate_human_visible_state(
+        _evaluate_pull_request_compose_surface(
+            result=result,
+            probe=probe,
+            verification=verification,
+            config=config,
+        )
+        _evaluate_template_body(
             result=result,
             verification=verification,
             config=config,
@@ -94,8 +98,7 @@ def main() -> None:
 
         failures = _failed_steps(result)
         if failures:
-            failure_message = "\n".join(failures)
-            raise AssertionError(failure_message)
+            raise AssertionError("\n".join(failures))
 
         _write_pass_outputs(result)
     except AssertionError as error:
@@ -110,15 +113,15 @@ def main() -> None:
         raise
 
 
-def _evaluate_repository_state(
+def _capture_verification_metadata(
     *,
     result: dict[str, object],
     verification: PullRequestTemplateChecklistVerificationResult,
     config: PullRequestTemplateChecklistConfig,
 ) -> None:
-    repository_info = verification.repository_info
-    community_profile = verification.community_profile
     default_branch = verification.default_branch or config.expected_default_branch or "main"
+    selected_candidate = verification.selected_candidate
+    selected_recognized_template = verification.selected_recognized_template
     result["default_branch"] = default_branch
     result["configured_pull_request_template_url"] = (
         verification.configured_pull_request_template_url
@@ -139,197 +142,302 @@ def _evaluate_repository_state(
         }
         for observation in verification.candidate_observations
     ]
+    result["recognized_pull_request_templates"] = [
+        {
+            "filename": template.filename,
+            "body": template.body,
+        }
+        for template in verification.recognized_templates
+    ]
+    result["selected_template_path"] = (
+        selected_recognized_template.filename
+        if selected_recognized_template is not None
+        else (selected_candidate.path if selected_candidate is not None else None)
+    )
+    result["selected_template_text"] = (
+        selected_recognized_template.body
+        if selected_recognized_template is not None
+        else (selected_candidate.raw_text if selected_candidate is not None else None)
+    )
 
-    if not repository_info.succeeded:
+
+def _evaluate_pull_request_compose_surface(
+    *,
+    result: dict[str, object],
+    probe,
+    verification: PullRequestTemplateChecklistVerificationResult,
+    config: PullRequestTemplateChecklistConfig,
+) -> None:
+    default_branch = verification.default_branch or config.expected_default_branch or "main"
+    branches_result = probe.list_branches(config.repository)
+    pulls_result = probe.pull_requests(config.repository, state="open")
+
+    if not branches_result.succeeded:
         _record_step(
             result,
             step=1,
             status="failed",
             action=TICKET_STEPS[0],
             observed=(
-                "The automation could not read the live repository metadata needed to "
-                "verify the PR template source.\n"
-                f"Command: {repository_info.command_text}\n"
-                f"Exit code: {repository_info.exit_code}\n"
-                f"stdout:\n{repository_info.stdout}\n"
-                f"stderr:\n{repository_info.stderr}"
+                "The automation could not list live repository branches to find a real "
+                "pull-request compose candidate.\n"
+                f"Command: {branches_result.command_text}\n"
+                f"Exit code: {branches_result.exit_code}\n"
+                f"stdout:\n{branches_result.stdout}\n"
+                f"stderr:\n{branches_result.stderr}"
             ),
         )
         return
 
-    repository_default_branch = verification.default_branch
-    if config.expected_default_branch is not None and (
-        repository_default_branch != config.expected_default_branch
-    ):
+    if not pulls_result.succeeded:
         _record_step(
             result,
             step=1,
             status="failed",
             action=TICKET_STEPS[0],
             observed=(
-                "GitHub reported an unexpected default branch, so the PR template "
-                "source could be resolving from the wrong branch.\n"
-                f"Expected default branch: {config.expected_default_branch}\n"
-                f"Observed default branch: {repository_default_branch}"
+                "The automation could not list open pull requests to avoid branches "
+                "that already have a PR.\n"
+                f"Command: {pulls_result.command_text}\n"
+                f"Exit code: {pulls_result.exit_code}\n"
+                f"stdout:\n{pulls_result.stdout}\n"
+                f"stderr:\n{pulls_result.stderr}"
             ),
         )
-    else:
-        if not community_profile.succeeded:
-            _record_step(
-                result,
-                step=1,
-                status="failed",
-                action=TICKET_STEPS[0],
-                observed=(
-                    "The live repository metadata loaded, but GitHub community profile "
-                    "data did not. The automation could not confirm whether GitHub "
-                    "recognizes any PR template for new pull requests.\n"
-                    f"Command: {community_profile.command_text}\n"
-                    f"Exit code: {community_profile.exit_code}\n"
-                    f"stdout:\n{community_profile.stdout}\n"
-                    f"stderr:\n{community_profile.stderr}"
-                ),
-            )
-        elif verification.configured_pull_request_template_url is None and not (
-            verification.existing_candidates or verification.discovered_template_paths
-        ):
-            _record_step(
-                result,
-                step=1,
-                status="failed",
-                action=TICKET_STEPS[0],
-                observed=(
-                    "GitHub does not expose a PR template for this repository. The "
-                    "community profile returned `pull_request_template: null`, and the "
-                    "default-branch tree did not contain any conventional PR template "
-                    "file paths.\n"
-                    f"Repository: {verification.target_repository}\n"
-                    f"Default branch: {default_branch}\n"
-                    f"Checked candidate paths: {', '.join(config.candidate_template_paths)}\n"
-                    f"Discovered template-like paths: {list(verification.discovered_template_paths)}"
-                ),
-            )
-        else:
-            template_path = (
-                verification.configured_pull_request_template_path
-                or (
-                    verification.selected_candidate.path
-                    if verification.selected_candidate is not None
-                    else None
-                )
-            )
-            _record_step(
-                result,
-                step=1,
-                status="passed",
-                action=TICKET_STEPS[0],
-                observed=(
-                    "GitHub exposed a PR template source for the repository.\n"
-                    f"Repository: {verification.target_repository}\n"
-                    f"Default branch: {default_branch}\n"
-                    f"Configured template path: {template_path}\n"
-                    f"Configured template URL: {verification.configured_pull_request_template_url}"
-                ),
-            )
+        return
 
-    selected_candidate = verification.selected_candidate
-    result["selected_template_path"] = (
-        selected_candidate.path if selected_candidate is not None else None
-    )
-    result["selected_template_text"] = (
-        selected_candidate.raw_text if selected_candidate is not None else None
+    branch_names = _branch_names(branches_result.json_payload)
+    open_pull_request_heads = _open_pull_request_heads(pulls_result.json_payload)
+    candidate_heads = [
+        branch
+        for branch in branch_names
+        if branch != default_branch and branch not in open_pull_request_heads
+    ]
+    result["candidate_compare_heads"] = candidate_heads[:10]
+
+    if not candidate_heads:
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=TICKET_STEPS[0],
+            observed=(
+                "The repository did not expose any branch that could be used to open a "
+                "new pull-request compose surface after excluding the default branch and "
+                "branches that already have open pull requests.\n"
+                f"Default branch: {default_branch}\n"
+                f"Open pull-request heads: {sorted(open_pull_request_heads)}"
+            ),
+        )
+        return
+
+    compare_attempts: list[dict[str, object]] = []
+    successful_observation = None
+    successful_head_branch: str | None = None
+    last_observation = None
+    expected_surface_texts = (
+        "Open a pull request",
+        "View pull request",
+        "There isn’t anything to compare.",
+        "There isn’t anything to compare",
+        "Choose different branches or forks above to discuss and review changes.",
+        "Comparing changes",
     )
 
-    accessibility_check_passed = False
-    if selected_candidate is None or selected_candidate.raw_text is None:
+    with create_github_pull_request_compose_page() as compose_page:
+        for head_branch in candidate_heads[:10]:
+            observation = compose_page.open_compose_surface(
+                repository=verification.target_repository,
+                base_branch=default_branch,
+                head_branch=head_branch,
+                expected_texts=expected_surface_texts,
+                screenshot_path=None,
+            )
+            last_observation = observation
+            compare_attempts.append(
+                {
+                    "head_branch": head_branch,
+                    "url": observation.url,
+                    "matched_text": observation.matched_text,
+                    "body_text_excerpt": _snippet(observation.body_text),
+                }
+            )
+            if observation.matched_text == "Open a pull request":
+                successful_observation = observation
+                successful_head_branch = head_branch
+                break
+
+    result["compare_attempts"] = compare_attempts
+
+    if successful_observation is None or successful_head_branch is None:
+        if last_observation is not None:
+            result["compare_surface"] = {
+                "head_branch": candidate_heads[min(len(compare_attempts), len(candidate_heads)) - 1],
+                "url": last_observation.url,
+                "matched_text": last_observation.matched_text,
+                "body_text": last_observation.body_text,
+                "screenshot_path": last_observation.screenshot_path,
+            }
+            result["screenshot"] = last_observation.screenshot_path
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=TICKET_STEPS[0],
+            observed=(
+                "The automation exercised live GitHub compare pages, but none reached "
+                "the `Open a pull request` compose surface needed to inspect the "
+                "generated PR description body.\n"
+                f"Repository: {verification.target_repository}\n"
+                f"Default branch: {default_branch}\n"
+                f"Attempt summaries: {json.dumps(compare_attempts, indent=2)}"
+            ),
+        )
+        return
+
+    result["compare_surface"] = {
+        "head_branch": successful_head_branch,
+        "url": successful_observation.url,
+        "matched_text": successful_observation.matched_text,
+        "body_text": successful_observation.body_text,
+        "screenshot_path": successful_observation.screenshot_path,
+    }
+    result["compare_url"] = successful_observation.url
+    result["screenshot"] = successful_observation.screenshot_path
+    _record_step(
+        result,
+        step=1,
+        status="passed",
+        action=TICKET_STEPS[0],
+        observed=(
+            "GitHub opened the live compare page on the `Open a pull request` compose "
+            "surface.\n"
+            f"Repository: {verification.target_repository}\n"
+            f"Base branch: {default_branch}\n"
+            f"Head branch: {successful_head_branch}\n"
+            f"Compose URL: {successful_observation.url}"
+        ),
+    )
+    _record_human_verification(
+        result,
+        check=(
+            "Opened the live GitHub compare page and confirmed the reviewer-visible "
+            "`Open a pull request` surface."
+        ),
+        observed=(
+            f"Visible page URL: {successful_observation.url}\n"
+            f"Matched visible text: {successful_observation.matched_text}\n"
+            f"Visible body text excerpt: {_snippet(successful_observation.body_text)}\n"
+            f"Screenshot: {successful_observation.screenshot_path or '<not captured>'}"
+        ),
+    )
+
+
+def _evaluate_template_body(
+    *,
+    result: dict[str, object],
+    verification: PullRequestTemplateChecklistVerificationResult,
+    config: PullRequestTemplateChecklistConfig,
+) -> None:
+    body_source_name, body_source_path, body_source_text = _resolved_template_body_source(
+        result=result,
+        verification=verification,
+    )
+    result["selected_template_source"] = body_source_name
+    if body_source_path is not None:
+        result["selected_template_path"] = body_source_path
+    if body_source_text is not None:
+        result["selected_template_text"] = body_source_text
+
+    if body_source_text is None:
         _record_step(
             result,
             step=2,
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "No live PR template file could be read from the repository, so the "
-                "automation could not find an accessibility checklist in the PR body "
-                "template.\n"
-                f"Configured template URL: {verification.configured_pull_request_template_url}\n"
+                "GitHub did not expose any recognized PR template body for the live "
+                "compose flow. The compare surface opened, but the repository's "
+                "`pullRequestTemplates` GraphQL field was empty, so the automation could "
+                "not verify an accessibility checklist in the generated PR description.\n"
+                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}\n"
                 f"Candidate file observations: {json.dumps(result['candidate_template_paths'], indent=2)}"
             ),
         )
-    else:
-        matched_marker = _first_accessibility_marker(
-            selected_candidate.raw_text,
-            config.accessibility_section_markers,
-        )
-        if matched_marker is None:
-            _record_step(
-                result,
-                step=2,
-                status="failed",
-                action=TICKET_STEPS[1],
-                observed=(
-                    "The live PR template file exists, but its visible text did not "
-                    "include an accessibility checklist marker.\n"
-                    f"Template path: {selected_candidate.path}\n"
-                    f"Expected markers: {list(config.accessibility_section_markers)}\n"
-                    f"Observed template text:\n{selected_candidate.raw_text}"
-                ),
-            )
-        else:
-            accessibility_check_passed = True
-            result["matched_accessibility_marker"] = matched_marker
-            _record_step(
-                result,
-                step=2,
-                status="passed",
-                action=TICKET_STEPS[1],
-                observed=(
-                    "The live PR template text includes an accessibility checklist "
-                    "marker.\n"
-                    f"Template path: {selected_candidate.path}\n"
-                    f"Matched marker: {matched_marker}"
-                ),
-            )
-
-    if selected_candidate is None or selected_candidate.raw_text is None:
         _record_step(
             result,
             step=3,
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact DOM-order checklist item could not be present because no "
-                "live PR template file was available to inspect.\n"
+                "The exact DOM-order checklist item could not be present because GitHub "
+                "did not expose any recognized PR template body for the compose flow.\n"
                 f"Required item: {config.required_checklist_item}"
             ),
         )
         return
 
-    if config.required_checklist_item not in selected_candidate.raw_text:
+    matched_marker = _first_accessibility_marker(
+        body_source_text,
+        config.accessibility_section_markers,
+    )
+    if matched_marker is None:
+        _record_step(
+            result,
+            step=2,
+            status="failed",
+            action=TICKET_STEPS[1],
+            observed=(
+                "The PR description body source resolved by GitHub did not include an "
+                "accessibility checklist marker.\n"
+                f"Body source: {body_source_name}\n"
+                f"Template path: {body_source_path}\n"
+                f"Expected markers: {list(config.accessibility_section_markers)}\n"
+                f"Observed body text:\n{body_source_text}"
+            ),
+        )
+    else:
+        result["matched_accessibility_marker"] = matched_marker
+        _record_step(
+            result,
+            step=2,
+            status="passed",
+            action=TICKET_STEPS[1],
+            observed=(
+                "The PR description body source resolved by GitHub includes an "
+                "accessibility checklist marker.\n"
+                f"Body source: {body_source_name}\n"
+                f"Template path: {body_source_path}\n"
+                f"Matched marker: {matched_marker}"
+            ),
+        )
+
+    if config.required_checklist_item not in body_source_text:
         _record_step(
             result,
             step=3,
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The live PR template file did not contain the exact required checklist "
-                "item.\n"
-                f"Template path: {selected_candidate.path}\n"
+                "The PR description body source resolved by GitHub did not contain the "
+                "exact required checklist item.\n"
+                f"Body source: {body_source_name}\n"
+                f"Template path: {body_source_path}\n"
                 f"Required item: {config.required_checklist_item}\n"
-                f"Observed template text:\n{selected_candidate.raw_text}"
+                f"Observed body text:\n{body_source_text}"
             ),
         )
         return
 
-    if not accessibility_check_passed:
+    if matched_marker is None:
         _record_step(
             result,
             step=3,
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact checklist item was found, but the broader accessibility "
-                "checklist marker was still missing, so the PR body would not present "
-                "the item inside an explicit accessibility checklist section."
+                "The exact checklist item was found, but GitHub did not expose it "
+                "inside a recognizable accessibility checklist section."
             ),
         )
         return
@@ -340,100 +448,70 @@ def _evaluate_repository_state(
         status="passed",
         action=TICKET_STEPS[2],
         observed=(
-            "The live PR template file contains the exact required checklist item.\n"
-            f"Template path: {selected_candidate.path}\n"
+            "The PR description body source resolved by GitHub contains the exact "
+            "required checklist item.\n"
+            f"Body source: {body_source_name}\n"
+            f"Template path: {body_source_path}\n"
             f"Required item: {config.required_checklist_item}"
         ),
     )
 
 
-def _evaluate_human_visible_state(
+def _resolved_template_body_source(
     *,
     result: dict[str, object],
     verification: PullRequestTemplateChecklistVerificationResult,
-    config: PullRequestTemplateChecklistConfig,
-) -> None:
-    default_branch = verification.default_branch or config.expected_default_branch or "main"
-    selected_candidate = verification.selected_candidate
-    template_path = (
-        selected_candidate.path
-        if selected_candidate is not None
-        else config.candidate_template_paths[0]
-    )
-    screenshot_path = (
-        SUCCESS_SCREENSHOT_PATH
-        if selected_candidate is not None and selected_candidate.raw_text is not None
-        else FAILURE_SCREENSHOT_PATH
-    )
+) -> tuple[str | None, str | None, str | None]:
+    compare_surface = result.get("compare_surface", {})
+    if isinstance(compare_surface, dict):
+        compare_body_text = compare_surface.get("body_text")
+        if isinstance(compare_body_text, str) and compare_body_text.strip():
+            required_item = verification.required_checklist_item
+            if required_item in compare_body_text:
+                return (
+                    "live GitHub compare page",
+                    compare_surface.get("url") if isinstance(compare_surface.get("url"), str) else None,
+                    compare_body_text,
+                )
 
-    expected_texts = [config.required_checklist_item]
-    if selected_candidate is None or selected_candidate.raw_text is None:
-        expected_texts.extend(["Page not found", "404", "Uh oh!"])
-    else:
-        expected_texts.extend(config.accessibility_section_markers)
-
-    with create_github_repository_file_page() as file_page:
-        observation = file_page.open_file(
-            repository=verification.target_repository,
-            branch=default_branch,
-            file_path=template_path,
-            expected_texts=tuple(expected_texts),
-            screenshot_path=str(screenshot_path),
+    selected_template = verification.selected_recognized_template
+    if selected_template is not None:
+        return (
+            "GitHub GraphQL pullRequestTemplates",
+            selected_template.filename,
+            selected_template.body,
         )
 
-    result["browser_observation"] = {
-        "url": observation.url,
-        "matched_text": observation.matched_text,
-        "body_text": observation.body_text,
-        "screenshot_path": observation.screenshot_path,
-    }
-    result["screenshot"] = observation.screenshot_path
+    return None, None, None
 
-    if config.required_checklist_item in observation.body_text:
-        _record_human_verification(
-            result,
-            check=(
-                "Opened the live GitHub PR template file page in Chromium and checked "
-                "the visible checklist text a reviewer would read."
-            ),
-            observed=(
-                f"Visible page URL: {observation.url}\n"
-                f"Matched visible text: {observation.matched_text}\n"
-                f"Screenshot: {observation.screenshot_path}"
-            ),
-        )
-        return
 
-    _record_human_verification(
-        result,
-        check=(
-            "Opened the live GitHub PR template file page in Chromium and checked the "
-            "visible page content a reviewer would read."
-        ),
-        observed=(
-            f"Visible page URL: {observation.url}\n"
-            f"Matched visible text: {observation.matched_text}\n"
-            f"Screenshot: {observation.screenshot_path}\n"
-            f"Visible body text excerpt: {_snippet(observation.body_text)}"
-        ),
-    )
-    _record_step(
-        result,
-        step=4,
-        status="failed",
-        action=(
-            "Open the live GitHub PR template file page and verify the checklist item "
-            "is visibly present for a human reviewer."
-        ),
-        observed=(
-            "The browser did not visibly show the required checklist item on the live "
-            "GitHub page.\n"
-            f"URL: {observation.url}\n"
-            f"Matched text: {observation.matched_text}\n"
-            f"Screenshot: {observation.screenshot_path}\n"
-            f"Visible body text:\n{observation.body_text}"
-        ),
-    )
+def _branch_names(payload: object | None) -> list[str]:
+    if not isinstance(payload, list):
+        return []
+    branches: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if isinstance(name, str) and name:
+            branches.append(name)
+    return branches
+
+
+def _open_pull_request_heads(payload: object | None) -> set[str]:
+    if not isinstance(payload, list):
+        return set()
+    heads: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        head = item.get("head")
+        if not isinstance(head, dict):
+            continue
+        ref = head.get("ref")
+        if isinstance(ref, str) and ref:
+            heads.add(ref)
+    return heads
 
 
 def _first_accessibility_marker(
@@ -485,9 +563,7 @@ def _failed_steps(result: dict[str, object]) -> list[str]:
             continue
         if item.get("status") != "failed":
             continue
-        failures.append(
-            f"Step {item.get('step')} failed: {item.get('observed')}"
-        )
+        failures.append(f"Step {item.get('step')} failed: {item.get('observed')}")
     return failures
 
 
@@ -541,31 +617,26 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "*Automation coverage*",
         (
             "* Queried the live GitHub repository metadata, community profile, "
-            "default-branch tree, and conventional pull-request-template paths for "
-            f"{{{{{result['repository']}}}}}."
+            "default-branch tree, branch list, open pull requests, conventional "
+            f"template paths, and GitHub `pullRequestTemplates` for {{{{{result['repository']}}}}}."
         ),
         (
-            "* Verified whether the live PR template exposes an accessibility "
-            "checklist and the exact item {{Manual verification: DOM order matches "
-            "visual hierarchy for keyboard-accessible elements.}}"
+            "* Opened a live GitHub compare page that reached {{Open a pull request}} "
+            "for a branch without an open PR."
         ),
         (
-            "* Opened the live GitHub file page in Chromium to confirm what a human "
-            "reviewer would visibly read."
+            "* Verified the accessibility checklist item against the PR body source "
+            "recognized by GitHub for that compose flow."
         ),
         "",
         "*Observed result*",
-        (
-            "* Matched the expected result."
-            if passed
-            else "* Did not match the expected result."
-        ),
+        "* Matched the expected result." if passed else "* Did not match the expected result.",
         (
             f"* Environment: repository {{{{{result['repository']}}}}}, branch "
             f"{{{{{result.get('default_branch', result.get('expected_default_branch', 'main'))}}}}}, "
-            f"browser {{Chromium (Playwright)}}, OS {{{{{result['os']}}}}}."
+            f"browser {{{{{result['browser']}}}}}, OS {{{{{result['os']}}}}}."
         ),
-        f"* Screenshot: {{{{{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}}}}}",
+        f"* Screenshot: {{{{{result.get('screenshot', '<not captured>')}}}}}",
         "",
         "*Step results*",
         *_step_lines(result, jira=True),
@@ -594,27 +665,20 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "### Automation",
         (
             f"- Queried the live GitHub repository metadata, community profile, "
-            f"default-branch tree, and conventional PR template paths for `{result['repository']}`."
+            f"default-branch tree, branch list, open pull requests, conventional "
+            f"template paths, and GitHub `pullRequestTemplates` for `{result['repository']}`."
         ),
-        (
-            "- Verified whether the live PR template exposes an accessibility "
-            "checklist and the exact item `Manual verification: DOM order matches "
-            "visual hierarchy for keyboard-accessible elements.`"
-        ),
-        "- Opened the live GitHub file page in Chromium to confirm the visible reviewer experience.",
+        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR.",
+        "- Verified the accessibility checklist item against the PR body source recognized by GitHub for that compose flow.",
         "",
         "### Observed result",
-        (
-            "- Matched the expected result."
-            if passed
-            else "- Did not match the expected result."
-        ),
+        "- Matched the expected result." if passed else "- Did not match the expected result.",
         (
             f"- Environment: repository `{result['repository']}`, branch "
             f"`{result.get('default_branch', result.get('expected_default_branch', 'main'))}`, "
-            f"browser `Chromium (Playwright)`, OS `{result['os']}`."
+            f"browser `{result['browser']}`, OS `{result['os']}`."
         ),
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
         "",
         "### Step results",
         *_step_lines(result, jira=False),
@@ -642,14 +706,15 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Repository: `{result['repository']}`",
         (
-            f"- Result: expected PR-template checklist item was present."
+            "- Result: GitHub exposed the required PR-template checklist item in the PR body source."
             if passed
             else (
-                "- Result: expected PR-template checklist item was not present in the "
-                "live GitHub implementation."
+                "- Result: GitHub did not expose the required PR-template checklist "
+                "item in the PR body source used for the live compose flow."
             )
         ),
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        f"- Compose URL: `{result.get('compare_url', '<unavailable>')}`",
+        f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
     ]
     if not passed:
         lines.extend(
@@ -665,45 +730,51 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
-    browser_observation = result.get("browser_observation", {})
-    if not isinstance(browser_observation, dict):
-        browser_observation = {}
+    compare_surface = result.get("compare_surface", {})
+    if not isinstance(compare_surface, dict):
+        compare_surface = {}
     lines = [
         f"# Bug report — {TICKET_KEY}",
         "",
-        f"## Summary",
+        "## Summary",
         (
-            "The live `IstiN/trackstate` repository does not expose a PR template that "
-            "contains the required manual accessibility checklist item for DOM order."
+            "The live GitHub PR compose flow for `IstiN/trackstate` does not expose a "
+            "recognized PR template body that contains the required manual "
+            "accessibility DOM-order checklist item."
         ),
         "",
         "## Exact steps to reproduce",
         (
-            "1. Create a new Pull Request for a UI layout change. "
-            + _step_outcome(result, 1)
+            "1. Open a new PR compare/compose surface for a branch without an existing "
+            "open PR. " + _step_outcome(result, 1)
         ),
         (
-            "2. Verify that the PR description template automatically includes an "
-            "accessibility checklist. "
-            + _step_outcome(result, 2)
+            "2. Verify that the PR description body includes an accessibility "
+            "checklist. " + _step_outcome(result, 2)
         ),
         (
             "3. Confirm the presence of the specific item "
             "`Manual verification: DOM order matches visual hierarchy for "
-            "keyboard-accessible elements.` "
-            + _step_outcome(result, 3)
-        ),
-        "",
-        "## Actual result",
-        (
-            "GitHub community profile returned `pull_request_template: null`, the "
-            "default branch tree did not contain any conventional PR template file, "
-            "and the browser opened the conventional PR template URL as a missing file "
-            "page instead of a visible template containing the required checklist item."
+            "keyboard-accessible elements.` " + _step_outcome(result, 3)
         ),
         "",
         "## Expected result",
         EXPECTED_RESULT,
+        "",
+        "## Actual result",
+        (
+            "GitHub either exposed no recognized pull-request template body through "
+            "`repository.pullRequestTemplates` or the recognized body omitted the "
+            "required checklist marker/item, so the live compose flow could not prove "
+            "the required accessibility verification step."
+        ),
+        "",
+        "## Missing / broken production capability",
+        (
+            "The repository's live GitHub PR creation flow does not expose a PR body "
+            "source containing the required manual DOM-order accessibility checklist "
+            "item for reviewers."
+        ),
         "",
         "## Exact error message / assertion failure",
         "```text",
@@ -716,19 +787,21 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Default branch: "
             f"`{result.get('default_branch', result.get('expected_default_branch', 'main'))}`"
         ),
-        "- Browser: `Chromium (Playwright)`",
+        f"- Browser/runtime: `{result['browser']}`",
         f"- OS: `{result['os']}`",
         f"- Run command: `{RUN_COMMAND}`",
         "",
-        "## Screenshots / logs",
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        "## Evidence",
+        f"- Compose URL: `{compare_surface.get('url', '<unavailable>')}`",
         (
-            f"- Browser URL: `{browser_observation.get('url', '<unavailable>')}`"
+            f"- Compose matched text: `{compare_surface.get('matched_text', '<unavailable>')}`"
         ),
-        (
-            f"- Browser matched text: `{browser_observation.get('matched_text', '<unavailable>')}`"
-        ),
-        "- Candidate path observations:",
+        f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
+        "- Recognized pull-request templates:",
+        "```json",
+        json.dumps(result.get("recognized_pull_request_templates", []), indent=2),
+        "```",
+        "- Candidate file observations:",
         "```json",
         json.dumps(result.get("candidate_template_paths", []), indent=2),
         "```",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from testing.core.config.pull_request_template_checklist_config import (
     PullRequestTemplateChecklistConfig,
 )
@@ -26,6 +28,13 @@ class PullRequestTemplateChecklistVerifier:
         )
         community_profile = self._probe.community_profile(config.repository)
         tree_fetch = self._probe.list_tree(config.repository, default_branch)
+        pull_request_templates_fetch = self._probe.pull_request_templates(
+            config.repository
+        )
+        candidate_paths = self._candidate_paths(
+            configured_paths=config.candidate_template_paths,
+            tree_fetch=tree_fetch,
+        )
         candidate_observations = tuple(
             PullRequestTemplateCandidateObservation(
                 path=path,
@@ -40,7 +49,7 @@ class PullRequestTemplateChecklistVerifier:
                     path,
                 ),
             )
-            for path in config.candidate_template_paths
+            for path in candidate_paths
         )
         return PullRequestTemplateChecklistVerificationResult(
             target_repository=config.repository,
@@ -48,6 +57,7 @@ class PullRequestTemplateChecklistVerifier:
             repository_info=repository_info,
             community_profile=community_profile,
             tree_fetch=tree_fetch,
+            pull_request_templates_fetch=pull_request_templates_fetch,
             candidate_observations=candidate_observations,
         )
 
@@ -64,3 +74,40 @@ class PullRequestTemplateChecklistVerifier:
         if expected_default_branch:
             return expected_default_branch
         return "main"
+
+    @staticmethod
+    def _candidate_paths(
+        *,
+        configured_paths: tuple[str, ...],
+        tree_fetch,
+    ) -> tuple[str, ...]:
+        merged_paths = list(configured_paths)
+        seen_paths = set(configured_paths)
+        for path in PullRequestTemplateChecklistVerifier._discovered_template_paths(
+            tree_fetch
+        ):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            merged_paths.append(path)
+        return tuple(merged_paths)
+
+    @staticmethod
+    def _discovered_template_paths(tree_fetch) -> tuple[str, ...]:
+        payload = tree_fetch.json_payload
+        if not isinstance(payload, dict):
+            return ()
+        tree = payload.get("tree")
+        if not isinstance(tree, list):
+            return ()
+        pattern = re.compile(
+            r"(?i)(^|/)(pull_request_template(\.md)?|pull_request_template/[^/]+\.md)$"
+        )
+        paths: list[str] = []
+        for item in tree:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if isinstance(path, str) and path and pattern.search(path):
+                paths.append(path)
+        return tuple(paths)

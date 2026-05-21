@@ -45,12 +45,19 @@ class PullRequestTemplateCandidateObservation:
 
 
 @dataclass(frozen=True)
+class RecognizedPullRequestTemplate:
+    filename: str
+    body: str
+
+
+@dataclass(frozen=True)
 class PullRequestTemplateChecklistVerificationResult:
     target_repository: str
     required_checklist_item: str
     repository_info: CliCommandResult
     community_profile: CliCommandResult
     tree_fetch: CliCommandResult
+    pull_request_templates_fetch: CliCommandResult
     candidate_observations: tuple[PullRequestTemplateCandidateObservation, ...]
 
     @property
@@ -124,6 +131,32 @@ class PullRequestTemplateChecklistVerificationResult:
         return tuple(path for path in self.tree_paths if pattern.search(path))
 
     @property
+    def recognized_templates(self) -> tuple[RecognizedPullRequestTemplate, ...]:
+        payload = self.pull_request_templates_fetch.json_payload
+        if not isinstance(payload, dict):
+            return ()
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return ()
+        repository = data.get("repository")
+        if not isinstance(repository, dict):
+            return ()
+        templates = repository.get("pullRequestTemplates")
+        if not isinstance(templates, list):
+            return ()
+        recognized_templates: list[RecognizedPullRequestTemplate] = []
+        for template in templates:
+            if not isinstance(template, dict):
+                continue
+            filename = template.get("filename")
+            body = template.get("body")
+            if isinstance(filename, str) and filename and isinstance(body, str):
+                recognized_templates.append(
+                    RecognizedPullRequestTemplate(filename=filename, body=body)
+                )
+        return tuple(recognized_templates)
+
+    @property
     def existing_candidates(self) -> tuple[PullRequestTemplateCandidateObservation, ...]:
         return tuple(
             observation
@@ -139,3 +172,17 @@ class PullRequestTemplateChecklistVerificationResult:
                 if observation.path == configured_path:
                     return observation
         return self.existing_candidates[0] if self.existing_candidates else None
+
+    @property
+    def selected_recognized_template(self) -> RecognizedPullRequestTemplate | None:
+        configured_path = self.configured_pull_request_template_path
+        if configured_path is not None:
+            for template in self.recognized_templates:
+                if template.filename == configured_path:
+                    return template
+        selected_candidate = self.selected_candidate
+        if selected_candidate is not None:
+            for template in self.recognized_templates:
+                if template.filename == selected_candidate.path:
+                    return template
+        return self.recognized_templates[0] if self.recognized_templates else None
