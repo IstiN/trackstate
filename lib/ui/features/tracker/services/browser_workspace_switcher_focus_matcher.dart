@@ -62,3 +62,19 @@ bool browserFocusWithinWorkspaceSwitcherRow({
   }
   return false;
 }
+
+bool browserWorkspaceSwitcherShouldPreventDefaultKey({
+  required String key,
+  required Iterable<BrowserWorkspaceSwitcherFocusAncestorSnapshot> ancestors,
+}) {
+  switch (key) {
+    case 'ArrowDown':
+    case 'ArrowUp':
+      return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
+    case 'Home':
+    case 'End':
+      return browserFocusWithinWorkspaceSwitcherRow(ancestors: ancestors);
+    default:
+      return false;
+  }
+}

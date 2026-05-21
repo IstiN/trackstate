@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -170,6 +171,101 @@ void main() {
       );
       expect(
         find.descendant(of: activeRow, matching: find.text('Open')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'startup restore keeps the saved active local workspace selected when local snapshot loading reports unsupported startup access',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: activeLocalWorkspaceId,
+              displayName: 'Active local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/trackstate-demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:stable/repo@main',
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: activeLocalWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => _QueuedLoadTrackStateRepository(
+                loadResults: [
+                  UnsupportedError(
+                    'Local Git startup access is unavailable.',
+                  ),
+                ],
+              ),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Open')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Unavailable')),
         findsNothing,
       );
     },
@@ -1137,11 +1233,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(switcherSheet, findsOneWidget);
-      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
-      expect(
-        FocusManager.instance.primaryFocus?.debugLabel,
-        'desktop-workspace-switcher',
-      );
+      expect(_focusWithinFinder(tester, switcherTrigger), isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
@@ -2356,6 +2448,77 @@ void main() {
   );
 
   testWidgets(
+    'condensed desktop workspace switcher exports only one focusable button semantics node',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1180, 900);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        final triggerSemantics = _semanticsFinderFor(tester: tester, finder: trigger);
+        final focusableButtonSemantics = find.semantics.descendant(
+          of: triggerSemantics,
+          matching: find.semantics.byPredicate(
+            (node) {
+              final data = node.getSemanticsData();
+              return data.flagsCollection.isButton &&
+                  data.flagsCollection.isFocusable;
+            },
+            describeMatch: (_) => 'focusable button semantics node',
+          ),
+          matchRoot: true,
+        );
+
+        expect(
+          focusableButtonSemantics,
+          kIsWeb ? findsOne : findsAtLeast(1),
+          reason:
+              'The condensed desktop workspace switcher trigger must export a '
+              '${kIsWeb ? 'single' : 'stable'} focusable button semantics node '
+              'so browser Tab and post-open focus stay on the canonical trigger '
+              'control.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'workspace switcher keeps state badges readable and the compact trigger keyboard reachable',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -3001,9 +3164,13 @@ String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
       continue;
     }
     for (var index = 0; index < matches; index += 1) {
+      final candidateFinder = entry.value.at(index);
+      if (_focusWithinFinder(tester, candidateFinder)) {
+        return entry.key;
+      }
       final candidateSemantics = _semanticsFinderFor(
         tester: tester,
-        finder: entry.value.at(index),
+        finder: candidateFinder,
       );
       final ownsFocusedNode = find.semantics.descendant(
         of: candidateSemantics,

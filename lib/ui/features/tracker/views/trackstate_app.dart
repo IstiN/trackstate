@@ -125,6 +125,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
+  browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
+  _desktopWorkspaceSwitcherScrollSnapshot;
   String? _requestedWorkspaceSwitcherRowFocusId;
   int _workspaceSwitcherRowFocusRequestVersion = 0;
   final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
@@ -424,6 +426,14 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
+      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+          _isUnsupportedActiveLocalStartupAccess(reason)) {
+        nextViewModel.dispose();
+        return _preserveActiveLocalWorkspaceSelection(
+          workspace,
+          previousViewModel,
+        );
+      }
       nextViewModel.dispose();
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
@@ -438,14 +448,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     } on Object catch (error) {
       if (preserveActiveLocalSelectionOnUnsupportedAccess &&
           error is UnsupportedError) {
-        if (previousViewModel.snapshot == null) {
-          await previousViewModel.load();
-        }
-        _workspaceValidationFailures.remove(workspace.id);
-        return _PreparedWorkspaceSwitch(
-          viewModel: previousViewModel,
-          workspace: workspace,
-          localConfigurationKey: null,
+        return _preserveActiveLocalWorkspaceSelection(
+          workspace,
+          previousViewModel,
         );
       }
       final reason = _normalizeWorkspaceFailureReason(error);
@@ -460,6 +465,31 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     }
+  }
+
+  Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
+    WorkspaceProfile workspace,
+    TrackerViewModel previousViewModel,
+  ) async {
+    if (previousViewModel.snapshot == null) {
+      await previousViewModel.load();
+    }
+    _workspaceValidationFailures.remove(workspace.id);
+    return _PreparedWorkspaceSwitch(
+      viewModel: previousViewModel,
+      workspace: workspace,
+      localConfigurationKey: null,
+    );
+  }
+
+  bool _isUnsupportedActiveLocalStartupAccess(String reason) {
+    final normalizedReason = reason.toLowerCase();
+    return normalizedReason.contains(
+          'local git startup access is unavailable',
+        ) ||
+        normalizedReason.contains('local git runtime is not available') ||
+        (normalizedReason.contains('local') &&
+            normalizedReason.contains('not available in this build'));
   }
 
   void _rememberWorkspaceValidationFailure(
@@ -841,6 +871,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     String? workspaceSwitcherFocusWorkspaceId,
   }) async {
+    final preservedBrowserScrollSnapshot =
+        _isDesktopWorkspaceSwitcherVisible && kIsWeb
+        ? (_desktopWorkspaceSwitcherScrollSnapshot ??
+              browser_workspace_switcher_focus_monitor
+                  .captureBrowserViewportScrollSnapshot())
+        : null;
     final previousViewModel = viewModel;
     final prepared = await _prepareWorkspaceSwitch(
       workspace,
@@ -858,6 +894,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       previousViewModel: previousViewModel,
       workspaceState: selectedState,
       workspaceSwitcherFocusWorkspaceId: workspaceSwitcherFocusWorkspaceId,
+      preservedBrowserScrollSnapshot: preservedBrowserScrollSnapshot,
     );
   }
 
@@ -866,6 +903,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     required TrackerViewModel previousViewModel,
     WorkspaceProfilesState? workspaceState,
     String? workspaceSwitcherFocusWorkspaceId,
+    browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
+    preservedBrowserScrollSnapshot,
   }) async {
     if (!mounted) {
       prepared.viewModel.dispose();
@@ -913,6 +952,12 @@ class _TrackStateAppState extends State<TrackStateApp>
             workspaceSwitcherFocusWorkspaceId,
           ),
         );
+        if (preservedBrowserScrollSnapshot != null) {
+          browser_workspace_switcher_focus_monitor
+              .restoreBrowserViewportScrollSnapshot(
+                snapshot: preservedBrowserScrollSnapshot,
+              );
+        }
       });
     } else if (_isDesktopWorkspaceSwitcherVisible &&
         workspaceSwitcherFocusWorkspaceId == null) {
@@ -921,6 +966,12 @@ class _TrackStateAppState extends State<TrackStateApp>
           return;
         }
         _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+        if (preservedBrowserScrollSnapshot != null) {
+          browser_workspace_switcher_focus_monitor
+              .restoreBrowserViewportScrollSnapshot(
+                snapshot: preservedBrowserScrollSnapshot,
+              );
+        }
       });
     }
   }
@@ -1126,10 +1177,11 @@ class _TrackStateAppState extends State<TrackStateApp>
       _desktopWorkspaceSwitcherProfileOrder = [
         for (final profile in _workspaceState.profiles) profile.id,
       ];
-      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
-      if (activeWorkspaceId != null) {
-        _workspaceSwitcherRowFocusRequestVersion += 1;
-      }
+      _desktopWorkspaceSwitcherScrollSnapshot = kIsWeb
+          ? browser_workspace_switcher_focus_monitor
+                .captureBrowserViewportScrollSnapshot()
+          : null;
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1141,7 +1193,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               activeWorkspaceId: activeWorkspaceId,
             );
       }
-      _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+      _workspaceSwitcherTriggerFocusNode.requestFocus();
     });
   }
 
@@ -1209,6 +1261,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
       _desktopWorkspaceSwitcherProfileOrder = null;
+      _desktopWorkspaceSwitcherScrollSnapshot = null;
       _requestedWorkspaceSwitcherRowFocusId = null;
     });
     if (!restoreTriggerFocus) {
@@ -11078,6 +11131,92 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       height: 1,
     );
 
+    final triggerButton = FilledButton(
+      focusNode: focusNode,
+      onPressed: onPressed,
+      style: ButtonStyle(
+        animationDuration: Duration.zero,
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return colors.primary.withValues(alpha: 0.5);
+          }
+          return colors.primary;
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return onPrimary.withValues(alpha: 0.72);
+          }
+          return onPrimary;
+        }),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        minimumSize: WidgetStatePropertyAll(
+          Size(0, compact ? 44 : _desktopTopBarControlHeight),
+        ),
+        maximumSize: WidgetStatePropertyAll(
+          Size(
+            double.infinity,
+            compact ? 44 : _desktopTopBarControlHeight,
+          ),
+        ),
+        padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 12,
+            vertical: compact ? 8 : 6,
+          ),
+        ),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: borderRadius),
+        ),
+        side: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.focused)) {
+            return BorderSide(color: onPrimary, width: 2);
+          }
+          return BorderSide(color: colors.primary);
+        }),
+      ),
+      child: Row(
+        mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+        children: [
+          TrackStateIcon(
+            summary.icon,
+            color: onPrimary,
+            size: compact ? 18 : _desktopTopBarIconSize,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: compact
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        summary.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: nameStyle,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        summary.detailLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: detailStyle,
+                      ),
+                    ],
+                  )
+                : Text(
+                    summary.textLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: nameStyle,
+                  ),
+          ),
+        ],
+      ),
+    );
+
     return MergeSemantics(
       child: Semantics(
         button: true,
@@ -11094,91 +11233,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
             maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
           ),
-          child: FilledButton(
-            focusNode: focusNode,
-            onPressed: onPressed,
-            style: ButtonStyle(
-              animationDuration: Duration.zero,
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.disabled)) {
-                  return colors.primary.withValues(alpha: 0.5);
-                }
-                return colors.primary;
-              }),
-              foregroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.disabled)) {
-                  return onPrimary.withValues(alpha: 0.72);
-                }
-                return onPrimary;
-              }),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              minimumSize: WidgetStatePropertyAll(
-                Size(0, compact ? 44 : _desktopTopBarControlHeight),
-              ),
-              maximumSize: WidgetStatePropertyAll(
-                Size(
-                  double.infinity,
-                  compact ? 44 : _desktopTopBarControlHeight,
-                ),
-              ),
-              padding: WidgetStatePropertyAll(
-                EdgeInsets.symmetric(
-                  horizontal: compact ? 10 : 12,
-                  vertical: compact ? 8 : 6,
-                ),
-              ),
-              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-              shape: WidgetStatePropertyAll(
-                RoundedRectangleBorder(borderRadius: borderRadius),
-              ),
-              side: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.focused)) {
-                  return BorderSide(color: onPrimary, width: 2);
-                }
-                return BorderSide(color: colors.primary);
-              }),
-            ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
-            ),
-          ),
+          child: kIsWeb ? ExcludeSemantics(child: triggerButton) : triggerButton,
         ),
       ),
     );
