@@ -91,6 +91,15 @@ class ProjectSettingsNavigationState:
     add_status_visible: bool
 
 
+@dataclass(frozen=True)
+class ProjectSettingsAdminTabObservation:
+    label: str
+    selected_tab_label: str
+    body_text: str
+    expected_visible_text: str | None
+    signal_text: str
+
+
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_selector = 'flt-semantics[role="tab"]'
@@ -347,6 +356,60 @@ class LiveProjectSettingsPage:
             timeout_ms=timeout_ms,
         )
         return str(payload)
+
+    def rendered_tab_labels(self, *, timeout_ms: int = 30_000) -> list[str]:
+        payload = self._session.wait_for_function(
+            """
+            () => {
+              const labels = Array.from(document.querySelectorAll('flt-semantics[role="tab"]'))
+                .map((tab) => (tab.getAttribute('aria-label') ?? '').trim())
+                .filter((label) => label.length > 0);
+              return labels.length > 0 ? labels : null;
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "The Settings surface did not expose readable admin tab labels.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return [str(item) for item in payload]
+
+    def observe_admin_tab(
+        self,
+        label: str,
+        *,
+        expected_visible_text: str | None = None,
+        signal_label: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> ProjectSettingsAdminTabObservation:
+        body_text = self.open_tab(
+            label,
+            expected_visible_text=expected_visible_text,
+            timeout_ms=timeout_ms,
+        )
+        selected_tab_label = self.selected_tab_label(timeout_ms=timeout_ms)
+        if selected_tab_label != label:
+            raise AssertionError(
+                "The Settings admin tab did not become the selected tab.\n"
+                f"Expected selected tab: {label}\n"
+                f"Observed selected tab: {selected_tab_label}\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        signal_text = ""
+        if signal_label:
+            signal_text = self._wait_for_visible_semantics_text(
+                signal_label,
+                timeout_ms=timeout_ms,
+            )
+        return ProjectSettingsAdminTabObservation(
+            label=label,
+            selected_tab_label=selected_tab_label,
+            body_text=body_text,
+            expected_visible_text=expected_visible_text,
+            signal_text=signal_text,
+        )
 
     def observe_attachment_settings_surface(
         self,
@@ -1513,6 +1576,56 @@ class LiveProjectSettingsPage:
             """,
             arg=selector,
         )
+
+    def _wait_for_visible_semantics_text(self, text: str, *, timeout_ms: int) -> str:
+        payload = self._session.wait_for_function(
+            r"""
+            (expectedText) => {
+              const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .find((candidate) => {
+                  if (!isVisible(candidate)) {
+                    return false;
+                  }
+                  const rendered = normalize(
+                    candidate.getAttribute('aria-label')
+                    ?? candidate.innerText
+                    ?? candidate.textContent
+                    ?? '',
+                  );
+                  return rendered.includes(expectedText);
+                });
+              if (!match) {
+                return null;
+              }
+              return normalize(
+                match.getAttribute('aria-label')
+                ?? match.innerText
+                ?? match.textContent
+                ?? '',
+              );
+            }
+            """,
+            arg=text,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, str) or not payload.strip():
+            raise AssertionError(
+                f'The Settings surface never exposed visible semantics containing "{text}".\n'
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return str(payload).strip()
 
     def _tab_selector_for(self, label: str) -> str:
         return f'{self._tab_selector}[aria-label="{self._escape(label)}"]'
