@@ -11078,6 +11078,92 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       height: 1,
     );
 
+    final triggerButton = FilledButton(
+      focusNode: focusNode,
+      onPressed: onPressed,
+      style: ButtonStyle(
+        animationDuration: Duration.zero,
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return colors.primary.withValues(alpha: 0.5);
+          }
+          return colors.primary;
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return onPrimary.withValues(alpha: 0.72);
+          }
+          return onPrimary;
+        }),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        minimumSize: WidgetStatePropertyAll(
+          Size(0, compact ? 44 : _desktopTopBarControlHeight),
+        ),
+        maximumSize: WidgetStatePropertyAll(
+          Size(
+            double.infinity,
+            compact ? 44 : _desktopTopBarControlHeight,
+          ),
+        ),
+        padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 12,
+            vertical: compact ? 8 : 6,
+          ),
+        ),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: borderRadius),
+        ),
+        side: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.focused)) {
+            return BorderSide(color: onPrimary, width: 2);
+          }
+          return BorderSide(color: colors.primary);
+        }),
+      ),
+      child: Row(
+        mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+        children: [
+          TrackStateIcon(
+            summary.icon,
+            color: onPrimary,
+            size: compact ? 18 : _desktopTopBarIconSize,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: compact
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        summary.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: nameStyle,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        summary.detailLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: detailStyle,
+                      ),
+                    ],
+                  )
+                : Text(
+                    summary.textLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: nameStyle,
+                  ),
+          ),
+        ],
+      ),
+    );
+
     return MergeSemantics(
       child: Semantics(
         button: true,
@@ -11094,91 +11180,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
             maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
           ),
-          child: FilledButton(
-            focusNode: focusNode,
-            onPressed: onPressed,
-            style: ButtonStyle(
-              animationDuration: Duration.zero,
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.disabled)) {
-                  return colors.primary.withValues(alpha: 0.5);
-                }
-                return colors.primary;
-              }),
-              foregroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.disabled)) {
-                  return onPrimary.withValues(alpha: 0.72);
-                }
-                return onPrimary;
-              }),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              minimumSize: WidgetStatePropertyAll(
-                Size(0, compact ? 44 : _desktopTopBarControlHeight),
-              ),
-              maximumSize: WidgetStatePropertyAll(
-                Size(
-                  double.infinity,
-                  compact ? 44 : _desktopTopBarControlHeight,
-                ),
-              ),
-              padding: WidgetStatePropertyAll(
-                EdgeInsets.symmetric(
-                  horizontal: compact ? 10 : 12,
-                  vertical: compact ? 8 : 6,
-                ),
-              ),
-              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-              shape: WidgetStatePropertyAll(
-                RoundedRectangleBorder(borderRadius: borderRadius),
-              ),
-              side: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.focused)) {
-                  return BorderSide(color: onPrimary, width: 2);
-                }
-                return BorderSide(color: colors.primary);
-              }),
-            ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
-            ),
-          ),
+          child: kIsWeb ? ExcludeSemantics(child: triggerButton) : triggerButton,
         ),
       ),
     );
