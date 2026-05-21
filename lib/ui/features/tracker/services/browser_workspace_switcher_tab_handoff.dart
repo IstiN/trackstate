@@ -26,27 +26,18 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
   final triggerIndex = focusStops.indexWhere(
     (stop) => stop.isFocusable && stop.isWorkspaceSwitcherTrigger,
   );
-  final firstExternalControlIndex = triggerIndex == -1
-      ? -1
-      : _firstExternalControlIndex(focusStops, startIndex: triggerIndex + 1);
-  if (!backwards &&
-      triggerIndex != -1 &&
-      firstExternalControlIndex != -1 &&
-      currentIndex == triggerIndex) {
-    return firstExternalControlIndex;
-  }
-  if (backwards &&
-      triggerIndex != -1 &&
-      firstExternalControlIndex != -1 &&
-      currentIndex == firstExternalControlIndex) {
-    return triggerIndex;
-  }
-
   final selectedRowIndex = focusStops.indexWhere(
     (stop) => stop.isFocusable && stop.isSelectedWorkspaceRow,
   );
   if (selectedRowIndex == -1) {
     return null;
+  }
+
+  if (!backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
+    return selectedRowIndex;
+  }
+  if (backwards && triggerIndex != -1 && currentIndex == selectedRowIndex) {
+    return triggerIndex;
   }
 
   final lastWorkspaceRowIndex = _lastWorkspaceRowIndex(focusStops);
@@ -87,19 +78,6 @@ int _firstPostRowControlIndex(
     if (stop.isFocusable &&
         stop.isWithinWorkspaceSwitcher &&
         !stop.isWithinWorkspaceRow) {
-      return index;
-    }
-  }
-  return -1;
-}
-
-int _firstExternalControlIndex(
-  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
-  required int startIndex,
-}) {
-  for (var index = startIndex; index < stops.length; index += 1) {
-    final stop = stops[index];
-    if (stop.isFocusable && !stop.isWithinWorkspaceSwitcher) {
       return index;
     }
   }

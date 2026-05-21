@@ -1403,7 +1403,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      _workspaceSwitcherTriggerFocusNode.requestFocus();
+      final triggerContext = _workspaceSwitcherTriggerAnchorKey.currentContext;
+      if (triggerContext != null) {
+        FocusScope.of(
+          triggerContext,
+        ).requestFocus(_workspaceSwitcherTriggerFocusNode);
+      } else {
+        _workspaceSwitcherTriggerFocusNode.requestFocus();
+      }
+      if (kIsWeb) {
+        _requestDesktopWorkspaceSwitcherBrowserFocus(
+          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+        );
+      }
     });
   }
 
@@ -1662,6 +1674,32 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  void _focusActiveWorkspaceSwitcherRow() {
+    final activeWorkspaceId = _workspaceState.activeWorkspaceId;
+    if (!_isDesktopWorkspaceSwitcherVisible || activeWorkspaceId == null) {
+      return;
+    }
+    setState(() {
+      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
+      _workspaceSwitcherRowFocusRequestVersion += 1;
+    });
+    if (!kIsWeb) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        return;
+      }
+      browser_workspace_switcher_focus_monitor
+          .syncBrowserWorkspaceSwitcherRowTabIndices(
+            activeWorkspaceId: activeWorkspaceId,
+          );
+      _requestDesktopWorkspaceSwitcherBrowserFocus(
+        browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId),
+      );
+    });
+  }
+
   List<WorkspaceProfile> _desktopWorkspaceSwitcherProfiles() {
     final storedOrder = _desktopWorkspaceSwitcherProfileOrder;
     if (!_isDesktopWorkspaceSwitcherVisible ||
@@ -1807,6 +1845,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onDeleteWorkspace: _deleteWorkspaceProfile,
                   onMoveWorkspaceSelection: (step) =>
                       unawaited(_switchToAdjacentWorkspace(step: step)),
+                  onFocusActiveWorkspaceSwitcherRow:
+                      _focusActiveWorkspaceSwitcherRow,
                   workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
                   onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
@@ -1842,6 +1882,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -1871,6 +1912,7 @@ class _TrackerHome extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -1978,11 +2020,14 @@ class _TrackerHome extends StatelessWidget {
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
                           onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                          onFocusActiveWorkspaceSwitcherRow:
+                              onFocusActiveWorkspaceSwitcherRow,
                           workspaceRestoreFailure: workspaceRestoreFailure,
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
                       : _BrowserDesktopPrimaryNavigationTabOrderBinder(
+                          enabled: !isDesktopWorkspaceSwitcherVisible,
                           orderedTargets: [
                             browser_workspace_switcher_focus_monitor
                                 .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
@@ -2057,6 +2102,8 @@ class _TrackerHome extends StatelessWidget {
                             onSelectWorkspace: onSelectWorkspace,
                             onDeleteWorkspace: onDeleteWorkspace,
                             onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                            onFocusActiveWorkspaceSwitcherRow:
+                                onFocusActiveWorkspaceSwitcherRow,
                             workspaceRestoreFailure: workspaceRestoreFailure,
                             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                             attachmentPicker: attachmentPicker,
@@ -3337,10 +3384,12 @@ class _SelectSectionIntent extends Intent {
 class _BrowserDesktopPrimaryNavigationTabOrderBinder extends StatefulWidget {
   const _BrowserDesktopPrimaryNavigationTabOrderBinder({
     required this.child,
+    required this.enabled,
     required this.orderedTargets,
   });
 
   final Widget child;
+  final bool enabled;
   final List<
     browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget
   >
@@ -3367,7 +3416,8 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
     covariant _BrowserDesktopPrimaryNavigationTabOrderBinder oldWidget,
   ) {
     super.didUpdateWidget(oldWidget);
-    if (listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
+    if (oldWidget.enabled == widget.enabled &&
+        listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
       return;
     }
     _restartSubscription();
@@ -3381,7 +3431,7 @@ class _BrowserDesktopPrimaryNavigationTabOrderBinderState
 
   void _restartSubscription() {
     _subscription?.cancel();
-    if (!kIsWeb) {
+    if (!kIsWeb || !widget.enabled) {
       _subscription = null;
       return;
     }
@@ -3420,6 +3470,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3449,6 +3500,7 @@ class _DesktopShell extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3494,6 +3546,8 @@ class _DesktopShell extends StatelessWidget {
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
             onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+            onFocusActiveWorkspaceSwitcherRow:
+                onFocusActiveWorkspaceSwitcherRow,
             workspaceRestoreFailure: workspaceRestoreFailure,
             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
@@ -3529,6 +3583,7 @@ class _MobileShell extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3558,6 +3613,7 @@ class _MobileShell extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3589,6 +3645,7 @@ class _MobileShell extends StatelessWidget {
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
       onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+      onFocusActiveWorkspaceSwitcherRow: onFocusActiveWorkspaceSwitcherRow,
       workspaceRestoreFailure: workspaceRestoreFailure,
       onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
@@ -3621,6 +3678,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3652,6 +3710,7 @@ class _TrackerMainPane extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3685,6 +3744,8 @@ class _TrackerMainPane extends StatelessWidget {
                 onOpenCreateIssue: onOpenCreateIssue,
                 onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
                 onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                onFocusActiveWorkspaceSwitcherRow:
+                    onFocusActiveWorkspaceSwitcherRow,
                 onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
                 canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
               ),
@@ -3917,6 +3978,7 @@ class _TopBar extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onMoveWorkspaceSelection,
+    required this.onFocusActiveWorkspaceSwitcherRow,
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     this.compact = false,
@@ -3934,6 +3996,7 @@ class _TopBar extends StatelessWidget {
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final bool compact;
@@ -3997,6 +4060,9 @@ class _TopBar extends StatelessWidget {
           if (isDesktopWorkspaceSwitcherVisible) {
             desktopWorkspaceSwitcherBindings
                 .addAll(<ShortcutActivator, VoidCallback>{
+                  if (kIsWeb)
+                    const SingleActivator(LogicalKeyboardKey.tab):
+                        onFocusActiveWorkspaceSwitcherRow,
                   const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
                       onMoveWorkspaceSelection(1),
                   const SingleActivator(LogicalKeyboardKey.arrowUp): () =>

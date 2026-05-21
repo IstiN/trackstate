@@ -15,7 +15,7 @@ void main() {
   });
 
   testWidgets(
-    'desktop web workspace switcher tabs from the open trigger to Search issues and dismisses',
+    'desktop web workspace switcher tabs into the open panel and Escape restores trigger focus',
     (tester) async {
       if (!kIsWeb) {
         return;
@@ -67,6 +67,9 @@ void main() {
           'Workspace switcher': find.byKey(
             const ValueKey('workspace-switcher-trigger'),
           ),
+          'Active workspace': find.byKey(
+            const ValueKey('workspace-hosted:alpha/repo@main'),
+          ),
           'Search issues': find.byType(TextField),
           'Repository': find.widgetWithText(TextFormField, 'Repository'),
         };
@@ -84,8 +87,20 @@ void main() {
         await tester.pump();
         await tester.pumpAndSettle();
 
-        expect(_focusedLabel(tester, desktopCandidates), 'Search issues');
+        expect(_focusedLabel(tester, desktopCandidates), 'Active workspace');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        await tester.pumpAndSettle();
+
         await _pumpUntilGone(tester, find.text('Saved workspaces'));
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await _pumpUntilVisible(
+          tester,
+          find.widgetWithText(TextFormField, 'Repository'),
+        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
