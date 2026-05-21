@@ -85,4 +85,42 @@ void main() {
       );
     },
   );
+
+  test(
+    'browser key filter treats ArrowDown inside the switcher as a prevent-default key',
+    () {
+      expect(
+        browserWorkspaceSwitcherShouldPreventDefaultKey(
+          key: 'ArrowDown',
+          ancestors: const [
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              textContent: 'Save and switch',
+            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              semanticsIdentifier: browserWorkspaceSwitcherSemanticsIdentifier,
+              textContent:
+                  'Workspace switcher alpha/repo Hosted Saved workspaces Repository Branch Save and switch',
+            ),
+          ],
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('browser key filter keeps ArrowDown outside the switcher untouched', () {
+    expect(
+      browserWorkspaceSwitcherShouldPreventDefaultKey(
+        key: 'ArrowDown',
+        ancestors: const [
+          BrowserWorkspaceSwitcherFocusAncestorSnapshot(textContent: 'Board'),
+          BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+            textContent:
+                'TrackState.AI Dashboard Board JQL Search Hierarchy Settings Saved workspaces Repository Branch Save and switch',
+          ),
+        ],
+      ),
+      isFalse,
+    );
+  });
 }

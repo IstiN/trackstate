@@ -63,6 +63,12 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 
 bool isBrowserFocusWithinWorkspaceSwitcher() => false;
 
+double captureBrowserViewportScrollY() => 0;
+
+void restoreBrowserViewportScrollY({required double scrollY}) {
+  _keep(scrollY);
+}
+
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
   required String semanticsIdentifier,
 }) => BrowserWorkspaceSwitcherFocusRequest();

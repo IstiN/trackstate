@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web/web.dart' as web;
@@ -90,25 +91,29 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 }) {
   final listener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
+    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
-      if (_moveBrowserWorkspaceSwitcherTabFocus(backwards: keyboardEvent.shiftKey)) {
+      if (_moveBrowserWorkspaceSwitcherTabFocus(
+        backwards: keyboardEvent.shiftKey,
+      )) {
         keyboardEvent.preventDefault();
       }
       onBrowserTab();
       return;
     }
 
-    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
-      return;
-    }
-
-    if (!browserFocusWithinWorkspaceSwitcherRow(
-      ancestors: _activeBrowserFocusAncestors(),
+    if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
+      key: keyboardEvent.key,
+      ancestors: ancestors,
     )) {
       return;
     }
 
     keyboardEvent.preventDefault();
+    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
+      return;
+    }
+
     onBrowserBoundaryKey(keyboardEvent.key);
   }).toJS;
 
@@ -122,6 +127,140 @@ bool isBrowserFocusWithinWorkspaceSwitcher() {
   return browserFocusWithinWorkspaceSwitcher(
     ancestors: _activeBrowserFocusAncestors(),
   );
+}
+
+double captureBrowserViewportScrollY() {
+  final target = _resolveBackgroundScrollTarget();
+  if (target.useWindow) {
+    return web.window.scrollY;
+  }
+  return target.element?.scrollTop.toDouble() ?? 0;
+}
+
+void restoreBrowserViewportScrollY({required double scrollY}) {
+  Timer? timer;
+  var attemptCount = 0;
+
+  void restore() {
+    attemptCount += 1;
+    final target = _resolveBackgroundScrollTarget();
+    if (target.useWindow) {
+      web.window.scrollTo(web.window.scrollX.toJS, scrollY);
+    } else {
+      target.element?.scrollTop = scrollY.toInt();
+    }
+    final restoredScrollY = captureBrowserViewportScrollY();
+    if ((restoredScrollY - scrollY).abs() <= 1 || attemptCount >= 12) {
+      timer?.cancel();
+      timer = null;
+    }
+  }
+
+  timer = Timer.periodic(const Duration(milliseconds: 16), (_) => restore());
+  Timer.run(restore);
+}
+
+class _BrowserBackgroundScrollTarget {
+  const _BrowserBackgroundScrollTarget({required this.useWindow, this.element});
+
+  final bool useWindow;
+  final web.Element? element;
+}
+
+class _BrowserBackgroundScrollCandidate {
+  const _BrowserBackgroundScrollCandidate({
+    required this.element,
+    required this.scrollHeight,
+    required this.clientHeight,
+    required this.overflowY,
+    required this.width,
+    required this.height,
+    required this.text,
+  });
+
+  final web.Element element;
+  final double scrollHeight;
+  final double clientHeight;
+  final String overflowY;
+  final double width;
+  final double height;
+  final String text;
+}
+
+_BrowserBackgroundScrollTarget _resolveBackgroundScrollTarget() {
+  final scrollingElement =
+      web.document.scrollingElement ??
+      web.document.documentElement ??
+      web.document.body;
+  final windowScrollHeight = math.max(
+    math.max(
+      scrollingElement?.scrollHeight.toDouble() ?? 0,
+      web.document.documentElement?.scrollHeight.toDouble() ?? 0,
+    ),
+    web.document.body?.scrollHeight.toDouble() ?? 0,
+  );
+  final windowViewportHeight = web.window.innerHeight.toDouble();
+  final windowMaxScrollY = math.max(
+    0,
+    windowScrollHeight - windowViewportHeight,
+  );
+  final candidates = <_BrowserBackgroundScrollCandidate>[];
+  final nodes = web.document.querySelectorAll('*');
+  for (var index = 0; index < nodes.length; index += 1) {
+    final node = nodes.item(index);
+    if (node == null) {
+      continue;
+    }
+    final element = node as web.Element;
+    if (!_isVisible(element)) {
+      continue;
+    }
+    final rect = element.getBoundingClientRect();
+    final style = web.window.getComputedStyle(element);
+    final htmlElement = element as web.HTMLElement;
+    final candidate = _BrowserBackgroundScrollCandidate(
+      element: element,
+      scrollHeight: element.scrollHeight.toDouble(),
+      clientHeight: element.clientHeight.toDouble(),
+      overflowY: style.overflowY,
+      width: rect.width,
+      height: rect.height,
+      text: _normalizeText(htmlElement.innerText),
+    );
+    if (candidate.scrollHeight - candidate.clientHeight <= 40 ||
+        candidate.width < math.min(web.window.innerWidth * 0.35, 280) ||
+        candidate.height < math.min(web.window.innerHeight * 0.35, 200) ||
+        candidate.text.startsWith('Workspace switcher')) {
+      continue;
+    }
+    candidates.add(candidate);
+  }
+  candidates.sort(
+    (left, right) => _candidateScore(right).compareTo(_candidateScore(left)),
+  );
+  final bestCandidate = candidates.isEmpty ? null : candidates.first;
+  final useWindow =
+      windowMaxScrollY > 0 ||
+      bestCandidate == null ||
+      windowMaxScrollY >=
+          math.max(80, bestCandidate.scrollHeight - bestCandidate.clientHeight);
+  return _BrowserBackgroundScrollTarget(
+    useWindow: useWindow,
+    element: bestCandidate?.element,
+  );
+}
+
+double _candidateScore(_BrowserBackgroundScrollCandidate candidate) {
+  final area = candidate.width * candidate.height;
+  final overflowBonus =
+      candidate.overflowY == 'scroll' || candidate.overflowY == 'auto'
+      ? 1000000
+      : 0;
+  return overflowBonus + area + candidate.scrollHeight;
+}
+
+String _normalizeText(String? value) {
+  return (value ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
 bool _moveBrowserWorkspaceSwitcherTabFocus({required bool backwards}) {
@@ -247,7 +386,7 @@ bool _focusSemanticsElement(String semanticsIdentifier) {
       continue;
     }
     if (candidate case final web.HTMLElement htmlElement) {
-      htmlElement.focus();
+      htmlElement.focus(web.FocusOptions(preventScroll: true));
     }
     final activeElement = web.document.activeElement;
     if (activeElement == candidate || candidate.contains(activeElement)) {
@@ -410,7 +549,7 @@ int? _activeDesktopPrimaryNavigationTargetIndex({
 
 bool _focusElement(web.Element element) {
   final htmlElement = element as web.HTMLElement;
-  htmlElement.focus();
+  htmlElement.focus(web.FocusOptions(preventScroll: true));
   final activeElement = web.document.activeElement;
   return activeElement == htmlElement || htmlElement.contains(activeElement);
 }
