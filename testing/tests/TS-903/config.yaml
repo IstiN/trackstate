@@ -1,0 +1,16 @@
+test_id: TS-903
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Uses a mutable hosted provider-backed repository so the production JQL Search, issue-detail, and workspace-sync refresh flows run unchanged.
+  - Updates the currently selected issue in .trackstate/index/issues.json and its main.md during a background sync instead of removing it.
+  - Verifies the visible selection styling remains on the same issue, the detail view refreshes with new content, and no unavailable message is shown.
+runtime_inputs:
+  issue_key: TRACK-12
+  initial_issue_summary: Implement Git sync service
+  updated_issue_summary: Implement Git sync service with conflict recovery
+  expected_missing_notice_absent: no longer available
+  run_command: flutter test testing/tests/TS-903/test_ts_903.dart --reporter expanded
