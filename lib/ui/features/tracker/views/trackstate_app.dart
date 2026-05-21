@@ -1323,7 +1323,8 @@ class _TrackStateAppState extends State<TrackStateApp>
       final browserFocusWithinSwitcher =
           browser_workspace_switcher_focus_monitor
               .isBrowserFocusWithinWorkspaceSwitcher();
-      if (!browserFocusWithinSwitcher || !_isDesktopWorkspaceSwitcherFocused()) {
+      if (!browserFocusWithinSwitcher ||
+          !_isDesktopWorkspaceSwitcherFocused()) {
         _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
         _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
         return;
@@ -3876,6 +3877,7 @@ class _Sidebar extends StatelessWidget {
               children: [
                 _SyncPill(
                   label: _workspaceSyncLabel(l10n, viewModel),
+                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                   tone: _workspaceSyncTone(viewModel),
                   onPressed: () =>
                       viewModel.selectSection(TrackerSection.settings),
@@ -4257,6 +4259,7 @@ class _TopBar extends StatelessWidget {
                 syncPillOrder ?? searchOrder + 1,
                 _SyncPill(
                   label: _workspaceSyncLabel(l10n, viewModel),
+                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                   tone: _workspaceSyncTone(viewModel),
                   height: _desktopTopBarControlHeight,
                   onPressed: () =>
@@ -4734,6 +4737,19 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
     WorkspaceSyncHealth.attentionNeeded => l10n.workspaceSyncAttentionNeeded,
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
+}
+
+String _workspaceSyncSemanticLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  final label = _workspaceSyncLabel(l10n, viewModel);
+  final status = viewModel.workspaceSyncStatus;
+  if (status.health == WorkspaceSyncHealth.attentionNeeded &&
+      !status.hasPendingRefresh) {
+    return l10n.workspaceSyncAttentionNeededSemanticLabel;
+  }
+  return '${l10n.workspaceSyncSettings}, $label';
 }
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
@@ -6240,6 +6256,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
               const SizedBox(width: 12),
               _SyncPill(
                 label: _workspaceSyncLabel(l10n, viewModel),
+                semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
                 tone: _workspaceSyncTone(viewModel),
               ),
             ],
@@ -6272,6 +6289,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
             _IssueDetailActionButton(
               label: actionLabel,
               onPressed: _workspaceSyncPrimaryAction(viewModel),
+              sortOrder: 10,
             ),
           ],
         ],
@@ -9975,11 +9993,13 @@ class _IssueDetailActionButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.emphasized = false,
+    this.sortOrder,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool emphasized;
+  final double? sortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10010,7 +10030,19 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    return Semantics(button: true, label: label, child: button);
+    final semanticButton = Semantics(
+      button: true,
+      label: label,
+      sortKey: _semanticsSortKey(sortOrder),
+      child: button,
+    );
+    if (sortOrder == null) {
+      return semanticButton;
+    }
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(sortOrder!),
+      child: semanticButton,
+    );
   }
 }
 
@@ -13171,6 +13203,7 @@ class _SyncPill extends StatelessWidget {
     required this.tone,
     this.height,
     this.onPressed,
+    this.semanticLabel,
     this.semanticsSortOrder,
   });
 
@@ -13178,27 +13211,40 @@ class _SyncPill extends StatelessWidget {
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
+  final String? semanticLabel;
   final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final theme = Theme.of(context);
+    final isLightTheme = theme.brightness == Brightness.light;
+    final attentionBackgroundColor = isLightTheme
+        ? Color.lerp(colors.error, colors.primary, 0.4)!
+        : colors.error;
+    final attentionForegroundColor = isLightTheme
+        ? theme.colorScheme.onError
+        : colors.page;
     final backgroundColor = switch (tone) {
       _SyncPillTone.healthy => colors.secondarySoft,
       _SyncPillTone.checking => colors.accentSoft,
-      _SyncPillTone.attention => colors.error.withValues(alpha: 0.14),
+      _SyncPillTone.attention => attentionBackgroundColor,
       _SyncPillTone.unavailable => colors.surfaceAlt,
     };
     final iconColor = switch (tone) {
       _SyncPillTone.healthy => colors.secondary,
       _SyncPillTone.checking => colors.accent,
-      _SyncPillTone.attention => colors.error,
+      _SyncPillTone.attention => attentionForegroundColor,
       _SyncPillTone.unavailable => colors.muted,
+    };
+    final textColor = switch (tone) {
+      _SyncPillTone.attention => attentionForegroundColor,
+      _ => colors.text,
     };
     return Semantics(
       button: onPressed != null,
       container: true,
-      label: label,
+      label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
@@ -13232,7 +13278,7 @@ class _SyncPill extends StatelessWidget {
                       label,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: colors.text,
+                        color: textColor,
                         fontWeight: FontWeight.w600,
                         height: 1,
                       ),
