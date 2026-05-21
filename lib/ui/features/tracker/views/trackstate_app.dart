@@ -152,12 +152,19 @@ class _TrackStateAppState extends State<TrackStateApp>
   _desktopWorkspaceSwitcherBrowserFocusMonitor;
   browser_workspace_switcher_focus_monitor.BrowserWorkspaceSwitcherFocusRequest?
   _desktopWorkspaceSwitcherBrowserFocusRequest;
+  Timer? _desktopWorkspaceSwitcherBrowserBlurCheckTimer;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _workspaceSwitcherTriggerFocusNode.addListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
+    _desktopWorkspaceSwitcherFocusScopeNode.addListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
     viewModel = _createViewModel(autoLoad: false);
     unawaited(_initializeWorkspaceProfiles());
   }
@@ -190,6 +197,13 @@ class _TrackStateAppState extends State<TrackStateApp>
     WidgetsBinding.instance.removeObserver(this);
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+    _workspaceSwitcherTriggerFocusNode.removeListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
+    _desktopWorkspaceSwitcherFocusScopeNode.removeListener(
+      _handleDesktopWorkspaceSwitcherFocusChange,
+    );
     _workspaceSwitcherTriggerFocusNode.dispose();
     _desktopSearchFocusNode.dispose();
     _desktopSettingsFocusNode.dispose();
@@ -1264,16 +1278,13 @@ class _TrackStateAppState extends State<TrackStateApp>
         browser_workspace_switcher_focus_monitor
             .createBrowserWorkspaceSwitcherFocusMonitorSubscription(
               onBrowserTab: () {
-                Timer.run(() {
-                  if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
-                    return;
-                  }
-                  if (browser_workspace_switcher_focus_monitor
-                      .isBrowserFocusWithinWorkspaceSwitcher()) {
-                    return;
-                  }
-                  _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
-                });
+                _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck();
+              },
+              onBrowserFocusOutside: () {
+                if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
               },
               onBrowserBoundaryKey: (key) {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1292,6 +1303,61 @@ class _TrackStateAppState extends State<TrackStateApp>
   void _stopDesktopWorkspaceSwitcherBrowserFocusMonitor() {
     _desktopWorkspaceSwitcherBrowserFocusMonitor?.cancel();
     _desktopWorkspaceSwitcherBrowserFocusMonitor = null;
+  }
+
+  void _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck() {
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+    var attemptsRemaining = 6;
+
+    void verifyFocus() {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+        return;
+      }
+      final browserFocusWithinSwitcher =
+          browser_workspace_switcher_focus_monitor
+              .isBrowserFocusWithinWorkspaceSwitcher();
+      if (!browserFocusWithinSwitcher || !_isDesktopWorkspaceSwitcherFocused()) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+        _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+        return;
+      }
+      attemptsRemaining -= 1;
+      if (attemptsRemaining <= 0) {
+        _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
+      }
+    }
+
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer = Timer.periodic(
+      const Duration(milliseconds: 16),
+      (_) => verifyFocus(),
+    );
+    Timer.run(verifyFocus);
+  }
+
+  void _cancelDesktopWorkspaceSwitcherBrowserBlurCheck() {
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer?.cancel();
+    _desktopWorkspaceSwitcherBrowserBlurCheckTimer = null;
+  }
+
+  bool _isDesktopWorkspaceSwitcherFocused() {
+    return _workspaceSwitcherTriggerFocusNode.hasFocus ||
+        _desktopWorkspaceSwitcherFocusScopeNode.hasFocus;
+  }
+
+  void _handleDesktopWorkspaceSwitcherFocusChange() {
+    if (!kIsWeb || !_isDesktopWorkspaceSwitcherVisible) {
+      return;
+    }
+    Timer.run(() {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        return;
+      }
+      if (_isDesktopWorkspaceSwitcherFocused()) {
+        return;
+      }
+      _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+    });
   }
 
   void _requestDesktopWorkspaceSwitcherBrowserFocus(
@@ -1316,6 +1382,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
+    _cancelDesktopWorkspaceSwitcherBrowserBlurCheck();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
       _desktopWorkspaceSwitcherProfileOrder = null;

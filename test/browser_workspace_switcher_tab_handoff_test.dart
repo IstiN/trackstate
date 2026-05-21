@@ -8,33 +8,45 @@ void main() {
         focusStops: const [
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: false,
+            isWithinWorkspaceSwitcher: false,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
         ],
         currentIndex: 2,
@@ -50,23 +62,31 @@ void main() {
         focusStops: const [
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
         ],
         currentIndex: 3,
@@ -82,29 +102,117 @@ void main() {
         focusStops: const [
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
             isWithinWorkspaceRow: true,
             isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
           BrowserWorkspaceSwitcherTabStopSnapshot(
             isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
             isWithinWorkspaceRow: false,
             isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
           ),
         ],
         currentIndex: 3,
         backwards: false,
       ),
       isNull,
+    );
+  });
+
+  test('Tab from the open trigger hands focus to the first control outside the switcher', () {
+    expect(
+      browserWorkspaceSwitcherTabHandoffIndex(
+        focusStops: const [
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: true,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: true,
+            isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+        ],
+        currentIndex: 0,
+        backwards: false,
+      ),
+      3,
+    );
+  });
+
+  test('Shift+Tab from the first external control returns to the open trigger', () {
+    expect(
+      browserWorkspaceSwitcherTabHandoffIndex(
+        focusStops: const [
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: true,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: true,
+            isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+        ],
+        currentIndex: 3,
+        backwards: true,
+      ),
+      0,
     );
   });
 }
