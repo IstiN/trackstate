@@ -9,6 +9,7 @@ import '../../core/utils/local_trackstate_fixture.dart';
 import '../../fixtures/issue_edit_accessibility_screen_fixture.dart';
 
 const _approvedDesktopGoldenPath = '../../../test/goldens/edit_issue_desktop.png';
+const _requiredDesktopViewport = Size(1440, 900);
 
 void main() {
   testWidgets(
@@ -20,6 +21,7 @@ void main() {
 
       try {
         screen = await launchIssueEditAccessibilityFixture(tester);
+        await _resizeViewport(tester, _requiredDesktopViewport);
 
         for (final text in const [
           'Edit issue',
@@ -64,11 +66,11 @@ void main() {
 
         final layout = _observeLayout(tester, robot);
         expect(
-          layout.viewportWidth,
-          1440,
+          layout.viewportSize,
+          _requiredDesktopViewport,
           reason:
               'Step 3 failed: the Edit issue desktop flow did not render at the '
-              'approved 1440px-wide viewport. Observed ${layout.describe()}.',
+              'approved 1440x900 viewport. Observed ${layout.describe()}.',
         );
         expect(
           layout.rightInset,
@@ -104,6 +106,8 @@ void main() {
         );
       } finally {
         await screen?.dispose();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
         semantics.dispose();
       }
     },
@@ -136,7 +140,6 @@ class _EditIssueLayoutObservation {
   final Size viewportSize;
   final Rect surfaceRect;
 
-  double get viewportWidth => viewportSize.width;
   double get leftInset => surfaceRect.left;
   double get rightInset => viewportSize.width - surfaceRect.right;
   double get widthFraction => surfaceRect.width / viewportSize.width;
@@ -152,6 +155,13 @@ class _EditIssueLayoutObservation {
         'right ${rightInset.toStringAsFixed(1)}, '
         'width=${(widthFraction * 100).toStringAsFixed(1)}%';
   }
+}
+
+Future<void> _resizeViewport(WidgetTester tester, Size size) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
