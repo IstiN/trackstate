@@ -59,15 +59,31 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
                 "StoredWorkspaceProfilesRuntime expected a browser context.",
             )
         serialized_state = json.dumps(self._workspace_state)
+        workspace_ids = [
+            str(profile["id"])
+            for profile in self._workspace_state.get("profiles", [])
+            if isinstance(profile, dict) and isinstance(profile.get("id"), str)
+        ]
         self._context.add_init_script(
             script=(
                 "(() => {"
                 f"const state = {json.dumps(serialized_state)};"
+                f"const token = {json.dumps(self._token)};"
+                f"const workspaceIds = {json.dumps(workspace_ids)};"
                 "for (const key of ["
                 "  'trackstate.workspaceProfiles.state',"
                 "  'flutter.trackstate.workspaceProfiles.state',"
                 "]) {"
                 "  window.localStorage.setItem(key, state);"
+                "}"
+                "for (const workspaceId of workspaceIds) {"
+                "  const encodedWorkspaceId = encodeURIComponent(workspaceId);"
+                "  for (const key of ["
+                "    `trackstate.githubToken.workspace.${encodedWorkspaceId}`,"
+                "    `flutter.trackstate.githubToken.workspace.${encodedWorkspaceId}`,"
+                "  ]) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
                 "}"
                 "})();"
             ),

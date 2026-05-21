@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 import platform
+import re
 import subprocess
 import sys
 import traceback
@@ -40,6 +41,15 @@ LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
+ROW_STATE_LABELS = (
+    "Attachments limited",
+    "Saved hosted workspace",
+    "Needs sign-in",
+    "Read-only",
+    "Connected",
+    "Unavailable",
+    "Local Git",
+)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -448,13 +458,23 @@ def _find_named_local_row(
             and LOCAL_TARGET in row.detail_text
         ):
             return row
-    return _fallback_local_row_from_switcher_text(switcher.switcher_text)
+    for row in _fallback_rows_from_switcher_text(switcher.switcher_text):
+        if (
+            row.display_name == LOCAL_DISPLAY_NAME
+            and row.target_type_label == "Local"
+            and LOCAL_TARGET in row.detail_text
+        ):
+            return row
+    return None
 
 
 def _find_selected_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
     for row in switcher.rows:
+        if row.selected:
+            return row
+    for row in _fallback_rows_from_switcher_text(switcher.switcher_text):
         if row.selected:
             return row
     return None
@@ -477,43 +497,98 @@ def _selected_row_from_trigger(
     )
 
 
-def _fallback_local_row_from_switcher_text(
+def _fallback_rows_from_switcher_text(
     switcher_text: str,
-) -> WorkspaceSwitcherRowObservation | None:
+) -> tuple[WorkspaceSwitcherRowObservation, ...]:
     normalized = " ".join(switcher_text.split())
-    detail_text = f"{LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}"
-    anchor = f"{LOCAL_DISPLAY_NAME} {detail_text} Local "
-    if anchor not in normalized:
-        return None
-
-    tail = normalized.split(anchor, 1)[1]
-    state_label = None
-    for candidate in (
-        "Local Git",
-        "Unavailable",
-        "Needs sign-in",
-        "Connected",
-        "Read-only",
-        "Attachments limited",
-    ):
-        if tail.startswith(candidate):
-            state_label = candidate
-            tail = tail[len(candidate) :].strip()
+    if not normalized:
+        return ()
+    normalized = normalized.replace("Workspace switcher Workspace switcher ", "", 1)
+    for trailer in (" Hosted Local Save and switch", " Save and switch"):
+        if trailer in normalized:
+            normalized = normalized.split(trailer, 1)[0].strip()
             break
-    if state_label is None:
+
+    row_starts = [
+        (start, display_name)
+        for display_name in (HOSTED_DISPLAY_NAME, LOCAL_DISPLAY_NAME)
+        for start in [normalized.find(display_name)]
+        if start >= 0
+    ]
+    if not row_starts:
+        return ()
+    row_starts.sort()
+
+    rows: list[WorkspaceSwitcherRowObservation] = []
+    for index, (start, display_name) in enumerate(row_starts):
+        end = row_starts[index + 1][0] if index + 1 < len(row_starts) else len(normalized)
+        segment = normalized[start:end].strip()
+        row = _parse_switcher_row_segment(
+            display_name=display_name,
+            segment=segment,
+        )
+        if row is not None:
+            rows.append(row)
+    return tuple(rows)
+
+
+def _parse_switcher_row_segment(
+    *,
+    display_name: str,
+    segment: str,
+) -> WorkspaceSwitcherRowObservation | None:
+    detail_match = re.search(
+        r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)",
+        segment,
+    )
+    if detail_match is None:
         return None
 
-    action = "Active" if tail.startswith("Active") else "Open" if tail.startswith("Open") else None
-    if action is None:
+    detail_text = detail_match.group("detail").strip()
+    metadata = segment[: detail_match.start()].strip(" ,")
+    if metadata.startswith(display_name):
+        metadata = metadata[len(display_name) :].strip(" ,")
+    metadata_parts = [part.strip() for part in metadata.split(",") if part.strip()]
+
+    target_type = next(
+        (part for part in metadata_parts if part in ("Hosted", "Local")),
+        None,
+    )
+    state_label = next(
+        (part for part in metadata_parts if part in ROW_STATE_LABELS),
+        None,
+    )
+
+    if target_type is None or state_label is None:
+        metadata = metadata.replace(",", " ")
+        for candidate_state in ROW_STATE_LABELS:
+            for candidate_type in ("Hosted", "Local"):
+                candidate_suffix = f"{candidate_type} {candidate_state}"
+                if metadata.endswith(candidate_suffix):
+                    target_type = candidate_type
+                    state_label = candidate_state
+                    break
+            if target_type is not None and state_label is not None:
+                break
+    if target_type is None or state_label is None:
         return None
 
-    visible_text = f"{LOCAL_DISPLAY_NAME} {detail_text} Local {state_label} {tail}".strip()
+    tail = segment[detail_match.end() :].strip()
+    if tail.startswith("Active"):
+        action = "Active"
+    elif tail.startswith("Open workspace") or tail.startswith("Open workspace:"):
+        action = "Open workspace"
+    elif tail.startswith("Open") or tail.startswith("Open:"):
+        action = "Open"
+    else:
+        return None
+
     return WorkspaceSwitcherRowObservation(
-        display_name=LOCAL_DISPLAY_NAME,
-        target_type_label="Local",
+        display_name=display_name,
+        target_type_label=target_type,
         state_label=state_label,
         detail_text=detail_text,
-        visible_text=visible_text,
+        visible_text=segment,
         selected=action == "Active",
         semantics_label=None,
         icon_accessibility_label=None,
