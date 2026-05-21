@@ -106,16 +106,22 @@ class BrowserDesktopPrimaryNavigationTabOrderTarget {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
+  required VoidCallback onBrowserFocusOutside,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
-  final listener = ((web.Event event) {
+  final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
     final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
-      if (_moveBrowserWorkspaceSwitcherTabFocus(
+      final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
-      )) {
+      );
+      if (tabMoveResult != _BrowserWorkspaceSwitcherTabMoveResult.none) {
         keyboardEvent.preventDefault();
+      }
+      if (tabMoveResult ==
+          _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
+        onBrowserFocusOutside();
       }
       onBrowserTab();
       return;
@@ -135,10 +141,20 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 
     onBrowserBoundaryKey(keyboardEvent.key);
   }).toJS;
+  final focusinListener = ((web.Event _) {
+    if (isBrowserFocusWithinWorkspaceSwitcher()) {
+      return;
+    }
+    onBrowserFocusOutside();
+  }).toJS;
 
-  web.window.addEventListener('keydown', listener, true.toJS);
+  web.window.addEventListener('keydown', keydownListener, true.toJS);
+  web.window.addEventListener('focusin', focusinListener, true.toJS);
   return BrowserWorkspaceSwitcherFocusMonitorSubscription(
-    () => web.window.removeEventListener('keydown', listener, true.toJS),
+    () {
+      web.window.removeEventListener('keydown', keydownListener, true.toJS);
+      web.window.removeEventListener('focusin', focusinListener, true.toJS);
+    },
   );
 }
 
@@ -354,10 +370,12 @@ String _normalizeText(String? value) {
   return (value ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
-bool _moveBrowserWorkspaceSwitcherTabFocus({required bool backwards}) {
+_BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
+  required bool backwards,
+}) {
   final activeElement = web.document.activeElement;
   if (activeElement is! web.Element) {
-    return false;
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
   final focusTargets = _visibleDocumentFocusTargets();
@@ -366,7 +384,7 @@ bool _moveBrowserWorkspaceSwitcherTabFocus({required bool backwards}) {
     activeElement: activeElement,
   );
   if (currentIndex == null) {
-    return false;
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
   final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
@@ -374,18 +392,25 @@ bool _moveBrowserWorkspaceSwitcherTabFocus({required bool backwards}) {
       for (final target in focusTargets)
         BrowserWorkspaceSwitcherTabStopSnapshot(
           isFocusable: true,
+          isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
           isWithinWorkspaceRow: target.isWithinWorkspaceRow,
           isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+          isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
         ),
     ],
     currentIndex: currentIndex,
     backwards: backwards,
   );
   if (targetIndex == null) {
-    return false;
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
-  return _focusElement(focusTargets[targetIndex].element);
+  if (!_focusElement(focusTargets[targetIndex].element)) {
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  }
+  return focusTargets[targetIndex].isWithinWorkspaceSwitcher
+      ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
+      : _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher;
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
@@ -531,13 +556,23 @@ void syncBrowserWorkspaceSwitcherRowTabIndices({
 class _WorkspaceSwitcherFocusTarget {
   const _WorkspaceSwitcherFocusTarget({
     required this.element,
+    required this.isWithinWorkspaceSwitcher,
     required this.isWithinWorkspaceRow,
     required this.isSelectedWorkspaceRow,
+    required this.isWorkspaceSwitcherTrigger,
   });
 
   final web.Element element;
+  final bool isWithinWorkspaceSwitcher;
   final bool isWithinWorkspaceRow;
   final bool isSelectedWorkspaceRow;
+  final bool isWorkspaceSwitcherTrigger;
+}
+
+enum _BrowserWorkspaceSwitcherTabMoveResult {
+  none,
+  withinWorkspaceSwitcher,
+  outsideWorkspaceSwitcher,
 }
 
 List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
@@ -570,8 +605,13 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     targets.add(
       _WorkspaceSwitcherFocusTarget(
         element: element,
+        isWithinWorkspaceSwitcher:
+            _workspaceSwitcherElementFor(element) != null ||
+            _workspaceSwitcherTriggerElementFor(element) != null,
         isWithinWorkspaceRow: _workspaceRowElementFor(element) != null,
         isSelectedWorkspaceRow: _isSelectedWorkspaceRowElement(element),
+        isWorkspaceSwitcherTrigger:
+            _workspaceSwitcherTriggerElementFor(element) != null,
       ),
     );
   }
@@ -660,15 +700,39 @@ bool _isFocusable(web.Element element) {
 }
 
 web.Element? _workspaceRowElementFor(web.Element element) {
+  return _ancestorWithSemanticsIdentifier(
+    element,
+    (identifier) => identifier.startsWith(
+      browserWorkspaceSwitcherRowSemanticsIdentifierPrefix,
+    ),
+  );
+}
+
+web.Element? _workspaceSwitcherElementFor(web.Element element) {
+  return _ancestorWithSemanticsIdentifier(
+    element,
+    (identifier) => identifier == browserWorkspaceSwitcherSemanticsIdentifier,
+  );
+}
+
+web.Element? _workspaceSwitcherTriggerElementFor(web.Element element) {
+  return _ancestorWithSemanticsIdentifier(
+    element,
+    (identifier) =>
+        identifier == browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+  );
+}
+
+web.Element? _ancestorWithSemanticsIdentifier(
+  web.Element element,
+  bool Function(String identifier) matches,
+) {
   web.Element? current = element;
   while (current != null) {
     final semanticsIdentifier = current.getAttribute(
       'flt-semantics-identifier',
     );
-    if (semanticsIdentifier?.startsWith(
-          browserWorkspaceSwitcherRowSemanticsIdentifierPrefix,
-        ) ==
-        true) {
+    if (semanticsIdentifier case final value? when matches(value)) {
       return current;
     }
     current = current.parentElement;
