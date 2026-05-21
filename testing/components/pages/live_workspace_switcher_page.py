@@ -522,6 +522,9 @@ class LiveWorkspaceSwitcherPage:
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
 
+    def dismiss_project_settings_surface(self, *, timeout_ms: int = 30_000) -> None:
+        self._project_settings_page.dismiss_if_open(timeout_ms=timeout_ms)
+
     def set_viewport(self, *, width: int, height: int, timeout_ms: int = 15_000) -> None:
         self._session.set_viewport_size(width=width, height=height)
         try:
@@ -840,20 +843,6 @@ class LiveWorkspaceSwitcherPage:
                 f'The hosted tracker did not expose a visible "{label}" navigation entry.\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        active = self._session.evaluate(
-            """
-            (label) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                .some((element) =>
-                  normalize(element.innerText) === label
-                  && element.getAttribute('aria-current') === 'true');
-            }
-            """,
-            arg=label,
-        )
-        if active is True:
-            return
         try:
             self._session.click(
                 self._button_selector,

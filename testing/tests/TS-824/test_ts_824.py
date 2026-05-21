@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherEscapeDismissObservation,
+    WorkspaceSwitcherFocusOwnershipObservation,
     WorkspaceSwitcherInternalFocusObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
@@ -41,6 +42,7 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-824/tes
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TAB_FOCUS_TIMEOUT_MS = 4_000
 ESCAPE_DISMISS_TIMEOUT_MS = 4_000
+PRE_TAB_TRIGGER_SHIFT_TAB_LIMIT = 3
 
 REQUEST_STEPS = [
     "Launch the application on a desktop browser.",
@@ -113,7 +115,7 @@ def main() -> None:
                             f"Observed runtime state: {runtime.kind}\n"
                             f"Observed body text:\n{runtime.body_text}",
                         )
-
+                    page.dismiss_connection_banner()
                     page.dismiss_connection_banner()
                     page.navigate_to_section("Dashboard")
                     page.set_viewport(**DESKTOP_VIEWPORT)
@@ -176,7 +178,7 @@ def main() -> None:
                         focused=focused_trigger,
                         focus_steps=trigger_focus_steps,
                     )
-                    page.press_enter_on_active_element_and_wait_for_surface(
+                    page.open_switcher(
                         timeout_ms=TAB_FOCUS_TIMEOUT_MS,
                     )
                     switcher = page.observe_open_switcher(
@@ -199,6 +201,22 @@ def main() -> None:
                     )
                     result["open_switcher_observation"] = _switcher_payload(switcher)
                     result["open_panel_observation"] = asdict(panel)
+                    (
+                        pre_tab_focus,
+                        pre_tab_restore_attempts,
+                    ) = _ensure_trigger_focus_before_internal_tab(
+                        page=page,
+                        panel=panel,
+                        timeout_ms=TAB_FOCUS_TIMEOUT_MS,
+                    )
+                    result["pre_tab_focus_observation"] = _focus_ownership_payload(
+                        pre_tab_focus,
+                    )
+                    result["pre_tab_trigger_restore_attempts"] = pre_tab_restore_attempts
+                    _assert_trigger_focus_restored_before_internal_tab(
+                        observation=pre_tab_focus,
+                        attempts=pre_tab_restore_attempts,
+                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -218,6 +236,8 @@ def main() -> None:
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         f"container_kind={panel.container_kind}; "
                         f"anchored_to_trigger={panel.anchored_to_trigger}; "
+                        f"pre_tab_focus_on_trigger={pre_tab_focus.active_on_trigger}; "
+                        f"pre_tab_restore_attempts={max(0, len(pre_tab_restore_attempts) - 1)}; "
                         f"row_count={switcher.row_count}; "
                         f"title_visible={'Workspace switcher' in switcher.switcher_text}"
                     ),
@@ -234,6 +254,9 @@ def main() -> None:
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         "title='Workspace switcher'; "
+                        f"pre_tab_focus={pre_tab_focus.active_label!r}; "
+                        f"pre_tab_on_trigger={pre_tab_focus.active_on_trigger}; "
+                        f"pre_tab_restore_attempts={len(pre_tab_restore_attempts)}; "
                         f"row_count={switcher.row_count}; "
                         f"text_excerpt={switcher.switcher_text!r}"
                     ),
@@ -487,6 +510,81 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
         )
 
 
+def _ensure_trigger_focus_before_internal_tab(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
+    timeout_ms: int,
+    max_shift_tabs: int = PRE_TAB_TRIGGER_SHIFT_TAB_LIMIT,
+) -> tuple[WorkspaceSwitcherFocusOwnershipObservation, list[dict[str, object]]]:
+    attempts: list[dict[str, object]] = []
+    observation = page.observe_focus_ownership(panel=panel)
+    attempts.append(
+        {
+            "attempt": 0,
+            "action": "after-open",
+            **_focus_ownership_payload(observation),
+        },
+    )
+    if observation.active_on_trigger:
+        return observation, attempts
+
+    page.focus_workspace_trigger(timeout_ms=timeout_ms)
+    observation = page.observe_focus_ownership(panel=panel)
+    attempts.append(
+        {
+            "attempt": 1,
+            "action": "focus_workspace_trigger",
+            **_focus_ownership_payload(observation),
+        },
+    )
+    if observation.active_on_trigger:
+        return observation, attempts
+
+    for attempt_index in range(1, max_shift_tabs + 1):
+        page.press_key("Shift+Tab", timeout_ms=timeout_ms)
+        observation = page.observe_focus_ownership(panel=panel)
+        attempts.append(
+            {
+                "attempt": attempt_index + 1,
+                "action": "Shift+Tab",
+                **_focus_ownership_payload(observation),
+            },
+        )
+        if observation.active_on_trigger:
+            return observation, attempts
+
+    return observation, attempts
+
+
+def _assert_trigger_focus_restored_before_internal_tab(
+    *,
+    observation: WorkspaceSwitcherFocusOwnershipObservation,
+    attempts: list[dict[str, object]],
+) -> None:
+    if observation.active_on_trigger:
+        return
+    raise AssertionError(
+        "Step 2 failed: after opening the workspace switcher, keyboard focus could not be "
+        "restored to the workspace switcher trigger before the Step 3 Tab observation.\n"
+        "Observed focus restoration attempts: "
+        + " | ".join(_focus_attempt_summary(attempt) for attempt in attempts)
+    )
+
+
+def _focus_attempt_summary(attempt: dict[str, object]) -> str:
+    return (
+        f"attempt={attempt.get('attempt')}, "
+        f"action={attempt.get('action')!r}, "
+        f"label={attempt.get('active_label')!r}, "
+        f"role={attempt.get('active_role')!r}, "
+        f"tag={attempt.get('active_tag_name')!r}, "
+        f"within_switcher={attempt.get('active_within_switcher')}, "
+        f"on_trigger={attempt.get('active_on_trigger')}, "
+        f"owned_by_switcher={attempt.get('focus_owned_by_switcher')}"
+    )
+
+
 def _assert_workspace_trigger_focused(
     *,
     focused: FocusedElementObservation,
@@ -723,8 +821,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Rework summary",
-        "- Restored the Step 3 boundary so the test only passes when `Tab` moves focus from the workspace-switcher trigger into the open panel.",
-        "- Restored the Step 4 dismissal check so Escape only passes when the transition monitor sees the visible switcher surface disappear.",
+        "- Added a deterministic trigger-focus restore after opening the panel so Step 3 always measures the required trigger-owned `Tab` transition into the switcher.",
+        "- Restored the resolved-thread filter so `review_replies.json` only targets unresolved PR review threads.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -774,8 +872,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Restored the Step 3 trigger-owned pre-`Tab` assertion for the keyboard path into the switcher panel.",
-        "- Restored the Step 4 real-surface dismissal assertion so Escape must close the visible switcher surface, not just empty its contents.",
+        "- Added a deterministic pre-Step-3 trigger-focus restore so the test measures the required trigger -> panel `Tab` transition even when opening the panel moves focus internally.",
+        "- Restored unresolved-thread filtering so per-thread review replies are only generated for still-open PR discussions.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -864,6 +962,10 @@ def _bug_description(result: dict[str, object]) -> str:
                     "trigger_before": result.get("trigger_before"),
                     "open_switcher_observation": result.get("open_switcher_observation"),
                     "open_panel_observation": result.get("open_panel_observation"),
+                    "pre_tab_focus_observation": result.get("pre_tab_focus_observation"),
+                    "pre_tab_trigger_restore_attempts": result.get(
+                        "pre_tab_trigger_restore_attempts",
+                    ),
                     "tab_focus_observation": result.get("tab_focus_observation"),
                     "escape_dismissal_observation": result.get("escape_dismissal_observation"),
                     "escape_transition_monitor": result.get("escape_transition_monitor"),
@@ -907,6 +1009,7 @@ def _discussion_threads() -> list[dict[str, object]]:
         thread
         for thread in threads
         if isinstance(thread, dict)
+        and thread.get("resolved") is False
         and thread.get("rootCommentId") is not None
         and thread.get("threadId") is not None
     ]
@@ -925,18 +1028,17 @@ def _review_reply_text(
         else "Re-ran "
         f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
     )
-    if root_comment_id == 3283970622:
+    if root_comment_id == 3284106691:
         return (
-            "Fixed: Step 3 now requires focus to still be on the workspace-switcher "
-            "trigger before `Tab`, and only passes when that key press moves focus "
-            "into a visible internal switcher element. "
+            "Fixed: after opening the switcher, TS-824 now checks whether focus stayed on "
+            "the trigger and, when it did not, deterministically restores trigger focus "
+            "before observing the Step 3 `Tab` transition into the panel. "
             + rerun_summary
         )
-    if root_comment_id == 3283970736:
+    if root_comment_id == 3284106847:
         return (
-            "Fixed: Step 4 now relies on the transition monitor's real dismissal "
-            "signal (`ever_hidden_after_visible`), so the test only passes when the "
-            "visible workspace-switcher surface actually disappears after `Escape`. "
+            "Fixed: `_discussion_threads()` again skips `resolved: true` entries, so "
+            "`review_replies.json` only replies to unresolved GitHub review threads. "
             + rerun_summary
         )
     return "Fixed the requested TS-824 review item. " + rerun_summary
@@ -1016,6 +1118,25 @@ def _first_failed_step_number(result: dict[str, object]) -> int | None:
 def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
     if failed_step == 2:
+        pre_tab_focus = result.get("pre_tab_focus_observation")
+        if isinstance(pre_tab_focus, dict):
+            return (
+                f"{TICKET_KEY} - Opening the workspace switcher does not return focus to the trigger for the Tab transition",
+                [
+                    "1. Launch the application on a desktop browser.",
+                    "2. Reach the workspace switcher trigger by keyboard.",
+                    "3. Open the workspace switcher panel from that focused trigger.",
+                    "4. Attempt to restore focus to the workspace switcher trigger without clicking before pressing `Tab` again.",
+                    "5. Observe that focus remains away from the trigger.",
+                ],
+                (
+                    "After the workspace switcher opens, the production UI does not keep "
+                    "or restore keyboard focus to the workspace switcher trigger before "
+                    "the next Tab transition. That prevents the required `trigger -> "
+                    "internal panel element -> Escape` flow from being exercised from a "
+                    "valid trigger-owned starting state."
+                ),
+            )
         focusability = result.get("trigger_focusability_observation")
         keyboard_focusable = False
         tabindex: object = None
@@ -1057,6 +1178,23 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
             ),
         )
     if failed_step == 3:
+        tab_focus = result.get("tab_focus_observation")
+        if isinstance(tab_focus, dict) and not bool(tab_focus.get("before_on_trigger")):
+            return (
+                f"{TICKET_KEY} - Opening the workspace switcher moves focus inside the panel before the Tab transition",
+                [
+                    "1. Launch the application on a desktop browser.",
+                    "2. Reach the workspace switcher trigger by keyboard and open the panel.",
+                    "3. Observe the active element before pressing `Tab` again.",
+                    "4. Press `Tab` once and compare the before/after focus targets.",
+                ],
+                (
+                    "The open workspace switcher does not preserve trigger-owned focus for "
+                    "the ticket's keyboard path. Focus is already inside the panel before "
+                    "the Step 3 Tab press, so the required `trigger -> internal panel "
+                    "element` transition cannot be exercised as specified."
+                ),
+            )
         return (
             f"{TICKET_KEY} - Tab does not move focus into the open workspace switcher panel",
             [
@@ -1176,6 +1314,22 @@ def _trigger_focusability_payload(
         "tabindex": observation.tabindex,
         "keyboard_focusable": observation.keyboard_focusable,
         "outer_html": observation.outer_html,
+    }
+
+
+def _focus_ownership_payload(
+    observation: WorkspaceSwitcherFocusOwnershipObservation,
+) -> dict[str, object]:
+    return {
+        "active_label": observation.active_label,
+        "active_role": observation.active_role,
+        "active_tag_name": observation.active_tag_name,
+        "active_outer_html": observation.active_outer_html,
+        "active_visible": observation.active_visible,
+        "active_in_viewport": observation.active_in_viewport,
+        "active_within_switcher": observation.active_within_switcher,
+        "active_on_trigger": observation.active_on_trigger,
+        "focus_owned_by_switcher": observation.focus_owned_by_switcher,
     }
 
 
