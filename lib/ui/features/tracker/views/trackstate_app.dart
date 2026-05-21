@@ -424,6 +424,14 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
+      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+          _isUnsupportedActiveLocalStartupAccess(reason)) {
+        nextViewModel.dispose();
+        return _preserveActiveLocalWorkspaceSelection(
+          workspace,
+          previousViewModel,
+        );
+      }
       nextViewModel.dispose();
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
@@ -438,14 +446,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     } on Object catch (error) {
       if (preserveActiveLocalSelectionOnUnsupportedAccess &&
           error is UnsupportedError) {
-        if (previousViewModel.snapshot == null) {
-          await previousViewModel.load();
-        }
-        _workspaceValidationFailures.remove(workspace.id);
-        return _PreparedWorkspaceSwitch(
-          viewModel: previousViewModel,
-          workspace: workspace,
-          localConfigurationKey: null,
+        return _preserveActiveLocalWorkspaceSelection(
+          workspace,
+          previousViewModel,
         );
       }
       final reason = _normalizeWorkspaceFailureReason(error);
@@ -460,6 +463,31 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     }
+  }
+
+  Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
+    WorkspaceProfile workspace,
+    TrackerViewModel previousViewModel,
+  ) async {
+    if (previousViewModel.snapshot == null) {
+      await previousViewModel.load();
+    }
+    _workspaceValidationFailures.remove(workspace.id);
+    return _PreparedWorkspaceSwitch(
+      viewModel: previousViewModel,
+      workspace: workspace,
+      localConfigurationKey: null,
+    );
+  }
+
+  bool _isUnsupportedActiveLocalStartupAccess(String reason) {
+    final normalizedReason = reason.toLowerCase();
+    return normalizedReason.contains(
+          'local git startup access is unavailable',
+        ) ||
+        normalizedReason.contains('local git runtime is not available') ||
+        (normalizedReason.contains('local') &&
+            normalizedReason.contains('not available in this build'));
   }
 
   void _rememberWorkspaceValidationFailure(
