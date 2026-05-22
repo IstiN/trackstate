@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -16,9 +17,9 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherRowObservation,
+    WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
-from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
@@ -61,6 +62,54 @@ EXPECTED_RESULT = (
     "The workspace status is updated to 'Local Git'. The workspace becomes "
     "active and its contents are successfully loaded/indexed."
 )
+MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
+RESTORE_COMPLETION_WAIT_SECONDS = 45
+REWORK_SUMMARY = (
+    "Reworked the test to click the exact visible unavailable-workspace action and "
+    "record browser directory-access callbacks instead of using the generic "
+    "`Open` / `Save and switch` helper. Added `testing/tests/TS-912/README.md`."
+)
+
+
+class Ts912ManualReauthRuntime(StoredWorkspaceProfilesRuntime):
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        workspace_state: dict[str, object],
+        workspace_token_profile_ids: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(
+            repository=repository,
+            token=token,
+            workspace_state=workspace_state,
+            workspace_token_profile_ids=workspace_token_profile_ids,
+        )
+        self.console_events: list[dict[str, str]] = []
+        self.page_errors: list[str] = []
+
+    def __enter__(self):
+        session = super().__enter__()
+        if self._context is None or self._page is None:
+            raise RuntimeError(
+                "TS-912 manual re-auth runtime expected a browser context and page.",
+            )
+        self._context.add_init_script(script=_manual_reauth_probe_script())
+        self._page.on("console", self._record_console_event)
+        self._page.on("pageerror", self._record_page_error)
+        return session
+
+    def _record_console_event(self, message) -> None:
+        self.console_events.append(
+            {
+                "level": str(message.type),
+                "text": str(message.text),
+            },
+        )
+
+    def _record_page_error(self, error: object) -> None:
+        self.page_errors.append(str(error))
 
 
 def main() -> None:
@@ -98,32 +147,36 @@ def main() -> None:
     }
 
     page: LiveWorkspaceSwitcherPage | None = None
+    runtime_context: Ts912ManualReauthRuntime | None = None
 
     try:
+        runtime_context = Ts912ManualReauthRuntime(
+            repository=config.repository,
+            token=token,
+            workspace_state=workspace_state,
+            workspace_token_profile_ids=(hosted_workspace_id,),
+        )
         with create_live_tracker_app(
             config,
-            runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                repository=config.repository,
-                token=token,
-                workspace_state=workspace_state,
-                workspace_token_profile_ids=(hosted_workspace_id,),
-            ),
+            runtime_factory=lambda: runtime_context,
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime = tracker_page.open()
+                runtime_observation = tracker_page.open()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                result["runtime_state"] = runtime.kind
-                result["runtime_body_text"] = runtime.body_text
+                result["runtime_state"] = runtime_observation.kind
+                result["runtime_body_text"] = runtime_observation.body_text
                 shell_observation = tracker_page.observe_interactive_shell(
                     SHELL_NAVIGATION_LABELS,
                 )
                 result["shell_observation_before_restore"] = shell_observation
-                if runtime.kind != "ready" or not bool(shell_observation.get("shell_ready")):
+                if runtime_observation.kind != "ready" or not bool(
+                    shell_observation.get("shell_ready"),
+                ):
                     raise AssertionError(
                         "Precondition failed: the deployed app did not reach the "
                         "interactive shell with the hosted-workspace preload.\n"
-                        f"Observed runtime state: {runtime.kind}\n"
+                        f"Observed runtime state: {runtime_observation.kind}\n"
                         f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}",
                     )
 
@@ -148,6 +201,13 @@ def main() -> None:
 
                 switcher_before = page.open_and_observe(timeout_ms=20_000)
                 result["switcher_before_restore"] = _switcher_payload(switcher_before)
+                saved_rows_before = page.observe_saved_workspace_rows(timeout_ms=20_000)
+                saved_local_row_before = _find_named_saved_local_row(saved_rows_before)
+                result["saved_local_row_before_restore"] = (
+                    _saved_row_payload(saved_local_row_before)
+                    if saved_local_row_before is not None
+                    else None
+                )
                 _record_step(
                     result,
                     step=1,
@@ -233,14 +293,16 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
+                result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
+                    tracker_page,
+                )
+                exact_action_label = _saved_workspace_action_label(saved_local_row_before)
+                result["manual_restore_action_label"] = exact_action_label
 
                 try:
-                    trigger_after_restore = page.switch_to_workspace(
-                        display_name=LOCAL_DISPLAY_NAME,
-                        target_type_label="Local",
-                        detail_contains=LOCAL_TARGET,
-                        expected_state_label="Local Git",
-                        timeout_ms=45_000,
+                    page.click_saved_workspace_action_button(
+                        exact_action_label,
+                        timeout_ms=10_000,
                     )
                 except AssertionError as error:
                     _record_step(
@@ -264,61 +326,132 @@ def main() -> None:
                     )
                     raise
 
-                result["trigger_after_restore"] = _trigger_payload(trigger_after_restore)
-                observed_action_labels = (
-                    list(local_row_before.action_labels) if local_row_before is not None else []
-                )
                 _record_step(
                     result,
                     step=3,
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Activated the saved local workspace via the row action exposed for the "
-                        "unavailable workspace entry.\n"
-                        f"observed_action_labels={observed_action_labels!r}; "
-                        f"trigger_after_restore={json.dumps(_trigger_payload(trigger_after_restore), indent=2)}"
+                        "Activated the visible saved-workspace action exposed for the "
+                        "unavailable workspace entry instead of using the generic workspace "
+                        "switch helper.\n"
+                        f"observed_saved_row={json.dumps(_saved_row_payload(saved_local_row_before), indent=2)}\n"
+                        f"clicked_action_label={exact_action_label!r}"
                     ),
                 )
 
-                shell_after_restore = tracker_page.observe_interactive_shell(
-                    SHELL_NAVIGATION_LABELS,
-                    timeout_ms=60_000,
-                )
-                persisted_workspace_state = _decode_workspace_state(
-                    tracker_page.snapshot_local_storage(
-                        [
-                            "trackstate.workspaceProfiles.state",
-                            "flutter.trackstate.workspaceProfiles.state",
-                        ],
+                callback_observed, restore_attempt_observation = poll_until(
+                    probe=lambda: _observe_manual_restore_attempt(
+                        tracker_page=tracker_page,
+                        page=page,
                     ),
+                    is_satisfied=lambda observation: observation[
+                        "directory_access_callback_observed"
+                    ]
+                    or observation["failure_message"] is not None,
+                    timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
+                    interval_seconds=1,
                 )
+                result["manual_restore_attempt_observation"] = restore_attempt_observation
+                result["manual_reauth_probe_after_action"] = restore_attempt_observation[
+                    "probe"
+                ]
+                if not callback_observed:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "The manual unavailable-workspace action never triggered a "
+                            "directory-access callback and never restored the workspace.\n"
+                            f"action_label={exact_action_label!r}\n"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 4 failed: the manual unavailable-workspace action never triggered "
+                        "a directory-access callback and never restored the workspace.\n"
+                        f"Observed action label: {exact_action_label!r}\n"
+                        f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                        f"Observed body text:\n{restore_attempt_observation['body_text']}"
+                    )
+                if restore_attempt_observation["failure_message"] is not None:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "The closest production-visible manual restore action did not open "
+                            "a directory-access prompt and instead failed in the deployed app.\n"
+                            f"action_label={exact_action_label!r}\n"
+                            f"failure_message={restore_attempt_observation['failure_message']!r}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 4 failed: the closest production-visible manual restore action "
+                        "did not open a directory-access prompt and instead failed in the "
+                        "deployed app.\n"
+                        f"Observed action label: {exact_action_label!r}\n"
+                        f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
+                        "Missing production capability: the Workspace switcher does not expose "
+                        "a working manual re-authentication / access-grant flow for the saved "
+                        "unavailable local workspace in the deployed web build.\n"
+                        f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                        f"Observed body text:\n{restore_attempt_observation['body_text']}"
+                    )
+
+                restored, restored_observation = poll_until(
+                    probe=lambda: _observe_restored_local_workspace(
+                        tracker_page=tracker_page,
+                        page=page,
+                        expected_local_workspace_id=local_workspace_id,
+                    ),
+                    is_satisfied=lambda observation: observation["restored"],
+                    timeout_seconds=RESTORE_COMPLETION_WAIT_SECONDS,
+                    interval_seconds=2,
+                )
+                result["restored_workspace_observation"] = restored_observation
+                if not restored:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "A directory-access callback was observed, but the workspace never "
+                            "completed the Local Git restore flow.\n"
+                            f"restore_observation={json.dumps(restored_observation, indent=2)}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 4 failed: the directory-access callback was observed, but the "
+                        "workspace never completed the Local Git restore flow.\n"
+                        f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}"
+                    )
+
+                trigger_after_restore = restored_observation["trigger"]
+                shell_after_restore = restored_observation["shell_observation"]
+                persisted_workspace_state = restored_observation["persisted_workspace_state"]
+                switcher_after = restored_observation["switcher"]
+                local_row_after = restored_observation["local_row"]
+                hosted_row_after = restored_observation["hosted_row"]
+                selected_row_after = restored_observation["selected_row"]
+                result["trigger_after_restore"] = trigger_after_restore
                 result["shell_observation_after_restore"] = shell_after_restore
                 result["persisted_workspace_state"] = persisted_workspace_state
-
-                switcher_after = page.open_and_observe(timeout_ms=20_000)
-                result["switcher_after_restore"] = _switcher_payload(switcher_after)
-                local_row_after = _find_named_local_row(switcher_after)
-                hosted_row_after = _find_named_hosted_row(switcher_after)
-                selected_row_after = _find_selected_row(switcher_after)
-                result["local_row_after_restore"] = (
-                    _row_payload(local_row_after) if local_row_after is not None else None
-                )
-                result["hosted_row_after_restore"] = (
-                    _row_payload(hosted_row_after) if hosted_row_after is not None else None
-                )
-                result["selected_row_after_restore"] = (
-                    _row_payload(selected_row_after)
-                    if selected_row_after is not None
-                    else None
-                )
+                result["switcher_after_restore"] = switcher_after
+                result["local_row_after_restore"] = local_row_after
+                result["hosted_row_after_restore"] = hosted_row_after
+                result["selected_row_after_restore"] = selected_row_after
 
                 try:
                     _assert_restored_local_workspace(
-                        trigger=trigger_after_restore,
-                        switcher=switcher_after,
-                        local_row=local_row_after,
-                        selected_row=selected_row_after,
+                        trigger=_trigger_from_payload(trigger_after_restore),
+                        switcher=_switcher_from_payload(switcher_after),
+                        local_row=_row_from_payload(local_row_after),
+                        selected_row=_row_from_payload(selected_row_after),
                         shell_observation=shell_after_restore,
                         persisted_workspace_state=persisted_workspace_state,
                         expected_local_workspace_id=local_workspace_id,
@@ -353,7 +486,7 @@ def main() -> None:
                         "restore action to confirm the same workspace was now active as Local Git."
                     ),
                     observed=(
-                        f"trigger_after_restore={json.dumps(_trigger_payload(trigger_after_restore), ensure_ascii=True)}; "
+                        f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
                         f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
                     ),
                 )
@@ -383,6 +516,9 @@ def main() -> None:
         _write_failure_outputs(result)
         raise
     finally:
+        if runtime_context is not None:
+            result["console_events"] = list(runtime_context.console_events)
+            result["page_errors"] = list(runtime_context.page_errors)
         _remove_local_workspace_repository()
 
     _write_pass_outputs(result)
@@ -531,6 +667,19 @@ def _find_named_hosted_row(
     return None
 
 
+def _find_named_saved_local_row(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:
+    for row in rows:
+        if (
+            row.display_name == LOCAL_DISPLAY_NAME
+            and row.target_type_label == "Local"
+            and LOCAL_TARGET in row.detail_text
+        ):
+            return row
+    return None
+
+
 def _find_selected_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
@@ -646,6 +795,25 @@ def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, 
     }
 
 
+def _saved_row_payload(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
+) -> dict[str, object] | None:
+    if row is None:
+        return None
+    return {
+        "display_name": row.display_name,
+        "target_type_label": row.target_type_label,
+        "state_label": row.state_label,
+        "detail_text": row.detail_text,
+        "selected": row.selected,
+        "action_labels": list(row.action_labels),
+        "left": row.left,
+        "top": row.top,
+        "width": row.width,
+        "height": row.height,
+    }
+
+
 def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, object] | None:
     if row is None:
         return None
@@ -672,6 +840,74 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
     }
 
 
+def _trigger_from_payload(payload: dict[str, object]) -> WorkspaceSwitcherTriggerObservation:
+    return WorkspaceSwitcherTriggerObservation(
+        viewport_width=float(payload["viewport_width"]),
+        viewport_height=float(payload["viewport_height"]),
+        semantic_label=str(payload["semantic_label"]),
+        visible_text=str(payload["visible_text"]),
+        raw_text_lines=tuple(str(line) for line in payload["raw_text_lines"]),
+        display_name=str(payload["display_name"]),
+        workspace_type=str(payload["workspace_type"]),
+        state_label=str(payload["state_label"]),
+        icon_count=int(payload["icon_count"]),
+        left=float(payload["left"]),
+        top=float(payload["top"]),
+        width=float(payload["width"]),
+        height=float(payload["height"]),
+        top_button_labels=tuple(str(label) for label in payload["top_button_labels"]),
+    )
+
+
+def _row_from_payload(
+    payload: dict[str, object] | None,
+) -> WorkspaceSwitcherRowObservation | None:
+    if payload is None:
+        return None
+    return WorkspaceSwitcherRowObservation(
+        display_name=(
+            None if payload.get("display_name") is None else str(payload["display_name"])
+        ),
+        target_type_label=(
+            None
+            if payload.get("target_type_label") is None
+            else str(payload["target_type_label"])
+        ),
+        state_label=None if payload.get("state_label") is None else str(payload["state_label"]),
+        detail_text=str(payload["detail_text"]),
+        visible_text=str(payload["visible_text"]),
+        selected=bool(payload["selected"]),
+        semantics_label=(
+            None if payload.get("semantics_label") is None else str(payload["semantics_label"])
+        ),
+        icon_accessibility_label=(
+            None
+            if payload.get("icon_accessibility_label") is None
+            else str(payload["icon_accessibility_label"])
+        ),
+        action_labels=tuple(str(label) for label in payload["action_labels"]),
+        button_labels=tuple(str(label) for label in payload["button_labels"]),
+    )
+
+
+def _switcher_from_payload(payload: dict[str, object]) -> WorkspaceSwitcherObservation:
+    rows = tuple(
+        row
+        for row in (
+            _row_from_payload(row_payload)
+            for row_payload in payload.get("rows", [])
+            if isinstance(row_payload, dict)
+        )
+        if row is not None
+    )
+    return WorkspaceSwitcherObservation(
+        body_text=str(payload["body_text"]),
+        switcher_text=str(payload["switcher_text"]),
+        row_count=int(payload["row_count"]),
+        rows=rows,
+    )
+
+
 def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str, object] | None:
     for value in storage_snapshot.values():
         if value is None:
@@ -680,6 +916,195 @@ def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str
         if isinstance(parsed, dict):
             return parsed
     return None
+
+
+def _manual_reauth_probe_script() -> str:
+    return """
+    (() => {
+      const state = window.__ts912ManualReauthProbe = {
+        showDirectoryPickerCalls: [],
+        requestPermissionCalls: [],
+        queryPermissionCalls: [],
+        wrapErrors: [],
+      };
+      const serialize = (value) => {
+        try {
+          return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+          state.wrapErrors.push(String(error));
+          return String(value);
+        }
+      };
+      const wrap = (target, key, bucket) => {
+        if (!target || typeof target[key] !== 'function') {
+          return;
+        }
+        const original = target[key];
+        target[key] = async function(...args) {
+          state[bucket].push({
+            callNumber: state[bucket].length + 1,
+            args: serialize(args),
+          });
+          return await original.apply(this, args);
+        };
+      };
+      wrap(window, 'showDirectoryPicker', 'showDirectoryPickerCalls');
+      const fileSystemHandleProto = window.FileSystemHandle && window.FileSystemHandle.prototype;
+      wrap(fileSystemHandleProto, 'requestPermission', 'requestPermissionCalls');
+      wrap(fileSystemHandleProto, 'queryPermission', 'queryPermissionCalls');
+    })();
+    """
+
+
+def _saved_workspace_action_label(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
+) -> str:
+    if row is None:
+        raise AssertionError(
+            "Step 3 failed: the open workspace switcher did not expose a saved local "
+            "workspace row with an actionable control.",
+        )
+    action_label = next(
+        (
+            label
+            for label in row.action_labels
+            if label and not label.startswith("Delete:")
+        ),
+        None,
+    )
+    if not action_label:
+        raise AssertionError(
+            "Step 3 failed: the unavailable local workspace row did not expose any "
+            "visible manual action.\n"
+            f"Observed saved row: {json.dumps(_saved_row_payload(row), indent=2)}"
+        )
+    return action_label
+
+
+def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const probe = window.__ts912ManualReauthProbe || {};
+          return {
+            showDirectoryPickerCalls: Array.isArray(probe.showDirectoryPickerCalls)
+              ? probe.showDirectoryPickerCalls
+              : [],
+            requestPermissionCalls: Array.isArray(probe.requestPermissionCalls)
+              ? probe.requestPermissionCalls
+              : [],
+            queryPermissionCalls: Array.isArray(probe.queryPermissionCalls)
+              ? probe.queryPermissionCalls
+              : [],
+            wrapErrors: Array.isArray(probe.wrapErrors) ? probe.wrapErrors : [],
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "showDirectoryPickerCalls": [],
+            "requestPermissionCalls": [],
+            "queryPermissionCalls": [],
+            "wrapErrors": [],
+        }
+    return {
+        "showDirectoryPickerCalls": list(payload.get("showDirectoryPickerCalls", [])),
+        "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
+        "queryPermissionCalls": list(payload.get("queryPermissionCalls", [])),
+        "wrapErrors": list(payload.get("wrapErrors", [])),
+    }
+
+
+def _observe_manual_restore_attempt(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+) -> dict[str, object]:
+    body_text = tracker_page.body_text()
+    probe = _read_manual_reauth_probe(tracker_page)
+    trigger = _safe_trigger_payload(page)
+    return {
+        "probe": probe,
+        "body_text": body_text,
+        "trigger": trigger,
+        "failure_message": _extract_workspace_open_failure_message(body_text),
+        "directory_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
+        ),
+    }
+
+
+def _observe_restored_local_workspace(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+    expected_local_workspace_id: str,
+) -> dict[str, object]:
+    trigger = _safe_trigger_payload(page)
+    shell_observation = tracker_page.observe_interactive_shell(
+        SHELL_NAVIGATION_LABELS,
+        timeout_ms=10_000,
+    )
+    persisted_workspace_state = _decode_workspace_state(
+        tracker_page.snapshot_local_storage(
+            [
+                "trackstate.workspaceProfiles.state",
+                "flutter.trackstate.workspaceProfiles.state",
+            ],
+        ),
+    )
+    trigger_is_restored = (
+        trigger is not None
+        and trigger["display_name"] == LOCAL_DISPLAY_NAME
+        and trigger["workspace_type"] == "Local"
+        and trigger["state_label"] == "Local Git"
+    )
+    storage_matches = (
+        persisted_workspace_state is not None
+        and persisted_workspace_state.get("activeWorkspaceId") == expected_local_workspace_id
+    )
+    restored = trigger_is_restored and bool(shell_observation.get("shell_ready")) and storage_matches
+    if not restored:
+        return {
+            "restored": False,
+            "trigger": trigger,
+            "shell_observation": shell_observation,
+            "persisted_workspace_state": persisted_workspace_state,
+            "body_text": tracker_page.body_text(),
+        }
+
+    switcher_after = page.open_and_observe(timeout_ms=20_000)
+    local_row_after = _find_named_local_row(switcher_after)
+    hosted_row_after = _find_named_hosted_row(switcher_after)
+    selected_row_after = _find_selected_row(switcher_after)
+    return {
+        "restored": True,
+        "trigger": trigger,
+        "shell_observation": shell_observation,
+        "persisted_workspace_state": persisted_workspace_state,
+        "switcher": _switcher_payload(switcher_after),
+        "local_row": _row_payload(local_row_after),
+        "hosted_row": _row_payload(hosted_row_after),
+        "selected_row": _row_payload(selected_row_after),
+    }
+
+
+def _safe_trigger_payload(page: LiveWorkspaceSwitcherPage) -> dict[str, object] | None:
+    try:
+        return _trigger_payload(page.observe_trigger(timeout_ms=2_000))
+    except AssertionError:
+        return None
+
+
+def _extract_workspace_open_failure_message(body_text: str) -> str | None:
+    match = re.search(
+        rf"Could not open {re.escape(LOCAL_DISPLAY_NAME)}\.\s*[^\n]+",
+        body_text,
+    )
+    if match is None:
+        return None
+    return match.group(0).strip()
 
 
 def _record_step(
@@ -826,6 +1251,9 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {'passed' if passed else 'failed'}",
         "",
+        "## Rework summary",
+        f"- {REWORK_SUMMARY}",
+        "",
         f"**Test case:** {TEST_CASE_TITLE}",
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
@@ -879,11 +1307,13 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
     if passed:
         return (
             f"{TICKET_KEY} passed.\n\n"
+            f"{REWORK_SUMMARY}\n\n"
             "The saved unavailable local workspace was restored manually and became the "
             "active Local Git workspace while the shell stayed interactive.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
+        f"{REWORK_SUMMARY}\n\n"
         f"{result.get('error', 'The restore flow did not reach the expected Local Git state.')}\n"
     )
 
@@ -915,6 +1345,8 @@ def _build_bug_description(result: dict[str, object]) -> str:
     trigger_after = result.get("trigger_after_restore")
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
+    probe_after_action = result.get("manual_reauth_probe_after_action")
+    manual_action_label = result.get("manual_restore_action_label")
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -932,18 +1364,30 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "## Expected result",
         EXPECTED_RESULT,
         "",
+        "## Missing or broken production capability",
+        (
+            "The deployed web build does not expose a working manual re-authentication / "
+            "directory-access grant flow for the saved unavailable local workspace from the "
+            "Workspace switcher. The closest visible saved-workspace action remains "
+            f"`{manual_action_label}` and it fails before any browser directory-access "
+            "callback is triggered."
+        ),
+        "",
         "## Environment details",
         f"- URL: {result.get('app_url')}",
         f"- Browser: {result.get('browser')}",
         f"- OS: {result.get('os')}",
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Local workspace target: {LOCAL_TARGET}",
+        f"- Run command: `{RUN_COMMAND}`",
         "",
         "## Observed state",
         f"- Trigger before restore: `{json.dumps(trigger_before, ensure_ascii=True)}`",
         f"- Local row before restore: `{json.dumps(local_before, ensure_ascii=True)}`",
         f"- Trigger after restore: `{json.dumps(trigger_after, ensure_ascii=True)}`",
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
+        f"- Manual action label: `{manual_action_label}`",
+        f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])

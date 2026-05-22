@@ -1651,7 +1651,7 @@ class LiveWorkspaceSwitcherPage:
                     summary_match = summary_line_pattern.match(summary_line)
                     if (
                         summary_match is not None
-                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and _is_saved_workspace_action_line(action_label)
                         and delete_label.startswith("Delete: ")
                     ):
                         parsed_rows.append(
@@ -1679,7 +1679,7 @@ class LiveWorkspaceSwitcherPage:
                 if (
                     "Branch:" in detail_text
                     and target_type_label in {"Hosted", "Local"}
-                    and (action_label == "Active" or action_label.startswith("Open: "))
+                    and _is_saved_workspace_action_line(action_label)
                     and delete_label.startswith("Delete: ")
                 ):
                     parsed_rows.append(
@@ -1771,7 +1771,7 @@ class LiveWorkspaceSwitcherPage:
                     delete_label = candidate_lines[index + 2]
                     if (
                         "Branch:" in summary_line
-                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and _is_saved_workspace_action_line(action_label)
                         and delete_label.startswith("Delete: ")
                     ):
                         summary_parts = [
@@ -2195,6 +2195,25 @@ class LiveWorkspaceSwitcherPage:
             row.left + min(40.0, row.width * 0.15),
             row.top + min(28.0, row.height * 0.25),
         )
+
+    def click_saved_workspace_action_button(
+        self,
+        action_label: str,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        try:
+            self._session.click(
+                'flt-semantics[role="button"],button,[role="button"]',
+                has_text=action_label,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The open workspace switcher did not expose the expected saved workspace "
+                f"action button {action_label!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def wait_for_active_saved_workspace(
         self,
@@ -3764,7 +3783,15 @@ class LiveWorkspaceSwitcherPage:
                 return null;
               }
 
-              const actionLabels = ['Open', 'Open workspace', 'Active', 'Delete'];
+              const actionLabels = [
+                'Open',
+                'Open workspace',
+                'Retry',
+                'Re-authenticate',
+                'Reauthenticate',
+                'Active',
+                'Delete',
+              ];
               const stateLabels = [
                 'Local Git',
                 'Needs sign-in',
@@ -3795,7 +3822,13 @@ class LiveWorkspaceSwitcherPage:
                   && candidate.text.includes('Branch:')
                   && candidate.text.includes('Delete')
                   && (candidate.text.includes('Hosted') || candidate.text.includes('Local'))
-                  && (candidate.text.includes('Open') || candidate.text.includes('Active'))
+                  && (
+                    candidate.text.includes('Open')
+                    || candidate.text.includes('Retry')
+                    || candidate.text.includes('Re-authenticate')
+                    || candidate.text.includes('Reauthenticate')
+                    || candidate.text.includes('Active')
+                  )
                 )
                 .filter((candidate) => candidate)
                 .sort((left, right) => left.area - right.area);
@@ -6810,7 +6843,8 @@ def _rows_from_structured_switcher_text(
         r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)",
     )
     open_pattern = re.compile(
-        r"^(?P<action>Open(?:\s+workspace)?):\s+(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
+        r"^(?P<action>Open(?:\s+workspace)?|Retry|Re-authenticate|Reauthenticate):\s+"
+        r"(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
     )
     detail_matches = list(detail_pattern.finditer(normalized))
     if not detail_matches:
@@ -6900,7 +6934,8 @@ def _rows_from_linear_switcher_text(
         rf"^(?P<target_type>Hosted|Local)\s+(?P<state>{escaped_states})\s+(?P<tail>.+)$",
     )
     open_pattern = re.compile(
-        r"^(?P<action>Open(?:\s+workspace)?):\s+(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
+        r"^(?P<action>Open(?:\s+workspace)?|Retry|Re-authenticate|Reauthenticate):\s+"
+        r"(?P<display>.+?)\s+Delete:\s+(?P<delete>.+)$",
     )
     detail_matches = list(detail_pattern.finditer(normalized))
     rows: list[WorkspaceSwitcherRowObservation] = []
@@ -6993,4 +7028,22 @@ def _workspace_row_action_label(action_text: str) -> str:
         return "Open workspace"
     if normalized.startswith("Open"):
         return "Open"
+    if normalized.startswith("Re-authenticate"):
+        return "Re-authenticate"
+    if normalized.startswith("Reauthenticate"):
+        return "Reauthenticate"
+    if normalized.startswith("Retry"):
+        return "Retry"
     return "Active"
+
+
+def _is_saved_workspace_action_line(action_text: str) -> bool:
+    normalized = action_text.strip()
+    if normalized == "Active":
+        return True
+    return bool(
+        re.match(
+            r"^(Open(?:\s+workspace)?|Retry|Re-authenticate|Reauthenticate):\s+.+$",
+            normalized,
+        ),
+    )
