@@ -223,6 +223,35 @@ void main() {
         self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
         self.assertIn("child: Ts908ProbeSurface()", patched)
 
+    def test_inject_probe_into_render_host_supports_multiline_conditional_run_app(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        patched = probe._inject_probe_into_render_host(  # noqa: SLF001
+            """
+import 'package:flutter/widgets.dart';
+
+import 'data/repositories/trackstate_repository.dart';
+import 'ui/features/tracker/views/trackstate_app.dart';
+
+const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
+  'TRACKSTATE_USE_DEMO_REPOSITORY',
+);
+
+void main() {
+  runApp(
+    _useDemoRepositoryForAccessibility
+        ? const TrackStateApp(repository: DemoTrackStateRepository())
+        : const TrackStateApp(),
+  );
+}
+""".strip()
+        )
+
+        self.assertIn("import 'package:flutter/material.dart';", patched)
+        self.assertIn("import 'ts908_probe_surface.dart';", patched)
+        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
+        self.assertIn("child: Ts908ProbeSurface()", patched)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -580,6 +580,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
             "status_checks": [],
             "status_check_names": [],
             "status_check_workflow_names": [],
+            "failed_status_check_names": [],
+            "failed_status_check_workflow_names": [],
         }
 
         while time.time() < deadline:
@@ -596,6 +598,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "status_checks": surface["status_checks"],
                 "status_check_names": surface["status_check_names"],
                 "status_check_workflow_names": surface["status_check_workflow_names"],
+                "failed_status_check_names": surface["failed_status_check_names"],
+                "failed_status_check_workflow_names": surface[
+                    "failed_status_check_workflow_names"
+                ],
             }
             if (
                 mergeable_state
@@ -1008,13 +1014,11 @@ class Ts908ProbeSurface extends StatelessWidget {
                 f"{probe_import}\n",
             )
 
-        updated_source, replacements = re.subn(
-            r"runApp\(\s*const\s+TrackStateApp\(\)\s*\);",
-            "runApp(const _Ts908RenderedProbeApp());",
+        updated_source = self._replace_run_app_call(
             source,
-            count=1,
+            replacement="runApp(const _Ts908RenderedProbeApp());",
         )
-        if replacements != 1:
+        if updated_source is None:
             raise GitHubAccessibilityPullRequestGateError(
                 "TS-908 could not patch lib/main.dart to render the disposable probe."
             )
@@ -1060,6 +1064,34 @@ class _Ts908ProbeOverlay extends StatelessWidget {
 }
 """
         )
+
+    @staticmethod
+    def _replace_run_app_call(source: str, *, replacement: str) -> str | None:
+        start = source.find("runApp(")
+        if start < 0:
+            return None
+
+        index = start + len("runApp(")
+        depth = 1
+        while index < len(source):
+            character = source[index]
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    break
+            index += 1
+        else:
+            return None
+
+        while end < len(source) and source[end].isspace():
+            end += 1
+        if end >= len(source) or source[end] != ";":
+            return None
+
+        return source[:start] + replacement + source[end + 1 :]
 
     @staticmethod
     def _job_names(jobs: list[dict[str, Any]]) -> list[str]:
