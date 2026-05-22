@@ -321,23 +321,6 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
     active = page.active_element()
     focus = page.observe_focus_ownership(panel=panel)
     first_internal_target = _first_internal_focus_target(tab_stops=tab_stops)
-    if (
-        focus.focus_owned_by_switcher
-        and focus.active_within_switcher
-        and not focus.active_on_trigger
-        and not _is_workspace_trigger_focus_label(active.accessible_name or active.text)
-        and (active.accessible_name or active.text)
-    ):
-        first_internal_target = {
-            "label": active.accessible_name or active.text or "",
-            "visible_text": active.text,
-            "role": active.role,
-            "tag_name": active.tag_name,
-            "tabindex": active.tabindex,
-            "keyboard_focusable": True,
-            "disabled": False,
-            "outer_html": active.outer_html,
-        }
     expected_target = _last_internal_focus_target(tab_stops=tab_stops)
     row_focus = {
         name: _row_focus_payload(
@@ -372,9 +355,8 @@ def _reach_first_keyboard_target(
 ) -> dict[str, object]:
     current_state = _capture_current_state(page=page, state=state)
     if _is_switcher_internal_focus_state(current_state):
-        reached_state = _state_with_first_internal_target(
+        reached_state = _state_with_precondition_source(
             current_state,
-            _target_from_focus_state(current_state),
             precondition_source="initial-focus",
         )
         _assert_first_keyboard_target(reached_state)
@@ -406,9 +388,8 @@ def _reach_first_keyboard_target(
             f"Observed focus ownership: {json.dumps(_focus_from_state(reached_state), indent=2)}\n"
             f"Observed internal tab stops: {json.dumps(_tab_stops_from_state(reached_state), indent=2)}"
         )
-    reached_state = _state_with_first_internal_target(
+    reached_state = _state_with_precondition_source(
         reached_state,
-        _target_from_focus_state(reached_state),
         precondition_source="tab-from-trigger",
     )
     _assert_first_keyboard_target(reached_state)
@@ -718,18 +699,14 @@ def _first_internal_focus_target(
     }
 
 
-def _target_from_focus_state(state: dict[str, object]) -> dict[str, object]:
-    active = _active_from_state(state)
-    return {
-        "label": active.get("accessible_name") or active.get("text") or "",
-        "visible_text": active.get("text"),
-        "role": active.get("role"),
-        "tag_name": active.get("tag_name"),
-        "tabindex": active.get("tabindex"),
-        "keyboard_focusable": True,
-        "disabled": False,
-        "outer_html": active.get("outer_html"),
-    }
+def _state_with_precondition_source(
+    state: dict[str, object],
+    *,
+    precondition_source: str,
+) -> dict[str, object]:
+    payload = dict(state)
+    payload["precondition_source"] = precondition_source
+    return payload
 
 
 def _is_switcher_internal_focus_state(state: dict[str, object]) -> bool:
@@ -955,8 +932,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Run command:** `{RUN_COMMAND}`",
         "",
         "## Rework applied",
-        "1. Opened the switcher from a focused trigger and established TS-911's starting point from the live initial focus state or a single public `Tab` into the panel instead of a helper-only direct-focus path.",
-        "2. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
+        "1. Kept the Step 1-derived first internal target as the source of truth instead of overwriting it with whichever control happened to hold focus.",
+        "2. Required the live initial-focus state or a single public `Tab` from the trigger to reach that exact first target before evaluating the reverse-wrap behavior.",
+        "3. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1002,7 +980,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: established the TS-911 precondition from the live initial focus state or a real `Tab` from the focused trigger, then compared `Shift+Tab` against the live last internal target exposed by the open panel.",
+        "- Rework: preserved the Step 1-derived first internal target as the baseline, required the live initial-focus/public-Tab path to reach that exact label, and kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1679,10 +1657,10 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         )
     )
     return (
-        "Fixed: TS-911 now establishes its precondition from the live initial focus "
-        "state or a real Tab from the focused trigger, instead of relying on a "
-        "page-object-only direct-focus helper. The reverse-wrap expectation remains "
-        "tied to the live last internal switcher control, and the failure reporting "
+        "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
+        "source of truth, and the initial-focus or public-Tab path must reach that "
+        "exact label before Shift+Tab runs. The reverse-wrap expectation remains "
+        "tied to the live last internal switcher control, and failure reporting "
         "stays scoped to the public keyboard path or the Shift+Tab wrap behavior. "
         f"{rerun_summary}"
     )
