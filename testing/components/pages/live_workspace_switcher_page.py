@@ -417,6 +417,45 @@ class WorkspaceSwitcherSurfaceObservation:
     interactive_texts: tuple[WorkspaceSwitcherInteractiveTextObservation, ...]
 
 
+def _merge_surface_payload_items(
+    primary_items: list[dict[str, object]],
+    panel_scoped_items: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    merged = list(primary_items)
+    for panel_item in panel_scoped_items:
+        label = str(panel_item.get("label", "")).strip()
+        if not label:
+            continue
+        if any(_surface_payload_items_match(item, panel_item) for item in merged):
+            continue
+        merged.append(dict(panel_item))
+    return merged
+
+
+def _surface_payload_items_match(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    left_label = str(left.get("label", "")).strip()
+    right_label = str(right.get("label", "")).strip()
+    if left_label != right_label:
+        return False
+    left_tag = str(left.get("tagName", "")).strip()
+    right_tag = str(right.get("tagName", "")).strip()
+    if left_tag != right_tag:
+        return False
+    left_role = str(left.get("role", "")).strip()
+    right_role = str(right.get("role", "")).strip()
+    if left_role != right_role:
+        return False
+    return (
+        abs(float(left.get("x", 0.0)) - float(right.get("x", 0.0))) < 1
+        and abs(float(left.get("y", 0.0)) - float(right.get("y", 0.0))) < 1
+        and abs(float(left.get("width", 0.0)) - float(right.get("width", 0.0))) < 1
+        and abs(float(left.get("height", 0.0)) - float(right.get("height", 0.0))) < 1
+    )
+
+
 @dataclass(frozen=True)
 class MobileTriggerFocusObservation:
     trigger_label: str
@@ -4248,6 +4287,19 @@ class LiveWorkspaceSwitcherPage:
                   tagName: element.tagName.toLowerCase(),
                   ...rectPayload(element),
                 }));
+              const panelScopedControlElements = panelScopedControls
+                .map((element) => ({
+                  label: labelFor(element),
+                  accessibleLabel: normalize(
+                    element.getAttribute('aria-label')
+                    || element.getAttribute('placeholder')
+                    || '',
+                  ),
+                  role: element.getAttribute('role'),
+                  tagName: element.tagName.toLowerCase(),
+                  ...rectPayload(element),
+                }))
+                .filter((element) => element.label.length > 0);
               const missingInteractiveLabels = interactiveElements
                 .filter((element) => element.label.length === 0)
                 .map((element, index) =>
@@ -4335,6 +4387,30 @@ class LiveWorkspaceSwitcherPage:
                 }
                 interactiveTexts.push(candidate);
               }
+              const panelScopedControlTexts = panelScopedControls
+                .map((element) => {
+                  const label = labelFor(element);
+                  const visibleText = visibleTextFor(element) || label;
+                  if (!label && !visibleText) {
+                    return null;
+                  }
+                  const backgroundColor = resolveBackgroundColor(
+                    element,
+                    toHex(window.getComputedStyle(switcher).backgroundColor),
+                  );
+                  const foregroundColor = resolveForegroundColor(element);
+                  return {
+                    label,
+                    visibleText,
+                    role: element.getAttribute('role'),
+                    foregroundColor,
+                    backgroundColor,
+                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                    ...rectPayload(element),
+                    tagName: element.tagName.toLowerCase(),
+                  };
+                })
+                .filter((element) => element !== null);
               const badgeLabels = new Set([
                 'Hosted',
                 'Local',
@@ -4416,12 +4492,14 @@ class LiveWorkspaceSwitcherPage:
                   ? 'Workspace switcher'
                   : normalize(switcher.innerText || switcher.textContent),
                 interactiveElements,
+                panelScopedControls: panelScopedControlElements,
                 semanticsNodes,
                 missingInteractiveLabels,
                 missingSemanticsLabels,
                 badges,
                 interactiveIcons,
                 interactiveTexts,
+                panelScopedControlTexts,
               };
             }
             """,
@@ -4432,6 +4510,14 @@ class LiveWorkspaceSwitcherPage:
                 "The deployed app did not expose a readable workspace switcher surface.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        interactive_elements_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveElements", [])),
+            list(payload.get("panelScopedControls", [])),
+        )
+        interactive_texts_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveTexts", [])),
+            list(payload.get("panelScopedControlTexts", [])),
+        )
         return WorkspaceSwitcherSurfaceObservation(
             body_text=str(payload.get("bodyText", "")),
             dialog_visible=bool(payload.get("dialogVisible")),
@@ -4447,7 +4533,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveElements", [])
+                for item in interactive_elements_payload
             ),
             semantics_nodes=tuple(
                 WorkspaceSwitcherSemanticsObservation(
@@ -4543,7 +4629,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveTexts", [])
+                for item in interactive_texts_payload
             ),
         )
 
