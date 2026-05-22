@@ -20,10 +20,12 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
+from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
@@ -40,8 +42,9 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts912-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-894", "TS-915"]
+LINKED_BUGS = ["TS-894", "TS-915", "TS-947"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
+STARTUP_TRIGGER_WAIT_SECONDS = 60
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -143,6 +146,7 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "linked_bugs": LINKED_BUGS,
         "preloaded_workspace_state": workspace_state,
+        "ticket_boundary_reached": False,
         "steps": [],
         "human_verification": [],
     }
@@ -163,30 +167,43 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                result["runtime_state"] = runtime_observation.kind
-                result["runtime_body_text"] = runtime_observation.body_text
+                trigger_visible, initial_trigger = poll_until(
+                    probe=lambda: _try_observe_trigger(page),
+                    is_satisfied=lambda candidate: candidate is not None,
+                    timeout_seconds=STARTUP_TRIGGER_WAIT_SECONDS,
+                    interval_seconds=1,
+                )
+                result["runtime_state"] = (
+                    "workspace-trigger-visible"
+                    if trigger_visible and initial_trigger is not None
+                    else "startup-trigger-timeout"
+                )
+                result["runtime_body_text"] = page.current_body_text()
+                if not trigger_visible or initial_trigger is None:
+                    _raise_startup_failure(
+                        result=result,
+                        tracker_page=tracker_page,
+                        runtime_context=runtime_context,
+                        reason=(
+                            "The deployed app never exposed the visible Workspace switcher "
+                            "trigger required to start the TS-912 manual re-authentication "
+                            "flow."
+                        ),
+                    )
+
                 shell_observation = tracker_page.observe_interactive_shell(
                     SHELL_NAVIGATION_LABELS,
+                    timeout_ms=10_000,
                 )
                 result["shell_observation_before_restore"] = shell_observation
-                if runtime_observation.kind != "ready" or not bool(
-                    shell_observation.get("shell_ready"),
-                ):
-                    raise AssertionError(
-                        "Precondition failed: the deployed app did not reach the "
-                        "interactive shell with the hosted-workspace preload.\n"
-                        f"Observed runtime state: {runtime_observation.kind}\n"
-                        f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}",
-                    )
 
                 try:
                     page.dismiss_connection_banner()
                 except Exception:
                     pass
 
-                initial_trigger = page.observe_trigger(timeout_ms=10_000)
                 result["trigger_before_restore"] = _trigger_payload(initial_trigger)
                 _record_human_verification(
                     result,
@@ -280,6 +297,7 @@ def main() -> None:
                         f"local_row={json.dumps(_row_payload(local_row_before), indent=2)}"
                     ),
                 )
+                result["ticket_boundary_reached"] = True
                 _record_human_verification(
                     result,
                     check=(
@@ -852,10 +870,10 @@ def _trigger_from_payload(payload: dict[str, object]) -> WorkspaceSwitcherTrigge
         workspace_type=str(payload["workspace_type"]),
         state_label=str(payload["state_label"]),
         icon_count=int(payload["icon_count"]),
-        left=float(payload["left"]),
-        top=float(payload["top"]),
-        width=float(payload["width"]),
-        height=float(payload["height"]),
+        left=float(payload.get("left", 0.0)),
+        top=float(payload.get("top", 0.0)),
+        width=float(payload.get("width", 0.0)),
+        height=float(payload.get("height", 0.0)),
         top_button_labels=tuple(str(label) for label in payload["top_button_labels"]),
     )
 
@@ -914,9 +932,143 @@ def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str
         if value is None:
             continue
         parsed = json.loads(value)
+        if isinstance(parsed, str):
+            parsed = json.loads(parsed)
         if isinstance(parsed, dict):
             return parsed
     return None
+
+
+def _try_observe_trigger(
+    page: LiveWorkspaceSwitcherPage,
+) -> WorkspaceSwitcherTriggerObservation | None:
+    try:
+        return page.observe_trigger(timeout_ms=1_000)
+    except (AssertionError, WebAppTimeoutError):
+        return None
+
+
+def _observe_startup_surface(
+    tracker_page: TrackStateTrackerPage,
+) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const isVisible = (element) => {
+            if (!element) {
+              return false;
+            }
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0
+              && rect.height > 0
+              && style.visibility !== 'hidden'
+              && style.display !== 'none';
+          };
+          const buttonLabels = Array.from(
+            document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+          )
+            .filter(isVisible)
+            .map((element) =>
+              normalize(
+                element.getAttribute('aria-label')
+                || element.innerText
+                || element.textContent
+                || '',
+              ),
+            )
+            .filter((label) => label.length > 0);
+          return {
+            title: document.title || '',
+            locationHref: window.location.href,
+            locationHash: window.location.hash,
+            locationPathname: window.location.pathname,
+            bodyText: document.body?.innerText || document.body?.textContent || '',
+            buttonLabels,
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "title": "",
+            "location_href": "",
+            "location_hash": "",
+            "location_pathname": "",
+            "body_text": tracker_page.body_text(),
+            "button_labels": [],
+        }
+    return {
+        "title": str(payload.get("title", "")),
+        "location_href": str(payload.get("locationHref", "")),
+        "location_hash": str(payload.get("locationHash", "")),
+        "location_pathname": str(payload.get("locationPathname", "")),
+        "body_text": str(payload.get("bodyText", "")),
+        "button_labels": [str(label) for label in payload.get("buttonLabels", [])],
+    }
+
+
+def _raise_startup_failure(
+    *,
+    result: dict[str, object],
+    tracker_page: TrackStateTrackerPage,
+    runtime_context: Ts912ManualReauthRuntime,
+    reason: str,
+) -> None:
+    startup_observation = _observe_startup_surface(tracker_page)
+    result["runtime_state"] = "startup-failed"
+    result["startup_observation"] = startup_observation
+    result["runtime_body_text"] = startup_observation["body_text"]
+    result["console_events"] = list(runtime_context.console_events)
+    result["page_errors"] = list(runtime_context.page_errors)
+    observed = (
+        "The deployed app never exposed the Workspace switcher entry point needed to begin "
+        "the TS-912 manual re-authentication flow, so this run did not reach the ticket "
+        "boundary.\n"
+        f"Reason: {reason}\n"
+        f"Startup observation: {json.dumps(startup_observation, indent=2)}\n"
+        f"Console events: {json.dumps(result['console_events'], indent=2)}\n"
+        f"Page errors: {json.dumps(result['page_errors'], indent=2)}"
+    )
+    _record_step(
+        result,
+        step=1,
+        status="failed",
+        action=REQUEST_STEPS[0],
+        observed=observed,
+    )
+    for step_number in (2, 3, 4):
+        _record_step(
+            result,
+            step=step_number,
+            status="failed",
+            action=REQUEST_STEPS[step_number - 1],
+            observed=(
+                "Not reached because the deployed app never exposed the Workspace switcher "
+                "trigger required to enter the unavailable-workspace restore flow."
+            ),
+        )
+    _record_human_verification(
+        result,
+        check=(
+            "Loaded the deployed app at the ticket viewport and waited for the header "
+            "Workspace switcher trigger to appear before attempting TS-912."
+        ),
+        observed=(
+            f"title={startup_observation['title']!r}; "
+            f"url={startup_observation['location_href']!r}; "
+            f"visible_buttons={json.dumps(startup_observation['button_labels'], ensure_ascii=True)}; "
+            f"body_text={startup_observation['body_text']!r}"
+        ),
+    )
+    raise AssertionError(
+        "Step 1 failed: the deployed app never exposed the Workspace switcher trigger, so "
+        "this run did not reach the TS-912 manual re-authentication boundary.\n"
+        f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}\n"
+        f"Console events:\n{json.dumps(result['console_events'], indent=2)}\n"
+        f"Page errors:\n{json.dumps(result['page_errors'], indent=2)}",
+    )
 
 
 def _manual_reauth_probe_script() -> str:
@@ -1324,7 +1476,35 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_review_replies() -> str:
-    return json.dumps({"replies": []}) + "\n"
+    return (
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3291125572,
+                        "threadId": "PRRT_kwDOSU6Gf86EOmiq",
+                        "reply": (
+                            "Updated: TS-912 no longer treats `tracker_page.open()` as the "
+                            "ticket boundary. The test now waits for the visible Workspace "
+                            "switcher trigger, opens the switcher, and only treats failures "
+                            "after that boundary as TS-912 evidence."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3291125646,
+                        "threadId": "PRRT_kwDOSU6Gf86EOmjn",
+                        "reply": (
+                            "Updated: failure output is now scoped to the boundary actually "
+                            "reached. Startup-only failures describe the separate interactive "
+                            "shell/workspace-switcher outage, while the manual re-auth bug text "
+                            "is only used after the unavailable-workspace restore flow is visible."
+                        ),
+                    },
+                ],
+            },
+        )
+        + "\n"
+    )
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
@@ -1356,6 +1536,26 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
     manual_action_label = result.get("manual_restore_action_label")
+    startup_observation = result.get("startup_observation")
+    boundary_reached = bool(result.get("ticket_boundary_reached"))
+    missing_capability = (
+        "The deployed web build never exposed the Workspace switcher trigger needed to start "
+        "the TS-912 manual re-authentication flow during this run. This failure happened "
+        "before the unavailable-workspace restore path was visible, so it should be treated "
+        "as a separate startup/app-shell issue rather than evidence that the TS-912 manual "
+        "re-authentication capability itself is broken."
+        if not boundary_reached
+        else (
+            "The deployed web build does not expose a working manual re-authentication / "
+            "directory-access grant flow for the saved unavailable local workspace from the "
+            "Workspace switcher. The closest visible saved-workspace action remains "
+            f"`{manual_action_label}` and it fails before any browser directory-access "
+            "callback is triggered."
+            if manual_action_label
+            else "The Workspace switcher opened, but it did not expose the saved unavailable "
+            "local workspace row/action required to continue the TS-912 manual restore flow."
+        )
+    )
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -1374,13 +1574,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         EXPECTED_RESULT,
         "",
         "## Missing or broken production capability",
-        (
-            "The deployed web build does not expose a working manual re-authentication / "
-            "directory-access grant flow for the saved unavailable local workspace from the "
-            "Workspace switcher. The closest visible saved-workspace action remains "
-            f"`{manual_action_label}` and it fails before any browser directory-access "
-            "callback is triggered."
-        ),
+        missing_capability,
         "",
         "## Environment details",
         f"- URL: {result.get('app_url')}",
@@ -1391,6 +1585,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Run command: `{RUN_COMMAND}`",
         "",
         "## Observed state",
+        f"- Startup observation: `{json.dumps(startup_observation, ensure_ascii=True)}`",
         f"- Trigger before restore: `{json.dumps(trigger_before, ensure_ascii=True)}`",
         f"- Local row before restore: `{json.dumps(local_before, ensure_ascii=True)}`",
         f"- Trigger after restore: `{json.dumps(trigger_after, ensure_ascii=True)}`",

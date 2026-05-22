@@ -1092,17 +1092,23 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         )
 
-    def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
-        if not run_log_text.strip():
-            return ""
-        match = re.search(
-            r"Accessibility runtime surface ready:[^\r\n]*",
-            run_log_text,
-            flags=re.IGNORECASE,
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
         )
-        if match is None:
-            return ""
-        return self._snippet(match.group(0), limit=400)
+
+    def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
+        for line in self._extract_matching_log_lines(
+            run_log_text,
+            markers=["accessibility runtime surface ready"],
+        ):
+            return line
+        return ""
 
     def _extract_flutter_engine_initialization_log_entries(
         self,
@@ -1140,10 +1146,25 @@ class GitHubAccessibilityPullRequestGateProbeService:
             normalized_line = " ".join(raw_line.split()).strip()
             if not normalized_line:
                 continue
-            lowered_line = normalized_line.lower()
-            if any(marker in lowered_line for marker in lowered_markers):
+            if any(
+                self._line_contains_runtime_marker(normalized_line, marker)
+                for marker in lowered_markers
+            ):
                 matches.append(self._snippet(normalized_line, limit=300))
         return self._dedupe(matches)
+
+    @staticmethod
+    def _line_contains_runtime_marker(normalized_line: str, marker: str) -> bool:
+        lowered_line = normalized_line.lower()
+        marker = marker.lower().strip()
+        if not marker:
+            return False
+        return lowered_line.startswith(marker) or bool(
+            re.search(
+                r"\d{4}-\d{2}-\d{2}t[\d:.]+z\s+" + re.escape(marker),
+                lowered_line,
+            )
+        )
 
     def _summarize_log_entries(self, entries: list[str]) -> str:
         if not entries:
@@ -1358,11 +1379,30 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        probe_import = f"import '{Path(self._config.probe_path).name}';"
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
         ):
+            if probe_import in source:
+                return source
+
+            updated_source, replacements = re.subn(
+                r"^import '[^']+_probe_surface\.dart';\n",
+                f"{probe_import}\n",
+                source,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if replacements > 0:
+                return updated_source
+
+            source = source.replace(
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n",
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n"
+                f"{probe_import}\n",
+            )
             return source
 
         if "package:flutter/material.dart" not in source:
@@ -1373,7 +1413,6 @@ class Ts908ProbeSurface extends StatelessWidget {
         if "package:flutter/material.dart" not in source:
             source = "import 'package:flutter/material.dart';\n\n" + source.lstrip()
 
-        probe_import = f"import '{Path(self._config.probe_path).name}';"
         if probe_import not in source:
             source = source.replace(
                 "import 'ui/features/tracker/views/trackstate_app.dart';\n",

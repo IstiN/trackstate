@@ -212,6 +212,62 @@ jobs:
             )
         )
 
+    def test_inject_probe_into_render_host_replaces_stale_checked_in_probe_import(self) -> None:
+        probe = _StubProbeService(
+            self.config,
+            github_api_client=_FakeGitHubApiClient(
+                {
+                    "/repos/IstiN/trackstate": {"default_branch": "main"},
+                    "/repos/IstiN/trackstate/actions/workflows?per_page=100": {"workflows": []},
+                }
+            ),
+        )
+
+        patched = probe._inject_probe_into_render_host(  # noqa: SLF001
+            """
+import 'package:flutter/material.dart';
+
+import 'data/repositories/trackstate_repository.dart';
+import 'ui/features/tracker/views/trackstate_app.dart';
+import 'ts908_probe_surface.dart';
+
+const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
+  'TRACKSTATE_USE_DEMO_REPOSITORY',
+);
+
+void main() {
+  runApp(_Ts908RenderedProbeApp(child: _useDemoRepositoryForAccessibility
+        ? const TrackStateApp(repository: DemoTrackStateRepository())
+        : const TrackStateApp(),));
+}
+
+class _Ts908RenderedProbeApp extends StatelessWidget {
+  const _Ts908RenderedProbeApp({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'TrackState.AI',
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: const Ts908ProbeSurface(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+""".strip()
+        )
+
+        self.assertIn("import 'ts936_probe_surface.dart';", patched)
+        self.assertNotIn("import 'ts908_probe_surface.dart';", patched)
+
 
 if __name__ == "__main__":
     unittest.main()

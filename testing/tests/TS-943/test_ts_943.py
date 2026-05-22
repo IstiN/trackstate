@@ -262,11 +262,12 @@ def _evaluate_log_validation_output(
     full_run_log_error: str | None,
 ) -> None:
     step_failures: list[str] = []
+    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
     log_validation_visible = _has_log_validation_step(
         observation.observed_step_names,
         full_run_log_text,
     )
-    missing_token_message = _extract_missing_token_message(full_run_log_text)
+    missing_token_message = _extract_missing_token_message(log_validation_step_output)
     if full_run_log_error is not None:
         step_failures.append(
             f"the hosted run log could not be read: {full_run_log_error}."
@@ -299,8 +300,14 @@ def _evaluate_log_validation_output(
             + f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
             + f"Flutter engine log entries: {observation.flutter_engine_initialization_log_entries or ['<none>']}\n"
             + f"Semantics discovery log entries: {observation.semantics_tree_discovery_log_entries or ['<none>']}\n"
-            + "Full run log excerpt:\n"
-            + (_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation) or "<none>")
+            + "log-validation step excerpt:\n"
+            + (
+                _extract_relevant_full_log_excerpt(
+                    full_run_log_text,
+                    observation=observation,
+                )
+                or "<none>"
+            )
         )
         failures.append(message)
         _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
@@ -323,6 +330,7 @@ def _record_live_user_verification(
     full_run_log_text: str,
     full_run_log_error: str | None,
 ) -> None:
+    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
     _record_human_verification(
         result,
         check=(
@@ -346,7 +354,7 @@ def _record_live_user_verification(
         ),
         observed=(
             f"Log read error: `{full_run_log_error or '<none>'}`; missing-token message: "
-            f"`{_extract_missing_token_message(full_run_log_text) or '<none>'}`; Flutter "
+            f"`{_extract_missing_token_message(log_validation_step_output) or '<none>'}`; Flutter "
             f"engine lines: `{observation.flutter_engine_initialization_summary or '<none>'}`; "
             f"semantics lines: `{observation.semantics_tree_discovery_summary or '<none>'}`; "
             f"log excerpt: `{_one_line(_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation)) or '<none>'}`."
@@ -375,6 +383,21 @@ def _surface_step_names_from_log(full_run_log_text: str) -> list[str]:
     return step_names
 
 
+def _extract_log_validation_step_output(full_run_log_text: str) -> str:
+    lines: list[str] = []
+    for raw_line in full_run_log_text.splitlines():
+        parts = raw_line.lstrip("\ufeff").split("\t", 2)
+        if len(parts) != 3:
+            continue
+        step_name = parts[1].strip()
+        if not LOG_VALIDATION_STEP_PATTERN.search(step_name):
+            continue
+        payload = parts[2].strip()
+        if payload:
+            lines.append(payload)
+    return "\n".join(lines)
+
+
 def _extract_missing_token_message(text: str) -> str | None:
     for pattern in MISSING_TOKEN_PATTERNS:
         match = pattern.search(text)
@@ -388,6 +411,9 @@ def _extract_relevant_full_log_excerpt(
     *,
     observation: GitHubAccessibilityPullRequestGateObservation,
 ) -> str:
+    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
+    if log_validation_step_output.strip():
+        return _snippet(log_validation_step_output, limit=1600)
     if not full_run_log_text.strip():
         return observation.run_log_excerpt or ""
 

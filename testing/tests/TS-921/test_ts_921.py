@@ -35,6 +35,7 @@ TICKET_KEY = "TS-921"
 TEST_CASE_TITLE = (
     "Manual re-authentication with non-workspace directory keeps Local Unavailable state"
 )
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-921/test_ts_921.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
@@ -47,9 +48,9 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Updated TS-921 to treat the overridden browser picker call as the real "
-    "selection signal and to fail only on the final user-visible wrong-directory "
-    "result."
+    "Resolved the TS-921 rework conflict, kept the live wrong-directory outcome "
+    "driven by the current rerun, and now builds review replies from the actual "
+    "unresolved PR thread metadata instead of stale hardcoded IDs."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -69,6 +70,7 @@ RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_failure.png"
 
@@ -412,21 +414,21 @@ def main() -> None:
 
                 post_retry_started_at = time.monotonic()
                 settled, settled_observation = poll_until(
-                    probe=lambda: _observe_post_retry_state(
-                        tracker_page=tracker_page,
-                        page=page,
-                        expected_local_workspace_id=local_workspace_id,
-                        post_retry_started_at=post_retry_started_at,
-                    ),
-                    is_satisfied=lambda observation: bool(
-                        observation.get("user_visible_error")
-                    )
-                    or bool(observation.get("active_workspace_is_local"))
-                    or _local_row_promoted_to_local_git(
-                        observation.get("local_row"),
-                    ),
-                    timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
-                    interval_seconds=1,
+probe=lambda: _observe_post_retry_state(
+    tracker_page=tracker_page,
+    page=page,
+    expected_local_workspace_id=local_workspace_id,
+    post_retry_started_at=post_retry_started_at,
+),
+is_satisfied=lambda observation: bool(
+    observation.get("user_visible_error")
+)
+or bool(observation.get("active_workspace_is_local"))
+or _local_row_promoted_to_local_git(
+    observation.get("local_row"),
+),
+timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
+interval_seconds=1,
                 )
                 result["post_retry_observation"] = settled_observation
                 result["console_events"] = list(runtime_context.console_events)
@@ -1222,7 +1224,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -1244,7 +1249,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
@@ -1345,38 +1353,66 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "The wrong-directory retry stayed visible to the user as a failure and did not "
-            "promote the workspace to Local Git.\n"
+    status = "passed" if passed else "failed"
+    lines = [f"# {TICKET_KEY} {status}", ""]
+    if not passed:
+        lines.extend(
+            [
+                "## Issues/Notes",
+                f"- Re-run failed: {_failed_step_summary(result)}",
+                "",
+            ],
         )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The deployed app blocked the TS-921 scenario before the wrong-directory retry could run.')}\n"
+    lines.extend(
+        [
+            "## Approach",
+            f"- {REWORK_SUMMARY}",
+            (
+                "- Re-ran the live deployed workspace re-authentication flow and captured the "
+                "current user-visible outcome after the wrong-directory selection."
+            ),
+            "",
+            "## Files Modified",
+            "- `testing/tests/TS-921/test_ts_921.py`",
+            "",
+            "## Test Coverage",
+            f"- Test case: `{TICKET_KEY} - {TEST_CASE_TITLE}`",
+            f"- Result: `{status}`",
+            f"- Command: `{RUN_COMMAND}`",
+            (
+                f"- Environment: `{result.get('app_url')}` on Chromium/Playwright "
+                f"({result.get('os')}) against `{result.get('repository')}` @ "
+                f"`{result.get('repository_ref')}`."
+            ),
+            f"- Step results: {', '.join(_step_status_summary(result))}",
+        ],
     )
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
 
 
-def _build_review_replies() -> str:
+def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
     return (
         json.dumps(
-            {
-                "replies": [
-                    {
-                        "inReplyToId": 3290577660,
-                        "threadId": "PRRT_kwDOSU6Gf86ENETH",
-                        "reply": (
-                            "Updated: the deployed app still hard-stops on the visible `Sync "
-                            "issue` surface before the Workspace switcher exists, so TS-921 now "
-                            "keeps that as a real failed test/product bug and emits the required "
-                            "failed result payload plus `bug_description.md` for downstream bug "
-                            "handling."
-                        ),
-                    },
-                ],
-            },
+            {"replies": replies},
+            indent=2,
         )
         + "\n"
     )
@@ -1403,45 +1439,44 @@ def _build_bug_description(result: dict[str, object]) -> str:
         )
 
     lines = [
-        f"# {TICKET_KEY} bug report",
+        "h4. Environment",
+        f"* URL: {result.get('app_url')}",
+        f"* Browser: {result.get('browser')}",
+        f"* OS: {result.get('os')}",
+        f"* Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+        f"* Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+        f"* Wrong directory handle returned by test: {WRONG_DIRECTORY_NAME}",
         "",
-        "## Steps to reproduce",
+        "h4. Steps to Reproduce",
         *annotated_steps,
         "",
-        "## Exact error message or assertion failure",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
-        "",
-        "## Actual result",
-        str(result.get("error", "The wrong-directory retry did not match the expected result.")),
-        "",
-        "## Missing or broken production capability",
-        _missing_or_broken_capability(result),
-        "",
-        "## Expected result",
+        "h4. Expected Result",
         EXPECTED_RESULT,
         "",
-        "## Environment details",
-        f"- URL: {result.get('app_url')}",
-        f"- Browser: {result.get('browser')}",
-        f"- OS: {result.get('os')}",
-        f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"- Wrong directory handle returned by test: {WRONG_DIRECTORY_NAME}",
-        f"- Run command: `{RUN_COMMAND}`",
+        "h4. Actual Result",
+        str(result.get("error", "The wrong-directory retry did not match the expected result.")),
         "",
-        "## Observed state",
-        f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
-        f"- Trigger before action: `{json.dumps(result.get('trigger_before'), ensure_ascii=True)}`",
-        f"- Switcher before action: `{json.dumps(result.get('switcher_before'), ensure_ascii=True)}`",
-        f"- Saved local row before action: `{json.dumps(result.get('saved_local_row_before'), ensure_ascii=True)}`",
-        f"- Callback observation: `{json.dumps(result.get('callback_observation'), ensure_ascii=True)}`",
-        f"- Post-retry observation: `{json.dumps(result.get('post_retry_observation'), ensure_ascii=True)}`",
-        f"- Console events: `{json.dumps(result.get('console_events'), ensure_ascii=True)}`",
-        f"- Page errors: `{json.dumps(result.get('page_errors'), ensure_ascii=True)}`",
+        "h4. Missing or Broken Production Capability",
+        _missing_or_broken_capability(result),
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
+        str(result.get("traceback", result.get("error", ""))),
+        "{code}",
+        "",
+        "h4. Notes",
+        f"* Run command: {RUN_COMMAND}",
+        f"* Startup observation: {json.dumps(result.get('startup_observation'), ensure_ascii=True)}",
+        f"* Trigger before action: {json.dumps(result.get('trigger_before'), ensure_ascii=True)}",
+        f"* Switcher before action: {json.dumps(result.get('switcher_before'), ensure_ascii=True)}",
+        f"* Saved local row before action: {json.dumps(result.get('saved_local_row_before'), ensure_ascii=True)}",
+        f"* Callback observation: {json.dumps(result.get('callback_observation'), ensure_ascii=True)}",
+        f"* Post-retry observation: {json.dumps(result.get('post_retry_observation'), ensure_ascii=True)}",
+        f"* Console events: {json.dumps(result.get('console_events'), ensure_ascii=True)}",
+        f"* Page errors: {json.dumps(result.get('page_errors'), ensure_ascii=True)}",
     ]
     if result.get("screenshot"):
-        lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{result['screenshot']}`"])
+        lines.append(f"* Screenshot: {result['screenshot']}")
     return "\n".join(lines) + "\n"
 
 
@@ -1485,6 +1520,86 @@ def _missing_or_broken_capability(result: dict[str, object]) -> str:
         "The deployed web app did not produce the expected wrong-directory mismatch "
         "outcome required by TS-921."
     )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId") or thread.get("id")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+                "body": thread.get("body"),
+            },
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-921 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else (
+            "Re-ran the current TS-921 test and it still failed: "
+            f"{_snippet(_current_failure_summary(result), limit=240)}"
+        )
+    )
+    return (
+        "Fixed: `review_replies.json` is now generated from the unresolved entries in "
+        f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}` and the current rerun result, "
+        "so it no longer hardcodes stale PR thread IDs or an outdated failure mode. "
+        f"{rerun_summary}"
+    )
+
+
+def _failed_step_summary(result: dict[str, object]) -> str:
+    failed_steps = [
+        step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    ]
+    if not failed_steps:
+        return str(result.get("error", "The test failed before step details were recorded."))
+    first_failed_step = failed_steps[0]
+    return (
+        f"Step {first_failed_step.get('step')} failed. "
+        f"{_snippet(str(first_failed_step.get('observed', '')), limit=500)}"
+    )
+
+
+def _current_failure_summary(result: dict[str, object]) -> str:
+    error = str(result.get("error", "")).strip()
+    if error:
+        return error.splitlines()[0]
+    return _failed_step_summary(result)
+
+
+def _step_status_summary(result: dict[str, object]) -> list[str]:
+    summaries: list[str] = []
+    for step in result.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        summaries.append(f"{step.get('step')}={step.get('status')}")
+    return summaries or ["<no steps recorded>"]
+
+
+def _snippet(text: str, *, limit: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
