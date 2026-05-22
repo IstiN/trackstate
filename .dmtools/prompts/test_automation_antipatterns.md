@@ -85,3 +85,49 @@ flowchart TD
 ```
 
 **Rule**: `aria-invalid` alone is never sufficient for "error feedback is accessible". The actual error text must be programmatically associated.
+
+## 8. Regression test fixtures must match data class contracts
+
+When you create a fake/stub observation for regression tests:
+- Instantiate the REAL data class, not a dict
+- Supply ALL required fields, not just the ones your test cares about
+- If the data class gains a new field, ALL fixtures must be updated in the same PR
+
+```python
+# ❌ WRONG — missing required fields, test crashes before assertions run
+fake_obs = GateObservation(conclusion="success", steps=["Run checks"])
+
+# ✅ CORRECT — all required fields present
+fake_obs = GateObservation(
+    conclusion="success",
+    steps=["Run checks"],
+    runtime_surface_present=True,
+    runtime_surface_summary="hosts=1; nodes=50"
+)
+```
+
+**Rule**: Run `python3 -m unittest <regression_test_file>` BEFORE pushing. If it errors with `TypeError: missing required positional argument`, fix it immediately.
+
+## 9. Never treat `skipped`/`neutral` CI conclusion as PASS
+
+```mermaid
+flowchart TD
+  CI([CI check completed]) --> Conc{Conclusion?}
+  Conc -->|success| PASS["✅ Only 'success' = pass"]
+  Conc -->|skipped / neutral| FAIL["❌ NOT a pass\nMay mean check was bypassed"]
+  Conc -->|failure| FAIL2["❌ Fail"]
+```
+
+**Rule**: If the ticket requires a CI check to prove something, only `conclusion == 'success'` counts. A skipped check proves nothing.
+
+## 10. Config values must be coupled to runtime artifacts
+
+```mermaid
+flowchart TD
+  Config["config.yaml defines\ncolor: rgb(178,67,40)"] --> Probe{How is probe\nrendered?}
+  Probe -->|"From config values\ndirectly"| OK["✅ Config validation\nis sufficient"]
+  Probe -->|"From theme tokens\nor computed values"| BAD["❌ Config check alone\nis NOT sufficient"]
+  BAD --> Fix["Either:\n1. Generate probe FROM config values\n2. Assert rendered colors from live evidence\n3. Both"]
+```
+
+**Rule**: If the test validates config values but the runtime uses a different source (theme tokens, computed values), the assertion proves nothing about actual behavior. Couple the assertion to the runtime artifact.

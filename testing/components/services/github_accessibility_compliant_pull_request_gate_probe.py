@@ -52,14 +52,18 @@ class Ts924ProbeSurface extends StatelessWidget {{
     final accessibleColor = colorScheme.onSurface;
 
     return Semantics(
+      container: true,
+      readOnly: true,
       label: '{cls.expected_semantic_label}',
-      child: Container(
-        color: colorScheme.surface,
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          'Accessibility checks ready',
-          style: textStyle?.copyWith(color: accessibleColor) ??
-              TextStyle(color: accessibleColor),
+      child: ExcludeSemantics(
+        child: Container(
+          color: colorScheme.surface,
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'Accessibility checks ready',
+            style: textStyle?.copyWith(color: accessibleColor) ??
+                TextStyle(color: accessibleColor),
+          ),
         ),
       ),
     );
