@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections import Counter
+from dataclasses import asdict, replace
 import json
+import math
 import platform
 import sys
 import traceback
@@ -22,6 +24,13 @@ from testing.components.services.live_workspace_switcher_delete_contrast_probe i
     LiveWorkspaceSwitcherDeleteContrastProbe,
     WorkspaceSwitcherDeleteContrastObservation,
 )
+from testing.core.utils.color_contrast import (  # noqa: E402
+    RgbColor,
+    color_distance,
+    contrast_ratio,
+    rgb_to_hex,
+)
+from testing.core.utils.png_image import RgbImage  # noqa: E402
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
@@ -56,12 +65,14 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+PROBE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts928_probe.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts928_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts928_failure.png"
 
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    PROBE_SCREENSHOT_PATH.unlink(missing_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
     FAILURE_SCREENSHOT_PATH.unlink(missing_ok=True)
 
@@ -74,6 +85,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state()
+    hosted_workspace_id = f"hosted:{HOSTED_TARGET.lower()}@{DEFAULT_BRANCH}"
     probe = LiveWorkspaceSwitcherDeleteContrastProbe()
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -100,6 +112,7 @@ def main() -> None:
                 repository=config.repository,
                 token=token,
                 workspace_state=workspace_state,
+                workspace_token_profile_ids=(hosted_workspace_id,),
             ),
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
@@ -132,12 +145,13 @@ def main() -> None:
             page.set_viewport(**DESKTOP_VIEWPORT)
             trigger = page.observe_trigger(timeout_ms=20_000)
             result["trigger_observation"] = _trigger_payload(trigger)
-            _open_surface_from_trigger(
-                page=page,
-                trigger=trigger,
-                timeout_ms=20_000,
-            )
+            page.open_switcher(timeout_ms=20_000)
             surface = page.observe_surface(timeout_ms=20_000)
+            _capture_screenshot(page, PROBE_SCREENSHOT_PATH, result)
+            surface = _enrich_surface_interactive_text_contrast(
+                surface=surface,
+                screenshot_path=PROBE_SCREENSHOT_PATH,
+            )
             result["surface_heading"] = surface.heading_text
             result["surface_body_text"] = surface.body_text
             result["surface_interactive_elements"] = [
@@ -361,30 +375,6 @@ def _semantics_payload(item: object) -> dict[str, object]:
         "tag_name": getattr(item, "tag_name", ""),
         "visible_text": getattr(item, "visible_text", ""),
     }
-
-
-def _open_surface_from_trigger(
-    *,
-    page: LiveWorkspaceSwitcherPage,
-    trigger: WorkspaceSwitcherTriggerObservation,
-    timeout_ms: int,
-) -> None:
-    escaped_label = trigger.semantic_label.replace("\\", "\\\\").replace('"', '\\"')
-    try:
-        page._session.click(  # noqa: SLF001 - reuse the observed live trigger label directly
-            (
-                'flt-semantics[role="button"][aria-label="'
-                f'{escaped_label}'
-                '"],button[aria-label="'
-                f'{escaped_label}'
-                '"],[role="button"][aria-label="'
-                f'{escaped_label}'
-                '"]'
-            ),
-            timeout_ms=timeout_ms,
-        )
-    except Exception:
-        page.open_surface_with_click(timeout_ms=timeout_ms)
 
 
 def _record_step(
@@ -739,6 +729,136 @@ def _reproduction_steps(result: dict[str, object]) -> str:
             f"Observed: {step.get('observed')}"
         )
     return "\n".join(lines)
+
+
+def _enrich_surface_interactive_text_contrast(
+    *,
+    surface,
+    screenshot_path: Path,
+):
+    if not screenshot_path.exists() or not surface.interactive_texts:
+        return surface
+    image = RgbImage.open(screenshot_path)
+    interactive_texts = tuple(
+        _observe_interactive_text(image=image, text_control=text_control)
+        for text_control in surface.interactive_texts
+    )
+    interactive_icons = tuple(
+        _observe_interactive_icon(image=image, icon=icon)
+        for icon in surface.interactive_icons
+    )
+    return replace(
+        surface,
+        interactive_texts=interactive_texts,
+        interactive_icons=interactive_icons,
+    )
+
+
+def _observe_interactive_text(*, image: RgbImage, text_control):
+    box = _box(
+        image=image,
+        left=text_control.x,
+        top=text_control.y,
+        width=text_control.width,
+        height=text_control.height,
+    )
+    if box is None:
+        return text_control
+    crop = image.crop(box)
+    background = _dominant_color(crop)
+    foreground = _sample_foreground(crop, background=background)
+    return replace(
+        text_control,
+        foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
+        background_color=rgb_to_hex(background).lower(),
+        contrast_ratio=(
+            round(contrast_ratio(foreground, background), 2)
+            if foreground is not None
+            else None
+        ),
+    )
+
+
+def _observe_interactive_icon(*, image: RgbImage, icon):
+    box = _box(
+        image=image,
+        left=icon.x,
+        top=icon.y,
+        width=icon.width,
+        height=icon.height,
+    )
+    if box is None:
+        return icon
+    crop = image.crop(box)
+    background = _dominant_color(crop)
+    foreground = _sample_foreground(crop, background=background)
+    return replace(
+        icon,
+        foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
+        background_color=rgb_to_hex(background).lower(),
+        contrast_ratio=(
+            round(contrast_ratio(foreground, background), 2)
+            if foreground is not None
+            else None
+        ),
+    )
+
+
+def _box(
+    *,
+    image: RgbImage,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+) -> tuple[int, int, int, int] | None:
+    if width <= 0 or height <= 0:
+        return None
+    box = (
+        max(int(math.floor(left)), 0),
+        max(int(math.floor(top)), 0),
+        min(int(math.ceil(left + width)), image.width),
+        min(int(math.ceil(top + height)), image.height),
+    )
+    if box[0] >= box[2] or box[1] >= box[3]:
+        return None
+    return box
+
+
+def _dominant_color(image: RgbImage) -> RgbColor:
+    counts = Counter(image.getdata())
+    color, _ = counts.most_common(1)[0]
+    return color
+
+
+def _sample_foreground(
+    image: RgbImage,
+    *,
+    background: RgbColor,
+) -> RgbColor | None:
+    counts = Counter(image.getdata())
+    samples = [
+        (color, count)
+        for color, count in counts.items()
+        if color_distance(color, background) > 20
+    ]
+    if not samples:
+        return None
+    strongest_distance = max(
+        color_distance(color, background)
+        for color, _ in samples
+    )
+    strongest_samples = [
+        (color, count)
+        for color, count in samples
+        if strongest_distance - color_distance(color, background) <= 8
+    ]
+    total = sum(count for _, count in strongest_samples)
+    return (
+        round(sum(color[0] * count for color, count in strongest_samples) / total),
+        round(sum(color[1] * count for color, count in strongest_samples) / total),
+        round(sum(color[2] * count for color, count in strongest_samples) / total),
+    )
 
 
 def _format_error(error: BaseException) -> str:

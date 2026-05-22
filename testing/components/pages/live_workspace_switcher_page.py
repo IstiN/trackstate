@@ -3544,6 +3544,13 @@ class LiveWorkspaceSwitcherPage:
                 'input',
                 'textarea',
               ].join(',');
+              const panelScopedControls = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
+              )
+                .filter(isVisible)
+                .filter((element) =>
+                  element.getAttribute('data-trackstate-browser-focus-panel-id') === 'trackstate-workspace-switcher',
+                );
               const semanticsSelector = [
                 'flt-semantics',
                 '[role]',
@@ -3622,7 +3629,7 @@ class LiveWorkspaceSwitcherPage:
                 .map((node, index) =>
                   `${node.tagName}[${index}] role=${node.role ?? '<none>'} text=${node.visibleText || '<none>'}`,
                 );
-              const interactiveTexts = Array.from(switcher.querySelectorAll(interactiveSelector))
+              const interactiveTextElements = Array.from(switcher.querySelectorAll(interactiveSelector))
                 .filter(isVisible)
                 .map((element) => {
                   const visibleText = visibleTextFor(element);
@@ -3642,6 +3649,41 @@ class LiveWorkspaceSwitcherPage:
                   };
                 })
                 .filter((element) => element.visibleText.length > 0);
+              const deleteButtons = panelScopedControls
+                .map((element) => {
+                  const label = labelFor(element);
+                  if (!label.startsWith('Delete:')) {
+                    return null;
+                  }
+                  const backgroundColor = resolveBackgroundColor(
+                    element,
+                    toHex(window.getComputedStyle(switcher).backgroundColor),
+                  );
+                  const foregroundColor = resolveForegroundColor(element);
+                  return {
+                    label,
+                    visibleText: label,
+                    role: element.getAttribute('role'),
+                    foregroundColor,
+                    backgroundColor,
+                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                    ...rectPayload(element),
+                  };
+                })
+                .filter((element) => element !== null);
+              const interactiveTexts = [...interactiveTextElements];
+              for (const candidate of deleteButtons) {
+                if (interactiveTexts.some((element) =>
+                  element.label === candidate.label
+                  && Math.abs(element.x - candidate.x) < 1
+                  && Math.abs(element.y - candidate.y) < 1
+                  && Math.abs(element.width - candidate.width) < 1
+                  && Math.abs(element.height - candidate.height) < 1
+                )) {
+                  continue;
+                }
+                interactiveTexts.push(candidate);
+              }
               const badgeLabels = new Set([
                 'Hosted',
                 'Local',
@@ -3688,6 +3730,7 @@ class LiveWorkspaceSwitcherPage:
               const triggerAndDialogControls = [
                 ...(workspaceTrigger ? [workspaceTrigger] : []),
                 ...Array.from(switcher.querySelectorAll(interactiveSelector)).filter(isVisible),
+                ...panelScopedControls,
               ];
               const interactiveIcons = triggerAndDialogControls.flatMap((element) => {
                 const icons = Array.from(element.querySelectorAll(iconSelector)).filter(isVisible);
