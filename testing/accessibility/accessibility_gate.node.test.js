@@ -64,12 +64,14 @@ test(
       ]);
       assert.deepEqual(diagnostics.semanticsEntries, [
         'Semantics tree discovery: waiting for nodes',
+        'Semantics tree discovery: verified flt-semantics-placeholder',
         'Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
       ]);
       assert.deepEqual(observedLogs, [
         'Flutter engine initialization: bootstrap requested',
         'Flutter engine initialization: page loaded',
         'Semantics tree discovery: waiting for nodes',
+        'Semantics tree discovery: verified flt-semantics-placeholder',
         'Flutter engine initialization: semantics placeholder attached',
         'Flutter engine initialization: semantics host attached',
         'Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
@@ -91,5 +93,43 @@ test(
       ]);
       assert.equal(page.calls[5][0], 'waitForFunction');
       assert.equal(page.calls[6][0], 'evaluate');
+    },
+);
+
+test(
+    'captureFlutterStartupDiagnostics logs explicit placeholder verification before runtime readiness',
+    async () => {
+      const page = new FakePage();
+      const observedLogs = [];
+
+      const diagnostics = await captureFlutterStartupDiagnostics(page, {
+        log: (entry) => observedLogs.push(entry),
+      });
+
+      const placeholderEvidence =
+        'Semantics tree discovery: verified flt-semantics-placeholder';
+      assert.ok(
+          diagnostics.semanticsEntries.includes(placeholderEvidence),
+          'Expected semantics diagnostics to include explicit placeholder verification evidence.',
+      );
+
+      const placeholderIndex = observedLogs.indexOf(placeholderEvidence);
+      const runtimeIndex = observedLogs.indexOf(
+          'Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
+      );
+      assert.notEqual(
+          placeholderIndex,
+          -1,
+          'Expected the shared accessibility log to include placeholder verification evidence.',
+      );
+      assert.notEqual(
+          runtimeIndex,
+          -1,
+          'Expected the shared accessibility log to include runtime readiness evidence.',
+      );
+      assert.ok(
+          placeholderIndex < runtimeIndex,
+          'Expected placeholder verification to be logged before runtime readiness evidence.',
+      );
     },
 );
