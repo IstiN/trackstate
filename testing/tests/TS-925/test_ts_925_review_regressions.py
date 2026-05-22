@@ -4,6 +4,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+from testing.components.pages.github_actions_page import GitHubActionsPageObservation
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (
     GitHubAccessibilityPullRequestGateObservation,
     GitHubAccessibilityWorkflowContractObservation,
@@ -70,10 +71,10 @@ class Ts925ReviewRegressionTest(unittest.TestCase):
             pull_request_checks_url="https://github.com/IstiN/trackstate/pull/123/checks",
             pull_request_head_branch="ts925-accessibility-fail-fast",
             pull_request_head_sha="abc123",
-            pull_request_probe_path="lib/ts925_probe_surface.dart",
+            pull_request_probe_path="lib/ts908_probe_surface.dart",
             probe_render_host_path="lib/main.dart",
             probe_rendered_in_application=True,
-            pull_request_file_paths=["lib/main.dart", "lib/ts925_probe_surface.dart"],
+            pull_request_file_paths=["lib/ts908_probe_surface.dart"],
             pull_request_state="open",
             pull_request_mergeable_state="clean",
             pull_request_status_state="failure",
@@ -124,10 +125,32 @@ class Ts925ReviewRegressionTest(unittest.TestCase):
             probe_contains_low_contrast_indicator=True,
             probe_contains_semantic_label_indicator=True,
             probe_semantic_label="button",
-            probe_contrast_technique="Uses onSurface.withAlpha(89) on surface.",
+            probe_contrast_technique="Uses colorScheme.surface text on colorScheme.surface.",
             cleanup_closed_pull_request=True,
             cleanup_deleted_branch=True,
         )
+
+    def test_step_1_accepts_rendered_probe_file_without_render_host_diff(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+        observation = self._observation(
+            observed_step_names=[
+                "Build web app for accessibility scan",
+                "Run axe-core accessibility checks",
+            ],
+            run_log_matched_accessibility_markers=["axe-core", "accessibility"],
+            run_log_matched_contrast_markers=["ratio"],
+            run_log_excerpt="Run axe-core accessibility checks",
+        )
+
+        self.module._evaluate_pr_probe(  # type: ignore[attr-defined]
+            result,
+            observation,
+            failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
 
     def test_step_4_rejects_build_failure_before_audit_executes(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
@@ -186,6 +209,82 @@ class Ts925ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("workflow contract defines a downstream deploy/publish stage", failures[0])
+
+    def test_step_3_requires_browser_screenshot_evidence(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+        observation = self._observation(
+            observed_step_names=[
+                "Build web app for accessibility scan",
+                "Run axe-core accessibility checks",
+            ],
+            run_log_matched_accessibility_markers=["axe-core", "accessibility"],
+            run_log_matched_contrast_markers=["ratio"],
+            run_log_excerpt="Run axe-core accessibility checks",
+        )
+        run_page = GitHubActionsPageObservation(
+            url=observation.latest_pull_request_run_url or "https://example.test/run",
+            matched_text="Flutter Required Checks",
+            body_text="Flutter Required Checks\nAccessibility checks\nDeploy preview",
+            screenshot_path=None,
+        )
+
+        self.module._evaluate_actions_ui(  # type: ignore[attr-defined]
+            result,
+            observation=observation,
+            run_page=run_page,
+            run_page_error=None,
+            failures=failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("browser-backed UI evidence was not captured", failures[0])
+
+    def test_bug_description_distinguishes_non_verifiable_audit_runs(self) -> None:
+        result: dict[str, object] = {
+            "ticket": "TS-925",
+            "repository": "IstiN/trackstate",
+            "default_branch": "main",
+            "browser": "Chromium (Playwright)",
+            "os": "Linux",
+            "pull_request_url": "https://github.com/IstiN/trackstate/pull/123",
+            "pull_request_checks_url": "https://github.com/IstiN/trackstate/pull/123/checks",
+            "latest_pull_request_run_url": "https://github.com/IstiN/trackstate/actions/runs/456",
+            "run_log_excerpt": "Build web app for accessibility scan\nError: Failed to compile",
+            "steps": [
+                {"step": 1, "status": "passed", "action": "1", "observed": "probe created"},
+                {"step": 2, "status": "passed", "action": "2", "observed": "run started"},
+                {"step": 3, "status": "passed", "action": "3", "observed": "ui opened"},
+                {
+                    "step": 4,
+                    "status": "failed",
+                    "action": "4",
+                    "observed": (
+                        "Step 4 failed: the live workflow did not expose a verifiable "
+                        "accessibility audit failure for the disposable contrast defect.\n"
+                        "Accessibility check conclusion: failure"
+                    ),
+                },
+            ],
+            "observed_step_names": ["Build web app for accessibility scan"],
+            "run_log_matched_accessibility_markers": [],
+            "run_log_matched_contrast_markers": ["ratio"],
+            "accessibility_status_check_conclusion": "failure",
+            "error": "AssertionError: Step 4 failed",
+            "traceback": "AssertionError: Step 4 failed",
+        }
+
+        bug_description = self.module._bug_description(result)  # type: ignore[attr-defined]
+
+        self.assertIn(
+            "Accessibility audit does not expose a verifiable result",
+            bug_description,
+        )
+        self.assertNotIn(
+            "Accessibility gate passes a low-contrast PR",
+            bug_description,
+        )
 
 
 if __name__ == "__main__":
