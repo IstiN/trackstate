@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import platform
-import re
 import sys
 import traceback
 from pathlib import Path
@@ -11,9 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.components.services.github_accessibility_stage_log_inspector import (  # noqa: E402
-    GitHubAccessibilityStageLogInspector,
-    GitHubWorkflowStageLogEntry,
+from testing.components.services.github_accessibility_compliant_pull_request_gate_probe import (  # noqa: E402
+    GitHubAccessibilityCompliantPullRequestGateProbeService,
 )
 from testing.core.config.github_accessibility_pull_request_gate_config import (  # noqa: E402
     GitHubAccessibilityPullRequestGateConfig,
@@ -21,18 +19,17 @@ from testing.core.config.github_accessibility_pull_request_gate_config import ( 
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (  # noqa: E402
     GitHubAccessibilityPullRequestGateObservation,
 )
-from testing.tests.support.github_accessibility_placeholder_verification_probe_factory import (  # noqa: E402
-    create_github_accessibility_stage_log_inspector,
-    create_github_accessibility_placeholder_verification_probe,
+from testing.tests.support.github_accessibility_compliant_pull_request_gate_probe_factory import (  # noqa: E402
+    create_github_accessibility_compliant_pull_request_gate_probe,
 )
 
-TICKET_KEY = "TS-932"
+TICKET_KEY = "TS-934"
 TEST_CASE_TITLE = (
-    "Accessibility gate initialization - flt-semantics-placeholder is verified before scanning"
+    "CI accessibility audit execution - Flutter engine initialization states are logged"
 )
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-932/test_ts_932.py"
-TEST_FILE_PATH = "testing/tests/TS-932/test_ts_932.py"
-CONFIG_PATH = REPO_ROOT / "testing/tests/TS-932/config.yaml"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-934/test_ts_934.py"
+TEST_FILE_PATH = "testing/tests/TS-934/test_ts_934.py"
+CONFIG_PATH = REPO_ROOT / "testing/tests/TS-934/config.yaml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -41,13 +38,13 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 
 REQUEST_STEPS = [
-    "Trigger the CI pipeline by pushing a change to a Pull Request.",
-    "Monitor the 'Accessibility checks' job execution.",
-    "Verify the log sequence before the axe-core scan begins.",
+    "Trigger a standard CI run for accessibility checks.",
+    "Open the run logs for the 'Accessibility checks' stage.",
+    "Search for entries related to 'Flutter engine initialization'.",
 ]
 EXPECTED_RESULT = (
-    "The script successfully detects the 'flt-semantics-placeholder', logs the "
-    "verification, and only then proceeds to the full WCAG validation scan."
+    "The logs contain automated entries documenting the transition states of the "
+    "Flutter engine during startup and the status of the semantics tree discovery."
 )
 SUCCESS_CONCLUSIONS = {"success"}
 
@@ -55,11 +52,10 @@ SUCCESS_CONCLUSIONS = {"success"}
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     config = GitHubAccessibilityPullRequestGateConfig.from_file(CONFIG_PATH)
-    probe = create_github_accessibility_placeholder_verification_probe(
+    probe = create_github_accessibility_compliant_pull_request_gate_probe(
         REPO_ROOT,
         config_path=CONFIG_PATH,
     )
-    log_inspector = create_github_accessibility_stage_log_inspector(REPO_ROOT)
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -74,60 +70,16 @@ def main() -> None:
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
-        "accessibility_stage_log_entries": [],
-        "accessibility_stage_log_excerpt": "",
-        "placeholder_verification_log_entries": [],
-        "runtime_accessibility_log_entries": [],
-        "scan_progress_log_entries": [],
     }
 
     try:
         observation = probe.validate()
         result.update(observation.to_dict())
 
-        stage_entries, stage_log_error = _read_accessibility_stage_entries(
-            observation,
-            log_inspector=log_inspector,
-        )
-        stage_log_lines = [entry.raw_line for entry in stage_entries]
-        placeholder_entries = log_inspector.extract_placeholder_verification_entries(
-            stage_entries
-        )
-        runtime_entries = log_inspector.extract_runtime_surface_entries(stage_entries)
-        scan_entries = log_inspector.extract_scan_progress_entries(stage_entries)
-
-        result["accessibility_stage_log_entries"] = stage_log_lines
-        result["accessibility_stage_log_excerpt"] = log_inspector.build_excerpt(stage_entries)
-        result["placeholder_verification_log_entries"] = placeholder_entries
-        result["runtime_accessibility_log_entries"] = runtime_entries
-        result["scan_progress_log_entries"] = scan_entries
-        result["stage_log_error"] = stage_log_error
-
         failures: list[str] = []
-        _evaluate_ci_trigger(result, observation, failures)
-        _evaluate_accessibility_job_surface(
-            result,
-            observation,
-            failures,
-            stage_log_error=stage_log_error,
-            stage_log_lines=stage_log_lines,
-        )
-        _evaluate_placeholder_sequence(
-            result,
-            observation,
-            failures,
-            stage_log_lines=stage_log_lines,
-            placeholder_entries=placeholder_entries,
-            runtime_entries=runtime_entries,
-            scan_entries=scan_entries,
-        )
-        _record_live_user_verification(
-            result,
-            observation,
-            stage_log_lines=stage_log_lines,
-            placeholder_entries=placeholder_entries,
-            runtime_entries=runtime_entries,
-        )
+        _evaluate_standard_ci_run(result, observation, failures)
+        _evaluate_accessibility_logs_open(result, observation, failures)
+        _evaluate_flutter_engine_logging(result, observation, failures)
 
         if failures:
             raise AssertionError("\n".join(failures))
@@ -138,28 +90,10 @@ def main() -> None:
         raise
 
     _write_pass_outputs(result)
-    print("TS-932 passed")
+    print("TS-934 passed")
 
 
-def _read_accessibility_stage_entries(
-    observation: GitHubAccessibilityPullRequestGateObservation,
-    *,
-    log_inspector: GitHubAccessibilityStageLogInspector,
-) -> tuple[list[GitHubWorkflowStageLogEntry], str | None]:
-    if observation.latest_pull_request_run_id is None:
-        return [], "The workflow run ID was missing, so the hosted log could not be read."
-    try:
-        return (
-            log_inspector.read_accessibility_stage_entries(
-                observation.latest_pull_request_run_id
-            ),
-            None,
-        )
-    except Exception as error:  # noqa: BLE001
-        return [], f"{type(error).__name__}: {error}"
-
-
-def _evaluate_ci_trigger(
+def _evaluate_standard_ci_run(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
@@ -171,20 +105,11 @@ def _evaluate_ci_trigger(
         )
     if observation.latest_pull_request_run_event != "pull_request":
         step_failures.append(
-            f"the observed workflow event was `{observation.latest_pull_request_run_event or '<none>'}` instead of `pull_request`."
-        )
-    if observation.latest_pull_request_run_status != "completed":
-        step_failures.append(
-            "the workflow run never completed; observed status was "
-            f"`{observation.latest_pull_request_run_status or '<none>'}`."
-        )
-    if observation.latest_pull_request_run_conclusion not in SUCCESS_CONCLUSIONS:
-        step_failures.append(
-            "the live PR workflow did not finish successfully for the compliant accessibility probe."
+            f"Observed workflow event was `{observation.latest_pull_request_run_event or '<none>'}` instead of `pull_request`."
         )
     if observation.accessibility_status_check_conclusion not in SUCCESS_CONCLUSIONS:
         step_failures.append(
-            "the contributor-visible `Accessibility checks` status did not conclude success."
+            "The hosted accessibility check did not complete successfully for the disposable compliant probe."
         )
 
     if step_failures:
@@ -193,10 +118,8 @@ def _evaluate_ci_trigger(
             + " ".join(step_failures)
             + "\n"
             + f"Pull Request URL: {observation.pull_request_url}\n"
-            + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + "Run status/conclusion: "
-            + f"{observation.latest_pull_request_run_status or '<none>'}/"
-            + f"{observation.latest_pull_request_run_conclusion or '<none>'}\n"
+            + f"Run URL: {observation.latest_pull_request_run_url}\n"
+            + f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
             + "Accessibility check conclusion: "
             + f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
             + f"Observed status checks: {observation.observed_status_check_names or ['<none>']}"
@@ -206,177 +129,145 @@ def _evaluate_ci_trigger(
         return
 
     observed = (
-        "Triggered a real disposable PR workflow and confirmed the hosted accessibility gate completed successfully.\n"
+        "Triggered a real disposable PR workflow and confirmed the standard accessibility run "
+        "completed on GitHub Actions.\n"
         f"Pull Request URL: {observation.pull_request_url}\n"
         f"Run URL: {observation.latest_pull_request_run_url}\n"
-        + "Run status/conclusion: "
-        + f"{observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
-        + "Accessibility check conclusion: "
-        + f"{observation.accessibility_status_check_conclusion or '<none>'}"
+        f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
+        "Accessibility check conclusion: "
+        f"{observation.accessibility_status_check_conclusion or '<none>'}"
     )
     _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
 
 
-def _evaluate_accessibility_job_surface(
+def _evaluate_accessibility_logs_open(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
-    *,
-    stage_log_error: str | None,
-    stage_log_lines: list[str],
 ) -> None:
-    step_failures: list[str] = []
-    if stage_log_error is not None:
-        step_failures.append(
-            f"the hosted accessibility-stage log could not be read: {stage_log_error}."
+    _record_human_verification(
+        result,
+        check=(
+            "Reviewed the live workflow output the way a human reviewer would, using "
+            "`gh pr view` for the checks surface and `gh run view --log` for the hosted log."
+        ),
+        observed=(
+            f"PR checks URL: `{observation.pull_request_checks_url}`; run URL: "
+            f"`{observation.latest_pull_request_run_url}`; observed jobs: "
+            f"{observation.observed_job_names or ['<none>']}; observed steps: "
+            f"{observation.observed_step_names or ['<none>']}; accessibility check conclusion: "
+            f"`{observation.accessibility_status_check_conclusion or '<none>'}`; engine log summary: "
+            f"`{observation.flutter_engine_initialization_summary or '<none>'}`; semantics summary: "
+            f"`{observation.semantics_tree_discovery_summary or '<none>'}`."
+        ),
+    )
+
+    if observation.run_log_error:
+        message = (
+            "Step 2 failed: the automation could not open the hosted workflow log for the "
+            "real accessibility run.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Log error: {observation.run_log_error}"
         )
+        failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
+        return
+
     if "Accessibility checks" not in observation.observed_job_names and (
         "Run axe-core accessibility checks" not in observation.observed_step_names
     ):
-        step_failures.append(
-            "the contributor-visible workflow surface did not expose the expected accessibility stage before log inspection."
-        )
-    if not stage_log_lines:
-        step_failures.append(
-            "no log lines were isolated for the `Accessibility checks` / `Run axe-core accessibility checks` stage."
-        )
-
-    if step_failures:
         message = (
-            "Step 2 failed: "
-            + " ".join(step_failures)
-            + "\n"
-            + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
-            + f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
-            + "Accessibility-stage excerpt:\n"
-            + (result.get("accessibility_stage_log_excerpt") or "<none>")
+            "Step 2 failed: the contributor-visible workflow surface did not expose the "
+            "expected accessibility-check stage before log inspection.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
+            f"Observed steps: {observation.observed_step_names or ['<none>']}"
         )
         failures.append(message)
         _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
         return
 
     observed = (
-        "Opened the contributor-visible `Accessibility checks` stage log for the hosted PR workflow run.\n"
+        "Opened the hosted accessibility-stage log for the live disposable PR run.\n"
         f"Run URL: {observation.latest_pull_request_run_url}\n"
-        f"Observed jobs: {observation.observed_job_names}\n"
-        f"Observed steps: {observation.observed_step_names}\n"
-        "Accessibility-stage excerpt:\n"
-        + (result.get("accessibility_stage_log_excerpt") or "<none>")
+        f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
+        f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
+        f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
     )
     _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
 
 
-def _evaluate_placeholder_sequence(
+def _evaluate_flutter_engine_logging(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
-    *,
-    stage_log_lines: list[str],
-    placeholder_entries: list[str],
-    runtime_entries: list[str],
-    scan_entries: list[str],
 ) -> None:
-    step_failures = _sequence_failures(
-        stage_log_lines=stage_log_lines,
-        placeholder_entries=placeholder_entries,
-        runtime_entries=runtime_entries,
-        scan_entries=scan_entries,
+    engine_entries = observation.flutter_engine_initialization_log_entries
+    semantics_entries = observation.semantics_tree_discovery_log_entries
+    distinct_engine_states = _normalized_flutter_engine_states(engine_entries)
+    engine_transitions_logged = len(distinct_engine_states) >= 2 or any(
+        "->" in state or "transition" in state for state in distinct_engine_states
     )
+
+    step_failures: list[str] = []
+    if not engine_entries:
+        step_failures.append(
+            "No run-log entries containing `Flutter engine initialization` were captured."
+        )
+    elif not engine_transitions_logged:
+        step_failures.append(
+            "Only one distinct Flutter engine initialization state was logged, so the transition sequence was not documented."
+        )
+    if not semantics_entries:
+        step_failures.append(
+            "No log entry documented semantics-tree discovery status."
+        )
 
     if step_failures:
         message = (
             "Step 3 failed: "
             + " ".join(step_failures)
             + "\n"
-            + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + "Placeholder verification entries: "
-            + f"{placeholder_entries or ['<none>']}\n"
-            + "Runtime accessibility entries: "
-            + f"{runtime_entries or ['<none>']}\n"
-            + "Scan progress entries: "
-            + f"{scan_entries or ['<none>']}\n"
-            + "Accessibility-stage excerpt:\n"
-            + (result.get("accessibility_stage_log_excerpt") or "<none>")
+            + f"Run URL: {observation.latest_pull_request_run_url}\n"
+            + f"Flutter engine log entries: {engine_entries or ['<none>']}\n"
+            + f"Distinct Flutter engine states: {distinct_engine_states or ['<none>']}\n"
+            + f"Semantics discovery log entries: {semantics_entries or ['<none>']}\n"
+            + f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
         )
         failures.append(message)
         _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
         return
 
     observed = (
-        "The hosted accessibility-stage log recorded placeholder verification before the runtime accessibility surface and scan completion evidence.\n"
-        + "Placeholder verification entries: "
-        + f"{placeholder_entries}\n"
-        + "Runtime accessibility entries: "
-        + f"{runtime_entries}\n"
-        + "Scan progress entries: "
-        + f"{scan_entries or ['<none explicitly logged>']}"
+        "Found the requested startup diagnostics in the hosted accessibility log.\n"
+        f"Flutter engine initialization entries: {engine_entries}\n"
+        f"Distinct Flutter engine states: {distinct_engine_states}\n"
+        f"Semantics discovery entries: {semantics_entries}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
 
 
-def _sequence_failures(
-    *,
-    stage_log_lines: list[str],
-    placeholder_entries: list[str],
-    runtime_entries: list[str],
-    scan_entries: list[str],
-) -> list[str]:
-    failures: list[str] = []
-    if not placeholder_entries:
-        failures.append(
-            "the hosted accessibility log never recorded that `flt-semantics-placeholder` was verified before the scan."
-        )
-    if not runtime_entries:
-        failures.append(
-            "the hosted accessibility log never recorded that the runtime accessibility surface became ready."
-        )
-    if placeholder_entries and runtime_entries:
-        placeholder_index = _first_index(stage_log_lines, placeholder_entries[0])
-        runtime_index = _first_index(stage_log_lines, runtime_entries[0])
-        if placeholder_index >= runtime_index:
-            failures.append(
-                "the placeholder verification entry appeared after the runtime accessibility surface was already reported ready."
-            )
-    if placeholder_entries and scan_entries:
-        placeholder_index = _first_index(stage_log_lines, placeholder_entries[0])
-        scan_index = _first_index(stage_log_lines, scan_entries[0])
-        if placeholder_index >= scan_index:
-            failures.append(
-                "the placeholder verification entry appeared after scan-progress evidence was already logged."
-            )
-    return failures
+def _normalized_flutter_engine_states(entries: list[str]) -> list[str]:
+    seen: set[str] = set()
+    distinct_states: list[str] = []
+    for entry in entries:
+        state = _normalized_flutter_engine_state(entry)
+        if not state or state in seen:
+            continue
+        seen.add(state)
+        distinct_states.append(state)
+    return distinct_states
 
 
-def _first_index(lines: list[str], target: str) -> int:
-    try:
-        return lines.index(target)
-    except ValueError:
-        return len(lines)
-
-
-def _record_live_user_verification(
-    result: dict[str, object],
-    observation: GitHubAccessibilityPullRequestGateObservation,
-    *,
-    stage_log_lines: list[str],
-    placeholder_entries: list[str],
-    runtime_entries: list[str],
-) -> None:
-    _record_human_verification(
-        result,
-        check=(
-            "Reviewed the same PR checks surface and `Accessibility checks` stage log that a human contributor would open in GitHub to confirm whether the smoke test verified the Flutter semantics placeholder before the scan."
-        ),
-        observed=(
-            f"PR checks URL: `{observation.pull_request_checks_url}`; run URL: "
-            f"`{observation.latest_pull_request_run_url or '<none>'}`; accessibility check "
-            f"conclusion: `{observation.accessibility_status_check_conclusion or '<none>'}`; "
-            f"placeholder entries: `{_one_line_list(placeholder_entries) or '<none>'}`; "
-            f"runtime entries: `{_one_line_list(runtime_entries) or '<none>'}`; "
-            f"visible stage lines: `{_one_line_list(stage_log_lines[:5]) or '<none>'}`."
-        ),
-    )
+def _normalized_flutter_engine_state(entry: str) -> str:
+    marker = "flutter engine initialization:"
+    normalized_entry = " ".join(entry.split()).strip()
+    lowered_entry = normalized_entry.lower()
+    marker_index = lowered_entry.find(marker)
+    if marker_index >= 0:
+        normalized_entry = normalized_entry[marker_index + len(marker) :]
+    normalized_state = normalized_entry.strip(" -:.;")
+    return normalized_state.lower()
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -400,7 +291,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-932 failed"))
+    error = str(result.get("error", "AssertionError: TS-934 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -430,9 +321,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Created a disposable WCAG-compliant pull request against the live repository to trigger the real PR accessibility workflow.",
-        "* Read the contributor-visible `Accessibility checks` / `Run axe-core accessibility checks` stage log from GitHub Actions.",
-        "* Verified whether the log recorded `flt-semantics-placeholder` verification before runtime accessibility readiness and scan-completion evidence.",
+        "* Created a disposable compliant pull request against the live repository to trigger the real PR accessibility workflow.",
+        "* Reused the shared accessibility gate probe and extended it to capture Flutter engine initialization lines plus semantics-tree discovery status from the hosted run log.",
+        "* Verified the contributor-visible workflow surface and the hosted accessibility log instead of inferring behavior from source only.",
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -474,9 +365,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Created a disposable WCAG-compliant pull request against the live repository to trigger the real PR accessibility workflow.",
-        "- Read the contributor-visible `Accessibility checks` / `Run axe-core accessibility checks` stage log from GitHub Actions.",
-        "- Verified whether the log recorded `flt-semantics-placeholder` verification before runtime accessibility readiness and scan-completion evidence.",
+        "- Created a disposable compliant pull request against the live repository to trigger the real PR accessibility workflow.",
+        "- Reused the shared accessibility gate probe and extended it to capture Flutter engine initialization lines plus semantics-tree discovery status from the hosted run log.",
+        "- Verified the contributor-visible workflow surface and the hosted accessibility log instead of inferring behavior from source only.",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -518,8 +409,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-932 as a live disposable-PR accessibility-log probe against GitHub Actions.",
-        "- Reused the WCAG-compliant accessibility probe path and inspected only the hosted `Accessibility checks` stage log lines.",
+        "- Added TS-934 as a live disposable-PR accessibility-log probe against GitHub Actions.",
+        "- Extended the shared accessibility probe to capture Flutter engine initialization lines and semantics-tree discovery evidence from hosted run logs.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -528,7 +419,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"using GitHub CLI on `{result['os']}`."
         ),
         (
-            "- Outcome: the live accessibility run logged placeholder verification before the scan proceeded."
+            "- Outcome: the live accessibility run logged Flutter engine initialization transitions and semantics-tree discovery status."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -553,7 +444,7 @@ def _bug_description(result: dict[str, object]) -> str:
         if isinstance(step, dict) and isinstance(step.get("step"), int)
     }
     return (
-        f"# {TICKET_KEY} - Accessibility stage does not log flt-semantics-placeholder verification before scan evidence\n\n"
+        f"# {TICKET_KEY} - Accessibility run logs do not document Flutter engine initialization transitions and semantics discovery status\n\n"
         "## Steps to reproduce\n"
         f"1. {REQUEST_STEPS[0]}  \n"
         f"   - Actual: {step_map.get(1, {}).get('observed', '<missing>')}  \n"
@@ -570,9 +461,8 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** the hosted `Accessibility checks` log completed successfully but did not "
-        "record a contributor-visible verification line for `flt-semantics-placeholder` before "
-        "the runtime accessibility surface and scan-completion evidence.\n\n"
+        "- **Actual:** The live hosted accessibility log did not expose enough Flutter-engine "
+        "startup transition entries and/or did not expose a semantics-tree discovery status line.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('pull_request_url', '<missing pull request URL>')}\n"
         "- **Browser:** GitHub CLI / GitHub Actions hosted log surface\n"
@@ -584,17 +474,17 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Run command:** `{result.get('run_command')}`\n"
         f"- **Config:** `{CONFIG_PATH}`\n\n"
         "## Screenshots or logs\n"
-        "- **Placeholder verification entries:**\n"
+        "- **Flutter engine log entries:**\n"
         "```text\n"
-        f"{result.get('placeholder_verification_log_entries', ['<none>'])}\n"
+        f"{result.get('flutter_engine_initialization_log_entries', ['<none>'])}\n"
         "```\n"
-        "- **Runtime accessibility entries:**\n"
+        "- **Semantics discovery log entries:**\n"
         "```text\n"
-        f"{result.get('runtime_accessibility_log_entries', ['<none>'])}\n"
+        f"{result.get('semantics_tree_discovery_log_entries', ['<none>'])}\n"
         "```\n"
-        "- **Accessibility-stage excerpt:**\n"
+        "- **Workflow/log excerpt:**\n"
         "```text\n"
-        f"{result.get('accessibility_stage_log_excerpt', '<missing stage excerpt>')}\n"
+        f"{result.get('run_log_excerpt', '<missing log excerpt>')}\n"
         "```\n"
     )
 
@@ -645,7 +535,7 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         if jira:
             action = _jira_inline(action)
             observed = _jira_inline(observed)
-        prefix = f"* Step {step} - {status}: " if jira else f"- Step {step} - {status}: "
+        prefix = f"* Step {step} — {status}: " if jira else f"- Step {step} — {status}: "
         lines.append(prefix + action)
         detail_prefix = "* " if jira else "  - "
         lines.append(detail_prefix + observed)
@@ -690,16 +580,6 @@ def _jira_inline(value: str) -> str:
         .replace("[", "\\[")
         .replace("]", "\\]")
     )
-
-
-def _one_line_list(lines: list[str]) -> str:
-    if not lines:
-        return ""
-    return " | ".join(_one_line(line) for line in lines)
-
-
-def _one_line(value: object) -> str:
-    return re.sub(r"\s+", " ", str(value)).strip()
 
 
 if __name__ == "__main__":

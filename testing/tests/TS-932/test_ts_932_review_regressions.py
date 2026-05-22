@@ -105,6 +105,17 @@ class Ts932ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("flt-semantics-placeholder", failures[0])
 
+    def test_runtime_module_keeps_framework_wiring_inside_support_factory(self) -> None:
+        module_source = Path(__file__).with_name("test_ts_932.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("GhCliWorkflowRunLogReader", module_source)
+        self.assertIn(
+            "create_github_accessibility_stage_log_inspector",
+            module_source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
