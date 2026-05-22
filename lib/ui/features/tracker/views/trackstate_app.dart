@@ -4970,17 +4970,18 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
   };
 }
 
-String _workspaceSyncSemanticLabel(
+_SyncPillSemanticLabel _workspaceSyncSemanticLabel(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
-  final label = _workspaceSyncLabel(l10n, viewModel);
   final status = viewModel.workspaceSyncStatus;
   if (status.health == WorkspaceSyncHealth.attentionNeeded &&
       !status.hasPendingRefresh) {
-    return l10n.workspaceSyncAttentionNeededSemanticLabel;
+    return _StaticSyncPillSemanticLabel(
+      l10n.workspaceSyncAttentionNeededSemanticLabel,
+    );
   }
-  return '${l10n.workspaceSyncSettings}, $label';
+  return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
 }
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
@@ -13611,7 +13612,7 @@ class _SyncPill extends StatelessWidget {
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
-  final String? semanticLabel;
+  final _SyncPillSemanticLabel? semanticLabel;
   final double? semanticsSortOrder;
 
   @override
@@ -13641,10 +13642,11 @@ class _SyncPill extends StatelessWidget {
       _SyncPillTone.attention => attentionForegroundColor,
       _ => colors.text,
     };
+    final resolvedSemanticLabel = semanticLabel?.resolve(label) ?? label;
     return Semantics(
       button: onPressed != null,
       container: true,
-      label: semanticLabel ?? label,
+      label: resolvedSemanticLabel,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
@@ -13692,6 +13694,30 @@ class _SyncPill extends StatelessWidget {
       ),
     );
   }
+}
+
+sealed class _SyncPillSemanticLabel {
+  const _SyncPillSemanticLabel();
+
+  String resolve(String visibleLabel);
+}
+
+final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _StaticSyncPillSemanticLabel(this.value);
+
+  final String value;
+
+  @override
+  String resolve(String visibleLabel) => value;
+}
+
+final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _PrefixedSyncPillSemanticLabel(this.prefix);
+
+  final String prefix;
+
+  @override
+  String resolve(String visibleLabel) => '$prefix, $visibleLabel';
 }
 
 class _InlineInfoBanner extends StatelessWidget {

@@ -57,6 +57,7 @@ def main() -> None:
         flutter_version="3.35.3",
         target_relative_path=Path("lib/ui/features/tracker/views/trackstate_app.dart"),
         localization_relative_path=Path("lib/l10n/generated/app_localizations_en.dart"),
+        semantic_label_localization_key="workspaceSyncAttentionNeededSemanticLabel",
         required_source_snippet="semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),",
         replacement_source_snippet="semanticLabel: 'Attention needed',",
         required_semantic_label="Sync error, attention needed",
