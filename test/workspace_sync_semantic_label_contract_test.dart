@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'flutter analyze flags weakened workspace sync semantic labels that drop sync error context',
+    'flutter analyze rejects a raw string passed to the workspace sync semantic label API',
     () async {
       final tempDir = await Directory.systemTemp.createTemp(
-        'trackstate-semantic-label-lint',
+        'trackstate-sync-semantic-contract',
       );
       addTearDown(() => tempDir.delete(recursive: true));
 
@@ -19,15 +19,15 @@ void main() {
       final source = targetFile.readAsStringSync();
       final mutatedSource = source.replaceFirst(
         'semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),',
-        'semanticLabel: l10n.workspaceSyncAttentionNeededVisibleLabel,',
+        "semanticLabel: 'Attention needed',",
       );
 
       expect(
         mutatedSource,
         isNot(equals(source)),
         reason:
-            'Expected the test mutation to weaken the sync semantic label '
-            'call-site contract.',
+            'Expected the test mutation to replace the typed sync semantic '
+            'label argument with a raw string.',
       );
       targetFile.writeAsStringSync(mutatedSource);
 
@@ -36,27 +36,27 @@ void main() {
         'lib/ui/features/tracker/views/trackstate_app.dart',
       ], workingDirectory: tempDir.path);
 
-      final output = '${result.stdout}${result.stderr}';
+      final output = '${result.stdout}${result.stderr}'.toLowerCase();
 
       expect(
-        output.toLowerCase(),
+        output,
         isNot(contains('no issues found!')),
         reason:
-            'Expected flutter analyze to flag the weakened semantic label.\n'
+            'Expected flutter analyze to reject the raw sync semantic label.\n'
             'stdout:\n${result.stdout}\n'
             'stderr:\n${result.stderr}',
       );
       expect(
-        output.toLowerCase(),
+        output,
         anyOf(
-          contains('sync error'),
-          contains('workspaceSyncAttentionNeeded'.toLowerCase()),
+          contains("can't be assigned"),
+          contains('argument type'),
           contains('semantic'),
-          contains('deprecated'),
+          contains('_syncpillsemanticlabel'.toLowerCase()),
         ),
         reason:
-            'Expected the analyzer output to explain the missing sync-error '
-            'context.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+            'Expected the analyzer output to explain the semantic-label type '
+            'contract.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}',
       );
     },
   );
