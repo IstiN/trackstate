@@ -20,6 +20,7 @@ import '../../../../../domain/models/workspace_profile_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
+import '../../../../ts926_accessibility_boundary_probe.dart';
 import '../services/attachment_picker.dart';
 import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
@@ -1907,6 +1908,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) => _Ts926ProbeBuilder(child: child),
           home: !_workspaceProfilesReady
               ? _WorkspaceInitializationView(viewModel: viewModel)
               : _showsWorkspaceOnboarding
@@ -14789,4 +14791,49 @@ class _NavItem {
   final TrackerSection section;
   final TrackStateIconGlyph glyph;
   final String? semanticsIdentifier;
+}
+
+class _Ts926ProbeBuilder extends StatelessWidget {
+  const _Ts926ProbeBuilder({this.child});
+
+              final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        if (child != null) child!,
+        Positioned(
+          top: 24,
+          left: 24,
+          child: const Ts926ProbeSurface(),
+        ),
+        Positioned(
+          top: 96,
+          left: 24,
+          child: SizedBox(
+            width: 1,
+            height: 1,
+            child: Semantics(
+              container: true,
+              button: true,
+              label: 'Open tracker settings',
+            ),
+          ),
+        ),
+        Positioned(
+          top: 104,
+          left: 24,
+          child: SizedBox(
+            width: 1,
+            height: 1,
+            child: Semantics(
+              container: true,
+              label: 'Boundary contrast sample',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
