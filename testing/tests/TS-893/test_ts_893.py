@@ -332,15 +332,62 @@ def main() -> None:
                             "Step 2 failed: the simulated busy state was not released "
                             "within the expected retry window.",
                         )
+                    if not overlap_proof_sources:
+                        step_2_observed = (
+                            "Kept the local workspace blocked until the startup "
+                            "observation window completed, then restored access. "
+                            "While the directory was still blocked, the deployed app "
+                            "already exposed the restored `Local Git` state and no "
+                            "restore-specific overlap proof tied to the saved local "
+                            "workspace was observed.\n"
+                            + "pre_release_overlap_proof_sources="
+                            + f"{json.dumps(overlap_proof_sources, indent=2)}\n"
+                            + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
+                            + f"pre_release_body_text={pre_release_body_text!r}\n"
+                            + "pre_release_public_overlap_state="
+                            + f"{json.dumps(public_overlap_state, indent=2)}\n"
+                            + f"pre_release_public_overlap_observed={public_overlap_observed}\n"
+                            + "pre_release_activity="
+                            + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
+                            + "pre_release_all_activity_events="
+                            + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
+                            + "pre_release_activity_events="
+                            + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                            + f"pre_release_activity_captured={activity_captured}\n"
+                            + (
+                                "pre_release_runtime_probe="
+                                f"{json.dumps(_console_event_payload(pre_release_runtime_probe), indent=2)}\n"
+                                if pre_release_runtime_probe is not None
+                                else "pre_release_runtime_probe=<not observed before release>\n"
+                            )
+                            + "pre_release_runtime_probe_events="
+                            + f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
+                            + f"pre_release_runtime_probe_captured={runtime_probe_captured}\n"
+                            f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
+                        )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                        raise AssertionError(
+                            "Step 2 failed: while the saved local workspace remained "
+                            "blocked, startup exposed no restore-specific overlap "
+                            "evidence from tracked local File System Access activity, "
+                            "the TS-893 runtime probe, or a public non-restored "
+                            "workspace state before access was released. The deployed "
+                            "web build already showed the final `Local Git` selection "
+                            "while the directory was still blocked, so TS-893 cannot "
+                            "prove that startup exercised the blocked local-handle "
+                            "revalidation/retry path."
+                        )
                     step_2_observed = (
                         "Kept the local workspace blocked until the header workspace "
                         "trigger was already observable, then restored access while "
                         "startup recovery was still in progress. "
-                        + (
-                            "Observed restore-specific overlap diagnostics before release.\n"
-                            if overlap_proof_sources
-                            else "The deployed app exposed no restore-specific overlap diagnostics before release, even while the busy state was still active.\n"
-                        )
+                        + "Observed restore-specific overlap diagnostics before release.\n"
                         + "pre_release_overlap_proof_sources="
                         + f"{json.dumps(overlap_proof_sources, indent=2)}\n"
                         + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
@@ -955,7 +1002,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "* Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
-        "* Recorded restore-specific overlap diagnostics before release from tracked File System Access activity, a tracked TS-893 runtime probe, or a public pre-release non-restored workspace state tied to the saved local workspace while it was still blocked.",
+        "* Required restore-specific overlap proof before release from tracked File System Access activity, a tracked TS-893 runtime probe, or a public pre-release non-restored workspace state tied to the saved local workspace while it was still blocked.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -1003,7 +1050,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "- Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
-        "- Recorded restore-specific overlap diagnostics before release from tracked File System Access activity, a tracked TS-893 runtime probe, or a public pre-release non-restored workspace state tied to the saved local workspace while it was still blocked.",
+        "- Required restore-specific overlap proof before release from tracked File System Access activity, a tracked TS-893 runtime probe, or a public pre-release non-restored workspace state tied to the saved local workspace while it was still blocked.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
@@ -1042,10 +1089,23 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
+    if passed:
+        outcome = (
+            "startup captured blocked-window overlap proof and restored the "
+            "prepared local workspace as the active `Local Git` selection."
+        )
+    elif _failed_due_to_missing_overlap_proof(result):
+        outcome = (
+            "the test now correctly fails because the deployed web build already "
+            "shows the saved workspace as `Local Git` while it is still blocked "
+            "and exposes no restore-specific overlap proof before release."
+        )
+    else:
+        outcome = _failed_step_summary(result)
     lines = [
         "## Test Automation Summary",
         "",
-        "- Updated TS-893 live startup coverage so the workspace stays blocked until the startup trigger is visible and pre-release overlap signals are recorded diagnostically instead of deciding the verdict.",
+        "- Updated TS-893 live startup coverage so the workspace stays blocked through the pre-release observation window and must capture restore-specific overlap proof before it can pass.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -1054,11 +1114,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"({result['os']}) against `{result['repository']}` @ "
             f"`{result['repository_ref']}`."
         ),
-        (
-            "- Outcome: startup retried after the temporary busy-state release and restored the prepared local workspace as the active `Local Git` selection."
-            if passed
-            else f"- Outcome: {_failed_step_summary(result)}"
-        ),
+        f"- Outcome: {outcome}",
     ]
     lines.extend(_artifact_lines(result, jira=False))
     if not passed:
@@ -1298,11 +1354,20 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
             f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
         )
     )
+    if _failed_due_to_missing_overlap_proof(result):
+        return (
+            "Updated TS-893 so Step 2 now requires restore-specific blocked-window "
+            "overlap proof before release instead of treating missing evidence as "
+            "diagnostic-only. The rerun now fails for the real product gap: the "
+            "deployed web build already shows the saved workspace as `Local Git` "
+            "while it is still blocked and exposes no saved-workspace retry-overlap "
+            f"signal. {rerun_summary}"
+        )
     return (
-        "Updated TS-893 so the workspace stays blocked until startup is visible, "
-        "the test records overlap diagnostics for the saved local workspace "
-        "before release, and the verdict is based on the post-release `Local Git` "
-        "/ no-hosted-fallback outcome rather than on missing overlap probes alone. "
+        "Updated TS-893 so the workspace stays blocked through the pre-release "
+        "startup window, requires restore-specific overlap proof before release, "
+        "and still verifies the post-release `Local Git` / no-hosted-fallback "
+        "outcome. "
         f"{rerun_summary}"
     )
 
@@ -1420,8 +1485,8 @@ def _failed_step_number(result: dict[str, object]) -> int | None:
 def _bug_title(result: dict[str, object]) -> str:
     if _failed_due_to_missing_overlap_proof(result):
         return (
-            f"{TICKET_KEY} - Startup restore path exposes no restore-specific "
-            "overlap signal while the saved local workspace handle is blocked"
+            f"{TICKET_KEY} - Web startup preserves Local Git without observable "
+            "blocked-handle retry overlap for the saved local workspace"
         )
     if _failed_due_to_release_error(result):
         return (
@@ -1441,8 +1506,9 @@ def _bug_expected_result(result: dict[str, object]) -> str:
             "deployed app should expose restore-specific overlap evidence before "
             "release so TS-893 can prove the retry path actually ran. That proof "
             "can be either a public pre-release non-restored workspace state tied "
-            "to the blocked saved workspace, or another complete signal specific "
-            "to the saved-workspace revalidation attempt."
+            "to the blocked saved workspace, or complete saved-workspace-specific "
+            "File System Access activity showing that startup touched the blocked "
+            "handle before the directory becomes available again."
         )
     if _failed_due_to_release_error(result):
         return (
@@ -1455,11 +1521,12 @@ def _bug_expected_result(result: dict[str, object]) -> str:
 def _bug_actual_result(result: dict[str, object]) -> str:
     if _failed_due_to_missing_overlap_proof(result):
         return (
-            "While the busy state remained active, the visible UI could already "
-            "show the final `Local Git` state and the deployed app exposed no "
-            "restore-specific public signal or complete saved-workspace "
-            "revalidation evidence before release. That leaves the transient "
-            "blocked-handle retry path unprovable from the live product surface."
+            "While the busy state remained active, the visible UI already showed "
+            "the final `Local Git` selection and the deployed app exposed no "
+            "restore-specific public signal or saved-workspace handle activity "
+            "before release. In the current web build, startup preserves the "
+            "active local selection without surfacing any observable blocked-handle "
+            "retry overlap, so the transient recovery path remains unprovable."
         )
     if _failed_due_to_release_error(result):
         return (
@@ -1480,10 +1547,11 @@ def _bug_actual_result(result: dict[str, object]) -> str:
 def _bug_missing_capability(result: dict[str, object]) -> str:
     if _failed_due_to_missing_overlap_proof(result):
         return (
-            "The deployed app does not expose a production-visible or otherwise "
+            "The deployed web build does not expose a production-visible or "
             "complete saved-workspace-specific startup revalidation signal before "
-            "release, so `testing/` cannot confirm that the blocked local handle "
-            "overlapped startup retry."
+            "release. It preserves the active local selection without showing that "
+            "startup actually touched the blocked local handle, so `testing/` "
+            "cannot confirm blocked-window retry overlap."
         )
     if _failed_due_to_release_error(result):
         return (

@@ -13,7 +13,7 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup has reached the visible recovery window
-5. records restore-specific overlap diagnostics before release from tracked File
+5. requires restore-specific overlap proof before release from tracked File
   System Access activity on the saved local workspace lineage, a tracked
   TS-893 runtime failure probe, or a public pre-release non-restored
   workspace state while the workspace is still blocked, then waits after the
