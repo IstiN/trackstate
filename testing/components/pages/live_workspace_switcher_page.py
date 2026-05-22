@@ -184,6 +184,7 @@ class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
     _top_bar_button_selector = 'flt-semantics[role="button"]'
+    _workspace_trigger_button_selector = 'button[aria-label^="Workspace switcher:"]'
     _trigger_label_prefix = "Workspace switcher:"
     _button_selector = 'flt-semantics[role="button"]'
     _switcher_heading = "Workspace switcher"
@@ -279,7 +280,11 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
         self.focus_search_field(timeout_ms=timeout_ms)
-        return self._collect_tab_sequence(tab_count=tab_count, timeout_ms=timeout_ms)
+        return self._collect_tab_sequence(
+            tab_count=tab_count,
+            timeout_ms=timeout_ms,
+            stop_when_workspace_trigger_reached=True,
+        )
 
     def collect_tab_sequence(
         self,
@@ -307,11 +312,7 @@ class LiveWorkspaceSwitcherPage:
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
-        self._session.click(
-            self._top_bar_button_selector,
-            has_text="Workspace switcher:",
-            timeout_ms=timeout_ms,
-        )
+        self._click_trigger(timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def observe_surface(
@@ -594,9 +595,11 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 };
               });
-              const workspaceTrigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
+              const triggerCandidates = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ].filter((element, index, all) => all.indexOf(element) === index);
+              const workspaceTrigger = triggerCandidates.find((candidate) =>
                 isVisible(candidate)
                 && labelFor(candidate).startsWith('Workspace switcher:'),
               );
@@ -1063,9 +1066,12 @@ class LiveWorkspaceSwitcherPage:
               };
               const labelFor = (element) =>
                 normalize(element.getAttribute('aria-label') || element.innerText || '');
-              const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).filter(isVisible);
+              const buttons = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ]
+                .filter((element, index, all) => all.indexOf(element) === index)
+                .filter(isVisible);
               const trigger = buttons
                 .filter((element) => labelFor(element).includes('Workspace switcher:'))
                 .sort((left, right) => {
@@ -1137,11 +1143,7 @@ class LiveWorkspaceSwitcherPage:
 
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
         try:
-            self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
-                timeout_ms=timeout_ms,
-            )
+            self._click_trigger(timeout_ms=timeout_ms)
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "The live app did not expose a clickable workspace switcher trigger.\n"
@@ -1324,9 +1326,12 @@ class LiveWorkspaceSwitcherPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
-              const trigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
+              const trigger = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ]
+                .filter((element, index, all) => all.indexOf(element) === index)
+                .find((candidate) =>
                 isVisible(candidate)
                 && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
                   .startsWith('Workspace switcher:')
@@ -1364,6 +1369,7 @@ class LiveWorkspaceSwitcherPage:
         *,
         tab_count: int,
         timeout_ms: int,
+        stop_when_workspace_trigger_reached: bool = False,
     ) -> tuple[FocusNavigationStep, ...]:
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, tab_count + 1):
@@ -1381,6 +1387,11 @@ class LiveWorkspaceSwitcherPage:
                     after_outer_html=after.outer_html,
                 )
             )
+            if (
+                stop_when_workspace_trigger_reached
+                and self._is_workspace_trigger_label(after.accessible_name)
+            ):
+                break
         return tuple(steps)
 
     def _wait_for_surface(self, *, timeout_ms: int) -> None:
@@ -1447,11 +1458,64 @@ class LiveWorkspaceSwitcherPage:
         return (label or "").startswith("Workspace switcher:")
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
-            timeout_ms=timeout_ms,
+        try:
+            self._session.click(
+                self._workspace_trigger_button_selector,
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=self._trigger_label_prefix,
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+        clicked = self._session.evaluate(
+            """
+            (labelPrefix) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidates = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ].filter((element, index, all) => all.indexOf(element) === index);
+              const trigger = candidates.find((element) => {
+                const label = normalize(
+                  element.getAttribute?.('aria-label')
+                  || element.innerText
+                  || element.textContent
+                  || '',
+                );
+                return isVisible(element) && label.startsWith(labelPrefix);
+              });
+              if (!trigger) {
+                return false;
+              }
+              trigger.click();
+              return true;
+            }
+            """,
+            arg=self._trigger_label_prefix,
         )
+        if clicked is not True:
+            raise WebAppTimeoutError(
+                f'Timed out clicking selector "{self._workspace_trigger_button_selector}".',
+            )
 
 
 def _bright_surface_box(
