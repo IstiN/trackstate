@@ -509,6 +509,7 @@ class LiveWorkspaceSwitcherPage:
     _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
     _button_selector = 'flt-semantics[role="button"]'
+    _workspace_trigger_selector = '[aria-label^="Workspace switcher:"]'
     _switcher_heading = "Workspace switcher"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -926,8 +927,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         try:
             self._session.focus(
-                self._top_bar_button_selector,
-                has_text="Workspace switcher:",
+                self._workspace_trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -2878,8 +2878,7 @@ class LiveWorkspaceSwitcherPage:
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(
-            self._top_bar_button_selector,
-            has_text="Workspace switcher:",
+            self._workspace_trigger_selector,
             timeout_ms=timeout_ms,
         )
         self._wait_for_surface(timeout_ms=timeout_ms)
@@ -3837,7 +3836,7 @@ class LiveWorkspaceSwitcherPage:
               const labelFor = (element) =>
                 normalize(element.getAttribute('aria-label') || element.innerText || '');
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
               ).filter(isVisible);
               const trigger = buttons
                 .filter((element) => labelFor(element).includes('Workspace switcher:'))
@@ -3911,8 +3910,7 @@ class LiveWorkspaceSwitcherPage:
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
         try:
             self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
+                self._workspace_trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -6196,8 +6194,7 @@ class LiveWorkspaceSwitcherPage:
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
         self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
+            self._workspace_trigger_selector,
             timeout_ms=timeout_ms,
         )
 

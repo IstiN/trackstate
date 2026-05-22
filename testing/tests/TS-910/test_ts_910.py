@@ -47,7 +47,7 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-910-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-910-third"
-LINKED_BUGS = ["TS-900"]
+LINKED_BUGS = ["TS-916", "TS-900"]
 FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
@@ -92,7 +92,8 @@ def main() -> None:
             "TS-910 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
-    workspace_state = _workspace_state(service.repository)
+    workspace_repository = service.repository.lower()
+    workspace_state = _workspace_state(workspace_repository)
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -120,7 +121,7 @@ def main() -> None:
         with create_live_tracker_app(
             config,
             runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                repository=service.repository,
+                repository=workspace_repository,
                 token=token,
                 workspace_state=workspace_state,
             ),
@@ -142,28 +143,58 @@ def main() -> None:
                 page.navigate_to_section("Dashboard")
                 page.set_viewport(**DESKTOP_VIEWPORT)
 
-                trigger = page.observe_trigger()
-                switcher = page.open_and_observe()
-                panel = page.observe_open_panel(
-                    expected_container_kinds=("anchored-panel", "surface"),
-                    timeout_ms=4_000,
-                )
-                rows = page.observe_saved_workspace_rows(timeout_ms=4_000)
-                surface = page.observe_surface(timeout_ms=4_000)
-
-                result["trigger_observation"] = _trigger_payload(trigger)
-                result["open_switcher_observation"] = _switcher_payload(switcher)
-                result["open_panel_observation"] = asdict(panel)
-                result["saved_workspace_rows_before_focus"] = _saved_workspace_rows_payload(
-                    rows,
-                )
-                result["surface_observation"] = _surface_payload(surface)
-                first_row = _assert_initial_panel_state(
-                    switcher=switcher,
-                    panel=panel,
-                    rows=rows,
-                    surface=surface,
-                )
+                trigger: WorkspaceSwitcherTriggerObservation | None = None
+                switcher: WorkspaceSwitcherObservation | None = None
+                panel: WorkspaceSwitcherPanelObservation | None = None
+                rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...] = ()
+                surface: WorkspaceSwitcherSurfaceObservation | None = None
+                try:
+                    trigger = page.observe_trigger()
+                    switcher = page.open_and_observe()
+                    panel = page.observe_open_panel(
+                        expected_container_kinds=("anchored-panel", "surface"),
+                        timeout_ms=4_000,
+                    )
+                    result["trigger_observation"] = _trigger_payload(trigger)
+                    result["open_switcher_observation"] = _switcher_payload(switcher)
+                    result["open_panel_observation"] = asdict(panel)
+                    rows = page.observe_saved_workspace_rows(timeout_ms=4_000)
+                    surface = page.observe_surface(timeout_ms=4_000)
+                    result["saved_workspace_rows_before_focus"] = _saved_workspace_rows_payload(
+                        rows,
+                    )
+                    result["surface_observation"] = _surface_payload(surface)
+                    first_row = _assert_initial_panel_state(
+                        switcher=switcher,
+                        panel=panel,
+                        rows=rows,
+                        surface=surface,
+                    )
+                except Exception as error:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=AUTOMATION_STEPS[0],
+                        observed=str(error),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the desktop workspace switcher and visually checked the "
+                            "visible panel state before starting keyboard traversal."
+                        ),
+                        observed=(
+                            f"trigger_label={trigger.semantic_label!r}; "
+                            f"switcher_text={switcher.switcher_text!r}; "
+                            f"panel_kind={panel.container_kind if panel is not None else None!r}; "
+                            f"saved_workspace_row_count={len(rows)}; "
+                            f"surface_labels={_surface_label_summary(surface)!r}"
+                            if trigger is not None and switcher is not None and panel is not None and surface is not None
+                            else f"body_text={page.current_body_text()!r}"
+                        ),
+                    )
+                    raise
                 first_row_label = _saved_workspace_row_focus_label(first_row)
                 result["first_row_label"] = first_row_label
                 _record_step(
@@ -1017,7 +1048,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             ),
             "* Human-style verification confirmed the visible desktop panel labels and the observed keyboard focus destination matched the recorded result."
             if passed
-            else "* Human-style verification confirmed the visible desktop panel stayed open, but the final Tab press did not return focus to the first saved workspace row.",
+            else f"* Human-style verification matched the failed step outcome: {_failed_step_label(result)}.",
             "",
             "h4. Human-style verification",
         ],
@@ -1126,6 +1157,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 def _bug_description(result: dict[str, object]) -> str:
     screenshot = result.get("screenshot", "not captured")
+    failed_step = _failed_step(result)
+    note = (
+        "* The live panel did not reach the ticket's expected saved-workspace traversal state, so the automation reported the earliest product-visible mismatch."
+        if failed_step is not None and failed_step.get("step") != 4
+        else "* The regression reproduction stayed within the visible panel; the final Tab press failed because focus did not loop back to the first internal row."
+    )
     return "\n".join(
         [
             f"h4. Summary",
@@ -1158,7 +1195,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "h4. Notes",
             f"* Focus labels observed before the failure: {_visited_focus_labels(result.get('tab_trace_to_footer') if isinstance(result.get('tab_trace_to_footer'), list) else [])!r}",
-            "* The regression reproduction stayed within the visible panel; the final Tab press failed because focus did not loop back to the first internal row.",
+            note,
         ],
     ) + "\n"
 
