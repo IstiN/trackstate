@@ -11,8 +11,9 @@ The automation:
    restorable if the picker were accepted
 3. opens the Workspace switcher and clicks the exact visible action exposed for
    the unavailable saved workspace row
-4. simulates the browser-native picker cancel by forcing
-   `showDirectoryPicker(...)` to reject with `AbortError`
+4. simulates the browser-native cancel path by forcing
+   `showDirectoryPicker(...)` to reject with `AbortError` and
+   `requestPermission(...)` to resolve to `denied`
 5. verifies the live app stays interactive, the hosted workspace stays active,
    and the saved local workspace remains `Unavailable`
 
@@ -39,12 +40,13 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-920/test_ts_920.py
 ## Expected result
 
 ```text
-Pass: the saved unavailable local workspace triggers the browser directory
-picker callback, the simulated Cancel leaves the hosted workspace active, the
-saved local workspace stays `Unavailable`, and no
-`Unsupported operation: Process.run` or runtime page error appears.
+Pass: the saved unavailable local workspace triggers the browser-access
+callback, the simulated Cancel leaves the hosted workspace active, the saved
+local workspace stays `Unavailable`, and no `Unsupported operation:
+Process.run` or runtime page error appears.
 
-Fail: the manual restore action never triggers `showDirectoryPicker()`, the
-cancel path crashes or surfaces a runtime exception, or the workspace state
-changes away from the expected `Unavailable` + hosted-active result.
+Fail: the deployed app never reaches the workspace switcher, the manual restore
+action never triggers browser access, the cancel path crashes or surfaces a
+runtime exception, or the workspace state changes away from the expected
+`Unavailable` + hosted-active result.
 ```
