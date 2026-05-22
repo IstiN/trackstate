@@ -45,6 +45,7 @@ LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
 PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS = 15
+PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS = 12
 PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS = 5
 PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS = 5
 LINKED_BUGS = ["TS-882", "TS-896"]
@@ -178,6 +179,9 @@ def main() -> None:
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
+        "pre_release_public_overlap_timeout_seconds": (
+            PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS
+        ),
         "pre_release_activity_timeout_seconds": PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
         "pre_release_runtime_probe_timeout_seconds": (
             PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS
@@ -202,6 +206,7 @@ def main() -> None:
             ) as tracker_page:
                 page = LiveWorkspaceSwitcherPage(tracker_page)
                 try:
+                    failure_message: str | None = None
                     runtime_observation = tracker_page.open()
                     result["runtime_state"] = runtime_observation.kind
                     result["runtime_body_text"] = runtime_observation.body_text
@@ -272,6 +277,21 @@ def main() -> None:
                     result["pre_release_runtime_probe_events"] = [
                         _console_event_payload(event) for event in runtime_probe_events
                     ]
+                    public_overlap_observed, public_overlap_state = poll_until(
+                        probe=lambda: _observe_pre_release_public_overlap(page),
+                        is_satisfied=lambda state: bool(
+                            isinstance(state, dict)
+                            and state.get("public_overlap_observed") is True
+                        ),
+                        timeout_seconds=PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS,
+                        interval_seconds=1,
+                    )
+                    result["pre_release_public_overlap_observed"] = (
+                        public_overlap_observed
+                    )
+                    result["pre_release_public_overlap_state"] = (
+                        public_overlap_state
+                    )
                     result["busy_blocker_before_release"] = blocker.snapshot()
                     blocker.release()
                     released = blocker.wait_for_release(timeout_seconds=5)
@@ -288,39 +308,68 @@ def main() -> None:
                             "Step 2 failed: the simulated busy state was not released "
                             "within the expected retry window.",
                         )
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed=(
-                            "Kept the local workspace blocked until the header workspace "
-                            "trigger was already observable, then restored access while "
-                            "startup recovery was still in progress. "
-                            "Tracked File System Access overlap and the TS-893 runtime "
-                            "probe were recorded diagnostically when present before "
-                            "release.\n"
-                            + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
-                            + f"pre_release_body_text={pre_release_body_text!r}\n"
-                            + "pre_release_activity="
-                            + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
-                            + "pre_release_all_activity_events="
-                            + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
-                            + "pre_release_activity_events="
-                            + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
-                            + f"pre_release_activity_captured={activity_captured}\n"
-                            + (
-                                "pre_release_runtime_probe="
-                                f"{json.dumps(_console_event_payload(pre_release_runtime_probe), indent=2)}\n"
-                                if pre_release_runtime_probe is not None
-                                else "pre_release_runtime_probe=<not observed before release>\n"
-                            )
-                            + "pre_release_runtime_probe_events="
-                            + f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
-                            + f"pre_release_runtime_probe_captured={runtime_probe_captured}\n"
-                            f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
-                        ),
+                    step_2_observed = (
+                        "Kept the local workspace blocked until the header workspace "
+                        "trigger was already observable, then restored access while "
+                        "startup recovery was still in progress. "
+                        "Required a public pre-release workspace state proving restore "
+                        "was not yet complete while the directory remained blocked, and "
+                        "recorded tracked File System Access overlap plus the TS-893 "
+                        "runtime probe diagnostically when present before release.\n"
+                        + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
+                        + f"pre_release_body_text={pre_release_body_text!r}\n"
+                        + "pre_release_public_overlap_state="
+                        + f"{json.dumps(public_overlap_state, indent=2)}\n"
+                        + f"pre_release_public_overlap_observed={public_overlap_observed}\n"
+                        + "pre_release_activity="
+                        + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
+                        + "pre_release_all_activity_events="
+                        + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
+                        + "pre_release_activity_events="
+                        + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                        + f"pre_release_activity_captured={activity_captured}\n"
+                        + (
+                            "pre_release_runtime_probe="
+                            f"{json.dumps(_console_event_payload(pre_release_runtime_probe), indent=2)}\n"
+                            if pre_release_runtime_probe is not None
+                            else "pre_release_runtime_probe=<not observed before release>\n"
+                        )
+                        + "pre_release_runtime_probe_events="
+                        + f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
+                        + f"pre_release_runtime_probe_captured={runtime_probe_captured}\n"
+                        f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                     )
+                    if public_overlap_observed:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="passed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                    else:
+                        failure_message = (
+                            "Step 2 failed: while the saved local workspace remained "
+                            "blocked, startup never exposed any public pre-release state "
+                            "showing that restore was still incomplete before access was "
+                            "released. The header already showed the final local `Local "
+                            "Git` state and the workspace switcher never surfaced "
+                            "`Local Unavailable` or the hosted fallback while blocked.\n"
+                            f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
+                            "Observed pre_release_public_overlap_state="
+                            f"{json.dumps(public_overlap_state, indent=2)}\n"
+                            "Observed pre_release_activity_events="
+                            f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                            "Observed pre_release_runtime_probe_events="
+                            f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}"
+                        )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=REQUEST_STEPS[1],
+                            observed=failure_message,
+                        )
 
                     restore_message = _observe_restore_message(
                         tracker_page,
@@ -346,6 +395,8 @@ def main() -> None:
                                 "restored the prepared local workspace in the workspace "
                                 "switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                "Observed pre_release_public_overlap_state="
+                                f"{json.dumps(public_overlap_state, ensure_ascii=True)}; "
                                 "Observed pre_release_activity="
                                 f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
@@ -367,6 +418,8 @@ def main() -> None:
                                 "never restored the prepared local workspace in the "
                                 "workspace switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                "Observed pre_release_public_overlap_state="
+                                f"{json.dumps(public_overlap_state, ensure_ascii=True)}; "
                                 "Observed pre_release_activity="
                                 f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
@@ -478,31 +531,38 @@ def main() -> None:
                             action=REQUEST_STEPS[3],
                             observed=str(error),
                         )
-                        raise
-
-                    _record_step(
-                        result,
-                        step=4,
-                        status="passed",
-                        action=REQUEST_STEPS[3],
-                        observed=(
-                            "Opened Workspace switcher and confirmed the prepared local "
-                            "workspace row remained selected in the visible `Local Git` "
-                            "state after the busy-state release.\n"
-                            f"selected_row={json.dumps(_row_payload(selected_row), indent=2)}"
-                        ),
-                    )
+                        if failure_message is None:
+                            failure_message = str(error)
+                    else:
+                        _record_step(
+                            result,
+                            step=4,
+                            status="passed",
+                            action=REQUEST_STEPS[3],
+                            observed=(
+                                "Opened Workspace switcher and confirmed the prepared local "
+                                "workspace row remained selected in the visible `Local Git` "
+                                "state after the busy-state release.\n"
+                                f"selected_row={json.dumps(_row_payload(selected_row), indent=2)}"
+                            ),
+                        )
 
                     if not restored:
-                        raise AssertionError(
-                            "Step 3 failed: startup did not restore the prepared active local "
-                            "workspace into the trigger after the temporary busy state was "
-                            "released within the allowed wait window.\n"
-                            f"Observed trigger label: {trigger.semantic_label!r}\n"
-                            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
-                            f"Observed active local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
-                            f"Observed switcher text:\n{switcher.switcher_text}"
-                        )
+                        if failure_message is None:
+                            failure_message = (
+                                "Step 3 failed: startup did not restore the prepared "
+                                "active local workspace into the trigger after the "
+                                "temporary busy state was released within the allowed "
+                                "wait window.\n"
+                                f"Observed trigger label: {trigger.semantic_label!r}\n"
+                                "Observed selected row: "
+                                f"{json.dumps(_row_payload(selected_row), indent=2)}\n"
+                                "Observed active local row: "
+                                f"{json.dumps(_row_payload(local_row), indent=2)}\n"
+                                f"Observed switcher text:\n{switcher.switcher_text}"
+                            )
+                    if failure_message is not None:
+                        raise AssertionError(failure_message)
 
                 except Exception:
                     if page is not None:
@@ -975,7 +1035,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Updated TS-893 live startup coverage so pre-release File System Access instrumentation is diagnostic evidence, while the verdict stays tied to the public Local Git restoration outcome.",
+        "- Updated TS-893 live startup coverage so pass now requires a public pre-release workspace state showing restore was still incomplete while the local workspace remained blocked; File System Access instrumentation stays diagnostic only.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -1008,6 +1068,7 @@ def _bug_description(result: dict[str, object]) -> str:
     trigger = result.get("trigger_observation") or result.get(
         "pre_release_trigger_observation",
     )
+    pre_release_public_overlap_state = result.get("pre_release_public_overlap_state")
     switcher = result.get("switcher_observation")
     active_local_row = result.get("active_local_row")
     selected_row = result.get("selected_row")
@@ -1075,6 +1136,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 else "- **Observed pre-release activity events:** `<missing>`"
             ),
             (
+                f"- **Observed pre-release public overlap state:** `{json.dumps(pre_release_public_overlap_state, ensure_ascii=True)}`"
+                if pre_release_public_overlap_state is not None
+                else "- **Observed pre-release public overlap state:** `<missing>`"
+            ),
+            (
                 f"- **Observed runtime probe:** `{json.dumps(runtime_probe, ensure_ascii=True)}`"
                 if runtime_probe is not None
                 else "- **Observed runtime probe:** `<missing>`"
@@ -1110,6 +1176,7 @@ def _bug_description(result: dict[str, object]) -> str:
                     "pre_release_activity": activity,
                     "pre_release_all_activity_events": all_activity_events,
                     "pre_release_activity_events": activity_events,
+                    "pre_release_public_overlap_state": pre_release_public_overlap_state,
                     "pre_release_runtime_probe": runtime_probe,
                     "restore_message": restore_message,
                     "trigger_observation": trigger,
@@ -1211,15 +1278,14 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         if passed
         else (
             "Re-ran "
-            f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+            f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
         )
     )
     return (
-        "Updated TS-893 so the pre-release File System Access activity and runtime "
-        "probe remain diagnostic evidence only; the ticket verdict now follows the "
-        "public contract that startup restores the saved local workspace as the "
-        "active `Local Git` row without leaving the app on `Local Unavailable` or "
-        "the hosted fallback. "
+        "Updated TS-893 so pass now requires public pre-release workspace evidence "
+        "that restore was still incomplete while the local workspace remained "
+        "blocked; the File System Access activity and runtime probe remain "
+        "diagnostic only. "
         f"{rerun_summary}"
     )
 
@@ -1229,11 +1295,16 @@ def _exact_error_summary(result: dict[str, object]) -> str:
     if traceback_text:
         for line in reversed(traceback_text.splitlines()):
             candidate = line.strip()
+            if candidate.startswith("AssertionError:"):
+                return candidate
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
             if candidate:
                 return candidate
     error = str(result.get("error", "")).strip()
     if error:
-        return error if ":" in error.splitlines()[0] else f"AssertionError: {error}"
+        first_line = error.splitlines()[0].strip()
+        return first_line if ":" in first_line else f"AssertionError: {first_line}"
     return "AssertionError: TS-893 failed"
 
 
@@ -1317,8 +1388,8 @@ def _failed_step_number(result: dict[str, object]) -> int | None:
 def _bug_title(result: dict[str, object]) -> str:
     if not _step_passed(result, 2):
         return (
-            f"{TICKET_KEY} - Startup restore exposes no saved-local File System "
-            "Access activity while the busy handle is still blocked"
+            f"{TICKET_KEY} - Startup restore exposes no public blocked-workspace "
+            "state before the busy handle is released"
         )
     return (
         f"{TICKET_KEY} - Startup retry does not restore the local workspace "
@@ -1329,10 +1400,12 @@ def _bug_title(result: dict[str, object]) -> str:
 def _bug_expected_result(result: dict[str, object]) -> str:
     if not _step_passed(result, 2):
         return (
-            "While the prepared local workspace is still blocked, startup should "
-            "attempt File System Access work for that saved local workspace before "
-            "the busy handle is released, then recover and keep the workspace "
-            "restorable as the active `Local Git` selection once access returns."
+            "While the prepared local workspace is still blocked during startup, "
+            "the deployed app should expose a public workspace state that proves "
+            "restore is not yet complete before access is released (for example "
+            "the local row unavailable or the hosted fallback selected), then "
+            "recover and keep the workspace restorable as the active `Local Git` "
+            "selection once access returns."
         )
     return EXPECTED_RESULT
 
@@ -1341,9 +1414,10 @@ def _bug_actual_result(result: dict[str, object]) -> str:
     if not _step_passed(result, 2):
         return (
             "While the prepared local workspace was still blocked, startup never "
-            "exposed any File System Access activity for that saved local "
-            "workspace before access was released, so the transient busy "
-            "revalidation path could not be observed."
+            "exposed any public workspace state showing that restore was still in "
+            "progress before access was released. The header already showed the "
+            "final `Local Git` selection and the workspace switcher never surfaced "
+            "a blocked/unavailable or hosted-fallback state while blocked."
         )
     if not _step_passed(result, 4):
         return (
@@ -1358,15 +1432,82 @@ def _bug_actual_result(result: dict[str, object]) -> str:
 def _bug_missing_capability(result: dict[str, object]) -> str:
     if not _step_passed(result, 2):
         return (
-            "The startup restore flow does not expose any reliable saved-local "
-            "File System Access activity while the busy handle is still blocked, "
-            "so the transient revalidation/retry path cannot be verified before "
-            "access is restored."
+            "The startup restore flow does not expose a reliable public state "
+            "transition proving the blocked local-workspace retry path is active "
+            "before access is restored, so this transient busy scenario cannot be "
+            "verified from `testing/` without falling back to incomplete "
+            "test-only instrumentation."
         )
     return (
         "Startup retry did not restore the prepared local workspace as the active "
         "`Local Git` selection after transient busy access cleared."
     )
+
+
+def _observe_pre_release_public_overlap(
+    page: LiveWorkspaceSwitcherPage,
+) -> dict[str, object]:
+    trigger = page.observe_trigger(timeout_ms=5_000)
+    switcher: WorkspaceSwitcherObservation | None = None
+    local_row: WorkspaceSwitcherRowObservation | None = None
+    selected_row: WorkspaceSwitcherRowObservation | None = None
+    switcher_error: str | None = None
+    switcher_opened = False
+    try:
+        switcher = page.open_and_observe(timeout_ms=5_000)
+        switcher_opened = True
+        local_row = _find_named_local_row(switcher)
+        selected_row = _find_selected_row(switcher)
+    except Exception as error:
+        switcher_error = f"{type(error).__name__}: {error}"
+    finally:
+        if switcher_opened:
+            try:
+                page.wait_for_escape_dismissal(timeout_ms=5_000)
+            except Exception as error:
+                dismiss_error = f"{type(error).__name__}: {error}"
+                switcher_error = (
+                    f"{switcher_error}; dismiss_error={dismiss_error}"
+                    if switcher_error
+                    else f"dismiss_error={dismiss_error}"
+                )
+    public_overlap_reason = _pre_release_public_overlap_reason(
+        trigger=trigger,
+        local_row=local_row,
+        selected_row=selected_row,
+    )
+    return {
+        "public_overlap_observed": public_overlap_reason is not None,
+        "public_overlap_reason": public_overlap_reason,
+        "trigger": _trigger_payload(trigger),
+        "switcher": _switcher_payload(switcher) if switcher is not None else None,
+        "local_row": _row_payload(local_row),
+        "selected_row": _row_payload(selected_row),
+        "switcher_error": switcher_error,
+    }
+
+
+def _pre_release_public_overlap_reason(
+    *,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    local_row: WorkspaceSwitcherRowObservation | None,
+    selected_row: WorkspaceSwitcherRowObservation | None,
+) -> str | None:
+    if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
+        return "header trigger showed the hosted fallback while the local workspace was blocked"
+    if local_row is not None and (
+        local_row.state_label != "Local Git" or "Local Unavailable" in local_row.visible_text
+    ):
+        return (
+            "workspace switcher showed the saved local workspace in a non-restored "
+            f"state while blocked: {local_row.state_label!r}"
+        )
+    if selected_row is not None and (
+        selected_row.display_name != LOCAL_DISPLAY_NAME
+        or selected_row.target_type_label != "Local"
+    ):
+        return "workspace switcher selected a non-local or hosted workspace while the local workspace was blocked"
+    return None
 
 
 def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:

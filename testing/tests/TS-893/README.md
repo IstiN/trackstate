@@ -11,13 +11,14 @@ The automation:
   to it to simulate a transiently busy/unavailable file-system handle
 3. runs the scenario at the default desktop viewport of `1440x900`
 4. keeps the local workspace blocked until the header workspace trigger is
-  already visible, then restores access so the unblock cannot happen before
-  startup reaches the recovery path
+  already visible, then requires a public pre-release workspace state proving
+  restore is still incomplete while the directory remains blocked before it
+  restores access
 5. records tracked File System Access activity on the saved local workspace
   lineage while it is still blocked, along with any TS-893 runtime failure
-  probe, as diagnostic evidence before access is restored, then waits after the
-  busy-state release for the workspace switcher trigger to restore the saved
-  local workspace instead of asserting immediately
+  probe, as diagnostic evidence only, then waits after the busy-state release
+  for the workspace switcher trigger to restore the saved local workspace
+  instead of asserting immediately
 6. opens **Workspace switcher** and verifies the selected active row is the
   local workspace in the `Local Git` state rather than `Local Unavailable` or
   the hosted fallback
@@ -49,11 +50,15 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py
 ## Expected result
 
 ```text
-Pass: after the temporary busy state is released during startup, the prepared
-active local workspace is restored as the selected Local Git row and the app
-does not keep Hosted setup workspace active or show Local Unavailable.
+Pass: while the local workspace is still blocked, startup exposes a public
+pre-release workspace state showing restore is not yet complete, and after the
+temporary busy state is released the prepared active local workspace is
+restored as the selected Local Git row without leaving Hosted setup workspace
+active or showing Local Unavailable.
 
-Fail: after the temporary busy state is released, startup still keeps Hosted
-setup workspace active, leaves the local row Unavailable, or otherwise does not
-restore the saved local workspace as Local Git.
+Fail: startup never exposes a trustworthy public pre-release blocked-workspace
+state while access is still revoked, or after the temporary busy state is
+released it still keeps Hosted setup workspace active, leaves the local row
+Unavailable, or otherwise does not restore the saved local workspace as Local
+Git.
 ```
