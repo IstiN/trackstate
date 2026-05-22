@@ -475,9 +475,11 @@ def _stage_excerpt(
     stage_log_lines: list[str],
     observation: GitHubAccessibilityPullRequestGateObservation,
 ) -> str:
+    if observation.run_log_excerpt:
+        return observation.run_log_excerpt
     if stage_log_lines:
         return "\n".join(stage_log_lines[:12])
-    return observation.run_log_excerpt or ""
+    return ""
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
