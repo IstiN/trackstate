@@ -82,7 +82,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Project Settings'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Attachments'), findsWidgets);
+      expect(_settingsTab('Attachments'), findsWidgets);
       expect(find.text('Attachment storage mode'), findsOneWidget);
     },
   );
@@ -107,7 +107,7 @@ void main() {
 
       await tester.tap(find.text('Settings').first);
       await tester.pumpAndSettle();
-      final statusesTab = find.widgetWithText(Tab, 'Statuses').first;
+      final statusesTab = _settingsTab('Statuses').first;
       await tester.ensureVisible(statusesTab);
       await tester.tap(statusesTab);
       await tester.pumpAndSettle();
@@ -197,6 +197,9 @@ Finder _attachmentsRestrictionActionFinder(
     matching: find.widgetWithText(FilledButton, actionLabel),
   );
 }
+
+Finder _settingsTab(String label) =>
+    find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
 class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
   const _RepositoryPathWebTestProvider();

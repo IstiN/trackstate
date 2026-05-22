@@ -208,11 +208,17 @@ abstract class AppLocalizations {
   /// **'Syncing'**
   String get workspaceSyncChecking;
 
-  /// No description provided for @workspaceSyncAttentionNeeded.
+  /// No description provided for @workspaceSyncAttentionNeededVisibleLabel.
   ///
   /// In en, this message translates to:
   /// **'Attention needed'**
-  String get workspaceSyncAttentionNeeded;
+  String get workspaceSyncAttentionNeededVisibleLabel;
+
+  /// No description provided for @workspaceSyncAttentionNeededSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync error, attention needed'**
+  String get workspaceSyncAttentionNeededSemanticLabel;
 
   /// No description provided for @workspaceSyncUnavailable.
   ///

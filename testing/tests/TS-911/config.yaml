@@ -1,0 +1,12 @@
+test_id: TS-911
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from a focused trigger and confirms the live visible controls plus the last internal keyboard target are present.
+  - Establishes the ticket precondition by focusing the live first internal keyboard target directly through the page object before the reverse-wrap assertion.
+  - Verifies reverse wrap returns to the observed last internal control instead of escaping to the app shell.

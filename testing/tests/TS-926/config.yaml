@@ -1,0 +1,38 @@
+test_id: TS-926
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs and pull request metadata
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts926_accessibility_boundary_probe.dart
+  probe_render_host_path: lib/ui/features/tracker/views/trackstate_app.dart
+  branch_prefix: ts926-accessibility-boundary
+  commit_message: "TS-926 probe: verify CI accessibility boundary on disposable PR"
+  pull_request_title: "TS-926 disposable probe: exact accessibility boundary"
+  pull_request_body: "Disposable PR created by TS-926 automation to verify that the live PR accessibility workflow treats an exact 4.5:1 contrast boundary as compliant."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - playwright
+  contrast_evidence_markers:
+    - color-contrast
+  semantic_evidence_markers:
+    - non-descriptive-label
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+  exact_contrast_ratio: 4.5
+  contrast_tolerance: 0.01
+  background_color: "rgb(241, 228, 213)"
+  text_color: "rgb(178, 67, 40)"
+  visible_text: "Boundary contrast sample"
+  accessible_button_label: "Open tracker settings"
+notes:
+  - Creates a disposable PR and verifies the hosted GitHub Actions workflow plus Playwright accessibility log surface instead of treating a local rerun as CI evidence.
+  - Generates the probe through a reusable testing service so the ticket layer depends on abstractions rather than raw Playwright calls.

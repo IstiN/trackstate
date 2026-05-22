@@ -9,7 +9,7 @@ void main() {
   group('TrackStateCli mutations', () {
     test('creates tickets from jira_create_ticket_with_json', () async {
       final repo = await _createCliMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
       final cli = _createCli();
 
       final result = await cli.run([
@@ -55,7 +55,7 @@ void main() {
       'creates tickets from legacy jira_create_ticket_with_json project and fieldsJson arguments',
       () async {
         final repo = await _createCliMutationRepository();
-        addTearDown(() => repo.delete(recursive: true));
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
         final cli = _createCli();
 
         final result = await cli.run([
@@ -92,7 +92,7 @@ void main() {
 
     test('accepts deployed Jira automation argument shapes', () async {
       final repo = await _createCliMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
       final cli = _createCli();
 
       final createBasicResult = await cli.run([
@@ -413,7 +413,7 @@ void main() {
       'updates and clears fields by display name and customfield id',
       () async {
         final repo = await _createCliMutationRepository();
-        addTearDown(() => repo.delete(recursive: true));
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
         final cli = _createCli();
 
         final updateResult = await cli.run([
@@ -469,7 +469,7 @@ void main() {
       'supports lifecycle mutations for status, assignee, labels, description, and hierarchy',
       () async {
         final repo = await _createCliMutationRepository();
-        addTearDown(() => repo.delete(recursive: true));
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
         final cli = _createCli();
 
         final moveResult = await cli.run([
@@ -600,7 +600,7 @@ void main() {
 
     test('posts comments and links with canonical mutation payloads', () async {
       final repo = await _createCliMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
       final cli = _createCli();
 
       final commentResult = await cli.run([
@@ -666,7 +666,7 @@ void main() {
       'updates from jira JSON, archives explicitly, and deletes permanently',
       () async {
         final repo = await _createCliMutationRepository();
-        addTearDown(() => repo.delete(recursive: true));
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
         final cli = _createCli();
 
         final updateResult = await cli.run([
@@ -778,6 +778,13 @@ TrackStateCli _createCli() => TrackStateCli(
 );
 
 String _identityPath(String path) => path;
+
+Future<void> _deleteDirectoryIfPresent(Directory directory) async {
+  if (!directory.existsSync()) {
+    return;
+  }
+  await directory.delete(recursive: true);
+}
 
 Future<Directory> _createCliMutationRepository() async {
   final directory = await Directory.systemTemp.createTemp(

@@ -1,0 +1,15 @@
+test_id: TS-811
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
+  - Seeds a JQL Search query ordered by priority descending with Issue-A selected above Issue-B, then refreshes after promoting Issue-B to Highest so the list reorders.
+  - Verifies Issue-A stays visibly selected at its new position and remains open in the detail panel after the background sync refresh.
+runtime_inputs:
+  issue_a_key: TRACK-811-A
+  issue_b_key: TRACK-811-B
+  query: project = TRACK AND status != Done ORDER BY priority DESC
+  run_command: flutter test testing/tests/TS-811/test_ts_811.dart --reporter expanded

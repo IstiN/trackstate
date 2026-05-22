@@ -1,0 +1,11 @@
+test_id: TS-821
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored signed-in GitHub token.
+  - Clicks the desktop workspace switcher trigger, presses Tab once, and verifies focus moves to a different visible in-viewport interactive element outside the switcher.
+  - Waits up to 6 seconds for the panel to dismiss after blur before asserting, so delayed blur handlers are still observed.

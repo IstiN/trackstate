@@ -18,7 +18,7 @@ void main() {
     'service creates a nested issue under the canonical epic path',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -52,7 +52,7 @@ void main() {
 
   test('service rejects sub-task creation without a parent issue', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -76,7 +76,7 @@ void main() {
     'service updates fields and acceptance criteria in one mutation',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -115,7 +115,7 @@ void main() {
     'service rejects direct issue type edits in generic field mutations',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -143,7 +143,7 @@ void main() {
     'service enforces workflow transitions and auto-defaults done resolution',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -169,7 +169,7 @@ void main() {
 
   test('service lists only valid outgoing workflow transitions', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -188,7 +188,7 @@ void main() {
     'service rejects workflow transitions that are not configured',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -212,7 +212,7 @@ void main() {
     'service reassigns an issue by moving its subtree to the new epic path',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -250,7 +250,7 @@ void main() {
     'service normalizes inverse link labels to one stored canonical link',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -286,7 +286,7 @@ void main() {
     'service rejects self-referencing links without writing metadata',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -314,7 +314,7 @@ void main() {
 
   test('service adds comments through the shared typed contract', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -342,7 +342,7 @@ void main() {
 
   test('service archives issues through the shared typed contract', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -365,7 +365,7 @@ void main() {
 
   test('service blocks delete when child issues would be orphaned', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -383,7 +383,7 @@ void main() {
 
   test('service returns a typed dirty-worktree failure', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -409,7 +409,7 @@ void main() {
 
   test('service rejects non-epic explicit epic targets', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -430,7 +430,7 @@ void main() {
 
   test('service rejects assigning epics into another hierarchy', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -490,7 +490,7 @@ void main() {
     'service preserves attachment backend metadata when moving issue hierarchies',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
       await _writeFile(
         repo,
         'DEMO/DEMO-1/DEMO-2/attachments.json',
@@ -608,7 +608,7 @@ void main() {
 
   test('repository rejects stale local deletes with a conflict', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     final snapshot = await repository.loadSnapshot();
@@ -737,6 +737,17 @@ Future<Directory> _createMutationRepository() async {
   await _git(directory.path, ['add', '.']);
   await _git(directory.path, ['commit', '-m', 'Initial mutation fixture']);
   return directory;
+}
+
+Future<void> _deleteDirectoryIfPresent(Directory directory) async {
+  if (!directory.existsSync()) {
+    return;
+  }
+  try {
+    await directory.delete(recursive: true);
+  } on PathNotFoundException {
+    // Another cleanup path may have already removed the temp fixture directory.
+  }
 }
 
 Map<String, String> _mutationFixtureFiles() {
