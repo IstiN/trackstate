@@ -29,11 +29,19 @@ class _FakeGitHubApiClient:
 class GitHubAccessibilityAlphaBlendedPullRequestGateProbeRegressionTest(
     unittest.TestCase
 ):
-    def test_probe_source_uses_alpha_blended_contrast_with_descriptive_label(self) -> None:
+    def test_probe_source_renders_alpha_text_and_publishes_flattened_signal(self) -> None:
         source = GitHubAccessibilityAlphaBlendedPullRequestGateProbeService._probe_source()
 
         self.assertIn("publishAccessibilityContrastProbeSignal(", source)
-        self.assertIn("colorScheme.onSurface.withAlpha(89)", source)
+        self.assertIn(
+            "final lowContrastColor = colorScheme.onSurface.withAlpha(89);",
+            source,
+        )
+        self.assertIn(
+            "final flattenedProbeColor = Color.alphaBlend(lowContrastColor, colorScheme.surface);",
+            source,
+        )
+        self.assertIn("foreground: flattenedProbeColor", source)
         self.assertIn("background: colorScheme.surface", source)
         self.assertIn(
             "label: 'Alpha-blended sync status message'",
@@ -41,6 +49,17 @@ class GitHubAccessibilityAlphaBlendedPullRequestGateProbeRegressionTest(
         )
         self.assertIn("ExcludeSemantics(", source)
         self.assertNotIn("label: 'button'", source)
+
+    def test_flattened_probe_signal_matches_expected_runtime_contract(self) -> None:
+        signal = GitHubAccessibilityAlphaBlendedPullRequestGateProbeService.flattened_probe_signal(
+            foreground_rgb=(0x2D, 0x2A, 0x26),
+            background_rgb=(0xFF, 0xFF, 0xFF),
+        )
+
+        self.assertEqual(signal["foreground_hex"], "#B6B5B3")
+        self.assertEqual(signal["background_hex"], "#FFFFFF")
+        self.assertAlmostEqual(signal["contrast_ratio"], 2.0554, places=4)
+        self.assertLess(signal["contrast_ratio"], 4.5)
 
     def test_create_and_observe_pull_request_derives_label_and_indicator(self) -> None:
         class _DerivedProbeService(
@@ -57,6 +76,13 @@ class Ts965ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final flattenedProbeColor = Color.alphaBlend(lowContrastColor, colorScheme.surface);
+    publishAccessibilityContrastProbeSignal(
+      text: 'Alpha blended sync warning',
+      semanticsLabel: 'Observed alpha label',
+      foreground: flattenedProbeColor,
+      background: colorScheme.surface,
+    );
     return Semantics(
       label: 'Observed alpha label',
       child: Container(
@@ -111,7 +137,7 @@ class Ts965ProbeSurface extends StatelessWidget {
         self.assertTrue(observation["probe_contains_low_contrast_indicator"])
         self.assertTrue(observation["probe_contains_semantic_label_indicator"])
         self.assertEqual(observation["probe_semantic_label"], "Observed alpha label")
-        self.assertIn("withAlpha(89)", observation["probe_contrast_technique"])
+        self.assertIn("alpha-flattened foreground", observation["probe_contrast_technique"])
 
 
 if __name__ == "__main__":
