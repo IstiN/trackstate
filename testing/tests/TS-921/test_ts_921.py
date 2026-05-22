@@ -41,14 +41,14 @@ LOCAL_TARGET = "/tmp/trackstate-ts921-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 WRONG_DIRECTORY_NAME = "ts921-wrong-directory"
-LINKED_BUGS = ["TS-915"]
+LINKED_BUGS = ["TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Added TS-921 live wrong-directory retry coverage and updated the shared "
-    "workspace-switcher trigger helper to support real HTML buttons rendered by the "
-    "deployed web app."
+    "Refreshed TS-921 live coverage so the existing wrong-directory retry test also "
+    "captures the first user-visible production failure when the deployed app does not "
+    "reach the workspace switcher."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -166,7 +166,15 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                try:
+                    runtime_observation = tracker_page.open()
+                except AssertionError as error:
+                    _raise_startup_failure(
+                        result=result,
+                        tracker_page=tracker_page,
+                        runtime_context=runtime_context,
+                        reason=str(error),
+                    )
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 result["runtime_state"] = runtime_observation.kind
                 result["runtime_body_text"] = runtime_observation.body_text
@@ -177,11 +185,16 @@ def main() -> None:
                 if runtime_observation.kind != "ready" or not bool(
                     shell_observation.get("shell_ready"),
                 ):
-                    raise AssertionError(
-                        "Precondition failed: the deployed app did not reach the "
-                        "interactive shell before the TS-921 workspace retry scenario.\n"
-                        f"Observed runtime state: {runtime_observation.kind}\n"
-                        f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}",
+                    _raise_startup_failure(
+                        result=result,
+                        tracker_page=tracker_page,
+                        runtime_context=runtime_context,
+                        reason=(
+                            "The deployed app did not reach the interactive shell before the "
+                            "TS-921 workspace retry scenario.\n"
+                            f"Observed runtime state: {runtime_observation.kind}\n"
+                            f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
+                        ),
                     )
                 try:
                     page.dismiss_connection_banner()
@@ -963,6 +976,138 @@ def _record_human_verification(
     entries.append({"check": check, "observed": observed})
 
 
+def _observe_startup_surface(tracker_page: TrackStateTrackerPage) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const isVisible = (element) => {
+            if (!element) {
+              return false;
+            }
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0
+              && rect.height > 0
+              && style.visibility !== 'hidden'
+              && style.display !== 'none';
+          };
+          const buttonLabels = Array.from(
+            document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+          )
+            .filter(isVisible)
+            .map((element) =>
+              normalize(
+                element.getAttribute?.('aria-label')
+                || element.innerText
+                || element.textContent
+                || '',
+              ),
+            )
+            .filter((label) => label.length > 0);
+          return {
+            title: document.title || '',
+            locationHref: window.location.href,
+            locationHash: window.location.hash,
+            locationPathname: window.location.pathname,
+            bodyText: document.body?.innerText || document.body?.textContent || '',
+            buttonLabels,
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "title": "",
+            "location_href": "",
+            "location_hash": "",
+            "location_pathname": "",
+            "body_text": tracker_page.body_text(),
+            "button_labels": [],
+        }
+    return {
+        "title": str(payload.get("title", "")),
+        "location_href": str(payload.get("locationHref", "")),
+        "location_hash": str(payload.get("locationHash", "")),
+        "location_pathname": str(payload.get("locationPathname", "")),
+        "body_text": str(payload.get("bodyText", "")),
+        "button_labels": [str(label) for label in payload.get("buttonLabels", [])],
+    }
+
+
+def _raise_startup_failure(
+    *,
+    result: dict[str, object],
+    tracker_page: TrackStateTrackerPage,
+    runtime_context: Ts921WrongDirectoryRuntime,
+    reason: str,
+) -> None:
+    startup_observation = _observe_startup_surface(tracker_page)
+    result["runtime_state"] = "startup-failed"
+    result["startup_observation"] = startup_observation
+    result["runtime_body_text"] = startup_observation["body_text"]
+    result["console_events"] = list(runtime_context.console_events)
+    result["page_errors"] = list(runtime_context.page_errors)
+    observed = (
+        "The deployed app never exposed the interactive shell or workspace switcher needed "
+        "for TS-921. Instead, the live page stayed on an early error surface.\n"
+        f"Reason: {reason}\n"
+        f"Startup observation: {json.dumps(startup_observation, indent=2)}\n"
+        f"Console events: {json.dumps(result['console_events'], indent=2)}\n"
+        f"Page errors: {json.dumps(result['page_errors'], indent=2)}"
+    )
+    _record_step(
+        result,
+        step=1,
+        status="failed",
+        action=REQUEST_STEPS[0],
+        observed=observed,
+    )
+    for step_number in (2, 3, 4):
+        _record_step(
+            result,
+            step=step_number,
+            status="failed",
+            action=REQUEST_STEPS[step_number - 1],
+            observed=(
+                "Not reached because the deployed app never showed the application header "
+                "and Workspace switcher. The visible page remained on the startup `Sync issue` "
+                "surface instead."
+            ),
+        )
+    _record_human_verification(
+        result,
+        check=(
+            "Loaded the deployed app at the required desktop viewport and waited for the "
+            "workspace switcher entry point to appear."
+        ),
+        observed=(
+            f"title={startup_observation['title']!r}; "
+            f"url={startup_observation['location_href']!r}; "
+            f"visible_buttons={json.dumps(startup_observation['button_labels'], ensure_ascii=True)}; "
+            f"body_text={startup_observation['body_text']!r}"
+        ),
+    )
+    _record_human_verification(
+        result,
+        check=(
+            "Viewed the live page like a user after load to confirm what was actually rendered "
+            "on screen."
+        ),
+        observed=(
+            "The page showed only a top-left `Sync issue` control on an otherwise blank screen, "
+            "with no dashboard, no navigation, and no workspace switcher trigger."
+        ),
+    )
+    raise AssertionError(
+        "Step 1 failed: the deployed app did not render the application shell, so the "
+        "Workspace switcher could not be opened for the TS-921 re-authentication scenario.\n"
+        f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}\n"
+        f"Console events:\n{json.dumps(result['console_events'], indent=2)}\n"
+        f"Page errors:\n{json.dumps(result['page_errors'], indent=2)}",
+    )
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -1018,13 +1163,19 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Preloaded a hosted workspace plus the saved local workspace targeted by the ticket.",
-        "* Opened the deployed Workspace switcher and checked for the unavailable local row a user must retry.",
+        (
+            "* Opened the deployed app and attempted to reach the Workspace switcher so the "
+            "unavailable local row could be retried through the visible UI."
+        ),
         (
             f"* When the row is available, the automation forces the browser directory picker to "
             f"return a different directory handle named {{{{code}}}}{WRONG_DIRECTORY_NAME}{{{{code}}}} "
             "and waits for the post-click async effects."
         ),
-        "* Verifies the visible error/message plus final workspace state instead of trusting the callback alone.",
+        (
+            "* Verifies either the visible rejection/final workspace state or the first "
+            "user-visible product failure that prevents the scenario from being reached."
+        ),
         "",
         "h4. Automation checks",
         *_step_lines(result, jira=True),
@@ -1071,12 +1222,18 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Preloaded the hosted/local workspace state needed for the manual re-authentication scenario.",
-        "- Opened the live Workspace switcher and verified the unavailable local row through the visible UI.",
+        (
+            "- Opened the live app and attempted to reach the Workspace switcher so the "
+            "unavailable local row could be exercised through the visible UI."
+        ),
         (
             f"- When available, forced the browser picker callback to choose the wrong directory "
             f"`{WRONG_DIRECTORY_NAME}` and waited for the async post-click state."
         ),
-        "- Verified the visible failure text and final workspace state from the user's perspective.",
+        (
+            "- Verified either the visible rejection/final workspace state or the first "
+            "user-visible product failure that blocked the scenario."
+        ),
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
@@ -1170,6 +1327,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Run command: `{RUN_COMMAND}`",
         "",
         "## Observed state",
+        f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
         f"- Trigger before action: `{json.dumps(result.get('trigger_before'), ensure_ascii=True)}`",
         f"- Switcher before action: `{json.dumps(result.get('switcher_before'), ensure_ascii=True)}`",
         f"- Saved local row before action: `{json.dumps(result.get('saved_local_row_before'), ensure_ascii=True)}`",
