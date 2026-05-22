@@ -1617,8 +1617,23 @@ class LiveWorkspaceSwitcherPage:
         panel: WorkspaceSwitcherPanelObservation,
         timeout_ms: int = 30_000,
     ) -> WorkspaceSwitcherFocusTargetObservation:
+        observable_labels = {
+            observation.label or observation.visible_text
+            for observation in self.observe_internal_tab_stops(
+                panel=panel,
+                timeout_ms=timeout_ms,
+            )
+            if observation.label or observation.visible_text
+        }
+        if label not in observable_labels:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a keyboard-reachable internal '
+                f'tab stop matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
         try:
-            self._session.wait_for_function(
+            target_payload = self._session.wait_for_function(
                 """
                 ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
@@ -1747,19 +1762,47 @@ class LiveWorkspaceSwitcherPage:
                   if (!target) {
                     return null;
                   }
+                  const targetKey =
+                    target.getAttribute('data-trackstate-browser-focus-id')
+                    || target.getAttribute('aria-label')
+                    || visibleText(target)
+                    || label;
+                  const focusProbe =
+                    window.__trackstateWorkspaceSwitcherFocusProbe
+                    && typeof window.__trackstateWorkspaceSwitcherFocusProbe === 'object'
+                      ? window.__trackstateWorkspaceSwitcherFocusProbe
+                      : {};
                   target.focus({ preventScroll: true });
                   const active = document.activeElement;
-                  return active === target || target.contains(active)
-                    ? {
-                        activeLabel: labelFor(active),
-                        activeTagName: active?.tagName || '',
-                      }
-                    : null;
+                  const focused = active === target || target.contains(active);
+                  const streak = focused
+                    ? (
+                        focusProbe.key === targetKey
+                          ? (Number(focusProbe.streak) || 0) + 1
+                          : 1
+                      )
+                    : 0;
+                  window.__trackstateWorkspaceSwitcherFocusProbe = {
+                    key: targetKey,
+                    streak,
+                  };
+                  if (!focused || streak < 2) {
+                    return false;
+                  }
+                  return {
+                    tagName: target.tagName,
+                    role: target.getAttribute('role'),
+                    ariaLabel: target.getAttribute('aria-label'),
+                    placeholder: target.getAttribute('placeholder'),
+                    title: target.getAttribute('title'),
+                    visibleText: visibleText(target),
+                    focusId: target.getAttribute('data-trackstate-browser-focus-id'),
+                  };
                 }
                 """,
                 arg={
-                    "heading": self._switcher_heading,
-                    "label": label,
+                   "heading": self._switcher_heading,
+                   "label": label,
                     "panelLeft": panel.left,
                     "panelTop": panel.top,
                     "panelRight": panel.left + panel.width,
@@ -1771,8 +1814,16 @@ class LiveWorkspaceSwitcherPage:
             raise AssertionError(
                 f'The open workspace switcher did not expose a focusable internal tab stop '
                 f'matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+        if not isinstance(target_payload, dict):
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable internal tab stop '
+                f'matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
         observation = self.observe_switcher_focus_target(panel=panel)
         if (
             not observation.focus_owned_by_switcher
