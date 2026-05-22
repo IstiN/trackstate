@@ -35,7 +35,9 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 CONFIG_PATH = REPO_ROOT / "testing/tests/TS-922/config.yaml"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input/TS-922/pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Open the source code for a UI component that implements a sync status widget (e.g., lib/ui/features/tracker/views/trackstate_app.dart).",
@@ -79,6 +81,7 @@ def main() -> None:
         "config_path": str(CONFIG_PATH),
         "target_path": config.target_relative_path.as_posix(),
         "localization_path": config.localization_relative_path.as_posix(),
+        "semantic_label_localization_key": config.semantic_label_localization_key,
         "expected_semantic_label": config.required_semantic_label,
         "generic_semantic_label": config.generic_semantic_label,
         "replacement_source_snippet": config.replacement_source_snippet,
@@ -124,7 +127,8 @@ def _evaluate(
         ),
         observed=(
             "The analysis run blocked the mutation with a terminal-visible "
-            f"type/argument contract diagnostic:\n{_combined_output(validation.mutated_analyze)}"
+            f"type/argument contract diagnostic:\n"
+            f"{_combined_output(validation.mutated_analyze)}"
         ),
     )
 
@@ -215,6 +219,11 @@ def _assert_semantic_parameter_located(
             "the live production call site no longer passes the contextualized "
             f"`{config.required_source_snippet}` snippet into the sync widget"
         )
+    if config.semantic_label_localization_key not in validation.baseline_source:
+        failures.append(
+            "the live sync semantic-label helper no longer references the "
+            f"`{config.semantic_label_localization_key}` localization getter"
+        )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
             "the live English localization file no longer contains the required "
@@ -239,9 +248,11 @@ def _assert_semantic_parameter_located(
         observed=(
             "Located the sync widget semantic/ARIA label parameter in "
             f"{config.target_relative_path.as_posix()} as `{parameter_contract}`. "
-            f"The live call site passes `{config.required_source_snippet}` and the "
-            f"English localization keeps both {config.required_semantic_label!r} "
-            f"and {config.generic_semantic_label!r} available."
+            f"The live call site passes `{config.required_source_snippet}`, the "
+            "helper still resolves "
+            f"`{config.semantic_label_localization_key}`, and the English "
+            f"localization keeps both {config.required_semantic_label!r} and "
+            f"{config.generic_semantic_label!r} available."
         ),
     )
 
@@ -295,8 +306,13 @@ def _assert_compile_contract(
     )
     contract_markers = _compile_contract_markers(normalized_output)
     clean_analysis = "no issues found!" in normalized_output
+    required_markers = {"string-type", "cannot-assign", "sync-pill-type"}
 
-    if diagnostic_signals and contract_markers and not clean_analysis:
+    if (
+        diagnostic_signals
+        and not clean_analysis
+        and required_markers.issubset(contract_markers)
+    ):
         _record_step(
             result,
             step=4,
@@ -308,7 +324,7 @@ def _assert_compile_contract(
                 f"compile-time/analyzer diagnostics. Observed exit_code="
                 f"{validation.mutated_analyze.exit_code}; "
                 f"diagnostic_signals={diagnostic_signals}; "
-                f"contract_markers={contract_markers}; terminal output:\n{output}"
+                f"contract_markers={sorted(contract_markers)}; terminal output:\n{output}"
             ),
         )
         return
@@ -324,7 +340,7 @@ def _assert_compile_contract(
             f"Observed exit_code={validation.mutated_analyze.exit_code}; "
             f"clean_analysis={clean_analysis}; "
             f"diagnostic_signals={diagnostic_signals}; "
-            f"contract_markers={contract_markers}; terminal output:\n{output}"
+            f"contract_markers={sorted(contract_markers)}; terminal output:\n{output}"
         ),
     )
     _record_human_verification(
@@ -349,7 +365,7 @@ def _assert_compile_contract(
         f"Observed exit code: {validation.mutated_analyze.exit_code}\n"
         f"Observed clean analysis: {clean_analysis}\n"
         f"Observed diagnostic signals: {diagnostic_signals}\n"
-        f"Observed compile-contract markers: {contract_markers}\n"
+        f"Observed compile-contract markers: {sorted(contract_markers)}\n"
         f"Observed output:\n{output}"
     )
 
@@ -381,17 +397,19 @@ def _diagnostic_signals(
     return signals
 
 
-def _compile_contract_markers(normalized_output: str) -> list[str]:
-    markers = {
-        "argument-type": "argument type",
-        "cannot-assign": "can't be assigned",
-        "parameter-type": "parameter type",
-        "undefined-named-parameter": "undefined_named_parameter",
-        "undefined-getter": "undefined getter",
-        "semantic-label": "semanticlabel",
-        "raw-generic-string": "attention needed",
-    }
-    return [name for name, fragment in markers.items() if fragment in normalized_output]
+def _compile_contract_markers(normalized_output: str) -> set[str]:
+    markers: set[str] = set()
+    if "type 'string'" in normalized_output or "type \"string\"" in normalized_output:
+        markers.add("string-type")
+    if (
+        "can't be assigned to the parameter type" in normalized_output
+        or "isn't assignable to parameter type" in normalized_output
+        or "isn't assignable to the parameter type" in normalized_output
+    ):
+        markers.add("cannot-assign")
+    if "_syncpillsemanticlabel" in normalized_output:
+        markers.add("sync-pill-type")
+    return markers
 
 
 def _semantic_label_parameter_contract(source: str) -> str | None:
@@ -435,6 +453,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         _markdown_summary(result, passed=True),
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -460,6 +479,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         encoding="utf-8",
     )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies(result, passed=False)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -537,6 +557,54 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
             )
         )
     return "\n".join(lines).strip() + "\n"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed: TS-922 now mutates the real sync-pill `semanticLabel` call site to "
+        "the raw string `Attention needed` instead of the nonexistent "
+        "`workspaceSyncAttentionNeeded` getter, and the success criteria now only "
+        "accept the real type-mismatch diagnostic for assigning `String` to "
+        "`_SyncPillSemanticLabel?`. "
+        f"{rerun_summary}"
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:
