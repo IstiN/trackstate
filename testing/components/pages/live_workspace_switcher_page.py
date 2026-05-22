@@ -2381,18 +2381,84 @@ class LiveWorkspaceSwitcherPage:
         *,
         timeout_ms: int = 10_000,
     ) -> None:
+        escaped_action_label = (
+            action_label.replace("\\", "\\\\").replace('"', '\\"')
+        )
         try:
             self._session.click(
                 'flt-semantics[role="button"],button,[role="button"]',
                 has_text=action_label,
                 timeout_ms=timeout_ms,
             )
+            return
         except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The open workspace switcher did not expose the expected saved workspace "
-                f"action button {action_label!r}.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
+            text_match_error = error
+
+        try:
+            self._session.click(
+                (
+                    'flt-semantics[role="button"][aria-label="'
+                    f'{escaped_action_label}'
+                    '"],button[aria-label="'
+                    f'{escaped_action_label}'
+                    '"],[role="button"][aria-label="'
+                    f'{escaped_action_label}'
+                    '"]'
+                ),
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        payload = self._session.evaluate(
+            """
+            (targetLabel) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const match = Array.from(
+                document.querySelectorAll(
+                  'flt-semantics[role="button"],button,[role="button"],[aria-label]'
+                )
+              )
+                .filter((element) => isVisible(element))
+                .find((element) => normalize(element.getAttribute('aria-label') || '') === targetLabel);
+              if (!match) {
+                return null;
+              }
+              const rect = match.getBoundingClientRect();
+              return {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+              };
+            }
+            """,
+            arg=action_label,
+        )
+        if isinstance(payload, dict):
+            self._session.mouse_click(
+                float(payload["left"]) + float(payload["width"]) / 2,
+                float(payload["top"]) + float(payload["height"]) / 2,
+            )
+            return
+
+        raise AssertionError(
+            "The open workspace switcher did not expose the expected saved workspace "
+            f"action button {action_label!r}.\n"
+            f"Observed body text:\n{self.current_body_text()}",
+        ) from text_match_error
 
     def wait_for_active_saved_workspace(
         self,

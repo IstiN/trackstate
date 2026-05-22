@@ -45,10 +45,10 @@ STARTUP_PRECONDITION_WAIT_SECONDS = 20
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 CANCEL_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Added a live Playwright regression that reuses the unavailable-workspace "
-    "manual restore flow, simulates a browser-native picker cancel via "
-    "`showDirectoryPicker()` rejecting with `AbortError`, and verifies the app "
-    "stays interactive while the workspace remains unavailable."
+    "Updated the TS-920 live Playwright regression to drive the real saved-workspace "
+    "restore button through the page object and to simulate browser-access cancel "
+    "outcomes for both picker and remembered-handle permission callbacks while "
+    "verifying the workspace stays unavailable."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -150,7 +150,8 @@ def main() -> None:
         "human_verification": [],
         "manual_cancel_simulation": (
             "Automation forced `showDirectoryPicker()` to reject with `AbortError` "
-            "to reproduce a user pressing Cancel on the native browser directory picker."
+            "and `requestPermission()` to resolve to `denied` so either browser-access "
+            "path behaves like the user canceling or dismissing the prompt."
         ),
     }
 
@@ -284,9 +285,9 @@ def main() -> None:
                 result["manual_restore_action_label"] = exact_action_label
 
                 try:
-                    _click_switcher_action_by_aria_label(
-                        tracker_page,
+                    page.click_saved_workspace_action_button(
                         exact_action_label,
+                        timeout_ms=10_000,
                     )
                 except AssertionError as error:
                     _record_step(
@@ -328,7 +329,9 @@ def main() -> None:
                         tracker_page=tracker_page,
                         page=page,
                     ),
-                    is_satisfied=lambda observation: observation["directory_picker_called"],
+                    is_satisfied=lambda observation: observation[
+                        "browser_access_callback_observed"
+                    ],
                     timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
                     interval_seconds=1,
                 )
@@ -343,15 +346,16 @@ def main() -> None:
                         status="failed",
                         action=REQUEST_STEPS[2],
                         observed=(
-                            "The unavailable-workspace action never triggered the browser "
-                            "directory picker callback.\n"
+                            "The unavailable-workspace action never triggered any browser "
+                            "access callback (`showDirectoryPicker()` or "
+                            "`requestPermission()`).\n"
                             f"action_label={exact_action_label!r}\n"
                             f"probe_state={json.dumps(cancel_attempt_observation['probe'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
                         "Step 3 failed: clicking the unavailable-workspace action never "
-                        "triggered `showDirectoryPicker()`.\n"
+                        "triggered `showDirectoryPicker()` or `requestPermission()`.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed probe state:\n{json.dumps(cancel_attempt_observation['probe'], indent=2)}\n"
                         f"Observed body text:\n{cancel_attempt_observation['body_text']}"
@@ -434,8 +438,8 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Simulated the browser-native picker cancel by forcing "
-                        "`showDirectoryPicker()` to reject with `AbortError`, then waited "
+                        "Simulated browser-access cancellation on the real unavailable-"
+                        "workspace restore flow, then waited "
                         f"{CANCEL_SETTLE_WAIT_SECONDS} seconds for the UI to settle. The "
                         "workspace stayed unavailable, the hosted workspace stayed active, "
                         "and no visible open-failure or unsupported-operation message "
@@ -749,6 +753,7 @@ def _manual_cancel_probe_script() -> str:
         requestPermissionCalls: [],
         queryPermissionCalls: [],
         canceledPickerErrors: [],
+        deniedPermissionResults: [],
         wrapErrors: [],
       };
       const serialize = (value) => {
@@ -772,8 +777,21 @@ def _manual_cancel_probe_script() -> str:
           return await original.apply(this, args);
         };
       };
-      wrap(window.FileSystemHandle && window.FileSystemHandle.prototype, 'requestPermission', 'requestPermissionCalls');
-      wrap(window.FileSystemHandle && window.FileSystemHandle.prototype, 'queryPermission', 'queryPermissionCalls');
+      const fileSystemHandleProto = window.FileSystemHandle && window.FileSystemHandle.prototype;
+      if (fileSystemHandleProto && typeof fileSystemHandleProto.requestPermission === 'function') {
+        fileSystemHandleProto.requestPermission = async function(...args) {
+          state.requestPermissionCalls.push({
+            callNumber: state.requestPermissionCalls.length + 1,
+            args: serialize(args),
+          });
+          state.deniedPermissionResults.push({
+            callNumber: state.deniedPermissionResults.length + 1,
+            result: 'denied',
+          });
+          return 'denied';
+        };
+      }
+      wrap(fileSystemHandleProto, 'queryPermission', 'queryPermissionCalls');
 
       if (typeof window.showDirectoryPicker === 'function') {
         window.showDirectoryPicker = async function(...args) {
@@ -839,6 +857,9 @@ def _read_manual_cancel_probe(tracker_page) -> dict[str, object]:
             canceledPickerErrors: Array.isArray(probe.canceledPickerErrors)
               ? probe.canceledPickerErrors
               : [],
+            deniedPermissionResults: Array.isArray(probe.deniedPermissionResults)
+              ? probe.deniedPermissionResults
+              : [],
             wrapErrors: Array.isArray(probe.wrapErrors) ? probe.wrapErrors : [],
           };
         }
@@ -850,6 +871,7 @@ def _read_manual_cancel_probe(tracker_page) -> dict[str, object]:
             "requestPermissionCalls": [],
             "queryPermissionCalls": [],
             "canceledPickerErrors": [],
+            "deniedPermissionResults": [],
             "wrapErrors": [],
         }
     return {
@@ -857,6 +879,7 @@ def _read_manual_cancel_probe(tracker_page) -> dict[str, object]:
         "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
         "queryPermissionCalls": list(payload.get("queryPermissionCalls", [])),
         "canceledPickerErrors": list(payload.get("canceledPickerErrors", [])),
+        "deniedPermissionResults": list(payload.get("deniedPermissionResults", [])),
         "wrapErrors": list(payload.get("wrapErrors", [])),
     }
 
@@ -873,8 +896,13 @@ def _observe_manual_cancel_attempt(
         "probe": probe,
         "body_text": body_text,
         "trigger": trigger,
+        "browser_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
+        ),
         "directory_picker_called": bool(probe["showDirectoryPickerCalls"]),
-        "cancel_error_observed": bool(probe["canceledPickerErrors"]),
+        "cancel_error_observed": bool(
+            probe["canceledPickerErrors"] or probe["deniedPermissionResults"]
+        ),
         "unsupported_operation_visible": "Unsupported operation: Process.run" in body_text,
     }
 
@@ -1076,58 +1104,6 @@ def _observe_switcher_accessible_labels(tracker_page) -> dict[str, object]:
         "selected_row_label": payload.get("selectedRowLabel"),
         "local_action_label": payload.get("localActionLabel"),
     }
-
-
-def _click_switcher_action_by_aria_label(tracker_page, aria_label: str) -> None:
-    selector = f'[aria-label="{aria_label.replace(chr(34), r"\\\"")}"]'
-    try:
-        tracker_page.session.click(selector, timeout_ms=10_000)
-        return
-    except Exception:
-        pass
-
-    payload = tracker_page.session.evaluate(
-        """
-        (targetLabel) => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const match = Array.from(document.querySelectorAll('[aria-label]'))
-            .filter((element) => isVisible(element))
-            .find((element) => normalize(element.getAttribute('aria-label') || '') === targetLabel);
-          if (!match) {
-            return null;
-          }
-          const rect = match.getBoundingClientRect();
-          return {
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
-          };
-        }
-        """,
-        arg=aria_label,
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "The open workspace switcher did not expose the expected saved workspace "
-            f"action button {aria_label!r}.\n"
-            f"Observed body text:\n{tracker_page.body_text()}",
-        )
-    tracker_page.session.mouse_click(
-        float(payload["left"]) + float(payload["width"]) / 2,
-        float(payload["top"]) + float(payload["height"]) / 2,
-    )
 
 
 def _safe_workspace_trigger_payload(tracker_page) -> dict[str, object] | None:
@@ -1352,10 +1328,10 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. Actual result",
         (
-            "The live app attempted `showDirectoryPicker()`, the simulated Cancel "
-            "left the hosted workspace active, the saved local workspace stayed "
-            "`Unavailable`, and no `Unsupported operation: Process.run` or runtime "
-            "page error was observed."
+            "The live app attempted browser-access recovery, the simulated cancel or "
+            "dismiss left the hosted workspace active, the saved local workspace "
+            "stayed `Unavailable`, and no `Unsupported operation: Process.run` or "
+            "runtime page error was observed."
             if passed
             else str(
                 result.get(
@@ -1417,9 +1393,10 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
             "",
             "## Actual result",
             (
-                "The live app attempted `showDirectoryPicker()`, the simulated cancel "
-                "left the hosted workspace active, the saved local workspace stayed "
-                "`Unavailable`, and no unsupported-operation or runtime page error surfaced."
+                "The live app attempted browser-access recovery, the simulated cancel "
+                "or dismiss left the hosted workspace active, the saved local workspace "
+                "stayed `Unavailable`, and no unsupported-operation or runtime page "
+                "error surfaced."
                 if passed
                 else str(
                     result.get(
@@ -1450,10 +1427,10 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         return (
             f"{TICKET_KEY} passed.\n\n"
             f"{REWORK_SUMMARY}\n\n"
-            "The live unavailable-workspace restore flow attempted the browser "
-            "directory picker, the simulated cancel kept the workspace "
-            "`Unavailable`, and the hosted workspace remained active without an "
-            "unsupported-operation or runtime page error.\n"
+            "The live unavailable-workspace restore flow attempted browser access, "
+            "the simulated cancel or dismiss kept the workspace `Unavailable`, and "
+            "the hosted workspace remained active without an unsupported-operation "
+            "or runtime page error.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
