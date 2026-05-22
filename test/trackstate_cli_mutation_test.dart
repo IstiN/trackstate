@@ -783,11 +783,7 @@ Future<void> _deleteDirectoryIfPresent(Directory directory) async {
   if (!directory.existsSync()) {
     return;
   }
-  try {
-    await directory.delete(recursive: true);
-  } on PathNotFoundException {
-    return;
-  }
+  await directory.delete(recursive: true);
 }
 
 Future<Directory> _createCliMutationRepository() async {

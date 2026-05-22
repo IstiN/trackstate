@@ -21,6 +21,9 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_focusable_control_stub.dart'
+    if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
+    as browser_focusable_control;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -60,6 +63,14 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+const _workspaceSwitcherTargetTypeHostedFocusId =
+    'trackstate-workspace-switcher-target-type-hosted';
+const _workspaceSwitcherTargetTypeLocalFocusId =
+    'trackstate-workspace-switcher-target-type-local';
+const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
+
+String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
+    'trackstate-workspace-switcher-$action-$workspaceId';
 
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
@@ -1415,6 +1426,11 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isDesktopWorkspaceSwitcherFocused() {
+    if (kIsWeb &&
+        browser_workspace_switcher_focus_monitor
+            .isBrowserFocusWithinWorkspaceSwitcher()) {
+      return true;
+    }
     return _workspaceSwitcherTriggerFocusNode.hasFocus ||
         _desktopWorkspaceSwitcherFocusScopeNode.hasFocus;
   }
@@ -4229,22 +4245,35 @@ class _TopBar extends StatelessWidget {
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   )
-                                : _PrimaryButton(
-                                    label: workspaceSummary.textLabel,
-                                    semanticLabel:
-                                        workspaceSummary.semanticLabel,
-                                    icon: workspaceSummary.icon,
-                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                : browser_focusable_control.BrowserFocusableControl(
+                                    label: workspaceSummary.semanticLabel,
                                     onPressed: openWorkspaceSwitcher,
-                                    height: _desktopTopBarControlHeight,
-                                    semanticsSortOrder: workspaceSwitcherOrder,
-                                    semanticsIdentifier:
+                                    focusTargetId:
                                         browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
-                                    controlsNodes: const {
-                                      browserWorkspaceSwitcherSemanticsIdentifier,
-                                    },
-                                    focusNode:
-                                        workspaceSwitcherTriggerFocusNode,
+                                    panelId:
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                    controlsId:
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                    child: _PrimaryButton(
+                                      label: workspaceSummary.textLabel,
+                                      semanticLabel:
+                                          workspaceSummary.semanticLabel,
+                                      icon: workspaceSummary.icon,
+                                      expanded:
+                                          isDesktopWorkspaceSwitcherVisible,
+                                      onPressed: openWorkspaceSwitcher,
+                                      height: _desktopTopBarControlHeight,
+                                      semanticsSortOrder:
+                                          workspaceSwitcherOrder,
+                                      semanticsIdentifier:
+                                          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+                                      controlsNodes: const {
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                      },
+                                      focusNode:
+                                          workspaceSwitcherTriggerFocusNode,
+                                    ),
                                   ),
                           ),
                         ),
@@ -6900,12 +6929,20 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase),
-                    child: _SettingsProviderButton(
+                    child: browser_focusable_control.BrowserFocusableControl(
                       label: l10n.workspaceTargetTypeHosted,
-                      selected:
-                          _targetType == WorkspaceProfileTargetType.hosted,
                       onPressed: () => setState(
                         () => _targetType = WorkspaceProfileTargetType.hosted,
+                      ),
+                      focusTargetId: _workspaceSwitcherTargetTypeHostedFocusId,
+                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                      child: _SettingsProviderButton(
+                        label: l10n.workspaceTargetTypeHosted,
+                        selected:
+                            _targetType == WorkspaceProfileTargetType.hosted,
+                        onPressed: () => setState(
+                          () => _targetType = WorkspaceProfileTargetType.hosted,
+                        ),
                       ),
                     ),
                   ),
@@ -6914,11 +6951,20 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase + 1),
-                    child: _SettingsProviderButton(
+                    child: browser_focusable_control.BrowserFocusableControl(
                       label: l10n.workspaceTargetTypeLocal,
-                      selected: _targetType == WorkspaceProfileTargetType.local,
                       onPressed: () => setState(
                         () => _targetType = WorkspaceProfileTargetType.local,
+                      ),
+                      focusTargetId: _workspaceSwitcherTargetTypeLocalFocusId,
+                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                      child: _SettingsProviderButton(
+                        label: l10n.workspaceTargetTypeLocal,
+                        selected:
+                            _targetType == WorkspaceProfileTargetType.local,
+                        onPressed: () => setState(
+                          () => _targetType = WorkspaceProfileTargetType.local,
+                        ),
                       ),
                     ),
                   ),
@@ -6948,10 +6994,16 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child: FilledButton(
-                  key: const ValueKey('workspace-add-button'),
+                child: browser_focusable_control.BrowserFocusableControl(
+                  label: l10n.workspaceSaveAndSwitch,
                   onPressed: _saveWorkspace,
-                  child: Text(l10n.workspaceSaveAndSwitch),
+                  focusTargetId: _workspaceSwitcherSaveFocusId,
+                  panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                  child: FilledButton(
+                    key: const ValueKey('workspace-add-button'),
+                    onPressed: _saveWorkspace,
+                    child: Text(l10n.workspaceSaveAndSwitch),
+                  ),
                 ),
               ),
             ),
@@ -7062,6 +7114,105 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final detailText = workspace.defaultBranch == workspace.writeBranch
         ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
         : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
+    final summaryButton = SizedBox(
+      width: double.infinity,
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+              widget.onMoveWorkspaceSelection(1),
+          const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+              widget.onMoveWorkspaceSelection(-1),
+          const SingleActivator(LogicalKeyboardKey.home):
+              widget.onSelectFirstWorkspace,
+          const SingleActivator(LogicalKeyboardKey.end):
+              widget.onSelectLastWorkspace,
+        },
+        child: OutlinedButton(
+          focusNode: _summaryFocusNode,
+          onPressed: () {
+            _summaryFocusNode.requestFocus();
+            onSelect?.call();
+          },
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.all(4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            side: BorderSide.none,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            foregroundColor: colors.text,
+          ),
+          child: Row(
+            children: [
+              TrackStateIcon(
+                workspace.isHosted
+                    ? TrackStateIconGlyph.repository
+                    : TrackStateIconGlyph.folder,
+                color: isActive ? colors.primary : colors.muted,
+                semanticLabel: workspace.isHosted ? 'repository' : 'folder',
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      workspace.displayName,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      detailText,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _WorkspaceStateBadge(label: typeLabel, active: isActive),
+              const SizedBox(width: 8),
+              _WorkspaceStateBadge(label: stateLabel, active: isActive),
+            ],
+          ),
+        ),
+      ),
+    );
+    final summaryControl = kIsWeb
+        ? browser_focusable_control.BrowserFocusableControl(
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            onPressed: onSelect == null
+                ? null
+                : () {
+                    _summaryFocusNode.requestFocus();
+                    onSelect();
+                  },
+            focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
+              workspace.id,
+            ),
+            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+            rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
+            selectedRow: isActive,
+            tabIndex: isActive ? 0 : -1,
+            child: summaryButton,
+          )
+        : Semantics(
+            container: true,
+            button: true,
+            enabled: true,
+            focusable: isActive,
+            focused: isActive,
+            selected: isActive,
+            identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
+              workspace.id,
+            ),
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            child: ExcludeSemantics(child: summaryButton),
+          );
     return Semantics(
       container: true,
       explicitChildNodes: true,
@@ -7075,94 +7226,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Semantics(
-              container: true,
-              button: true,
-              enabled: true,
-              focusable: isActive,
-              focused: isActive,
-              selected: isActive,
-              identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
-                workspace.id,
-              ),
-              label:
-                  '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-              child: ExcludeSemantics(
-                child: SizedBox(
-                  width: double.infinity,
-                  child: CallbackShortcuts(
-                    bindings: <ShortcutActivator, VoidCallback>{
-                      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                          widget.onMoveWorkspaceSelection(1),
-                      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                          widget.onMoveWorkspaceSelection(-1),
-                      const SingleActivator(LogicalKeyboardKey.home):
-                          widget.onSelectFirstWorkspace,
-                      const SingleActivator(LogicalKeyboardKey.end):
-                          widget.onSelectLastWorkspace,
-                    },
-                    child: OutlinedButton(
-                      focusNode: _summaryFocusNode,
-                      onPressed: () {
-                        _summaryFocusNode.requestFocus();
-                        onSelect?.call();
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.all(4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        side: BorderSide.none,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        foregroundColor: colors.text,
-                      ),
-                      child: Row(
-                        children: [
-                          TrackStateIcon(
-                            workspace.isHosted
-                                ? TrackStateIconGlyph.repository
-                                : TrackStateIconGlyph.folder,
-                            color: isActive ? colors.primary : colors.muted,
-                            semanticLabel: workspace.isHosted
-                                ? 'repository'
-                                : 'folder',
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  workspace.displayName,
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  detailText,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: colors.muted),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          _WorkspaceStateBadge(
-                            label: typeLabel,
-                            active: isActive,
-                          ),
-                          const SizedBox(width: 8),
-                          _WorkspaceStateBadge(
-                            label: stateLabel,
-                            active: isActive,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            summaryControl,
             const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.end,
@@ -7184,6 +7248,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       semanticsLabel:
                           '${l10n.openWorkspace}: ${workspace.displayName}',
                       onPressed: onSelect,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'open',
+                      ),
                     ),
                   ),
                 if (primaryActionLabel != null && onPrimaryAction != null)
@@ -7198,6 +7266,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       label: primaryActionLabel,
                       semanticsLabel: primaryActionSemanticLabel!,
                       onPressed: onPrimaryAction,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'primary',
+                      ),
                     ),
                   ),
                 if (!isActive)
@@ -7217,6 +7289,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                           '${l10n.delete}: ${workspace.displayName}',
                       onPressed: onDelete,
                       destructive: true,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'delete',
+                      ),
                     ),
                   ),
               ],
@@ -7296,6 +7372,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
     required this.label,
     required this.semanticsLabel,
     required this.onPressed,
+    required this.focusTargetId,
     this.destructive = false,
   });
 
@@ -7303,6 +7380,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
   final String label;
   final String semanticsLabel;
   final VoidCallback? onPressed;
+  final String focusTargetId;
   final bool destructive;
 
   @override
@@ -7319,33 +7397,42 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
       ).textTheme.labelLarge?.copyWith(color: foregroundColor),
     );
 
-    if (destructive) {
-      return TextButton(
-        key: buttonKey,
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: foregroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        child: labelText,
-      );
-    }
-
-    return OutlinedButton(
-      key: buttonKey,
+    final buttonChild = destructive
+        ? TextButton(
+            key: buttonKey,
+            onPressed: onPressed,
+            style: TextButton.styleFrom(
+              foregroundColor: foregroundColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: labelText,
+          )
+        : OutlinedButton(
+            key: buttonKey,
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: foregroundColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              side: BorderSide(color: colors.border),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: labelText,
+          );
+    return browser_focusable_control.BrowserFocusableControl(
+      label: semanticsLabel,
       onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: foregroundColor,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        side: BorderSide(color: colors.border),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-      child: labelText,
+      focusTargetId: focusTargetId,
+      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+      child: buttonChild,
     );
   }
 }
@@ -11650,6 +11737,27 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       ),
     );
 
+    final constrainedButton = ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: compact ? 44 : _desktopTopBarControlHeight,
+        maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+      ),
+      child: triggerButton,
+    );
+    final controlsId = controlsNodes == null || controlsNodes!.isEmpty
+        ? null
+        : controlsNodes!.first;
+    if (kIsWeb) {
+      return browser_focusable_control.BrowserFocusableControl(
+        label: summary.semanticLabel,
+        onPressed: onPressed,
+        focusTargetId: semanticsIdentifier,
+        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+        controlsId: controlsId,
+        expanded: expanded,
+        child: constrainedButton,
+      );
+    }
     return MergeSemantics(
       child: Semantics(
         button: true,
@@ -11661,15 +11769,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         sortKey: _semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
         onTap: enabled ? onPressed : null,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: compact ? 44 : _desktopTopBarControlHeight,
-            maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
-          ),
-          child: kIsWeb
-              ? ExcludeSemantics(child: triggerButton)
-              : triggerButton,
-        ),
+        child: constrainedButton,
       ),
     );
   }
