@@ -380,13 +380,13 @@ def main() -> None:
                         f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
                     )
                 if result["wrong_directory_selected"] is None:
-                    _, callback_observation = poll_until(
+                    selection_confirmed, callback_observation = poll_until(
                         probe=lambda: _observe_retry_callback(tracker_page),
                         is_satisfied=lambda observation: (
                             observation["wrong_picker"].get("selectedDirectoryName")
                             is not None
                         ),
-                        timeout_seconds=5,
+                        timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
                         interval_seconds=1,
                     )
                     result["callback_observation"] = callback_observation
@@ -399,6 +399,35 @@ def main() -> None:
                     result["wrong_directory_selected"] = callback_observation[
                         "wrong_picker"
                     ].get("selectedDirectoryName")
+                    if not selection_confirmed:
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "The unavailable-workspace retry action opened the browser "
+                                "directory picker / access flow, but the follow-up poll never "
+                                "confirmed that the wrong directory handle was selected.\n"
+                                f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                            ),
+                        )
+                        _record_step(
+                            result,
+                            step=4,
+                            status="failed",
+                            action=REQUEST_STEPS[3],
+                            observed=(
+                                "Not reached because step 3 never confirmed the wrong directory "
+                                "selection."
+                            ),
+                        )
+                        raise AssertionError(
+                            "Step 3 failed: the follow-up poll never confirmed "
+                            "`wrong_picker.selectedDirectoryName` for the wrong-directory "
+                            "selection.\n"
+                            f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
+                        )
                 _record_step(
                     result,
                     step=3,
