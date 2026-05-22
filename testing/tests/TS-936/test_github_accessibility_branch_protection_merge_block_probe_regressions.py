@@ -185,6 +185,33 @@ jobs:
         self.assertEqual(observation.gate.pull_request_mergeable_state, "blocked")
         self.assertEqual(observation.gate.accessibility_status_check_name, "Accessibility checks")
 
+    def test_low_contrast_helper_accepts_same_surface_probe_pattern(self) -> None:
+        probe = _StubProbeService(
+            self.config,
+            github_api_client=_FakeGitHubApiClient(
+                {
+                    "/repos/IstiN/trackstate": {"default_branch": "main"},
+                    "/repos/IstiN/trackstate/actions/workflows?per_page=100": {"workflows": []},
+                }
+            ),
+        )
+
+        self.assertTrue(
+            probe._probe_has_low_contrast_indicator(  # noqa: SLF001
+                """
+                final colorScheme = Theme.of(context).colorScheme;
+                final lowContrastColor = colorScheme.surface;
+                return ColoredBox(
+                  color: colorScheme.surface,
+                  child: Text(
+                    'Sync issue',
+                    style: TextStyle(color: colorScheme.surface),
+                  ),
+                );
+                """
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

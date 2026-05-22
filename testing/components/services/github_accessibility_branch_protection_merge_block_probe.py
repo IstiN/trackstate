@@ -249,9 +249,8 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
-            render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
-            )
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
+            render_host_source = self._inject_probe_into_render_host(render_host_original_source)
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
             self._run_command(
@@ -358,6 +357,8 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                     and (
                         self._config.probe_render_host_path in pull_request_files
                         or default_branch_probe_host_present
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
                     )
                 ),
                 "pull_request_file_paths": pull_request_files,
@@ -412,8 +413,8 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                     runtime_accessibility_surface_summary
                 ),
                 "runtime_accessibility_surface_summary": runtime_accessibility_surface_summary,
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",

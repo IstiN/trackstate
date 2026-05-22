@@ -289,8 +289,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
             render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
+                render_host_original_source
             )
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
@@ -419,6 +420,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
                     and (
                         self._config.probe_render_host_path in pull_request_files
                         or default_branch_probe_host_present
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
                     )
                 ),
                 "pull_request_file_paths": pull_request_files,
@@ -486,8 +489,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
@@ -890,7 +893,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 for run in runs_to_consider
             ):
                 return "failure"
-            success_conclusions = {"success", "neutral", "skipped"}
+            success_conclusions = {"success"}
             if all(
                 self._optional_string(run.get("conclusion")) in success_conclusions
                 for run in runs_to_consider
@@ -1064,10 +1067,29 @@ class GitHubAccessibilityPullRequestGateProbeService:
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
-        del probe_source
+        if "final lowContrastColor = colorScheme.surface;" in " ".join(probe_source.split()):
+            return (
+                "Uses `colorScheme.surface` text on `colorScheme.surface` to guarantee a "
+                "WCAG contrast failure while remaining theme-token-safe."
+            )
+        if "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source:
+            return (
+                "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+                "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            )
         return (
             "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            "`colorScheme.surface` or an equivalent theme-token-safe low-contrast signal."
+        )
+
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
         )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
@@ -1296,6 +1318,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
     def _probe_source() -> str:
         return """import 'package:flutter/material.dart';
 
+import 'ui/features/tracker/services/accessibility_probe_signal.dart';
+
 class Ts908ProbeSurface extends StatelessWidget {
   const Ts908ProbeSurface({super.key});
 
@@ -1303,16 +1327,25 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
+    const probeText = 'Sync issue';
+    const semanticsLabel = 'button';
+
+    publishAccessibilityContrastProbeSignal(
+      text: probeText,
+      semanticsLabel: semanticsLabel,
+      foreground: lowContrastColor,
+      background: colorScheme.surface,
+    );
 
     return Semantics(
-      label: 'button',
+      label: semanticsLabel,
       button: true,
       child: Container(
         color: colorScheme.surface,
         padding: const EdgeInsets.all(12),
         child: Text(
-          'Sync issue',
+          probeText,
           style: textStyle?.copyWith(color: lowContrastColor) ??
               TextStyle(color: lowContrastColor),
         ),
@@ -1559,6 +1592,11 @@ class Ts908ProbeSurface extends StatelessWidget {
             ):
                 return True
         return False
+
+    def _render_host_renders_probe(self, render_host_source: str) -> bool:
+        probe_import = Path(self._config.probe_path).name
+        probe_widget_name = self._probe_widget_name()
+        return probe_import in render_host_source and probe_widget_name in render_host_source
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:

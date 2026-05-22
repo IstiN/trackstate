@@ -1,0 +1,37 @@
+test_id: TS-944
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts944_early_engine_crash_simulation.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts944-early-engine-crash
+  commit_message: "TS-944 probe: verify early engine crash startup logging"
+  pull_request_title: "TS-944 disposable probe: verify early engine crash startup logging"
+  pull_request_body: "Disposable PR created by TS-944 automation to simulate an early Flutter web engine crash inside the live accessibility gate and verify that the hosted log still records the initial Flutter engine initialization milestones before surface-ready state."
+  expected_accessibility_markers:
+    - accessibility
+    - flutter engine initialization
+    - axe-core
+    - crash
+  contrast_evidence_markers:
+    - TS-944 simulated Flutter engine crash after bootstrap
+    - process completed with exit code 1
+    - timeout
+  semantic_evidence_markers:
+    - semantics
+    - surface ready
+    - nodes
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files so the live PR workflow simulates an early Flutter web engine crash without changing production source code.
+  - Verifies the hosted accessibility run log still exposes the initial Flutter engine initialization tokens before the crash prevents the runtime from reaching Accessibility runtime surface ready.

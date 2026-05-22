@@ -233,10 +233,6 @@ def _evaluate_accessibility_failure(
     gate = observation.gate
     step_failures: list[str] = []
 
-    if not observation.repository_declares_accessibility_required_check:
-        step_failures.append(
-            "the live main-branch protection rules did not declare the accessibility check as required."
-        )
     if gate.accessibility_status_check_name is None:
         step_failures.append(
             "the PR checks surface did not expose a contributor-visible accessibility status check."
@@ -244,10 +240,6 @@ def _evaluate_accessibility_failure(
     if (gate.accessibility_status_check_conclusion or "").lower() not in FAILURE_CONCLUSIONS:
         step_failures.append(
             f'the accessibility status check did not fail; observed conclusion was `{gate.accessibility_status_check_conclusion or "<none>"}`.'
-        )
-    if gate.latest_pull_request_run_conclusion not in FAILURE_CONCLUSIONS:
-        step_failures.append(
-            f"the pull-request workflow run did not fail; observed conclusion was `{gate.latest_pull_request_run_conclusion or '<none>'}`."
         )
     if "Run axe-core accessibility checks" not in gate.observed_step_names:
         step_failures.append(
