@@ -9113,9 +9113,6 @@ class _LocaleEntryRow extends StatelessWidget {
             child: KeyedSubtree(
               key: ValueKey('locale-$locale-$scopeKey-$id'),
               child: _SettingsTextField(
-                fieldKey: ValueKey(
-                  'locale-input-$locale-$scopeKey-$id-$translation',
-                ),
                 label: l10n.translationField(locale),
                 initialValue: translation,
                 focusNode: focusNode,

@@ -127,6 +127,17 @@ void main() {
           id: 'in-progress',
           text: '',
         );
+        await _waitForCondition(
+          tester,
+          () async =>
+              settingsRobot.localeTranslationFieldValue(
+                locale: locale,
+                id: 'in-progress',
+              ) ==
+              '',
+          failureMessage:
+              'Timed out waiting for the viewer-locale translation field to clear.',
+        );
         await settingsRobot.tapSaveSettingsButton();
         await _waitForCondition(
           tester,
@@ -135,20 +146,18 @@ void main() {
           failureMessage:
               'Timed out waiting for the fallback locale save to complete without an error banner.',
         );
-        await _waitForCondition(
+        await _waitForLocaleFieldValue(
           tester,
-          () async =>
-              _readPersistedLocaleStatusLabel(
-                fixture!.repositoryPath,
-                locale: locale,
-                id: 'in-progress',
-              ) ==
-              null,
+          screen,
+          settingsRobot,
+          chipLabel: locale,
+          locale: locale,
+          id: 'in-progress',
+          expectedValue: '',
           failureMessage:
-              'Timed out waiting for the cleared viewer-locale translation to persist to the locale catalog.',
+              'Timed out waiting for the cleared viewer-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
-        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
@@ -196,6 +205,17 @@ void main() {
           id: 'in-progress',
           text: '',
         );
+        await _waitForCondition(
+          tester,
+          () async =>
+              settingsRobot.localeTranslationFieldValue(
+                locale: defaultLocale,
+                id: 'in-progress',
+              ) ==
+              '',
+          failureMessage:
+              'Timed out waiting for the default-locale translation field to clear.',
+        );
         await settingsRobot.tapSaveSettingsButton();
         await _waitForCondition(
           tester,
@@ -204,20 +224,18 @@ void main() {
           failureMessage:
               'Timed out waiting for the canonical fallback save to complete without an error banner.',
         );
-        await _waitForCondition(
+        await _waitForLocaleFieldValue(
           tester,
-          () async =>
-              _readPersistedLocaleStatusLabel(
-                fixture!.repositoryPath,
-                locale: defaultLocale,
-                id: 'in-progress',
-              ) ==
-              null,
+          screen,
+          settingsRobot,
+          chipLabel: '$defaultLocale (default)',
+          locale: defaultLocale,
+          id: 'in-progress',
+          expectedValue: '',
           failureMessage:
-              'Timed out waiting for the cleared default-locale translation to persist to the locale catalog.',
+              'Timed out waiting for the cleared default-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
-        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
@@ -281,18 +299,31 @@ Future<void> _waitForCondition(
   fail(failureMessage);
 }
 
-String? _readPersistedLocaleStatusLabel(
-  String repositoryPath, {
+Future<void> _waitForLocaleFieldValue(
+  WidgetTester tester,
+  TrackStateAppComponent screen,
+  dynamic settingsRobot, {
+  required String chipLabel,
   required String locale,
   required String id,
+  required String expectedValue,
+  required String failureMessage,
 }) {
-  final localeFile = File('$repositoryPath/DEMO/config/i18n/$locale.json');
-  if (!localeFile.existsSync()) {
-    return null;
-  }
-  final catalog = jsonDecode(localeFile.readAsStringSync()) as Map<String, Object?>;
-  final statuses = catalog['statuses'] as Map<String, Object?>?;
-  return statuses?[id]?.toString();
+  return _waitForCondition(
+    tester,
+    () async {
+      await screen.openSection('Settings');
+      await settingsRobot.openLocalesTab();
+      await settingsRobot.selectLocaleChip(chipLabel);
+      return settingsRobot.localeTranslationFieldValue(
+            locale: locale,
+            id: id,
+          ) ==
+          expectedValue;
+    },
+    failureMessage: failureMessage,
+    step: const Duration(milliseconds: 250),
+  );
 }
 
 Future<void> _waitForIssueSearchResultTextVisibility(
