@@ -67,6 +67,7 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_failure.png"
@@ -1175,10 +1176,17 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
+    failure_kind = _failure_kind(result)
+    summary = (
+        "0 passed, 1 failed (precondition failure)"
+        if failure_kind == "precondition"
+        else "0 passed, 1 failed"
+    )
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1186,7 +1194,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
                 "passed": 0,
                 "failed": 1,
                 "skipped": 0,
-                "summary": "0 passed, 1 failed",
+                "summary": summary,
                 "error": error,
             },
         )
@@ -1196,6 +1204,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
     if result.get("failure_kind") == "precondition":
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     else:
@@ -1203,8 +1212,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    precondition_failure = _is_precondition_failure(result, passed=passed)
     status_icon = "✅" if passed else "❌"
-    status_word = "PASSED" if passed else "FAILED"
+    status_word = (
+        "PASSED"
+        if passed
+        else "PRECONDITION FAILED" if precondition_failure else "FAILED"
+    )
     lines = [
         f"h3. {status_icon} Automated test {status_word} — {TICKET_KEY}",
         "",
@@ -1233,11 +1247,7 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         EXPECTED_RESULT,
         "",
         "h4. Actual result",
-        (
-            "The wrong-directory retry showed a visible rejection and the local workspace stayed unavailable."
-            if passed
-            else str(result.get("error", "The wrong-directory retry did not match the expected result."))
-        ),
+        _actual_result_summary(result, passed=passed),
     ]
     if result.get("screenshot"):
         lines.extend(["", f"*Screenshot*: {result['screenshot']}"])
@@ -1255,8 +1265,15 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
+    precondition_failure = _is_precondition_failure(result, passed=passed)
     lines = [
-        f"## {TICKET_KEY} {'passed' if passed else 'failed'}",
+        (
+            f"## {TICKET_KEY} passed"
+            if passed
+            else f"## {TICKET_KEY} precondition failed"
+            if precondition_failure
+            else f"## {TICKET_KEY} failed"
+        ),
         "",
         "## Rework summary",
         f"- {REWORK_SUMMARY}",
@@ -1285,11 +1302,7 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
         EXPECTED_RESULT,
         "",
         "## Actual result",
-        (
-            "The wrong-directory retry showed a visible rejection and the local workspace stayed unavailable."
-            if passed
-            else str(result.get("error", "The wrong-directory retry did not match the expected result."))
-        ),
+        _actual_result_summary(result, passed=passed),
     ]
     if result.get("screenshot"):
         lines.extend(["", f"**Screenshot:** `{result['screenshot']}`"])
@@ -1314,10 +1327,39 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
             "The wrong-directory retry stayed visible to the user as a failure and did not "
             "promote the workspace to Local Git.\n"
         )
+    if _is_precondition_failure(result, passed=passed):
+        return (
+            f"{TICKET_KEY} precondition failed.\n\n"
+            f"{REWORK_SUMMARY}\n\n"
+            f"{result.get('error', 'The deployed app never reached the TS-921 scenario preconditions.')}\n"
+        )
     return (
         f"{TICKET_KEY} failed.\n\n"
         f"{REWORK_SUMMARY}\n\n"
         f"{result.get('error', 'The wrong-directory retry did not match the expected result.')}\n"
+    )
+
+
+def _build_review_replies() -> str:
+    return (
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3290478471,
+                        "threadId": "PRRT_kwDOSU6Gf86EMzAY",
+                        "reply": (
+                            "Fixed: TS-921 now carries precondition failures through the "
+                            "generated result and summary outputs. Startup/shell outages are "
+                            "labeled as precondition failures in `response.md`, `pr_body.md`, "
+                            "`jira_comment.md`, and the test result summary, and the review "
+                            "replies file is emitted for the remaining thread."
+                        ),
+                    },
+                ],
+            },
+        )
+        + "\n"
     )
 
 
@@ -1379,6 +1421,33 @@ def _build_bug_description(result: dict[str, object]) -> str:
     if result.get("screenshot"):
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{result['screenshot']}`"])
     return "\n".join(lines) + "\n"
+
+
+def _failure_kind(result: dict[str, object]) -> str:
+    return str(result.get("failure_kind") or "assertion")
+
+
+def _is_precondition_failure(result: dict[str, object], *, passed: bool) -> bool:
+    return not passed and _failure_kind(result) == "precondition"
+
+
+def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
+    if passed:
+        return (
+            "The wrong-directory retry showed a visible rejection and the local workspace "
+            "stayed unavailable."
+        )
+    if _is_precondition_failure(result, passed=passed):
+        return str(
+            result.get(
+                "error",
+                "Precondition failed: the deployed app never reached the workspace-switcher "
+                "scenario required by TS-921.",
+            ),
+        )
+    return str(
+        result.get("error", "The wrong-directory retry did not match the expected result."),
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
