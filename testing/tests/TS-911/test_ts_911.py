@@ -1795,7 +1795,7 @@ def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
         {
             "inReplyToId": thread.get("rootCommentId"),
             "threadId": thread.get("threadId"),
-            "reply": _review_reply_text(passed=passed, result=result),
+            "reply": _review_reply_text(thread=thread, passed=passed, result=result),
         }
         for thread in _discussion_threads()
     ]
@@ -1822,7 +1822,12 @@ def _discussion_threads() -> list[dict[str, object]]:
     ]
 
 
-def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+def _review_reply_text(
+    *,
+    thread: dict[str, object],
+    passed: bool,
+    result: dict[str, object],
+) -> str:
     rerun_summary = (
         f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         if passed
@@ -1831,6 +1836,18 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
             f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result).splitlines()[0]}"
         )
     )
+    thread_body = str(thread.get("body", ""))
+    thread_path = str(thread.get("path", ""))
+    if "displayNameHint" in thread_body or thread_path.endswith(
+        "live_workspace_switcher_page.py",
+    ):
+        return (
+            "Fixed: added `const displayNameHint = normalize(label.split(',')[0] || '');` "
+            "to `observe_switcher_button_state()` so the browser-side matcher no longer "
+            "references an undefined variable and now mirrors the display-name fallback "
+            "used by `observe_switcher_button_focusability()`. "
+            f"{rerun_summary}"
+        )
     return (
         "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
         "source of truth, establishes that exact label directly through the page "

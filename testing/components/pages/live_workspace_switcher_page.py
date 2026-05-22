@@ -1230,6 +1230,7 @@ class LiveWorkspaceSwitcherPage:
             """
             ({ heading, label }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const isVisible = (element) => {
                 if (!element) {
                   return false;
