@@ -27,4 +27,4 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
 ## Coverage notes
 
 - Verifies the known final in-panel keyboard target is the visible `Save and switch` control.
-- Focuses the selected first workspace row, presses `Tab` through the in-panel keyboard sequence until `Save and switch`, then requires the next `Tab` press to wrap back to the first row before attempting `Shift+Tab`.
+- Focuses the selected saved workspace row, proves from the open panel's internal tab order that this row is the first keyboard target, then presses `Shift+Tab` from that row.
