@@ -24,11 +24,11 @@ runtime_inputs:
     - aria
     - semantic
   contrast_evidence_markers:
-    - contrast
+    - color-contrast
     - color contrast
-    - ratio
-    - wcag
+    - contrast ratio
     - 4.5:1
+    - minimum color contrast ratio thresholds
   semantic_evidence_markers:
     - aria
     - aria-label

@@ -141,7 +141,7 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             self._observation(
                 run_conclusion="failure",
                 failed_status_check_names=["Flutter checks"],
-                run_log_matched_contrast_markers=["contrast", "4.5:1"],
+                run_log_matched_contrast_markers=["color-contrast", "4.5:1"],
                 run_log_matched_semantic_markers=["aria-label", "semantic"],
             ),
             failures,
@@ -159,8 +159,26 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             self._observation(
                 run_conclusion="success",
                 failed_status_check_names=[],
-                run_log_matched_contrast_markers=["contrast", "4.5:1"],
+                run_log_matched_contrast_markers=["color-contrast", "4.5:1"],
                 run_log_matched_semantic_markers=["aria-label", "semantic"],
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_4_rejects_ratio_only_contrast_noise(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_accessibility_gate_result(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_conclusion="failure",
+                failed_status_check_names=["Accessibility checks"],
+                run_log_matched_contrast_markers=["ratio"],
+                run_log_matched_semantic_markers=["non-descriptive-label"],
             ),
             failures,
         )

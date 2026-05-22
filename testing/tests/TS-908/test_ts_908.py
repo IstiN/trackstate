@@ -322,7 +322,7 @@ def _evaluate_accessibility_gate_result(
     workflow_failed = observation.latest_pull_request_run_conclusion in FAILURE_CONCLUSIONS
     failed_check_surface = workflow_failed or bool(observation.failed_status_check_names)
     real_log_reports_both_defects = (
-        bool(observation.run_log_matched_contrast_markers)
+        _has_explicit_contrast_evidence(observation.run_log_matched_contrast_markers)
         and bool(observation.run_log_matched_semantic_markers)
     )
 
@@ -388,6 +388,20 @@ def _evaluate_accessibility_gate_result(
     )
     failures.append(message)
     _record_step(result, step=4, status="failed", action=REQUEST_STEPS[3], observed=message)
+
+
+def _has_explicit_contrast_evidence(markers: list[str]) -> bool:
+    explicit_markers = (
+        "color-contrast",
+        "color contrast",
+        "contrast ratio",
+        "4.5:1",
+        "minimum color contrast ratio thresholds",
+    )
+    return any(
+        any(explicit_marker in marker.lower() for explicit_marker in explicit_markers)
+        for marker in markers
+    )
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
