@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -45,7 +46,7 @@ EXPECTED_RESULT = (
     "The accessibility gate stage passes successfully, and the Pull Request is not "
     "blocked by the accessibility status check."
 )
-SUCCESS_CONCLUSIONS = {"success", "neutral"}
+SUCCESS_CONCLUSIONS = {"success"}
 
 
 def main() -> None:
@@ -188,6 +189,28 @@ def _evaluate_compliant_component(
             f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
             f"Runtime accessibility evidence: "
             f"{observation.runtime_accessibility_surface_summary or '<none>'}\n"
+            f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(
+            result,
+            step=2,
+            status="failed",
+            action=REQUEST_STEPS[1],
+            observed=message,
+        )
+        return
+    if not _runtime_accessibility_surface_includes_label(
+        observation.runtime_accessibility_surface_summary,
+        observation.probe_semantic_label,
+    ):
+        message = (
+            "Step 2 failed: the runtime accessibility evidence did not include the "
+            "expected descriptive semantics label for the compliant probe.\n"
+            f"Expected label: {observation.probe_semantic_label!r}\n"
+            f"Runtime accessibility evidence: "
+            f"{observation.runtime_accessibility_surface_summary or '<none>'}\n"
+            f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
             f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
         )
         failures.append(message)
@@ -657,6 +680,28 @@ def _failed_step_summary(result: dict[str, object]) -> str:
         if status == "failed":
             return f"Step {entry.get('step')} failed: {entry.get('observed')}"
     return str(result.get("error", "Unknown failure"))
+
+
+def _runtime_accessibility_surface_includes_label(summary: str, expected_label: str) -> bool:
+    normalized_summary = summary.strip()
+    normalized_label = expected_label.strip()
+    if not normalized_summary or not normalized_label:
+        return False
+
+    sample_labels_match = re.search(
+        r"sample-labels\s*=\s*(\[[^\]]*\])",
+        normalized_summary,
+        flags=re.IGNORECASE,
+    )
+    if sample_labels_match is not None:
+        try:
+            sample_labels = json.loads(sample_labels_match.group(1))
+        except json.JSONDecodeError:
+            sample_labels = None
+        if isinstance(sample_labels, list):
+            return any(str(label) == normalized_label for label in sample_labels)
+
+    return normalized_label in normalized_summary
 
 
 def _jira_inline(value: str) -> str:
