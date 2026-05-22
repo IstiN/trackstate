@@ -11,6 +11,9 @@ from testing.components.services.github_accessibility_cancellation_probe import 
 from testing.core.config.github_accessibility_pull_request_gate_config import (
     GitHubAccessibilityPullRequestGateConfig,
 )
+from testing.core.interfaces.github_accessibility_cancellation_probe import (
+    GitHubAccessibilityCancellationProbe,
+)
 from testing.frameworks.python.gh_cli_api_client import GhCliApiClient
 
 
@@ -18,7 +21,7 @@ def create_github_accessibility_cancellation_probe(
     repository_root: Path,
     *,
     config_path: Path | None = None,
-) -> GitHubAccessibilityCancellationProbeService:
+) -> GitHubAccessibilityCancellationProbe:
     resolved_config_path = config_path or repository_root / "testing/tests/TS-962/config.yaml"
     config = GitHubAccessibilityPullRequestGateConfig.from_file(resolved_config_path)
     raw_config = _load_yaml(resolved_config_path)

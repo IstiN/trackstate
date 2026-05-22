@@ -4,7 +4,7 @@ framework: gh-cli
 platform: github-actions
 dependencies:
   - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
-  - Playwright or urllib fallback for human-style GitHub workflow page verification
+  - Playwright browser automation for contributor-visible GitHub workflow page verification
   - network access to GitHub REST APIs, pull requests, and workflow logs
 runtime_inputs:
   repository: IstiN/trackstate

@@ -16,7 +16,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.github_actions_page import GitHubActionsPageObservation  # noqa: E402
-from testing.components.services.github_accessibility_cancellation_probe import (  # noqa: E402
+from testing.core.config.github_accessibility_pull_request_gate_config import (  # noqa: E402
+    GitHubAccessibilityPullRequestGateConfig,
+)
+from testing.core.interfaces.github_accessibility_cancellation_probe import (  # noqa: E402
     GitHubAccessibilityCancellationProbeObservation,
 )
 from testing.core.interfaces.github_workflow_step_sequence_inspector import (  # noqa: E402
@@ -39,10 +42,12 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-962/tes
 TEST_FILE_PATH = "testing/tests/TS-962/test_ts_962.py"
 CONFIG_PATH = REPO_ROOT / "testing/tests/TS-962/config.yaml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 RUN_SCREENSHOT_PATH = OUTPUTS_DIR / "ts962_run_page.png"
 WORKFLOW_SCREENSHOT_PATH = OUTPUTS_DIR / "ts962_workflow_page.png"
@@ -65,6 +70,7 @@ def main() -> None:
     raw_config = _load_yaml(CONFIG_PATH)
     runtime_inputs = raw_config.get("runtime_inputs", {})
     assert isinstance(runtime_inputs, dict)
+    config = GitHubAccessibilityPullRequestGateConfig.from_file(CONFIG_PATH)
 
     accessibility_job_name = _required_string(runtime_inputs, "accessibility_job_name")
     axe_step_name = _required_string(runtime_inputs, "axe_step_name")
@@ -86,7 +92,11 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "test_file_path": TEST_FILE_PATH,
         "expected_result": EXPECTED_RESULT,
-        "browser": "Chromium (Playwright) / urllib fallback",
+        "repository": config.repository,
+        "default_branch": config.base_branch,
+        "target_workflow_name": config.target_workflow_name,
+        "target_workflow_path": config.target_workflow_path,
+        "browser": "Chromium (Playwright)",
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
@@ -446,7 +456,7 @@ def _open_run_page(
         *(sequence.observed_job_names[:4]),
     ]
     try:
-        with _create_actions_page() as actions_page:
+        with create_github_actions_page() as actions_page:
             return (
                 actions_page.open_page(
                     url=workflow.latest_pull_request_run_url,
@@ -474,7 +484,7 @@ def _open_workflow_page(
         "always()",
     ]
     try:
-        with _create_actions_page() as actions_page:
+        with create_github_actions_page() as actions_page:
             return (
                 actions_page.open_page(
                     url=sequence.workflow_url,
@@ -486,20 +496,6 @@ def _open_workflow_page(
             )
     except Exception as error:  # noqa: BLE001
         return None, f"{type(error).__name__}: {error}"
-
-
-def _create_actions_page():
-    try:
-        from testing.frameworks.python.playwright_web_app_session import (
-            PlaywrightWebAppRuntime,
-        )
-
-        return create_github_actions_page(runtime_factory=PlaywrightWebAppRuntime)
-    except ModuleNotFoundError:
-        from testing.frameworks.python.urllib_web_app_session import UrllibWebAppRuntime
-
-        return create_github_actions_page(runtime_factory=UrllibWebAppRuntime)
-
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -538,6 +534,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -559,6 +556,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -609,7 +607,19 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "✅ PASSED" if passed else "❌ FAILED"
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error')}`."
+    )
     lines = [
+        "## PR Rework Result",
+        "",
+        "- Switched the GitHub Actions UI verification back to the standard `create_github_actions_page()` Playwright-backed path and removed the raw HTML fallback.",
+        "- Added a `testing/core/interfaces` cancellation probe contract so the factory returns an interface instead of the concrete service type.",
+        "- Added `testing/tests/TS-962/README.md` for the ticket folder.",
+        f"- Test rerun: {rerun_summary}",
+        "",
         "## Test Automation Result",
         "",
         f"**Status:** {status}",
@@ -657,33 +667,28 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error')}`."
+    )
     lines = [
-        "## Test Automation Summary",
+        "h3. PR Rework Result",
         "",
-        "- Added TS-962 as a disposable PR cancellation probe against the live GitHub Actions accessibility workflow.",
-        "- The probe keeps the accessibility step in progress, cancels the run, and checks whether `log-validation` still appears as attempted instead of skipped.",
-        f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
-        f"- Result: **{status}**",
-        f"- Command: `{RUN_COMMAND}`",
-        (
-            f"- Environment: `{result['repository']}` @ `{result['default_branch']}` "
-            f"using `{result['browser']}` on `{result['os']}`."
-        ),
-        (
-            "- Outcome: the cancelled live workflow still exposed `log-validation` as attempted after the cancelled axe step."
-            if passed
-            else f"- Outcome: {_failed_step_summary(result)}"
-        ),
+        "*Fixed:* Restored the standard Playwright-backed `create_github_actions_page()` path, returned the TS-962 cancellation probe through a core interface contract, and added `testing/tests/TS-962/README.md`.",
+        f"*Test Run:* `{RUN_COMMAND}`",
+        f"*Result:* {status}",
+        f"*Summary:* {rerun_summary}",
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "## Exact error",
-                "```text",
+                "h4. Exact error",
+                "{code}",
                 str(result.get("traceback", result.get("error", ""))),
-                "```",
+                "{code}",
             ]
         )
     return "\n".join(lines) + "\n"
@@ -719,7 +724,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "the workflow contract surface did not show the expected `always()` protection.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('pull_request_url', '<missing pull request URL>')}\n"
-        "- **Browser:** Chromium (Playwright) / urllib fallback against GitHub Actions\n"
+        "- **Browser:** Chromium via Playwright against GitHub Actions\n"
         f"- **OS:** {result.get('os')}\n"
         f"- **Repository:** {result.get('repository')}\n"
         f"- **Branch:** {result.get('default_branch')}\n"
@@ -816,6 +821,53 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         f"{prefix} {entry['check']} Observed: {entry['observed']}"
         for entry in entries
     ]
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed: TS-962 now uses the standard `create_github_actions_page()` "
+        "Playwright-backed path with no urllib fallback, the cancellation probe "
+        "factory returns a core interface contract instead of the concrete "
+        "service, and `testing/tests/TS-962/README.md` has been added. "
+        f"{rerun_summary}"
+    )
 
 
 def _step_summary(step: GitHubWorkflowRunStepObservation | None) -> str:
