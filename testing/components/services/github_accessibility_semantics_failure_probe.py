@@ -300,15 +300,15 @@ module.exports = {{
     @classmethod
     def _patch_spec_source(cls, source: str) -> str:
         if cls.simulation_require_statement not in source:
-            require_statement = "require('./accessibility_gate');"
-            if require_statement not in source:
+            import_anchor = "} = require('./accessibility_gate');"
+            if import_anchor not in source:
                 raise GitHubAccessibilityPullRequestGateError(
                     "TS-933 could not find the shared accessibility gate import block in "
                     f"{cls.__name__} source."
                 )
             source = source.replace(
-                require_statement,
-                require_statement + "\n" + cls.simulation_require_statement,
+                import_anchor,
+                import_anchor + "\n" + cls.simulation_require_statement,
                 1,
             )
 

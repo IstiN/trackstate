@@ -129,6 +129,18 @@ test('TrackState web app has no axe-core accessibility violations', async ({
 
         patched = self.probe._patch_spec_source(original)  # noqa: SLF001
 
+        self.assertIn(
+            "installTs933SemanticsFailureSimulation",
+            patched,
+        )
+        self.assertIn(
+            "await installTs933SemanticsFailureSimulation(page);",
+            patched,
+        )
+        self.assertEqual(
+            patched.count("installTs933SemanticsFailureSimulation"),
+            2,
+        )
         self.assertLess(
             patched.index("await installTs933SemanticsFailureSimulation(page);"),
             patched.index("await page.goto('/');"),

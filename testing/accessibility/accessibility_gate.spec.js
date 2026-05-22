@@ -1,20 +1,17 @@
 const { test, expect } = require('@playwright/test');
 const {
+  captureFlutterStartupDiagnostics,
   collectAccessibilityViolations,
-  enableFlutterSemantics,
-  formatFlutterSemanticsEvidence,
   formatViolations,
 } = require('./accessibility_gate');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
-  await page.goto('/');
+  await captureFlutterStartupDiagnostics(page, {
+    log: (entry) => console.log(entry),
+  });
   await expect(page).toHaveTitle(/TrackState\.AI/);
-  await page.waitForLoadState('networkidle');
-
-  const semanticsEvidence = await enableFlutterSemantics(page);
-  console.log(formatFlutterSemanticsEvidence(semanticsEvidence));
 
   const results = await collectAccessibilityViolations(page);
 

@@ -417,6 +417,45 @@ class WorkspaceSwitcherSurfaceObservation:
     interactive_texts: tuple[WorkspaceSwitcherInteractiveTextObservation, ...]
 
 
+def _merge_surface_payload_items(
+    primary_items: list[dict[str, object]],
+    panel_scoped_items: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    merged = list(primary_items)
+    for panel_item in panel_scoped_items:
+        label = str(panel_item.get("label", "")).strip()
+        if not label:
+            continue
+        if any(_surface_payload_items_match(item, panel_item) for item in merged):
+            continue
+        merged.append(dict(panel_item))
+    return merged
+
+
+def _surface_payload_items_match(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    left_label = str(left.get("label", "")).strip()
+    right_label = str(right.get("label", "")).strip()
+    if left_label != right_label:
+        return False
+    left_tag = str(left.get("tagName", "")).strip()
+    right_tag = str(right.get("tagName", "")).strip()
+    if left_tag != right_tag:
+        return False
+    left_role = str(left.get("role", "")).strip()
+    right_role = str(right.get("role", "")).strip()
+    if left_role != right_role:
+        return False
+    return (
+        abs(float(left.get("x", 0.0)) - float(right.get("x", 0.0))) < 1
+        and abs(float(left.get("y", 0.0)) - float(right.get("y", 0.0))) < 1
+        and abs(float(left.get("width", 0.0)) - float(right.get("width", 0.0))) < 1
+        and abs(float(left.get("height", 0.0)) - float(right.get("height", 0.0))) < 1
+    )
+
+
 @dataclass(frozen=True)
 class MobileTriggerFocusObservation:
     trigger_label: str
@@ -523,6 +562,7 @@ class LiveWorkspaceSwitcherPage:
     _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
     _button_selector = 'button, flt-semantics[role="button"], [role="button"]'
+    _workspace_trigger_selector = '[aria-label^="Workspace switcher:"]'
     _switcher_heading = "Workspace switcher"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -940,8 +980,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         try:
             self._session.focus(
-                self._top_bar_button_selector,
-                has_text="Workspace switcher:",
+                self._workspace_trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -988,7 +1027,11 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
         self.focus_search_field(timeout_ms=timeout_ms)
-        return self._collect_tab_sequence(tab_count=tab_count, timeout_ms=timeout_ms)
+        return self._collect_tab_sequence(
+            tab_count=tab_count,
+            timeout_ms=timeout_ms,
+            stop_when_workspace_trigger_reached=True,
+        )
 
     def collect_tab_sequence(
         self,
@@ -2060,6 +2103,7 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, list):
             return []
         return [item for item in payload if isinstance(item, dict)]
+
 
     def click_switcher_button(
         self,
@@ -4035,7 +4079,6 @@ class LiveWorkspaceSwitcherPage:
                 else None
             ),
         )
-
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._click_trigger(timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
@@ -4245,6 +4288,19 @@ class LiveWorkspaceSwitcherPage:
                   tagName: element.tagName.toLowerCase(),
                   ...rectPayload(element),
                 }));
+              const panelScopedControlElements = panelScopedControls
+                .map((element) => ({
+                  label: labelFor(element),
+                  accessibleLabel: normalize(
+                    element.getAttribute('aria-label')
+                    || element.getAttribute('placeholder')
+                    || '',
+                  ),
+                  role: element.getAttribute('role'),
+                  tagName: element.tagName.toLowerCase(),
+                  ...rectPayload(element),
+                }))
+                .filter((element) => element.label.length > 0);
               const missingInteractiveLabels = interactiveElements
                 .filter((element) => element.label.length === 0)
                 .map((element, index) =>
@@ -4332,6 +4388,30 @@ class LiveWorkspaceSwitcherPage:
                 }
                 interactiveTexts.push(candidate);
               }
+              const panelScopedControlTexts = panelScopedControls
+                .map((element) => {
+                  const label = labelFor(element);
+                  const visibleText = visibleTextFor(element) || label;
+                  if (!label && !visibleText) {
+                    return null;
+                  }
+                  const backgroundColor = resolveBackgroundColor(
+                    element,
+                    toHex(window.getComputedStyle(switcher).backgroundColor),
+                  );
+                  const foregroundColor = resolveForegroundColor(element);
+                  return {
+                    label,
+                    visibleText,
+                    role: element.getAttribute('role'),
+                    foregroundColor,
+                    backgroundColor,
+                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                    ...rectPayload(element),
+                    tagName: element.tagName.toLowerCase(),
+                  };
+                })
+                .filter((element) => element !== null);
               const badgeLabels = new Set([
                 'Hosted',
                 'Local',
@@ -4362,9 +4442,11 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 };
               });
-              const workspaceTrigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
+              const triggerCandidates = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ].filter((element, index, all) => all.indexOf(element) === index);
+              const workspaceTrigger = triggerCandidates.find((candidate) =>
                 isVisible(candidate)
                 && labelFor(candidate).startsWith('Workspace switcher:'),
               );
@@ -4411,12 +4493,14 @@ class LiveWorkspaceSwitcherPage:
                   ? 'Workspace switcher'
                   : normalize(switcher.innerText || switcher.textContent),
                 interactiveElements,
+                panelScopedControls: panelScopedControlElements,
                 semanticsNodes,
                 missingInteractiveLabels,
                 missingSemanticsLabels,
                 badges,
                 interactiveIcons,
                 interactiveTexts,
+                panelScopedControlTexts,
               };
             }
             """,
@@ -4427,6 +4511,14 @@ class LiveWorkspaceSwitcherPage:
                 "The deployed app did not expose a readable workspace switcher surface.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        interactive_elements_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveElements", [])),
+            list(payload.get("panelScopedControls", [])),
+        )
+        interactive_texts_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveTexts", [])),
+            list(payload.get("panelScopedControlTexts", [])),
+        )
         return WorkspaceSwitcherSurfaceObservation(
             body_text=str(payload.get("bodyText", "")),
             dialog_visible=bool(payload.get("dialogVisible")),
@@ -4442,7 +4534,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveElements", [])
+                for item in interactive_elements_payload
             ),
             semantics_nodes=tuple(
                 WorkspaceSwitcherSemanticsObservation(
@@ -4538,7 +4630,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveTexts", [])
+                for item in interactive_texts_payload
             ),
         )
 
@@ -5141,7 +5233,9 @@ class LiveWorkspaceSwitcherPage:
               const visibleText = (element) =>
                 normalize(element.innerText || element.textContent || '');
               const buttons = Array.from(
-                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+                document.querySelectorAll(
+                  'button, flt-semantics[role="button"], [role="button"], [aria-label^="Workspace switcher:"]',
+                ),
               ).filter(isVisible);
               const trigger = buttons
                 .filter((element) => {
@@ -7326,6 +7420,7 @@ class LiveWorkspaceSwitcherPage:
         *,
         tab_count: int,
         timeout_ms: int,
+        stop_when_workspace_trigger_reached: bool = False,
     ) -> tuple[FocusNavigationStep, ...]:
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, tab_count + 1):
@@ -7343,6 +7438,11 @@ class LiveWorkspaceSwitcherPage:
                     after_outer_html=after.outer_html,
                 )
             )
+            if (
+                stop_when_workspace_trigger_reached
+                and self._is_workspace_trigger_label(after.accessible_name)
+            ):
+                break
         return tuple(steps)
 
     def _wait_for_surface(self, *, timeout_ms: int) -> None:
@@ -7676,6 +7776,14 @@ class LiveWorkspaceSwitcherPage:
     def _click_trigger(self, *, timeout_ms: int) -> None:
         try:
             self._session.click(
+                self._workspace_trigger_selector,
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+        try:
+            self._session.click(
                 self._button_selector,
                 has_text=self._trigger_label_prefix,
                 timeout_ms=timeout_ms,
@@ -7706,7 +7814,9 @@ class LiveWorkspaceSwitcherPage:
                           || '',
                         );
                       const trigger = Array.from(
-                        document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+                        document.querySelectorAll(
+                          'button, flt-semantics[role="button"], [role="button"], [aria-label^="Workspace switcher:"]',
+                        ),
                       )
                         .filter((candidate) => isVisible(candidate) && labelFor(candidate).startsWith(triggerLabelPrefix))
                         .sort((left, right) => {
