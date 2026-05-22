@@ -1138,12 +1138,10 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
-        rendered_probe_overlay_class_name = self._rendered_probe_overlay_class_name()
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
-            or rendered_probe_overlay_class_name in source
         ):
             return source
 
@@ -1195,40 +1193,28 @@ class Ts908ProbeSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {{
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        child,
-        Positioned(
-          top: 24,
-          left: 24,
-          child: Directionality(
-            textDirection: TextDirection.ltr,
-            child: {overlay_class}(),
+    assert(() {{
+      debugPrint(
+        'Accessibility probe preserved original app entrypoint: ${{child.runtimeType}}',
+      );
+      return true;
+    }}());
+    return MaterialApp(
+      title: 'TrackState.AI',
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: const {probe_widget}(),
           ),
         ),
-      ],
-    );
-  }}
-}}
-
-class {overlay_class} extends StatelessWidget {{
-  const {overlay_class}();
-
-  @override
-  Widget build(BuildContext context) {{
-    return Theme(
-      data: ThemeData(useMaterial3: true),
-      child: Material(
-        color: Colors.transparent,
-        child: const {probe_widget}(),
       ),
     );
   }}
 }}
 """.format(
                 app_class=rendered_probe_app_class_name,
-                overlay_class=rendered_probe_overlay_class_name,
                 probe_widget=probe_widget_name,
             )
         )
