@@ -402,7 +402,11 @@ class LiveMultiViewRefreshPage:
         try:
             payload = self._session.wait_for_function(
                 """
-                ({ dialogSelector, label, messageFragment }) => {
+                ({ dialogSelector, label, messageFragment, errorPrefix }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  if (bodyText.includes(errorPrefix)) {
+                    return { kind: 'save-error', bodyText };
+                  }
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -494,7 +498,7 @@ class LiveMultiViewRefreshPage:
                     );
                   const root = document.querySelector(dialogSelector);
                   if (!root) {
-                    return null;
+                    return { kind: 'dialog-closed', bodyText };
                   }
                   const field = findField(root);
                   if (!field) {
@@ -588,6 +592,7 @@ class LiveMultiViewRefreshPage:
                             || '',
                         );
                   return {
+                    kind: 'validation',
                     field: {
                       value:
                         'value' in field && typeof field.value === 'string'
@@ -633,6 +638,7 @@ class LiveMultiViewRefreshPage:
                     "dialogSelector": self._dialog_group_selector,
                     "label": "Summary",
                     "messageFragment": message_fragment,
+                    "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
                 },
                 timeout_ms=15_000,
             )
@@ -647,6 +653,26 @@ class LiveMultiViewRefreshPage:
                 "Step failed: clicking Save did not produce an observable Summary-required "
                 "validation state in the hosted Edit issue dialog.\n"
                 f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        kind = str(payload.get("kind", ""))
+        if kind == "save-error":
+            raise AssertionError(
+                "Step failed: clicking Save showed a visible save error instead of the "
+                "required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind == "dialog-closed":
+            raise AssertionError(
+                "Step failed: clicking Save dismissed the Edit issue dialog and returned to "
+                "the issue view without showing the required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind != "validation":
+            raise AssertionError(
+                "Step failed: clicking Save produced an unexpected validation probe result "
+                "for the hosted Edit issue dialog.\n"
+                f"Validation payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
             )
         field_payload = payload.get("field")
         active_payload = payload.get("activeElement")
