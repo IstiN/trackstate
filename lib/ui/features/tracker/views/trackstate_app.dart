@@ -7140,7 +7140,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
   }
 
   void _requestSummaryFocus() {
-    if (!mounted) {
+    if (!mounted || kIsWeb) {
       return;
     }
     _summaryFocusNode.requestFocus();
@@ -7243,12 +7243,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-            onPressed: onSelect == null
-                ? null
-                : () {
-                    _summaryFocusNode.requestFocus();
-                    onSelect();
-                  },
+            onPressed: onSelect,
             focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
             ),
