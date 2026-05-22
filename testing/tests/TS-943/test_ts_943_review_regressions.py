@@ -197,6 +197,40 @@ class Ts943ReviewRegressionTest(unittest.TestCase):
             )
         )
 
+    def test_step_3_rejects_missing_token_message_from_other_step_output(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_log_validation_output(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_conclusion="failure",
+                accessibility_conclusion="failure",
+                observed_step_names=[
+                    "Run axe-core accessibility checks",
+                    "log-validation",
+                ],
+                engine_entries=[],
+                semantics_entries=[],
+            ),
+            failures,
+            full_run_log_text=(
+                "Accessibility checks\tRun axe-core accessibility checks\t"
+                "2026-05-22T11:02:00Z log-validation failed because mandatory "
+                "engine state tokens were not found in the output.\n"
+                "Accessibility checks\tlog-validation\t2026-05-22T11:02:05Z "
+                "node testing/accessibility/log_validation.js accessibility.log"
+            ),
+            full_run_log_error=None,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn(
+            "did not report that mandatory engine state tokens were missing",
+            failures[0],
+        )
+
     def test_runtime_module_keeps_framework_wiring_inside_support_factory(self) -> None:
         module_source = Path(__file__).with_name("test_ts_943.py").read_text(
             encoding="utf-8"
