@@ -45,7 +45,7 @@ EXPECTED_RESULT = (
     "The accessibility gate stage passes successfully, and the Pull Request is not "
     "blocked by the accessibility status check."
 )
-SUCCESS_CONCLUSIONS = {"success", "neutral"}
+SUCCESS_CONCLUSIONS = {"success"}
 
 
 def main() -> None:
