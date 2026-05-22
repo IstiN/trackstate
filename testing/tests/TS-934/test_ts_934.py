@@ -204,8 +204,9 @@ def _evaluate_flutter_engine_logging(
 ) -> None:
     engine_entries = observation.flutter_engine_initialization_log_entries
     semantics_entries = observation.semantics_tree_discovery_log_entries
-    engine_transitions_logged = len(engine_entries) >= 2 or any(
-        "->" in entry or "transition" in entry.lower() for entry in engine_entries
+    distinct_engine_states = _normalized_flutter_engine_states(engine_entries)
+    engine_transitions_logged = len(distinct_engine_states) >= 2 or any(
+        "->" in state or "transition" in state for state in distinct_engine_states
     )
 
     step_failures: list[str] = []
@@ -215,7 +216,7 @@ def _evaluate_flutter_engine_logging(
         )
     elif not engine_transitions_logged:
         step_failures.append(
-            "Only one Flutter engine initialization state was logged, so the transition sequence was not documented."
+            "Only one distinct Flutter engine initialization state was logged, so the transition sequence was not documented."
         )
     if not semantics_entries:
         step_failures.append(
@@ -229,6 +230,7 @@ def _evaluate_flutter_engine_logging(
             + "\n"
             + f"Run URL: {observation.latest_pull_request_run_url}\n"
             + f"Flutter engine log entries: {engine_entries or ['<none>']}\n"
+            + f"Distinct Flutter engine states: {distinct_engine_states or ['<none>']}\n"
             + f"Semantics discovery log entries: {semantics_entries or ['<none>']}\n"
             + f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
         )
@@ -239,9 +241,33 @@ def _evaluate_flutter_engine_logging(
     observed = (
         "Found the requested startup diagnostics in the hosted accessibility log.\n"
         f"Flutter engine initialization entries: {engine_entries}\n"
+        f"Distinct Flutter engine states: {distinct_engine_states}\n"
         f"Semantics discovery entries: {semantics_entries}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
+
+
+def _normalized_flutter_engine_states(entries: list[str]) -> list[str]:
+    seen: set[str] = set()
+    distinct_states: list[str] = []
+    for entry in entries:
+        state = _normalized_flutter_engine_state(entry)
+        if not state or state in seen:
+            continue
+        seen.add(state)
+        distinct_states.append(state)
+    return distinct_states
+
+
+def _normalized_flutter_engine_state(entry: str) -> str:
+    marker = "flutter engine initialization:"
+    normalized_entry = " ".join(entry.split()).strip()
+    lowered_entry = normalized_entry.lower()
+    marker_index = lowered_entry.find(marker)
+    if marker_index >= 0:
+        normalized_entry = normalized_entry[marker_index + len(marker) :]
+    normalized_state = normalized_entry.strip(" -:.;")
+    return normalized_state.lower()
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:

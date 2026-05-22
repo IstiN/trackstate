@@ -147,7 +147,37 @@ class Ts934ReviewRegressionTest(unittest.TestCase):
 
         self.assertEqual(len(failures), 1)
         self.assertEqual(result["steps"][0]["status"], "failed")
-        self.assertIn("Only one Flutter engine initialization state was logged", failures[0])
+        self.assertIn(
+            "Only one distinct Flutter engine initialization state was logged",
+            failures[0],
+        )
+
+    def test_step_3_rejects_duplicate_engine_state_lines_with_new_timestamps(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_flutter_engine_logging(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                engine_entries=[
+                    "Accessibility checks 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested",
+                    "Accessibility checks 2026-05-22T11:02:05Z Flutter engine initialization: bootstrap requested",
+                ],
+                semantics_entries=["Accessibility runtime surface ready: hosts=1; nodes=5"],
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn(
+            "Only one distinct Flutter engine initialization state was logged",
+            failures[0],
+        )
+        self.assertIn(
+            "Distinct Flutter engine states: ['bootstrap requested']",
+            failures[0],
+        )
 
     def test_step_3_requires_semantics_discovery_status(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
