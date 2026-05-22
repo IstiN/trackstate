@@ -84,6 +84,8 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "run_log_mentions_semantic_issue": False,
             "run_log_excerpt": "",
             "run_log_error": None,
+            "runtime_accessibility_surface_present": False,
+            "runtime_accessibility_surface_summary": "",
             "probe_contains_low_contrast_indicator": True,
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
@@ -245,8 +247,27 @@ void main() {
 
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
-        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
-        self.assertIn("child: Ts908ProbeSurface()", patched)
+        self.assertIn(
+            "runApp(_Ts908RenderedProbeApp(child: const TrackStateApp()));",
+            patched,
+        )
+        self.assertIn("child: const Ts908ProbeSurface()", patched)
+
+    def test_extract_runtime_accessibility_surface_summary_reads_success_log_line(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        summary = probe._extract_runtime_accessibility_surface_summary(  # noqa: SLF001
+            """
+            some prefix
+            Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]
+            trailing line
+            """
+        )
+
+        self.assertEqual(
+            summary,
+            'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
+        )
 
     def test_wait_for_pull_request_surface_keeps_failed_check_fields(self) -> None:
         probe = _SurfaceProbeService(self.config)
