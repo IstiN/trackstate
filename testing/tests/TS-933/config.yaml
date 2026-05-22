@@ -22,8 +22,7 @@ runtime_inputs:
     - flutter engine
     - semantics tree
   contrast_evidence_markers:
-    - timeout
-    - playwright
+    - page.waitForFunction
   semantic_evidence_markers:
     - semantics
     - nodes
