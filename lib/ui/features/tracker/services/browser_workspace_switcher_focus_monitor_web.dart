@@ -150,12 +150,10 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
 
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   web.window.addEventListener('focusin', focusinListener, true.toJS);
-  return BrowserWorkspaceSwitcherFocusMonitorSubscription(
-    () {
-      web.window.removeEventListener('keydown', keydownListener, true.toJS);
-      web.window.removeEventListener('focusin', focusinListener, true.toJS);
-    },
-  );
+  return BrowserWorkspaceSwitcherFocusMonitorSubscription(() {
+    web.window.removeEventListener('keydown', keydownListener, true.toJS);
+    web.window.removeEventListener('focusin', focusinListener, true.toJS);
+  });
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
@@ -671,11 +669,37 @@ int? _activeDesktopPrimaryNavigationTargetIndex({
   }
   for (var index = 0; index < navigationTargets.length; index += 1) {
     final candidate = navigationTargets[index];
-    if (candidate == activeElement || candidate.contains(activeElement)) {
+    if (_matchesDesktopPrimaryNavigationTarget(
+      candidate: candidate,
+      activeElement: activeElement,
+    )) {
       return index;
     }
   }
   return null;
+}
+
+bool _matchesDesktopPrimaryNavigationTarget({
+  required web.HTMLElement candidate,
+  required web.Element activeElement,
+}) {
+  if (candidate == activeElement || candidate.contains(activeElement)) {
+    return true;
+  }
+
+  final semanticsIdentifier = candidate.getAttribute(
+    'flt-semantics-identifier',
+  );
+  if (semanticsIdentifier != browserDesktopSearchInputSemanticsIdentifier) {
+    return false;
+  }
+
+  final candidateLabel = _normalizeLabel(_elementAccessibleLabel(candidate));
+  if (candidateLabel.isEmpty) {
+    return false;
+  }
+  return candidateLabel ==
+      _normalizeLabel(_elementAccessibleLabel(activeElement));
 }
 
 bool _focusElement(web.Element element) {

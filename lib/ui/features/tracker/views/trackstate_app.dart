@@ -1520,6 +1520,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             : _closeDesktopWorkspaceSwitcher;
         return Semantics(
           container: true,
+          explicitChildNodes: true,
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           label: AppLocalizations.of(sheetContext)!.workspaceSwitcher,
           onDidLoseAccessibilityFocus: compact
@@ -2059,8 +2060,8 @@ class _TrackerHome extends StatelessWidget {
                               l10n.settings,
                             ),
                             browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
-                              '${l10n.workspaceSwitcher}:',
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.semanticsIdentifier(
+                              browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                             ),
                             browser_workspace_switcher_focus_monitor
                                 .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
@@ -6962,165 +6963,155 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final detailText = workspace.defaultBranch == workspace.writeBranch
         ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
         : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isActive ? colors.primarySoft : colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isActive ? colors.primary : colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Semantics(
-            container: true,
-            button: true,
-            enabled: true,
-            focusable: isActive,
-            focused: isActive,
-            selected: isActive,
-            identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
-              workspace.id,
-            ),
-            label:
-                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-            child: ExcludeSemantics(
-              child: SizedBox(
-                width: double.infinity,
-                child: CallbackShortcuts(
-                  bindings: <ShortcutActivator, VoidCallback>{
-                    const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                        widget.onMoveWorkspaceSelection(1),
-                    const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                        widget.onMoveWorkspaceSelection(-1),
-                    const SingleActivator(LogicalKeyboardKey.home):
-                        widget.onSelectFirstWorkspace,
-                    const SingleActivator(LogicalKeyboardKey.end):
-                        widget.onSelectLastWorkspace,
-                  },
-                  child: OutlinedButton(
-                    focusNode: _summaryFocusNode,
-                    onPressed: () {
-                      _summaryFocusNode.requestFocus();
-                      onSelect?.call();
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isActive ? colors.primarySoft : colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isActive ? colors.primary : colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              container: true,
+              button: true,
+              enabled: true,
+              focusable: isActive,
+              focused: isActive,
+              selected: isActive,
+              identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
+                workspace.id,
+              ),
+              label:
+                  '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+              child: ExcludeSemantics(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: CallbackShortcuts(
+                    bindings: <ShortcutActivator, VoidCallback>{
+                      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                          widget.onMoveWorkspaceSelection(1),
+                      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                          widget.onMoveWorkspaceSelection(-1),
+                      const SingleActivator(LogicalKeyboardKey.home):
+                          widget.onSelectFirstWorkspace,
+                      const SingleActivator(LogicalKeyboardKey.end):
+                          widget.onSelectLastWorkspace,
                     },
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.all(4),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      side: BorderSide.none,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                    child: OutlinedButton(
+                      focusNode: _summaryFocusNode,
+                      onPressed: () {
+                        _summaryFocusNode.requestFocus();
+                        onSelect?.call();
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.all(4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        side: BorderSide.none,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        foregroundColor: colors.text,
                       ),
-                      foregroundColor: colors.text,
-                    ),
-                    child: Row(
-                      children: [
-                        TrackStateIcon(
-                          workspace.isHosted
-                              ? TrackStateIconGlyph.repository
-                              : TrackStateIconGlyph.folder,
-                          color: isActive ? colors.primary : colors.muted,
-                          semanticLabel: workspace.isHosted
-                              ? 'repository'
-                              : 'folder',
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                workspace.displayName,
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                detailText,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: colors.muted),
-                              ),
-                            ],
+                      child: Row(
+                        children: [
+                          TrackStateIcon(
+                            workspace.isHosted
+                                ? TrackStateIconGlyph.repository
+                                : TrackStateIconGlyph.folder,
+                            color: isActive ? colors.primary : colors.muted,
+                            semanticLabel: workspace.isHosted
+                                ? 'repository'
+                                : 'folder',
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        _WorkspaceStateBadge(
-                          label: typeLabel,
-                          active: isActive,
-                        ),
-                        const SizedBox(width: 8),
-                        _WorkspaceStateBadge(
-                          label: stateLabel,
-                          active: isActive,
-                        ),
-                      ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  workspace.displayName,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  detailText,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: colors.muted),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _WorkspaceStateBadge(
+                            label: typeLabel,
+                            active: isActive,
+                          ),
+                          const SizedBox(width: 8),
+                          _WorkspaceStateBadge(
+                            label: stateLabel,
+                            active: isActive,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (isActive)
-                Text(
-                  l10n.activeWorkspace,
-                  style: Theme.of(context).textTheme.labelMedium,
-                )
-              else
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(focusOrderBase),
-                  child: Semantics(
-                    button: true,
-                    label: '${l10n.openWorkspace}: ${workspace.displayName}',
-                    child: ExcludeSemantics(
-                      child: OutlinedButton(
-                        key: ValueKey('workspace-open-${workspace.id}'),
-                        onPressed: onSelect,
-                        child: Text(l10n.openWorkspace),
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (isActive)
+                  Text(
+                    l10n.activeWorkspace,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  )
+                else
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(focusOrderBase),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey('workspace-open-${workspace.id}'),
+                      label: l10n.openWorkspace,
+                      semanticsLabel: l10n.openWorkspace,
+                      onPressed: onSelect,
+                    ),
+                  ),
+                if (primaryActionLabel != null && onPrimaryAction != null)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(focusOrderBase + 1),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey(
+                        'workspace-primary-action-${workspace.id}',
                       ),
+                      label: primaryActionLabel,
+                      semanticsLabel: primaryActionLabel,
+                      onPressed: onPrimaryAction,
                     ),
                   ),
-                ),
-              if (primaryActionLabel != null && onPrimaryAction != null)
                 FocusTraversalOrder(
-                  order: NumericFocusOrder(focusOrderBase + 1),
-                  child: Semantics(
-                    button: true,
-                    label: primaryActionLabel,
-                    child: ExcludeSemantics(
-                      child: OutlinedButton(
-                        key: ValueKey(
-                          'workspace-primary-action-${workspace.id}',
-                        ),
-                        onPressed: onPrimaryAction,
-                        child: Text(primaryActionLabel),
-                      ),
-                    ),
+                  order: NumericFocusOrder(focusOrderBase + 2),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey('workspace-delete-${workspace.id}'),
+                    label: l10n.delete,
+                    semanticsLabel: l10n.delete,
+                    onPressed: onDelete,
+                    destructive: true,
                   ),
                 ),
-              FocusTraversalOrder(
-                order: NumericFocusOrder(focusOrderBase + 2),
-                child: Semantics(
-                  button: true,
-                  label: '${l10n.delete}: ${workspace.displayName}',
-                  child: ExcludeSemantics(
-                    child: TextButton(
-                      key: ValueKey('workspace-delete-${workspace.id}'),
-                      onPressed: onDelete,
-                      child: Text(l10n.delete),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -7163,7 +7154,7 @@ class _WorkspaceStateBadge extends StatelessWidget {
       borderColor = colors.border;
       textColor = colors.muted;
     }
-    return Container(
+    final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -7176,6 +7167,70 @@ class _WorkspaceStateBadge extends StatelessWidget {
           context,
         ).textTheme.labelSmall?.copyWith(color: textColor),
       ),
+    );
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        readOnly: true,
+        label: label,
+        child: badge,
+      ),
+    );
+  }
+}
+
+class _WorkspaceSwitcherActionButton extends StatelessWidget {
+  const _WorkspaceSwitcherActionButton({
+    required this.buttonKey,
+    required this.label,
+    required this.semanticsLabel,
+    required this.onPressed,
+    this.destructive = false,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final String semanticsLabel;
+  final VoidCallback? onPressed;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final enabled = onPressed != null;
+    final foregroundColor = destructive ? colors.error : colors.text;
+
+    final visualChild = kIsWeb
+        ? InkWell(
+            key: buttonKey,
+            borderRadius: BorderRadius.circular(8),
+            excludeFromSemantics: true,
+            onTap: onPressed,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(color: foregroundColor),
+              ),
+            ),
+          )
+        : destructive
+        ? TextButton(key: buttonKey, onPressed: onPressed, child: Text(label))
+        : OutlinedButton(
+            key: buttonKey,
+            onPressed: onPressed,
+            child: Text(label),
+          );
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      focusable: enabled,
+      label: semanticsLabel,
+      onTap: onPressed,
+      child: ExcludeSemantics(child: visualChild),
     );
   }
 }
