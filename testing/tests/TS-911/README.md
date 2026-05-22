@@ -26,5 +26,6 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
 
 ## Coverage notes
 
-- Verifies the known final in-panel keyboard target is the visible `Save and switch` control.
-- Focuses the selected saved workspace row, proves from the open panel's internal tab order that this row is the first keyboard target, then presses `Shift+Tab` from that row.
+- Uses the default desktop viewport of `1440x960`.
+- Opens the live workspace switcher from a focused trigger and derives the current last internal keyboard target from the panel's observed in-panel controls.
+- Establishes the ticket precondition by focusing the live first internal keyboard target directly through the page object, then presses `Shift+Tab` from that proven starting point.

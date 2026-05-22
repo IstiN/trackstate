@@ -1,0 +1,50 @@
+test_id: TS-936
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs and pull request metadata
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts936_probe_surface.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts936-a11y-merge-block
+  commit_message: "TS-936 probe: verify branch protection blocks accessibility failure merge"
+  pull_request_title: "TS-936 disposable probe: verify accessibility failure merge block"
+  pull_request_body: "Disposable PR created by TS-936 automation to verify that branch protection blocks merging when the Accessibility checks status fails."
+  expected_required_check: Accessibility checks
+  expected_accessibility_markers:
+    - axe-core
+    - accessibility
+    - wcag
+    - contrast
+    - aria
+    - semantic
+  contrast_evidence_markers:
+    - contrast
+    - color contrast
+    - ratio
+    - wcag
+    - 4.5:1
+  semantic_evidence_markers:
+    - aria
+    - aria-label
+    - semantics
+    - semantic
+    - label
+  merge_block_markers:
+    - blocked
+    - required
+    - status check
+    - accessibility checks
+    - merge
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Reuses the live disposable accessibility-failure pull-request path from TS-908.
+  - Verifies the contributor-visible merge surface and branch protection requirement without issuing a destructive merge against main.

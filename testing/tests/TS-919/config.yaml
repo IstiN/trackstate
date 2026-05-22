@@ -1,0 +1,11 @@
+test_id: TS-919
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored signed-in GitHub token.
+  - Preloads one hosted workspace as active plus one saved local workspace whose local path is missing.
+  - Verifies the visible primary action label for the unavailable local workspace is `Re-authenticate` or `Retry`, not `Open`.

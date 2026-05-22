@@ -1251,7 +1251,6 @@ def _observe_startup_surface(tracker_page) -> dict[str, object]:
         "url": str(payload.get("url", "")),
     }
 
-
 def _saved_row_from_payload(
     payload: dict[str, object] | None,
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:

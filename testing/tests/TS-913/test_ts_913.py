@@ -34,13 +34,13 @@ TEST_CASE_TITLE = (
     "without manual action"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-913/test_ts_913.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts913-workspace"
 LOCAL_DISPLAY_NAME = "Guarded local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 STARTUP_RETRY_WAIT_SECONDS = 15
-LINKED_BUGS = ["TS-894"]
+LINKED_BUGS = ["TS-915", "TS-914", "TS-894"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -69,6 +69,19 @@ EXPECTED_RESULT = (
 class Ts913WorkspaceStateGuardRuntime(Ts723WorkspaceRestoreRuntime):
     """Preserve the phase-one workspace state across the manual refresh."""
 
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        workspace_state: dict[str, object],
+    ) -> None:
+        super().__init__(
+            repository=repository,
+            token=token,
+            workspace_state=workspace_state,
+            viewport=DESKTOP_VIEWPORT,
+        )
     def _build_preload_script(self) -> str:
         serialized_workspace_state = json.dumps(self._workspace_state)
         return "".join(
@@ -158,9 +171,9 @@ def main() -> None:
                     failure_step_label="the Local Unavailable precondition scenario",
                 )
                 result["precondition_summary"] = (
-                    "Prepared a local git repository, deleted it before startup, and "
-                    "opened the deployed app with the saved local workspace still "
-                    "selected so startup had to resolve a permanently missing local path."
+                    "Preloaded a hosted workspace as active while keeping the saved local "
+                    "workspace marked unavailable in persisted browser state, then opened "
+                    "the deployed app with the local path still missing."
                 )
 
                 initial_trigger_samples: list[dict[str, object]] = []
@@ -183,11 +196,17 @@ def main() -> None:
                     result["initial_restore_message"] = initial_restore_message
 
                 initial_switcher = page.open_and_observe(timeout_ms=20_000)
-                initial_local_row = _find_named_local_row(initial_switcher)
+                initial_saved_rows = page.observe_accessible_saved_workspace_rows(
+                    timeout_ms=20_000,
+                )
+                initial_local_row = _find_named_local_row_in_rows(initial_saved_rows)
                 initial_selected_row = _find_selected_row(initial_switcher) or _selected_row_from_trigger(
                     initial_trigger,
                 )
                 result["initial_switcher_observation"] = _switcher_payload(initial_switcher)
+                result["initial_accessible_saved_rows"] = [
+                    _row_payload(row) for row in initial_saved_rows
+                ]
                 result["initial_local_row"] = _row_payload(initial_local_row)
                 result["initial_selected_row"] = _row_payload(initial_selected_row)
                 result["pre_refresh_persisted_workspace_state"] = _decode_workspace_state(
@@ -286,7 +305,13 @@ def main() -> None:
                 )
 
                 final_switcher = page.open_and_observe(timeout_ms=20_000)
+                final_saved_rows = page.observe_accessible_saved_workspace_rows(
+                    timeout_ms=20_000,
+                )
                 result["final_switcher_observation"] = _switcher_payload(final_switcher)
+                result["final_accessible_saved_rows"] = [
+                    _row_payload(row) for row in final_saved_rows
+                ]
                 _record_step(
                     result,
                     step=3,
@@ -295,11 +320,12 @@ def main() -> None:
                     observed=(
                         "Opened Workspace switcher after the refresh wait window.\n"
                         f"row_count={final_switcher.row_count}; "
+                        f"accessible_saved_row_count={len(final_saved_rows)}; "
                         f"switcher_text={final_switcher.switcher_text!r}"
                     ),
                 )
 
-                final_local_row = _find_named_local_row(final_switcher)
+                final_local_row = _find_named_local_row_in_rows(final_saved_rows)
                 final_selected_row = _find_selected_row(final_switcher) or _selected_row_from_trigger(
                     final_trigger,
                 )
@@ -435,8 +461,9 @@ def _workspace_state(repository: str) -> dict[str, object]:
     local_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
     hosted_id = f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
     return {
-        "activeWorkspaceId": local_id,
+        "activeWorkspaceId": hosted_id,
         "migrationComplete": True,
+        "unavailableLocalWorkspaceIds": [local_id],
         "profiles": [
             {
                 "id": local_id,
@@ -542,10 +569,24 @@ def _observe_restore_message(tracker_page: TrackStateTrackerPage) -> str | None:
 def _find_named_local_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
-    for row in switcher.rows:
-        if row.target_type_label == "Local" and LOCAL_TARGET in row.detail_text:
+    row = _find_named_local_row_in_rows(switcher.rows)
+    return row or _fallback_local_row_from_switcher_text(switcher.switcher_text)
+
+
+def _find_named_local_row_in_rows(
+    rows: tuple[WorkspaceSwitcherRowObservation, ...] | list[WorkspaceSwitcherRowObservation],
+) -> WorkspaceSwitcherRowObservation | None:
+    for row in rows:
+        if (
+            row.target_type_label == "Local"
+            and (
+                row.display_name == LOCAL_DISPLAY_NAME
+                or LOCAL_TARGET in row.detail_text
+                or LOCAL_TARGET in row.visible_text
+            )
+        ):
             return row
-    return _fallback_local_row_from_switcher_text(switcher.switcher_text)
+    return None
 
 
 def _find_selected_row(
@@ -790,8 +831,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and one hosted workspace.",
-        "* Established the ticket precondition by deleting the prepared local repository before startup, waiting for retry exhaustion, and verifying the saved local workspace rendered as {{Local Unavailable}}.",
+        "* Opened the deployed TrackState app in Chromium with the hosted workspace active and a saved local workspace preloaded in browser state.",
+        "* Established the ticket precondition by preloading the saved local workspace in the persisted {{Local Unavailable}} state and verifying the unavailable row was visible before the refresh.",
         "* Restored the same local repository on disk outside the app and refreshed the browser tab without any manual workspace interaction.",
         f"* Waited {STARTUP_RETRY_WAIT_SECONDS} seconds after the refresh so startup revalidation had time to finish before asserting.",
         "* Opened *Workspace switcher* and inspected the visible local workspace status label the same way a user would.",
@@ -857,8 +898,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and one hosted workspace.",
-        "- Established the ticket precondition by deleting the prepared local repository before startup, waiting for retry exhaustion, and verifying the saved local workspace rendered as `Local Unavailable`.",
+        "- Opened the deployed TrackState app in Chromium with the hosted workspace active and a saved local workspace preloaded in browser state.",
+        "- Established the ticket precondition by preloading the saved local workspace in the persisted `Local Unavailable` state and verifying the unavailable row was visible before the refresh.",
         "- Restored the same local repository on disk outside the app and refreshed the browser tab without any manual workspace interaction.",
         f"- Waited {STARTUP_RETRY_WAIT_SECONDS} seconds after the refresh so startup revalidation had time to finish before asserting.",
         "- Opened **Workspace switcher** and inspected the visible local workspace status label the same way a user would.",
