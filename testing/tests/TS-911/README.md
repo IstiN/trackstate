@@ -26,6 +26,6 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
 
 ## Coverage notes
 
-- Uses the default desktop viewport of `1440x900`.
-- Opens the live workspace switcher, focuses the trigger, and uses a single `Tab` press to confirm whether keyboard focus enters the first internal workspace row.
-- If that precondition is satisfied, presses `Shift+Tab` from the first internal row and verifies reverse wrap returns to `Save and switch`.
+- Uses the default desktop viewport of `1440x960`.
+- Opens the live workspace switcher and derives the current first and last internal keyboard targets from the panel's observed tab order.
+- Focuses the selected saved workspace row, proves it is the first internal keyboard target, then presses `Shift+Tab` from that row.

@@ -190,6 +190,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             run_log_error=self._optional_string(
                 pull_request_observation.get("run_log_error")
             ),
+            runtime_accessibility_surface_present=bool(
+                pull_request_observation["runtime_accessibility_surface_present"]
+            ),
+            runtime_accessibility_surface_summary=str(
+                pull_request_observation["runtime_accessibility_surface_summary"]
+            ),
             probe_contains_low_contrast_indicator=bool(
                 pull_request_observation["probe_contains_low_contrast_indicator"]
             ),
@@ -349,6 +355,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 evidence_text,
                 self._config.semantic_evidence_markers,
             )
+            probe_semantic_label = self._extract_probe_semantic_label(probe_source)
+            runtime_accessibility_surface_summary = (
+                self._extract_runtime_accessibility_surface_summary(run_log_text)
+            )
 
             observation = {
                 "pull_request_number": pull_request_number,
@@ -417,15 +427,18 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 ),
                 "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
                 "run_log_error": run_log_error,
+                "runtime_accessibility_surface_present": bool(
+                    runtime_accessibility_surface_summary
+                ),
+                "runtime_accessibility_surface_summary": (
+                    runtime_accessibility_surface_summary
+                ),
                 "probe_contains_low_contrast_indicator": (
                     "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
                 ),
-                "probe_contains_semantic_label_indicator": "label: 'button'" in probe_source,
-                "probe_semantic_label": "button",
-                "probe_contrast_technique": (
-                    "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-                    "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
-                ),
+                "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
+                "probe_semantic_label": probe_semantic_label or "",
+                "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
             }
@@ -580,6 +593,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
             "status_checks": [],
             "status_check_names": [],
             "status_check_workflow_names": [],
+            "failed_status_check_names": [],
+            "failed_status_check_workflow_names": [],
         }
 
         while time.time() < deadline:
@@ -596,6 +611,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "status_checks": surface["status_checks"],
                 "status_check_names": surface["status_check_names"],
                 "status_check_workflow_names": surface["status_check_workflow_names"],
+                "failed_status_check_names": surface["failed_status_check_names"],
+                "failed_status_check_workflow_names": surface[
+                    "failed_status_check_workflow_names"
+                ],
             }
             if (
                 mergeable_state
@@ -842,11 +861,52 @@ class GitHubAccessibilityPullRequestGateProbeService:
         matches = [marker for marker in markers if marker.lower() in normalized]
         return self._dedupe(matches)
 
+    @staticmethod
+    def _extract_probe_semantic_label(probe_source: str) -> str | None:
+        match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
+        if match is None:
+            return None
+        return match.group("label")
+
+    @staticmethod
+    def _probe_contrast_technique(probe_source: str) -> str:
+        del probe_source
+        return (
+            "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+        )
+
+    def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
+        if not run_log_text.strip():
+            return ""
+        match = re.search(
+            r"Accessibility runtime surface ready:[^\r\n]*",
+            run_log_text,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return ""
+        return self._snippet(match.group(0), limit=400)
+
     def _extract_log_excerpt(self, run_log_text: str, fallback_text: str) -> str:
         text = run_log_text or fallback_text
         if not text.strip():
             return ""
         lowered = text.lower()
+        failure_markers = [
+            "test timeout",
+            "page.waitforfunction",
+            "##[error]",
+            "error context:",
+            "1 failed",
+            "process completed with exit code 1",
+        ]
+        for marker in failure_markers:
+            index = lowered.find(marker)
+            if index >= 0:
+                start = max(index - 200, 0)
+                end = min(index + 800, len(text))
+                return self._snippet(text[start:end], limit=1000)
         markers = [
             *self._config.expected_accessibility_markers,
             *self._config.contrast_evidence_markers,
@@ -989,7 +1049,15 @@ class Ts908ProbeSurface extends StatelessWidget {
 """
 
     def _inject_probe_into_render_host(self, source: str) -> str:
-        if "Ts908ProbeSurface" in source:
+        probe_widget_name = self._probe_widget_name()
+        rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        rendered_probe_overlay_class_name = self._rendered_probe_overlay_class_name()
+
+        if (
+            probe_widget_name in source
+            or rendered_probe_app_class_name in source
+            or rendered_probe_overlay_class_name in source
+        ):
             return source
 
         if "package:flutter/material.dart" not in source:
@@ -1008,57 +1076,71 @@ class Ts908ProbeSurface extends StatelessWidget {
                 f"{probe_import}\n",
             )
 
-        updated_source, replacements = re.subn(
-            r"runApp\(\s*const\s+TrackStateApp\(\)\s*\);",
-            "runApp(const _Ts908RenderedProbeApp());",
+        run_app_match = re.search(
+            r"runApp\(\s*(?P<child>[\s\S]*?)\s*\);\s*",
             source,
-            count=1,
         )
-        if replacements != 1:
+        if run_app_match is None:
             raise GitHubAccessibilityPullRequestGateError(
                 "TS-908 could not patch lib/main.dart to render the disposable probe."
             )
+        original_child = run_app_match.group("child").strip()
+        if "TrackStateApp" not in original_child:
+            raise GitHubAccessibilityPullRequestGateError(
+                "TS-908 could not find the TrackStateApp runApp target in lib/main.dart."
+            )
+        updated_source = (
+            source[: run_app_match.start()]
+            + f"runApp({rendered_probe_app_class_name}(child: {original_child}));\n"
+            + source[run_app_match.end() :]
+        )
 
         return (
             updated_source.rstrip()
             + "\n\n"
-            + """class _Ts908RenderedProbeApp extends StatelessWidget {
-  const _Ts908RenderedProbeApp();
+            + """class {app_class} extends StatelessWidget {{
+  const {app_class}({{required this.child}});
+
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) {{
     return Stack(
       fit: StackFit.expand,
-      children: const [
-        TrackStateApp(),
+      children: [
+        child,
         Positioned(
           top: 24,
           left: 24,
           child: Directionality(
             textDirection: TextDirection.ltr,
-            child: _Ts908ProbeOverlay(),
+            child: {overlay_class}(),
           ),
         ),
       ],
     );
-  }
-}
+  }}
+}}
 
-class _Ts908ProbeOverlay extends StatelessWidget {
-  const _Ts908ProbeOverlay();
+class {overlay_class} extends StatelessWidget {{
+  const {overlay_class}();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) {{
     return Theme(
       data: ThemeData(useMaterial3: true),
-      child: const Material(
+      child: Material(
         color: Colors.transparent,
-        child: Ts908ProbeSurface(),
+        child: const {probe_widget}(),
       ),
     );
-  }
-}
-"""
+  }}
+}}
+""".format(
+                app_class=rendered_probe_app_class_name,
+                overlay_class=rendered_probe_overlay_class_name,
+                probe_widget=probe_widget_name,
+            )
         )
 
     @staticmethod
@@ -1184,3 +1266,15 @@ class _Ts908ProbeOverlay extends StatelessWidget {
         if len(normalized) <= limit:
             return normalized
         return normalized[: limit - 3] + "..."
+
+    @staticmethod
+    def _probe_widget_name() -> str:
+        return "Ts908ProbeSurface"
+
+    @staticmethod
+    def _rendered_probe_app_class_name() -> str:
+        return "_Ts908RenderedProbeApp"
+
+    @staticmethod
+    def _rendered_probe_overlay_class_name() -> str:
+        return "_Ts908ProbeOverlay"

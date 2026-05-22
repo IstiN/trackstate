@@ -10,6 +10,7 @@ class SemanticLabelContextLintConfig:
     flutter_version: str
     target_relative_path: Path
     localization_relative_path: Path
+    semantic_label_localization_key: str
     required_source_snippet: str
     replacement_source_snippet: str
     required_semantic_label: str
@@ -43,6 +44,11 @@ class SemanticLabelContextLintConfig:
                     env_prefixes=env_prefixes,
                     default="lib/l10n/app_en.arb",
                 ),
+            ),
+            semantic_label_localization_key=_read_env(
+                "SEMANTIC_LABEL_LOCALIZATION_KEY",
+                env_prefixes=env_prefixes,
+                default="workspaceSyncAttentionNeededSemanticLabel",
             ),
             required_source_snippet=_read_env(
                 "REQUIRED_SOURCE_SNIPPET",
