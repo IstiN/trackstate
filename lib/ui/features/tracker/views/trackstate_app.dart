@@ -1188,22 +1188,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
 
     final reason = _workspaceValidationFailureReason(nextWorkspace);
-    if (_isUnsupportedActiveLocalStartupAccess(reason)) {
-      final selectedState = await widget.workspaceProfileService.selectProfile(
-        nextWorkspace.id,
-      );
-      final preserved = await _preserveActiveLocalWorkspaceSelection(
-        nextWorkspace,
-        previousViewModel,
-      );
-      await _commitPreparedWorkspaceSwitch(
-        preserved,
-        previousViewModel: previousViewModel,
-        workspaceState: selectedState,
-      );
-      return;
-    }
-
     previousViewModel.showMessage(
       TrackerMessage.workspaceSwitchFailed(
         workspaceName: nextWorkspace.displayName,
