@@ -32,7 +32,9 @@ OUTPUTS_DIR = REPO_ROOT / "outputs"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     (
@@ -46,7 +48,7 @@ EXPECTED_RESULT = (
     "The axe-core scanner identifies the 4.5:1 ratio as compliant, the test "
     "returns a success exit code, and the CI gate passes."
 )
-SUCCESS_CONCLUSIONS = {"success", "neutral", "skipped"}
+SUCCESS_CONCLUSIONS = {"success"}
 
 
 def main() -> None:
@@ -217,12 +219,29 @@ def _evaluate_live_ci_trigger(
         _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
         return
 
+    if observation.accessibility_status_check_conclusion not in SUCCESS_CONCLUSIONS:
+        message = (
+            "Step 2 failed: the hosted accessibility check did not complete successfully for "
+            "the disposable PR.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Accessibility check: {observation.accessibility_status_check_name or '<none>'}\n"
+            f"Accessibility check status: {observation.accessibility_status_check_status or '<none>'}\n"
+            "Accessibility check conclusion: "
+            f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
+            f"Observed status checks: {observation.observed_status_check_names or ['<none>']}"
+        )
+        failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
+        return
+
     observed = (
         "GitHub Actions executed the real PR workflow for the disposable boundary probe and "
-        "the run completed successfully.\n"
+        "the accessibility check completed successfully.\n"
         f"Run URL: {observation.latest_pull_request_run_url}\n"
         f"Status: {observation.latest_pull_request_run_status}\n"
         f"Conclusion: {observation.latest_pull_request_run_conclusion}\n"
+        "Accessibility check conclusion: "
+        f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
         f"Observed status checks: {observation.observed_status_check_names or ['<none>']}"
     )
     _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
@@ -245,7 +264,10 @@ def _evaluate_accessibility_audit_logs(
             f"`{observation.latest_pull_request_run_url}`; observed jobs: "
             f"{observation.observed_job_names or ['<none>']}; observed steps: "
             f"{observation.observed_step_names or ['<none>']}; status checks: "
-            f"{observation.observed_status_check_names or ['<none>']}; log excerpt: "
+            f"{observation.observed_status_check_names or ['<none>']}; accessibility "
+            f"check conclusion: `{observation.accessibility_status_check_conclusion or '<none>'}`; "
+            f"runtime accessibility evidence: "
+            f"`{observation.runtime_accessibility_surface_summary or '<none>'}`; log excerpt: "
             f"`{observation.run_log_excerpt or '<none>'}`."
         ),
     )
@@ -261,6 +283,20 @@ def _evaluate_accessibility_audit_logs(
         _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
         return
 
+    if observation.accessibility_status_check_conclusion not in SUCCESS_CONCLUSIONS:
+        message = (
+            "Step 3 failed: the hosted accessibility audit did not report a successful "
+            "accessibility check conclusion.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Accessibility check: {observation.accessibility_status_check_name or '<none>'}\n"
+            f"Accessibility check conclusion: "
+            f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
+            f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
+
     if not observation.matched_accessibility_markers:
         message = (
             "Step 3 failed: the hosted PR workflow surface did not expose accessibility-audit "
@@ -268,6 +304,31 @@ def _evaluate_accessibility_audit_logs(
             f"Observed jobs: {observation.observed_job_names}\n"
             f"Observed steps: {observation.observed_step_names}\n"
             f"Observed checks: {observation.observed_status_check_names}\n"
+            f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
+
+    if not observation.run_log_matched_accessibility_markers:
+        message = (
+            "Step 3 failed: the hosted accessibility audit never produced log-level axe-core "
+            "evidence, so the PR surface alone cannot prove that the audit executed.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
+            f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
+
+    if not observation.runtime_accessibility_surface_present:
+        message = (
+            "Step 3 failed: the hosted accessibility audit never exposed rendered "
+            "accessibility output for the exact-boundary probe.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            "Runtime accessibility evidence: "
+            f"{observation.runtime_accessibility_surface_summary or '<none>'}\n"
             f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
         )
         failures.append(message)
@@ -294,6 +355,10 @@ def _evaluate_accessibility_audit_logs(
         "Reviewed the hosted Playwright accessibility audit logs on the real PR workflow and "
         "confirmed the run stayed clean.\n"
         f"Matched accessibility markers: {observation.matched_accessibility_markers}\n"
+        "Run-log accessibility markers: "
+        f"{observation.run_log_matched_accessibility_markers}\n"
+        "Runtime accessibility evidence: "
+        f"{observation.runtime_accessibility_surface_summary}\n"
         f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
         f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
         f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
@@ -316,6 +381,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=True)
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
 
@@ -336,6 +402,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=False)
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
@@ -421,6 +488,53 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, result: dict[str, object], passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed: aligned the TS-926 regression fixtures with the current "
+        "`GitHubAccessibilityPullRequestGateObservation` contract, tightened the ticket so "
+        "only a real hosted accessibility check conclusion of `success` plus runtime "
+        "accessibility log evidence can pass, and added the required review-replies output. "
+        f"{rerun_summary}"
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:

@@ -87,6 +87,11 @@ class _StubProbeService(GitHubAccessibilityBoundaryPullRequestProbeService):
             "run_log_mentions_semantic_issue": False,
             "run_log_excerpt": "Run axe-core accessibility checks\n1 passed",
             "run_log_error": None,
+            "runtime_accessibility_surface_present": True,
+            "runtime_accessibility_surface_summary": (
+                "Accessibility runtime surface ready: "
+                "Boundary contrast sample | Open tracker settings"
+            ),
             "probe_contains_low_contrast_indicator": False,
             "probe_contains_semantic_label_indicator": False,
             "probe_semantic_label": "Open tracker settings",

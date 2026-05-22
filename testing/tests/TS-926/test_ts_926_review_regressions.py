@@ -31,6 +31,13 @@ class Ts926ReviewRegressionTest(unittest.TestCase):
         matched_accessibility_markers: list[str],
         run_log_matched_contrast_markers: list[str],
         run_log_matched_semantic_markers: list[str],
+        run_log_matched_accessibility_markers: list[str] | None = None,
+        runtime_accessibility_surface_present: bool = True,
+        runtime_accessibility_surface_summary: str = (
+            "Accessibility runtime surface ready: "
+            "Boundary contrast sample | Open tracker settings"
+        ),
+        accessibility_status_check_conclusion: str | None = None,
     ) -> GitHubAccessibilityPullRequestGateObservation:
         return GitHubAccessibilityPullRequestGateObservation(
             repository="IstiN/trackstate",
@@ -77,19 +84,33 @@ class Ts926ReviewRegressionTest(unittest.TestCase):
             accessibility_status_check_name="Accessibility checks",
             accessibility_status_check_workflow_name="Flutter Required Checks",
             accessibility_status_check_status="completed",
-            accessibility_status_check_conclusion=run_conclusion,
+            accessibility_status_check_conclusion=(
+                accessibility_status_check_conclusion
+                if accessibility_status_check_conclusion is not None
+                else run_conclusion
+            ),
             accessibility_status_check_url="https://example.test/accessibility",
             matched_accessibility_markers=matched_accessibility_markers,
             matched_contrast_markers=[],
             matched_semantic_markers=[],
-            run_log_matched_accessibility_markers=["axe-core"] if matched_accessibility_markers else [],
+            run_log_matched_accessibility_markers=(
+                run_log_matched_accessibility_markers
+                if run_log_matched_accessibility_markers is not None
+                else (["axe-core"] if matched_accessibility_markers else [])
+            ),
             run_log_matched_contrast_markers=run_log_matched_contrast_markers,
             run_log_matched_semantic_markers=run_log_matched_semantic_markers,
-            run_log_mentions_accessibility=bool(matched_accessibility_markers),
+            run_log_mentions_accessibility=bool(
+                run_log_matched_accessibility_markers
+                if run_log_matched_accessibility_markers is not None
+                else matched_accessibility_markers
+            ),
             run_log_mentions_contrast_issue=bool(run_log_matched_contrast_markers),
             run_log_mentions_semantic_issue=bool(run_log_matched_semantic_markers),
             run_log_excerpt="Run axe-core accessibility checks\n1 passed",
             run_log_error=None,
+            runtime_accessibility_surface_present=runtime_accessibility_surface_present,
+            runtime_accessibility_surface_summary=runtime_accessibility_surface_summary,
             probe_contains_low_contrast_indicator=False,
             probe_contains_semantic_label_indicator=False,
             probe_semantic_label="Open tracker settings",
@@ -132,6 +153,48 @@ class Ts926ReviewRegressionTest(unittest.TestCase):
         )
 
         self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_2_rejects_skipped_accessibility_check(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_live_ci_trigger(  # type: ignore[attr-defined]
+            result,
+            observation=self._observation(
+                run_conclusion="success",
+                matched_accessibility_markers=["accessibility", "axe-core"],
+                run_log_matched_contrast_markers=[],
+                run_log_matched_semantic_markers=[],
+                accessibility_status_check_conclusion="skipped",
+            ),
+            failures=failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("accessibility check did not complete successfully", failures[0])
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_3_rejects_missing_runtime_accessibility_evidence(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_accessibility_audit_logs(  # type: ignore[attr-defined]
+            result,
+            observation=self._observation(
+                run_conclusion="success",
+                matched_accessibility_markers=["accessibility", "axe-core"],
+                run_log_matched_contrast_markers=[],
+                run_log_matched_semantic_markers=[],
+                run_log_matched_accessibility_markers=["axe-core"],
+                runtime_accessibility_surface_present=False,
+                runtime_accessibility_surface_summary="",
+            ),
+            failures=failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("never exposed rendered accessibility output", failures[0])
         self.assertEqual(result["steps"][0]["status"], "failed")
 
 
