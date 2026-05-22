@@ -124,7 +124,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
-  final Set<String> _preservedUnavailableLocalWorkspaceIds = <String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
   browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
   _desktopWorkspaceSwitcherScrollSnapshot;
@@ -185,7 +184,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
-    _preservedUnavailableLocalWorkspaceIds.clear();
     _isDesktopWorkspaceSwitcherVisible = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
@@ -317,15 +315,17 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
-        localWorkspaceAvailability[workspace.id] =
-            !_preservedUnavailableLocalWorkspaceIds.contains(workspace.id);
+        localWorkspaceAvailability[workspace.id] = !workspaceState
+            .unavailableLocalWorkspaceIds
+            .contains(workspace.id);
+        continue;
+      }
+      if (workspaceState.unavailableLocalWorkspaceIds.contains(workspace.id)) {
+        localWorkspaceAvailability[workspace.id] = false;
         continue;
       }
       final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
       localWorkspaceAvailability[workspace.id] = isAvailable;
-      if (isAvailable) {
-        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
-      }
     }
     if (!mounted) {
       return;
@@ -371,6 +371,30 @@ class _TrackStateAppState extends State<TrackStateApp>
     final previousViewModel = viewModel;
     _WorkspaceRestoreFailure? lastFailure;
     for (final workspace in candidates) {
+      if (_shouldBlockAutomaticRestore(state, workspace)) {
+        if (workspace.id == activeWorkspaceId) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: true,
+            markUnavailable: true,
+          );
+          final selectedState = await widget.workspaceProfileService
+              .selectProfile(workspace.id);
+          _pendingWorkspaceRestoreFailure = null;
+          await _commitPreparedWorkspaceSwitch(
+            preserved,
+            previousViewModel: previousViewModel,
+            workspaceState: selectedState,
+          );
+          return true;
+        }
+        lastFailure = _WorkspaceRestoreFailure(
+          workspaceName: workspace.displayName,
+          reason: _workspaceValidationFailureReason(workspace),
+        );
+        continue;
+      }
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
@@ -413,6 +437,14 @@ class _TrackStateAppState extends State<TrackStateApp>
     return false;
   }
 
+  bool _shouldBlockAutomaticRestore(
+    WorkspaceProfilesState state,
+    WorkspaceProfile workspace,
+  ) {
+    return workspace.isLocal &&
+        state.unavailableLocalWorkspaceIds.contains(workspace.id);
+  }
+
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
@@ -441,7 +473,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot != null) {
-        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
         _workspaceValidationFailures.remove(workspace.id);
         return _PreparedWorkspaceSwitch(
           viewModel: nextViewModel,
@@ -536,9 +567,8 @@ class _TrackStateAppState extends State<TrackStateApp>
       await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     if (markUnavailable) {
-      _preservedUnavailableLocalWorkspaceIds.add(workspace.id);
+      await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
     } else {
-      _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
       _workspaceValidationFailures.remove(workspace.id);
     }
     return _PreparedWorkspaceSwitch(
@@ -546,6 +576,21 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace: workspace,
       localConfigurationKey: null,
     );
+  }
+
+  Future<WorkspaceProfilesState> _saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    final nextState = await widget.workspaceProfileService
+        .saveLocalWorkspaceAvailability(workspaceId, isAvailable: isAvailable);
+    if (!mounted) {
+      return nextState;
+    }
+    setState(() {
+      _workspaceState = nextState;
+    });
+    return nextState;
   }
 
   bool _isUnsupportedActiveLocalStartupAccess(String reason) {
@@ -861,6 +906,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         selectedState = await widget.workspaceProfileService.selectProfile(
           workspace.id,
         );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: true,
+        );
       }
       await _commitPreparedWorkspaceSwitch(
         prepared,
@@ -964,9 +1013,15 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (prepared == null) {
       return;
     }
-    final selectedState = await widget.workspaceProfileService.selectProfile(
+    var selectedState = await widget.workspaceProfileService.selectProfile(
       workspace.id,
     );
+    if (workspace.isLocal) {
+      selectedState = await _saveLocalWorkspaceAvailability(
+        workspace.id,
+        isAvailable: true,
+      );
+    }
     await _commitPreparedWorkspaceSwitch(
       prepared,
       previousViewModel: previousViewModel,
@@ -1176,8 +1231,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       showFailureMessage: false,
     );
     if (prepared != null) {
-      final selectedState = await widget.workspaceProfileService.selectProfile(
+      var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
       );
       await _commitPreparedWorkspaceSwitch(
         prepared,
