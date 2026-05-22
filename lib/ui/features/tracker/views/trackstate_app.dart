@@ -7241,7 +7241,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ),
       ),
     );
-    final summaryControl = kIsWeb
+    final shouldUseBrowserFocusableSummaryControl = kIsWeb && onSelect != null;
+    final summaryControl = shouldUseBrowserFocusableSummaryControl
         ? browser_focusable_control.BrowserFocusableControl(
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
