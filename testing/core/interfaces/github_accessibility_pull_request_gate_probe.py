@@ -77,6 +77,8 @@ class GitHubAccessibilityPullRequestGateObservation:
     run_log_mentions_semantic_issue: bool
     run_log_excerpt: str
     run_log_error: str | None
+    runtime_accessibility_surface_present: bool
+    runtime_accessibility_surface_summary: str
     probe_contains_low_contrast_indicator: bool
     probe_contains_semantic_label_indicator: bool
     probe_semantic_label: str

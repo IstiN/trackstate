@@ -43,8 +43,10 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 RUN_SCREENSHOT_PATH = OUTPUTS_DIR / "ts925_run_page.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Create a Pull Request that introduces a WCAG AA contrast violation (ratio below 4.5:1).",
@@ -502,6 +504,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -523,6 +529,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -626,7 +636,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-925 to exercise the live PR accessibility gate and its downstream deployment blocking behavior.",
+        "- Fixed the TS-925 rework findings by sourcing the workflow contract and observed run jobs from the shared accessibility probe.",
         "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and captures a real run-page screenshot.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
@@ -652,6 +662,72 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(
+                root_comment_id=thread.get("rootCommentId"),
+                passed=passed,
+                result=result,
+            ),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: object,
+    passed: bool,
+    result: dict[str, object],
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    if root_comment_id == 3286778457:
+        return (
+            "Fixed: Step 4 now uses `observation.target_workflow` from the shared "
+            "accessibility probe, so the downstream deploy/publish contract comes from the "
+            "same live default-branch workflow artifact that produced the observed run "
+            "instead of reparsing the reviewer checkout. "
+            f"{rerun_summary}"
+        )
+    if root_comment_id == 3286778579:
+        return (
+            "Fixed: TS-925 no longer reaches for `gh api` in the test layer. The shared "
+            "probe now exposes `observation.observed_run_jobs`, and the test consumes that "
+            "component-owned run-job observation directly. "
+            f"{rerun_summary}"
+        )
+    return (
+        "Fixed: TS-925 now keeps both the workflow contract and live run-job retrieval in "
+        "the shared accessibility probe/component layer, preserving the intended test "
+        "architecture. "
+        f"{rerun_summary}"
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:

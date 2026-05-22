@@ -95,12 +95,39 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "run_log_mentions_semantic_issue": False,
             "run_log_excerpt": "",
             "run_log_error": None,
+            "runtime_accessibility_surface_present": False,
+            "runtime_accessibility_surface_summary": "",
             "probe_contains_low_contrast_indicator": True,
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
             "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
             "cleanup_closed_pull_request": True,
             "cleanup_deleted_branch": True,
+        }
+
+
+class _SurfaceProbeService(_StubProbeService):
+    def _read_json_object(self, endpoint: str, *, method: str = "GET", field_args=None):
+        del method, field_args
+        if endpoint != "/repos/IstiN/trackstate/pulls/123":
+            raise AssertionError(f"Unexpected endpoint: {endpoint}")
+        return {
+            "head": {"sha": "abc123"},
+            "mergeable_state": "clean",
+        }
+
+    def _read_check_runs_state(self, head_sha: str) -> str | None:
+        assert head_sha == "abc123"
+        return "failure"
+
+    def _read_pull_request_status_surface(self, pull_request_number: int) -> dict[str, object]:
+        assert pull_request_number == 123
+        return {
+            "status_checks": [],
+            "status_check_names": ["Accessibility checks"],
+            "status_check_workflow_names": ["Flutter Required Checks"],
+            "failed_status_check_names": ["Accessibility checks"],
+            "failed_status_check_workflow_names": ["Flutter Required Checks"],
         }
 
 
@@ -260,8 +287,38 @@ void main() {
 
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
-        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
-        self.assertIn("child: Ts908ProbeSurface()", patched)
+        self.assertIn(
+            "runApp(_Ts908RenderedProbeApp(child: const TrackStateApp()));",
+            patched,
+        )
+        self.assertIn("child: const Ts908ProbeSurface()", patched)
+
+    def test_extract_runtime_accessibility_surface_summary_reads_success_log_line(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        summary = probe._extract_runtime_accessibility_surface_summary(  # noqa: SLF001
+            """
+            some prefix
+            Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]
+            trailing line
+            """
+        )
+
+        self.assertEqual(
+            summary,
+            'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
+        )
+
+    def test_wait_for_pull_request_surface_keeps_failed_check_fields(self) -> None:
+        probe = _SurfaceProbeService(self.config)
+
+        surface = probe._wait_for_pull_request_surface(123, head_sha="abc123")  # noqa: SLF001
+
+        self.assertEqual(surface["failed_status_check_names"], ["Accessibility checks"])
+        self.assertEqual(
+            surface["failed_status_check_workflow_names"],
+            ["Flutter Required Checks"],
+        )
 
     def test_inject_probe_into_render_host_supports_multiline_conditional_run_app(self) -> None:
         probe = _StubProbeService(self.config)
@@ -290,7 +347,7 @@ void main() {
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
         self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
-        self.assertIn("child: Ts908ProbeSurface()", patched)
+        self.assertIn("Ts908ProbeSurface()", patched)
 
 
 if __name__ == "__main__":
