@@ -52,15 +52,24 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
   if (firstPostRowControlIndex == -1) {
     return null;
   }
+  final lastPostRowControlIndex = _lastPostRowControlIndex(
+    focusStops,
+    startIndex: firstPostRowControlIndex,
+  );
 
   if (!backwards) {
-    return currentIndex == selectedRowIndex ? firstPostRowControlIndex : null;
+    if (currentIndex == selectedRowIndex) {
+      return firstPostRowControlIndex;
+    }
+    return currentIndex == lastPostRowControlIndex ? selectedRowIndex : null;
   }
 
   return currentIndex == firstPostRowControlIndex ? selectedRowIndex : null;
 }
 
-int _lastWorkspaceRowIndex(List<BrowserWorkspaceSwitcherTabStopSnapshot> stops) {
+int _lastWorkspaceRowIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops,
+) {
   for (var index = stops.length - 1; index >= 0; index -= 1) {
     if (stops[index].isFocusable && stops[index].isWithinWorkspaceRow) {
       return index;
@@ -74,6 +83,21 @@ int _firstPostRowControlIndex(
   required int startIndex,
 }) {
   for (var index = startIndex; index < stops.length; index += 1) {
+    final stop = stops[index];
+    if (stop.isFocusable &&
+        stop.isWithinWorkspaceSwitcher &&
+        !stop.isWithinWorkspaceRow) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+int _lastPostRowControlIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
+  required int startIndex,
+}) {
+  for (var index = stops.length - 1; index >= startIndex; index -= 1) {
     final stop = stops[index];
     if (stop.isFocusable &&
         stop.isWithinWorkspaceSwitcher &&
