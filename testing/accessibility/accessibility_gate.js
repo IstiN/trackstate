@@ -282,6 +282,10 @@ function formatSemanticsTreeDiscoveryStatus(status) {
   return `Semantics tree discovery: ${status}`;
 }
 
+function formatPlaceholderVerificationEvidence(selector = 'flt-semantics-placeholder') {
+  return formatSemanticsTreeDiscoveryStatus(`verified ${selector}`);
+}
+
 function appendAccessibilityLog(entries, entry, log) {
   if (entries.at(-1) === entry) {
     return;
@@ -320,6 +324,11 @@ async function captureFlutterStartupDiagnostics(
   const semanticsEvidence = await enableFlutterSemantics(page, {
     onPlaceholderReady: () => {
       appendAccessibilityLog(
+          semanticsEntries,
+          formatPlaceholderVerificationEvidence(),
+          log,
+      );
+      appendAccessibilityLog(
           engineEntries,
           formatFlutterEngineInitializationEvidence(
               'semantics placeholder attached',
@@ -355,6 +364,7 @@ module.exports = {
   collectAccessibilityViolations,
   enableFlutterSemantics,
   formatFlutterEngineInitializationEvidence,
+  formatPlaceholderVerificationEvidence,
   formatSemanticsTreeDiscoveryStatus,
   formatFlutterSemanticsEvidence,
   formatViolations,

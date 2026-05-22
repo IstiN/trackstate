@@ -174,6 +174,40 @@ class Ts943ReviewRegressionTest(unittest.TestCase):
         self.assertIn("did not expose a `log-validation` step", failures[0])
         self.assertIn("did not report that mandatory engine state tokens were missing", failures[0])
 
+    def test_log_validation_message_substring_does_not_count_as_step_surface(self) -> None:
+        self.assertFalse(
+            self.module._has_log_validation_step(  # type: ignore[attr-defined]
+                ["Run axe-core accessibility checks"],
+                (
+                    "Accessibility checks\tRun axe-core accessibility checks\t"
+                    "2026-05-22T11:02:00Z log-validation failed because mandatory "
+                    "engine state tokens were not found in the output."
+                ),
+            )
+        )
+
+    def test_stage_isolated_log_validation_step_counts_as_visible_surface(self) -> None:
+        self.assertTrue(
+            self.module._has_log_validation_step(  # type: ignore[attr-defined]
+                ["Run axe-core accessibility checks"],
+                (
+                    "Accessibility checks\tlog-validation\t2026-05-22T11:02:00Z "
+                    "mandatory engine state tokens were not found in the output."
+                ),
+            )
+        )
+
+    def test_runtime_module_keeps_framework_wiring_inside_support_factory(self) -> None:
+        module_source = Path(__file__).with_name("test_ts_943.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("GhCliWorkflowRunLogReader", module_source)
+        self.assertIn(
+            "create_github_accessibility_engine_log_validation_run_log_reader",
+            module_source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

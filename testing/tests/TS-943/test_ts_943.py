@@ -17,11 +17,12 @@ from testing.core.config.github_accessibility_pull_request_gate_config import ( 
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (  # noqa: E402
     GitHubAccessibilityPullRequestGateObservation,
 )
-from testing.frameworks.python.gh_cli_workflow_run_log_reader import (  # noqa: E402
-    GhCliWorkflowRunLogReader,
+from testing.core.interfaces.github_workflow_run_log_reader import (  # noqa: E402
+    GitHubWorkflowRunLogReader,
 )
 from testing.tests.support.github_accessibility_engine_log_validation_failure_probe_factory import (  # noqa: E402
     create_github_accessibility_engine_log_validation_failure_probe,
+    create_github_accessibility_engine_log_validation_run_log_reader,
 )
 
 TICKET_KEY = "TS-943"
@@ -64,7 +65,9 @@ def main() -> None:
         REPO_ROOT,
         config_path=CONFIG_PATH,
     )
-    log_reader = GhCliWorkflowRunLogReader(REPO_ROOT)
+    log_reader = create_github_accessibility_engine_log_validation_run_log_reader(
+        REPO_ROOT
+    )
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -127,7 +130,7 @@ def main() -> None:
 def _read_full_run_log(
     observation: GitHubAccessibilityPullRequestGateObservation,
     *,
-    log_reader: GhCliWorkflowRunLogReader,
+    log_reader: GitHubWorkflowRunLogReader,
 ) -> tuple[str, str | None]:
     if observation.latest_pull_request_run_id is None:
         return "", "The workflow run ID was missing, so the hosted run log could not be read."
@@ -354,7 +357,22 @@ def _record_live_user_verification(
 def _has_log_validation_step(step_names: list[str], full_run_log_text: str) -> bool:
     if any(LOG_VALIDATION_STEP_PATTERN.search(name or "") for name in step_names):
         return True
-    return bool(LOG_VALIDATION_STEP_PATTERN.search(full_run_log_text))
+    return any(
+        LOG_VALIDATION_STEP_PATTERN.search(step_name)
+        for step_name in _surface_step_names_from_log(full_run_log_text)
+    )
+
+
+def _surface_step_names_from_log(full_run_log_text: str) -> list[str]:
+    step_names: list[str] = []
+    for raw_line in full_run_log_text.splitlines():
+        parts = raw_line.lstrip("\ufeff").split("\t", 2)
+        if len(parts) != 3:
+            continue
+        step_name = parts[1].strip()
+        if step_name:
+            step_names.append(step_name)
+    return step_names
 
 
 def _extract_missing_token_message(text: str) -> str | None:
