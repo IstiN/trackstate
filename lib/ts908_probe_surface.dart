@@ -7,7 +7,7 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
 
     return Semantics(
       label: 'button',
