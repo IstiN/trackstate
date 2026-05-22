@@ -5,10 +5,14 @@ const {
   formatFlutterSemanticsEvidence,
   formatViolations,
 } = require('./accessibility_gate');
+const {
+  installTs933SemanticsFailureSimulation,
+} = require('./ts933_semantics_failure_simulation');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
+  await installTs933SemanticsFailureSimulation(page);
   await page.goto('/');
   await expect(page).toHaveTitle(/TrackState\.AI/);
   await page.waitForLoadState('networkidle');
