@@ -371,6 +371,30 @@ class _TrackStateAppState extends State<TrackStateApp>
     final previousViewModel = viewModel;
     _WorkspaceRestoreFailure? lastFailure;
     for (final workspace in candidates) {
+      if (_shouldBlockAutomaticRestore(state, workspace)) {
+        if (workspace.id == activeWorkspaceId) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: true,
+            markUnavailable: true,
+          );
+          final selectedState = await widget.workspaceProfileService
+              .selectProfile(workspace.id);
+          _pendingWorkspaceRestoreFailure = null;
+          await _commitPreparedWorkspaceSwitch(
+            preserved,
+            previousViewModel: previousViewModel,
+            workspaceState: selectedState,
+          );
+          return true;
+        }
+        lastFailure = _WorkspaceRestoreFailure(
+          workspaceName: workspace.displayName,
+          reason: _workspaceValidationFailureReason(workspace),
+        );
+        continue;
+      }
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
@@ -411,6 +435,14 @@ class _TrackStateAppState extends State<TrackStateApp>
       _pendingWorkspaceRestoreFailure = lastFailure;
     }
     return false;
+  }
+
+  bool _shouldBlockAutomaticRestore(
+    WorkspaceProfilesState state,
+    WorkspaceProfile workspace,
+  ) {
+    return workspace.isLocal &&
+        state.unavailableLocalWorkspaceIds.contains(workspace.id);
   }
 
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
