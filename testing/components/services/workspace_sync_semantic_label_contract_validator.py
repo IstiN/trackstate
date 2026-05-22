@@ -26,7 +26,6 @@ class WorkspaceSyncSemanticLabelContractValidator:
 
         test_source = self._read_required_file(config.test_relative_path)
         source = self._read_required_file(config.source_relative_path)
-        localization_source = self._read_required_file(config.localization_relative_path)
         flutter_test = self._probe.test(
             self._repository_root,
             config.test_relative_path,
@@ -39,10 +38,8 @@ class WorkspaceSyncSemanticLabelContractValidator:
             flutter_test=flutter_test,
             test_relative_path=config.test_relative_path,
             source_relative_path=config.source_relative_path,
-            localization_relative_path=config.localization_relative_path,
             test_source=test_source,
             source=source,
-            localization_source=localization_source,
         )
 
     def _read_required_file(self, relative_path: Path) -> str:

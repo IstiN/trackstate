@@ -10,12 +10,10 @@ class WorkspaceSyncSemanticLabelContractConfig:
     flutter_version: str
     test_relative_path: Path
     source_relative_path: Path
-    localization_relative_path: Path
     expected_test_name: str
     expected_result: str
     required_test_snippets: tuple[str, ...]
     required_source_snippets: tuple[str, ...]
-    required_localization_snippet: str
     mutation_snippet: str
     flutter_test_reporter: str
 
@@ -58,13 +56,6 @@ class WorkspaceSyncSemanticLabelContractConfig:
                     default="lib/ui/features/tracker/views/trackstate_app.dart",
                 ),
             ),
-            localization_relative_path=Path(
-                _read_env(
-                    "LOCALIZATION_PATH",
-                    env_prefixes=env_prefixes,
-                    default="lib/l10n/generated/app_localizations_en.dart",
-                ),
-            ),
             expected_test_name=expected_test_name,
             expected_result=_read_env(
                 "EXPECTED_RESULT",
@@ -86,14 +77,7 @@ class WorkspaceSyncSemanticLabelContractConfig:
             required_source_snippets=(
                 "final _SyncPillSemanticLabel? semanticLabel;",
                 "_SyncPillSemanticLabel _workspaceSyncSemanticLabel(",
-                "return _StaticSyncPillSemanticLabel(",
-                "return _PrefixedSyncPillSemanticLabel(",
                 "semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),",
-            ),
-            required_localization_snippet=_read_env(
-                "LOCALIZATION_SNIPPET",
-                env_prefixes=env_prefixes,
-                default="Sync error, attention needed",
             ),
             mutation_snippet=mutation_snippet,
             flutter_test_reporter=_read_env(

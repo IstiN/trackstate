@@ -13,10 +13,8 @@ class WorkspaceSyncSemanticLabelContractResult:
     flutter_test: CliCommandResult
     test_relative_path: Path
     source_relative_path: Path
-    localization_relative_path: Path
     test_source: str
     source: str
-    localization_source: str
 
     @staticmethod
     def combine_output(command_result: CliCommandResult) -> str:

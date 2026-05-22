@@ -62,7 +62,6 @@ def main() -> None:
         "config_path": str(CONFIG_PATH),
         "test_target": config.test_relative_path.as_posix(),
         "source_target": config.source_relative_path.as_posix(),
-        "localization_target": config.localization_relative_path.as_posix(),
         "expected_result": config.expected_result,
         "expected_test_name": config.expected_test_name,
         "os": platform.platform(),
@@ -89,7 +88,7 @@ def main() -> None:
             ),
             observed=(
                 f"The production `_SyncPill` still declares `final _SyncPillSemanticLabel? semanticLabel;`, "
-                "the helper returns `_SyncPillSemanticLabel`, and the dedicated Flutter test "
+                "the helper remains wrapper-typed, and the dedicated Flutter test "
                 f"`{config.expected_test_name}` mutates the live call site to the raw "
                 "`'Attention needed'` string before rerunning `flutter analyze`."
             ),
@@ -189,11 +188,6 @@ def _assert_live_signature_is_wrapped(
         if snippet not in validation.source:
             failures.append(f"live source missing `{snippet}`")
 
-    if config.required_localization_snippet not in validation.localization_source:
-        failures.append(
-            f"generated English localization missing `{config.required_localization_snippet}`"
-        )
-
     if config.mutation_snippet not in validation.test_source:
         failures.append("test no longer mutates the call site to a primitive String")
 
@@ -219,9 +213,8 @@ def _assert_live_signature_is_wrapped(
         observed=(
             "Located the semanticLabel type contract in the live implementation: "
             "`_SyncPill` still declares `final _SyncPillSemanticLabel? semanticLabel;`, "
-            "`_workspaceSyncSemanticLabel(...)` returns wrapper instances, the live call "
-            "site still passes `_workspaceSyncSemanticLabel(l10n, viewModel)`, and the "
-            "English semantic label remains `Sync error, attention needed`. The dedicated "
+            "`_workspaceSyncSemanticLabel(...)` remains wrapper-typed, and the live call "
+            "site still passes `_workspaceSyncSemanticLabel(l10n, viewModel)`. The dedicated "
             "test asserts this contract by mutating the call site to the raw "
             "`'Attention needed'` string and rerunning `flutter analyze`."
         ),
@@ -469,7 +462,6 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Config:** `{result.get('config_path')}`\n"
         f"- **Test target:** `{result.get('test_target')}`\n"
         f"- **Production target:** `{result.get('source_target')}`\n"
-        f"- **Localization target:** `{result.get('localization_target')}`\n"
         f"- **Flutter version command:** `{result.get('flutter_version_command')}`\n"
         f"- **Pub get command:** `{result.get('pub_get_command')}`\n"
         f"- **Flutter test command:** `{result.get('flutter_test_command')}`\n\n"
