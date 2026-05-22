@@ -85,6 +85,8 @@ class GitHubAccessibilityPullRequestGateObservation:
     probe_contrast_technique: str
     cleanup_closed_pull_request: bool
     cleanup_deleted_branch: bool
+    default_branch_probe_host_present: bool = False
+    default_branch_probe_host_summary: str = ""
     flutter_engine_initialization_log_entries: list[str] = field(default_factory=list)
     flutter_engine_initialization_summary: str = ""
     semantics_tree_discovery_log_entries: list[str] = field(default_factory=list)
