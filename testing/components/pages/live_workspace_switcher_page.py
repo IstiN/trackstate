@@ -4145,7 +4145,7 @@ class LiveWorkspaceSwitcherPage:
               const labelFor = (element) =>
                 normalize(element.getAttribute('aria-label') || element.innerText || '');
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
               ).filter(isVisible);
               const trigger = buttons
                 .filter((element) => labelFor(element).includes('Workspace switcher:'))
@@ -4218,9 +4218,41 @@ class LiveWorkspaceSwitcherPage:
 
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
         try:
-            self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
+            self._session.wait_for_function(
+                """
+                (triggerLabelPrefix) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(
+                      element.getAttribute?.('aria-label')
+                      || element.innerText
+                      || element.textContent
+                      || '',
+                    );
+                  const trigger = Array.from(
+                    document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  trigger.click();
+                  return labelFor(trigger);
+                }
+                """,
+                arg=self._trigger_label_prefix,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -6503,11 +6535,7 @@ class LiveWorkspaceSwitcherPage:
         return (label or "").startswith("Workspace switcher:")
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
-            timeout_ms=timeout_ms,
-        )
+        self.open_switcher(timeout_ms=timeout_ms)
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:
