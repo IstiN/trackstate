@@ -13,7 +13,23 @@ const accessibilityGateRules = [
   'link-name',
 ];
 
-const flutterSemanticsTimeoutMs = 15000;
+const flutterSemanticsInitializationTimeoutMs = 15000;
+const flutterRuntimeContrastProbeSelector =
+  '#trackstate-accessibility-probe-color-contrast'
+  + '[data-trackstate-accessibility-probe="color-contrast"]';
+
+function isSemanticsInitializationTimeout(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalizedMessage = error.message.toLowerCase();
+  return normalizedMessage.includes('timeout')
+    && (
+      normalizedMessage.includes('waitforfunction')
+      || normalizedMessage.includes('test timeout')
+    );
+}
 
 async function enableFlutterSemantics(
     page,
@@ -24,7 +40,7 @@ async function enableFlutterSemantics(
 ) {
   await page.waitForSelector('flt-semantics-placeholder', {
     state: 'attached',
-    timeout: flutterSemanticsTimeoutMs,
+    timeout: flutterSemanticsInitializationTimeoutMs,
   });
   onPlaceholderReady?.();
   await page.locator('flt-semantics-placeholder').evaluate((element) => {
@@ -32,23 +48,57 @@ async function enableFlutterSemantics(
   });
   await page.waitForSelector('flt-semantics-host', {
     state: 'attached',
-    timeout: flutterSemanticsTimeoutMs,
+    timeout: flutterSemanticsInitializationTimeoutMs,
   });
   onHostReady?.();
-  await page.waitForFunction(
+  try {
+    await page.waitForFunction(
       () => document.querySelectorAll('flt-semantics').length > 0,
-  );
+      undefined,
+      { timeout: flutterSemanticsInitializationTimeoutMs },
+    );
+  } catch (error) {
+    if (!isSemanticsInitializationTimeout(error)) {
+      throw error;
+    }
+
+    let evidence;
+    try {
+      evidence = await readFlutterSemanticsEvidence(page);
+    } catch {
+      throw new Error(
+        'Flutter engine failed to render semantics nodes during initialization. '
+        + 'The accessibility gate could not inspect the runtime semantics state '
+        + 'after the failure.',
+      );
+    }
+    throw new Error(
+      'Flutter engine failed to render semantics nodes during initialization. '
+      + `Observed runtime state: placeholder-count=${evidence.placeholderCount}; `
+      + `host-count=${evidence.hostCount}; `
+      + `node-count=${evidence.nodeCount}; `
+      + `sample-labels=${JSON.stringify(evidence.sampleLabels)}.`,
+    );
+  }
+  return await readFlutterSemanticsEvidence(page);
+}
+
+async function readFlutterSemanticsEvidence(page) {
   return await page.evaluate(() => {
+    const semanticsPlaceholders = document.querySelectorAll(
+      'flt-semantics-placeholder',
+    );
     const semanticsHosts = document.querySelectorAll('flt-semantics-host');
     const semanticsNodes = Array.from(document.querySelectorAll('flt-semantics'));
     const sampleLabels = semanticsNodes
-        .map((element) =>
-          element.getAttribute('aria-label') ?? element.textContent ?? '',
-        )
-        .map((value) => value.replace(/\s+/g, ' ').trim())
-        .filter((value) => value.length > 0)
-        .slice(0, 5);
+      .map((element) =>
+        element.getAttribute('aria-label') ?? element.textContent ?? '',
+      )
+      .map((value) => value.replace(/\s+/g, ' ').trim())
+      .filter((value) => value.length > 0)
+      .slice(0, 5);
     return {
+      placeholderCount: semanticsPlaceholders.length,
       hostCount: semanticsHosts.length,
       nodeCount: semanticsNodes.length,
       sampleLabels,
@@ -61,6 +111,8 @@ async function collectAccessibilityViolations(page) {
       .withRules(accessibilityGateRules)
       .analyze();
   const labelViolations = await collectNonDescriptiveLabelViolations(page);
+  const flutterRuntimeContrastViolations =
+    await collectFlutterRuntimeContrastViolations(page);
 
   return [
     ...axeResults.violations.map((violation) => ({
@@ -71,8 +123,63 @@ async function collectAccessibilityViolations(page) {
         failureSummary: node.failureSummary,
       })),
     })),
+    ...flutterRuntimeContrastViolations,
     ...labelViolations,
   ];
+}
+
+async function collectFlutterRuntimeContrastViolations(page) {
+  return await page.evaluate(
+      ({ selector, defaultThreshold }) => {
+        const probes = Array.from(document.querySelectorAll(selector));
+        const violations = [];
+
+        for (const probe of probes) {
+          const ratio = Number.parseFloat(
+              probe.getAttribute('data-trackstate-contrast-ratio') ?? '',
+          );
+          const threshold = Number.parseFloat(
+              probe.getAttribute('data-trackstate-contrast-threshold') ?? '',
+          );
+          const minimumRatio = Number.isFinite(threshold)
+            ? threshold
+            : defaultThreshold;
+          if (!Number.isFinite(ratio) || ratio >= minimumRatio) {
+            continue;
+          }
+
+          const foreground =
+            probe.getAttribute('data-trackstate-foreground') ?? 'unknown';
+          const background =
+            probe.getAttribute('data-trackstate-background') ?? 'unknown';
+          const text = probe.getAttribute('data-trackstate-text') ?? '';
+          const semanticsLabel =
+            probe.getAttribute('data-trackstate-semantics-label') ?? '';
+          const target = probe.id ? `#${probe.id}` : selector;
+
+          violations.push({
+            id: 'color-contrast',
+            help: 'Elements must meet minimum color contrast ratio thresholds.',
+            nodes: [
+              {
+                target: [target],
+                failureSummary:
+                  `Flutter-rendered probe "${text}" with semantics label `
+                  + `"${semanticsLabel}" reported contrast ratio `
+                  + `${ratio.toFixed(2)}:1 between ${foreground} and `
+                  + `${background}, below ${minimumRatio.toFixed(1)}:1.`,
+              },
+            ],
+          });
+        }
+
+        return violations;
+      },
+      {
+        selector: flutterRuntimeContrastProbeSelector,
+        defaultThreshold: 4.5,
+      },
+  );
 }
 
 async function collectNonDescriptiveLabelViolations(page) {
@@ -282,6 +389,10 @@ function formatSemanticsTreeDiscoveryStatus(status) {
   return `Semantics tree discovery: ${status}`;
 }
 
+function formatPlaceholderVerificationEvidence(selector = 'flt-semantics-placeholder') {
+  return formatSemanticsTreeDiscoveryStatus(`verified ${selector}`);
+}
+
 function appendAccessibilityLog(entries, entry, log) {
   if (entries.at(-1) === entry) {
     return;
@@ -320,6 +431,11 @@ async function captureFlutterStartupDiagnostics(
   const semanticsEvidence = await enableFlutterSemantics(page, {
     onPlaceholderReady: () => {
       appendAccessibilityLog(
+          semanticsEntries,
+          formatPlaceholderVerificationEvidence(),
+          log,
+      );
+      appendAccessibilityLog(
           engineEntries,
           formatFlutterEngineInitializationEvidence(
               'semantics placeholder attached',
@@ -353,9 +469,13 @@ module.exports = {
   accessibilityGateRules,
   captureFlutterStartupDiagnostics,
   collectAccessibilityViolations,
+  collectFlutterRuntimeContrastViolations,
   enableFlutterSemantics,
+  isSemanticsInitializationTimeout,
   formatFlutterEngineInitializationEvidence,
+  formatPlaceholderVerificationEvidence,
   formatSemanticsTreeDiscoveryStatus,
   formatFlutterSemanticsEvidence,
   formatViolations,
+  readFlutterSemanticsEvidence,
 };

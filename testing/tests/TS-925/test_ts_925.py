@@ -682,8 +682,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Reused the existing TS-925 live automation to create a disposable pull request, inspect the GitHub Actions jobs/logs, and capture browser-backed run-page evidence.",
-        "- Verified the scenario from the user-visible GitHub Actions UI in addition to the automated workflow/job assertions.",
+        "- Fixed the TS-925 review findings by requiring Playwright-backed GitHub Actions UI evidence for Step 3 and by distinguishing non-verifiable audit runs from real gate-pass regressions in the failure bug output.",
+        "- Reused the TS-925 live automation to create a disposable pull request, inspect the GitHub Actions jobs/logs, and record browser-captured run-page evidence.",
+        "- Verified the scenario from the user-visible GitHub Actions UI in addition to the shared workflow/job assertions.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
