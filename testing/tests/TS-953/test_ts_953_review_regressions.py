@@ -183,6 +183,29 @@ class Ts953ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("incorrectly reported a Flutter semantics initialization failure", failures[0])
 
+    def test_step_3_rejects_full_log_semantics_failure_even_with_generic_excerpt(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt=(
+                    "Error: page.goto: Timeout 15000ms exceeded while waiting for load state."
+                ),
+                run_log_matched_contrast_markers=["timeout", "page.goto"],
+                run_log_matched_semantic_markers=[
+                    "Flutter engine failed to render semantics nodes during initialization"
+                ],
+                run_log_mentions_semantic_issue=True,
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("incorrectly reported a Flutter semantics initialization failure", failures[0])
+
     def test_step_3_requires_generic_timeout_signal(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
         failures: list[str] = []

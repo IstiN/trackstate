@@ -224,7 +224,7 @@ def _evaluate_error_log(
         )
 
     generic_timeout_present = _has_generic_network_or_playwright_timeout(observation)
-    semantics_failure_present = _has_descriptive_semantics_failure_message(log_excerpt)
+    semantics_failure_present = _has_descriptive_semantics_failure_message(observation)
 
     if not generic_timeout_present:
         step_failures.append(
@@ -285,7 +285,16 @@ def _record_live_user_verification(
     )
 
 
-def _has_descriptive_semantics_failure_message(text: str) -> bool:
+def _has_descriptive_semantics_failure_message(
+    observation: GitHubAccessibilityPullRequestGateObservation,
+) -> bool:
+    if (
+        observation.run_log_mentions_semantic_issue
+        or observation.run_log_matched_semantic_markers
+    ):
+        return True
+
+    text = observation.run_log_excerpt or ""
     normalized = " ".join(text.lower().split())
     patterns = [
         r"flutter engine[^\n]*failed to render semantics nodes",
