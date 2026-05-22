@@ -303,10 +303,19 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         timeout_ms=FOCUS_TIMEOUT_MS,
     )
     first_row = _selected_saved_workspace(rows)
-    first_row_label = (
-        _saved_workspace_row_focus_label(first_row)
+    first_row_display_name = (
+        first_row.display_name
         if first_row is not None
-        else str(tab_stops[0].label if tab_stops else "")
+        else FIRST_WORKSPACE_DISPLAY_NAME
+    )
+    first_row_label = (
+        str(tab_stops[0].label)
+        if tab_stops and first_row_display_name in str(tab_stops[0].label)
+        else (
+            _saved_workspace_row_focus_label(first_row)
+            if first_row is not None
+            else str(tab_stops[0].label if tab_stops else "")
+        )
     )
     expected_target = _last_internal_focus_target(tab_stops=tab_stops)
     active = page.active_element()
@@ -327,6 +336,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         saved_workspace_rows=rows,
         row_focus=row_focus,
         expected_target=expected_target,
+        first_row_display_name=first_row_display_name,
         first_row_label=first_row_label,
         internal_tab_stops=_tab_stops_payload(tab_stops),
         focus_attempts=[],
@@ -340,11 +350,25 @@ def _prove_first_keyboard_target(
 ) -> dict[str, object]:
     panel_payload = _panel_from_state(state)
     panel = WorkspaceSwitcherPanelObservation(**panel_payload)
-    page.focus_switcher_button(
-        str(state.get("first_row_label")),
-        panel=panel,
-        timeout_ms=FOCUS_TIMEOUT_MS,
-    )
+    try:
+        page.focus_internal_tab_stop(
+            str(state.get("first_row_label")),
+            panel=panel,
+            timeout_ms=FOCUS_TIMEOUT_MS,
+        )
+    except AssertionError as error:
+        first_stop = _tab_stops_from_state(state)[0] if _tab_stops_from_state(state) else {}
+        raise AssertionError(
+            "Step 2 failed: the live workspace switcher did not allow focus to move onto "
+            "its first internal tab stop before the ticket-specific Shift+Tab action.\n"
+            f"- first internal tab stop label: {first_stop.get('label')!r}\n"
+            f"- first internal tab stop disabled: {first_stop.get('disabled')!r}\n"
+            f"- first internal tab stop tag: {first_stop.get('tag_name')!r}\n"
+            f"- first internal tab stop tabindex: {first_stop.get('tabindex')!r}\n"
+            f"- first internal tab stop keyboard_focusable flag: {first_stop.get('keyboard_focusable')!r}\n"
+            f"Observed first tab stop: {json.dumps(first_stop, indent=2)}\n"
+            f"Underlying focus error: {error}"
+        ) from error
     first_row_panel = page.observe_open_panel(
         expected_container_kinds=("anchored-panel", "surface"),
         timeout_ms=FOCUS_TIMEOUT_MS,
@@ -432,6 +456,7 @@ def _press_key_and_capture(
         "row_focus": row_focus,
         "saved_workspace_rows": _saved_workspace_rows_payload(rows),
         "expected_target": state.get("expected_target"),
+        "first_row_display_name": state.get("first_row_display_name"),
         "first_row_label": state.get("first_row_label"),
         "internal_tab_stops": state.get("internal_tab_stops", []),
         "monitor": _transition_monitor_payload(monitor),
@@ -639,6 +664,7 @@ def _last_internal_focus_target(
         "tab_index_value": target.get("tab_index_value"),
         "dom_index": target.get("dom_index"),
         "keyboard_focusable": target.get("keyboard_focusable"),
+        "disabled": target.get("disabled"),
         "outer_html": target.get("outer_html"),
     }
 
@@ -838,7 +864,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Rework applied",
         "1. Focused the selected first workspace row directly instead of gating TS-911 on a separate `Tab`-from-trigger contract.",
-        "2. Derived the reverse-wrap expectation from the live internal tab order instead of a fixed control label.",
+        "2. Tightened the live tab-stop probe to ignore anonymous wrapper nodes and read actionable in-panel controls before deriving the reverse-wrap target.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -883,7 +909,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: focused the selected first row directly and derived the reverse-wrap target from the live internal tab order.",
+        "- Rework: focused the selected first row directly and derived the reverse-wrap target from actionable live in-panel controls instead of wrapper nodes or a fixed label.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1196,6 +1222,7 @@ def _tab_stops_payload(
                 "tab_index_value": stop.tab_index_value,
                 "dom_index": stop.dom_index,
                 "keyboard_focusable": stop.keyboard_focusable,
+                "disabled": stop.disabled,
                 "outer_html": stop.outer_html,
             },
         )
@@ -1318,6 +1345,7 @@ def _capture_current_focus_state(
         "row_focus": row_focus,
         "saved_workspace_rows": state.get("saved_workspace_rows"),
         "expected_target": state.get("expected_target"),
+        "first_row_display_name": state.get("first_row_display_name"),
         "first_row_label": state.get("first_row_label"),
         "focused_label": focused_label,
     }
@@ -1334,6 +1362,7 @@ def _state_payload(
     saved_workspace_rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
     row_focus: dict[str, dict[str, object]],
     expected_target: dict[str, object],
+    first_row_display_name: str,
     first_row_label: str,
     internal_tab_stops: list[dict[str, object]],
     focus_attempts: list[dict[str, object]],
@@ -1354,6 +1383,7 @@ def _state_payload(
         ),
         "row_focus": row_focus,
         "expected_target": expected_target,
+        "first_row_display_name": first_row_display_name,
         "first_row_label": first_row_label,
         "internal_tab_stops": internal_tab_stops,
         "focus_attempts": focus_attempts,
@@ -1415,6 +1445,12 @@ def _expected_target_from_state(state: object) -> dict[str, object]:
         return {}
     target = state.get("expected_target", {})
     return target if isinstance(target, dict) else {}
+
+
+def _first_row_display_name_from_state(state: object) -> object:
+    if not isinstance(state, dict):
+        return None
+    return state.get("first_row_display_name")
 
 
 def _expected_target_label(state: object) -> object:
@@ -1514,9 +1550,10 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     )
     return (
         "Fixed: TS-911 now establishes the ticket precondition directly by focusing the "
-        "selected first row, proves from the live internal tab order that it is the first "
-        "keyboard target, derives the reverse-wrap target from that same live tab order, "
-        "and only then performs the ticket-specific `Shift+Tab` assertion. "
+        "selected first row, filters the live tab-stop probe down to actionable in-panel "
+        "controls instead of anonymous wrapper nodes, derives the reverse-wrap target from "
+        "that tightened live order, and only then performs the ticket-specific `Shift+Tab` "
+        "assertion. "
         f"{rerun_summary}"
     )
 

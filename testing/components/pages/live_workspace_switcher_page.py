@@ -349,6 +349,7 @@ class WorkspaceSwitcherTabStopObservation:
     tab_index_value: int
     dom_index: int
     keyboard_focusable: bool
+    disabled: bool
     outer_html: str
 
 
@@ -1184,6 +1185,7 @@ class LiveWorkspaceSwitcherPage:
               };
               const visibleText = (element) =>
                 normalize(element?.innerText || element?.textContent || '');
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const labelFor = (element) =>
                 normalize(
                   element?.getAttribute?.('aria-label')
@@ -1230,7 +1232,21 @@ class LiveWorkspaceSwitcherPage:
                 .find((element) => {
                   const elementLabel = labelFor(element);
                   const elementText = visibleText(element);
-                  return elementLabel === label || elementText === label;
+                  const combined = normalize(`${elementLabel} ${elementText}`);
+                  const isActionButton = elementLabel.startsWith('Delete:')
+                    || elementLabel.startsWith('Open:')
+                    || elementText === 'Active';
+                  return elementLabel === label
+                    || elementText === label
+                    || (
+                      displayNameHint.length > 0
+                      && !isActionButton
+                      && (
+                        elementLabel === displayNameHint
+                        || elementText === displayNameHint
+                        || combined.includes(displayNameHint)
+                      )
+                    );
                 });
               if (!candidate) {
                 return null;
@@ -1469,13 +1485,36 @@ class LiveWorkspaceSwitcherPage:
                 'select',
                 '[tabindex]',
               ].join(',');
-              const candidates = Array.from(switcher.querySelectorAll(interactiveSelector))
+              const panelScopedControls = Array.from(document.querySelectorAll(interactiveSelector))
+                .filter((element) => {
+                  const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                  if (panelId === 'trackstate-workspace-switcher') {
+                    return true;
+                  }
+                  return switcher.contains(element) || isInsidePanel(element);
+                });
+              const orderedElements = panelScopedControls
+                .filter((element, index, all) => all.indexOf(element) === index);
+              const candidates = orderedElements
                 .map((element, domIndex) => {
                   const label = labelFor(element);
                   const text = visibleText(element);
                   const tabIndexValue = Number.isFinite(element.tabIndex)
                     ? element.tabIndex
                     : -1;
+                  const role = element.getAttribute('role');
+                  const tagName = element.tagName;
+                  const style = window.getComputedStyle(element);
+                  const pointerEvents = style.pointerEvents;
+                  const hasMeaningfulLabel = label.length > 0 || text.length > 0;
+                  const hasFocusableDescendant = Array.from(element.querySelectorAll(interactiveSelector))
+                    .some((descendant) => descendant !== element && isVisible(descendant));
+                  const anonymousWrapper = (
+                    tagName === 'FLT-SEMANTICS'
+                    && !role
+                    && !hasMeaningfulLabel
+                    && (pointerEvents === 'none' || hasFocusableDescendant)
+                  );
                   return {
                     domIndex,
                     element,
@@ -1483,10 +1522,17 @@ class LiveWorkspaceSwitcherPage:
                     text,
                     tabIndexValue,
                     tabindex: element.getAttribute('tabindex'),
-                    role: element.getAttribute('role'),
-                    tagName: element.tagName,
+                    role,
+                    tagName,
+                    pointerEvents,
                     keyboardFocusable: tabIndexValue >= 0,
+                    disabled:
+                      typeof element.disabled === 'boolean'
+                        ? element.disabled
+                        : element.hasAttribute('disabled'),
                     headingMatch: text.includes(heading) || label.startsWith('Workspace switcher:'),
+                    hasMeaningfulLabel,
+                    anonymousWrapper,
                   };
                 })
                 .filter((candidate) =>
@@ -1494,6 +1540,9 @@ class LiveWorkspaceSwitcherPage:
                   && isVisible(candidate.element)
                   && isInsidePanel(candidate.element)
                   && !candidate.headingMatch
+                  && candidate.hasMeaningfulLabel
+                  && !candidate.anonymousWrapper
+                  && candidate.pointerEvents !== 'none'
                 )
                 .sort((left, right) => {
                   const leftPositive = left.tabIndexValue > 0;
@@ -1515,6 +1564,7 @@ class LiveWorkspaceSwitcherPage:
                   tabIndexValue: candidate.tabIndexValue,
                   domIndex: candidate.domIndex,
                   keyboardFocusable: candidate.keyboardFocusable,
+                  disabled: candidate.disabled,
                   outerHTML: candidate.element.outerHTML?.slice?.(0, 400) || '',
                 }));
               return candidates.length > 0 ? candidates : null;
@@ -1548,11 +1598,184 @@ class LiveWorkspaceSwitcherPage:
                 tab_index_value=int(item.get("tabIndexValue", -1)),
                 dom_index=int(item.get("domIndex", -1)),
                 keyboard_focusable=bool(item.get("keyboardFocusable")),
+                disabled=bool(item.get("disabled")),
                 outer_html=str(item.get("outerHTML", "")),
             )
             for item in payload
             if isinstance(item, dict)
         )
+
+    def focus_internal_tab_stop(
+        self,
+        label: str,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  const isInsidePanel = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const centerX = rect.left + (rect.width / 2);
+                    const centerY = rect.top + (rect.height / 2);
+                    return centerX >= panelLeft
+                      && centerX <= panelRight
+                      && centerY >= panelTop
+                      && centerY <= panelBottom;
+                  };
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const interactiveSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                    'a[href]',
+                    'input',
+                    'textarea',
+                    'select',
+                    '[tabindex]',
+                  ].join(',');
+                  const orderedElements = Array.from(document.querySelectorAll(interactiveSelector))
+                    .filter((element) => {
+                      const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                      if (panelId === 'trackstate-workspace-switcher') {
+                        return true;
+                      }
+                      return switcher.contains(element) || isInsidePanel(element);
+                    })
+                    .filter((element, index, all) => all.indexOf(element) === index);
+                  const target = orderedElements.find((element) => {
+                    if (!isVisible(element) || !isInsidePanel(element)) {
+                      return false;
+                    }
+                    const tabIndexValue = Number.isFinite(element.tabIndex)
+                      ? element.tabIndex
+                      : -1;
+                    if (tabIndexValue < 0) {
+                      return false;
+                    }
+                    const elementLabel = labelFor(element);
+                    const elementText = visibleText(element);
+                    const role = element.getAttribute('role');
+                    const tagName = element.tagName;
+                    const style = window.getComputedStyle(element);
+                    const pointerEvents = style.pointerEvents;
+                    const hasMeaningfulLabel = elementLabel.length > 0 || elementText.length > 0;
+                    const hasFocusableDescendant = Array.from(element.querySelectorAll(interactiveSelector))
+                      .some((descendant) => descendant !== element && isVisible(descendant));
+                    const anonymousWrapper = (
+                      tagName === 'FLT-SEMANTICS'
+                      && !role
+                      && !hasMeaningfulLabel
+                      && (pointerEvents === 'none' || hasFocusableDescendant)
+                    );
+                    if (
+                      !hasMeaningfulLabel
+                      || anonymousWrapper
+                      || pointerEvents === 'none'
+                    ) {
+                      return false;
+                    }
+                    return elementLabel === label || elementText === label;
+                  });
+                  if (!target) {
+                    return null;
+                  }
+                  target.focus({ preventScroll: true });
+                  const active = document.activeElement;
+                  return active === target || target.contains(active)
+                    ? {
+                        activeLabel: labelFor(active),
+                        activeTagName: active?.tagName || '',
+                      }
+                    : null;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "label": label,
+                    "panelLeft": panel.left,
+                    "panelTop": panel.top,
+                    "panelRight": panel.left + panel.width,
+                    "panelBottom": panel.top + panel.height,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable internal tab stop '
+                f'matching "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        observation = self.observe_switcher_focus_target(panel=panel)
+        if (
+            not observation.focus_owned_by_switcher
+            or not observation.active_within_switcher
+        ):
+            raise AssertionError(
+                f'Focusing the visible internal tab stop "{label}" did not keep keyboard '
+                "focus inside the open workspace switcher.\n"
+                f"Observed focus label: {observation.active_label!r}\n"
+                f"Observed focus role: {observation.active_role!r}\n"
+                f"Observed focus tag: {observation.active_tag_name!r}\n"
+                f"Observed focus within switcher: {observation.active_within_switcher!r}\n"
+                f"Observed focus owned by switcher: {observation.focus_owned_by_switcher!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return observation
 
     def click_switcher_button(
         self,
