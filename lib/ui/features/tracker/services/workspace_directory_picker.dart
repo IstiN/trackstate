@@ -1,4 +1,6 @@
-import 'package:file_selector/file_selector.dart';
+import 'workspace_directory_picker_stub.dart'
+    if (dart.library.js_interop) 'workspace_directory_picker_web.dart'
+    as impl;
 
 typedef WorkspaceDirectoryPicker =
     Future<String?> Function({
@@ -10,7 +12,7 @@ Future<String?> pickWorkspaceDirectory({
   String? confirmButtonText,
   String? initialDirectory,
 }) {
-  return getDirectoryPath(
+  return impl.pickWorkspaceDirectory(
     confirmButtonText: confirmButtonText,
     initialDirectory: initialDirectory,
   );

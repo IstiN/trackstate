@@ -20,18 +20,16 @@ from testing.core.interfaces.github_accessibility_pull_request_gate_probe import
 from testing.core.interfaces.github_workflow_run_log_reader import (  # noqa: E402
     GitHubWorkflowRunLogReader,
 )
-from testing.tests.support.github_accessibility_engine_log_validation_failure_probe_factory import (  # noqa: E402
-    create_github_accessibility_engine_log_validation_failure_probe,
-    create_github_accessibility_engine_log_validation_run_log_reader,
+from testing.tests.support.github_accessibility_log_validation_step_presence_probe_factory import (  # noqa: E402
+    create_github_accessibility_log_validation_step_presence_probe,
+    create_github_accessibility_log_validation_step_presence_run_log_reader,
 )
 
-TICKET_KEY = "TS-943"
-TEST_CASE_TITLE = (
-    "Integration suite log-validation - build fails when engine state tokens are missing"
-)
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-943/test_ts_943.py"
-TEST_FILE_PATH = "testing/tests/TS-943/test_ts_943.py"
-CONFIG_PATH = REPO_ROOT / "testing/tests/TS-943/config.yaml"
+TICKET_KEY = "TS-950"
+TEST_CASE_TITLE = "CI workflow configuration - log-validation step presence is mandatory"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-950/test_ts_950.py"
+TEST_FILE_PATH = "testing/tests/TS-950/test_ts_950.py"
+CONFIG_PATH = REPO_ROOT / "testing/tests/TS-950/config.yaml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -40,32 +38,49 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 
 REQUEST_STEPS = [
-    "Trigger the integration test suite for the accessibility module.",
-    "Allow the process to complete the execution phase.",
-    "Inspect the 'log-validation' step in the CI pipeline output.",
+    "Create a Pull Request with a workflow modification that removes the `log-validation` step from the accessibility job.",
+    "Observe the CI pipeline status for the automated schema validation check.",
+    "Confirm the failing schema validation prevents the pull request from being mergeable.",
 ]
 EXPECTED_RESULT = (
-    "The 'log-validation' step fails, and the build status is set to 'Failed' "
-    "because mandatory engine state tokens were not found in the output."
+    "The CI schema check fails, reports that the `log-validation` step is missing "
+    "from the workflow configuration, and prevents the merge."
 )
 EXPECTED_FAILURE_CONCLUSION = "failure"
 LOG_VALIDATION_STEP_PATTERN = re.compile(r"\blog[- ]validation\b", re.IGNORECASE)
-MISSING_TOKEN_PATTERNS = (
-    re.compile(r"mandatory[^\n]*engine state tokens[^\n]*(?:not found|missing)", re.IGNORECASE),
-    re.compile(r"engine state tokens[^\n]*(?:not found|missing)", re.IGNORECASE),
-    re.compile(r"missing[^\n]*engine state tokens", re.IGNORECASE),
-    re.compile(r"flutter engine[^\n]*tokens[^\n]*(?:not found|missing)", re.IGNORECASE),
+MISSING_STEP_MESSAGE_PATTERNS = (
+    re.compile(
+        r"expected the accessibility workflow to expose a contributor-visible "
+        r"`?log-validation`? step",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"expected `?log-validation`? to run after the axe-core accessibility scan",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"expected the `?log-validation`? step to invoke the accessibility log validator",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"log-validation[^\n]*missing",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"missing[^\n]*log-validation",
+        re.IGNORECASE,
+    ),
 )
 
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     config = GitHubAccessibilityPullRequestGateConfig.from_file(CONFIG_PATH)
-    probe = create_github_accessibility_engine_log_validation_failure_probe(
+    probe = create_github_accessibility_log_validation_step_presence_probe(
         REPO_ROOT,
         config_path=CONFIG_PATH,
     )
-    log_reader = create_github_accessibility_engine_log_validation_run_log_reader(
+    log_reader = create_github_accessibility_log_validation_step_presence_run_log_reader(
         REPO_ROOT
     )
     result: dict[str, object] = {
@@ -99,15 +114,15 @@ def main() -> None:
         )
 
         failures: list[str] = []
-        _evaluate_trigger(result, observation, failures)
-        _evaluate_execution_phase(result, observation, failures)
-        _evaluate_log_validation_output(
+        _evaluate_pull_request_creation(result, observation, failures)
+        _evaluate_schema_validation_failure(
             result,
             observation,
             failures,
             full_run_log_text=full_run_log_text,
             full_run_log_error=full_run_log_error,
         )
+        _evaluate_merge_block(result, observation, failures)
         _record_live_user_verification(
             result,
             observation,
@@ -124,7 +139,7 @@ def main() -> None:
         raise
 
     _write_pass_outputs(result)
-    print("TS-943 passed")
+    print("TS-950 passed")
 
 
 def _read_full_run_log(
@@ -140,30 +155,27 @@ def _read_full_run_log(
         return "", f"{type(error).__name__}: {error}"
 
 
-def _evaluate_trigger(
+def _evaluate_pull_request_creation(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
 ) -> None:
-    expected_files = [
-        observation.pull_request_probe_path,
-        observation.probe_render_host_path,
-    ]
+    step_failures: list[str] = []
+    expected_files = [observation.pull_request_probe_path]
     missing_files = [
         path for path in expected_files if path and path not in observation.pull_request_file_paths
     ]
     unexpected_files = [
         path
         for path in observation.pull_request_file_paths
-        if not path.startswith("testing/accessibility/")
+        if path != observation.target_workflow_path
     ]
-    step_failures: list[str] = []
     if missing_files:
-        step_failures.append(f"GitHub did not record the expected probe files: {missing_files}.")
+        step_failures.append(f"GitHub did not record the mutated workflow file: {missing_files}.")
     if unexpected_files:
         step_failures.append(
-            "the disposable PR changed files outside `testing/accessibility/`, which means "
-            f"the suppression scenario was not isolated: {unexpected_files}."
+            "the disposable PR changed files outside the workflow contract under test: "
+            f"{unexpected_files}."
         )
     if observation.latest_pull_request_run_id is None:
         step_failures.append(
@@ -184,8 +196,8 @@ def _evaluate_trigger(
         return
 
     observed = (
-        "Created a disposable PR that suppresses the engine-state logging wrapper only "
-        "through accessibility harness files and triggered the live PR workflow.\n"
+        "Created a disposable PR that removes only the workflow `log-validation` step and "
+        "triggered the live pull-request CI run.\n"
         f"Pull Request URL: {observation.pull_request_url}\n"
         f"Observed PR files: {observation.pull_request_file_paths}\n"
         f"Workflow run URL: {observation.latest_pull_request_run_url}\n"
@@ -194,16 +206,16 @@ def _evaluate_trigger(
     _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
 
 
-def _evaluate_execution_phase(
+def _evaluate_schema_validation_failure(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
+    *,
+    full_run_log_text: str,
+    full_run_log_error: str | None,
 ) -> None:
     step_failures: list[str] = []
-    if observation.latest_pull_request_run_id is None:
-        step_failures.append(
-            "GitHub Actions did not expose a contributor-visible pull-request workflow run."
-        )
+    missing_step_message = _extract_missing_step_message(full_run_log_text)
     if observation.latest_pull_request_run_event != "pull_request":
         step_failures.append(
             f"the observed workflow event was `{observation.latest_pull_request_run_event or '<none>'}` instead of `pull_request`."
@@ -214,13 +226,23 @@ def _evaluate_execution_phase(
         )
     if observation.latest_pull_request_run_conclusion != EXPECTED_FAILURE_CONCLUSION:
         step_failures.append(
-            "the overall build did not finish in the expected failed state; observed run "
-            f"conclusion was `{observation.latest_pull_request_run_conclusion or '<none>'}`."
+            "the overall CI workflow did not finish in a failed state; observed conclusion "
+            f"was `{observation.latest_pull_request_run_conclusion or '<none>'}`."
         )
-    if observation.accessibility_status_check_conclusion != EXPECTED_FAILURE_CONCLUSION:
+    if observation.pull_request_status_state != EXPECTED_FAILURE_CONCLUSION:
         step_failures.append(
-            "the contributor-visible accessibility status did not fail; observed conclusion "
-            f"was `{observation.accessibility_status_check_conclusion or '<none>'}`."
+            "the contributor-visible pull request checks did not report failure; observed "
+            f"status state was `{observation.pull_request_status_state or '<none>'}`."
+        )
+    if not observation.failed_status_check_names and not observation.failed_status_check_workflow_names:
+        step_failures.append(
+            "the contributor-visible PR checks surface did not show any failed status checks."
+        )
+    if full_run_log_error is not None:
+        step_failures.append(f"the hosted run log could not be read: {full_run_log_error}.")
+    if missing_step_message is None:
+        step_failures.append(
+            "the CI output did not report that the `log-validation` step was missing from the workflow contract."
         )
 
     if step_failures:
@@ -232,75 +254,10 @@ def _evaluate_execution_phase(
             + "Run status/conclusion: "
             + f"{observation.latest_pull_request_run_status or '<none>'}/"
             + f"{observation.latest_pull_request_run_conclusion or '<none>'}\n"
-            + "Accessibility check conclusion: "
-            + f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
-            + f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
-            + f"Observed steps: {observation.observed_step_names or ['<none>']}"
-        )
-        failures.append(message)
-        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
-        return
-
-    observed = (
-        "Allowed the disposable PR workflow to finish and confirmed the build reached a "
-        "failed conclusion, as a reviewer would expect for a missing-token contract.\n"
-        f"Run URL: {observation.latest_pull_request_run_url}\n"
-        f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
-        f"Accessibility check conclusion: {observation.accessibility_status_check_conclusion or '<none>'}\n"
-        f"Observed jobs: {observation.observed_job_names}\n"
-        f"Observed steps: {observation.observed_step_names}"
-    )
-    _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
-
-
-def _evaluate_log_validation_output(
-    result: dict[str, object],
-    observation: GitHubAccessibilityPullRequestGateObservation,
-    failures: list[str],
-    *,
-    full_run_log_text: str,
-    full_run_log_error: str | None,
-) -> None:
-    step_failures: list[str] = []
-    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
-    log_validation_visible = _has_log_validation_step(
-        observation.observed_step_names,
-        full_run_log_text,
-    )
-    missing_token_message = _extract_missing_token_message(log_validation_step_output)
-    if full_run_log_error is not None:
-        step_failures.append(
-            f"the hosted run log could not be read: {full_run_log_error}."
-        )
-    if not log_validation_visible:
-        step_failures.append(
-            "the CI output did not expose a `log-validation` step in the contributor-visible workflow surface."
-        )
-    if missing_token_message is None:
-        step_failures.append(
-            "the CI output did not report that mandatory engine state tokens were missing."
-        )
-    if observation.flutter_engine_initialization_log_entries:
-        step_failures.append(
-            "the suppression scenario still emitted Flutter engine initialization lines, so "
-            f"tokens were not actually absent: {observation.flutter_engine_initialization_log_entries}."
-        )
-    if observation.semantics_tree_discovery_log_entries:
-        step_failures.append(
-            "the suppression scenario still emitted semantics discovery lines, so the "
-            f"expected missing-token condition was not reproduced: {observation.semantics_tree_discovery_log_entries}."
-        )
-
-    if step_failures:
-        message = (
-            "Step 3 failed: "
-            + " ".join(step_failures)
-            + "\n"
-            + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
-            + f"Flutter engine log entries: {observation.flutter_engine_initialization_log_entries or ['<none>']}\n"
-            + f"Semantics discovery log entries: {observation.semantics_tree_discovery_log_entries or ['<none>']}\n"
-            + "log-validation step excerpt:\n"
+            + f"Observed failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
+            + "Observed failed workflows: "
+            + f"{observation.failed_status_check_workflow_names or ['<none>']}\n"
+            + "Full run log excerpt:\n"
             + (
                 _extract_relevant_full_log_excerpt(
                     full_run_log_text,
@@ -310,15 +267,63 @@ def _evaluate_log_validation_output(
             )
         )
         failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
+        return
+
+    observed = (
+        "Observed the live CI schema/contract validation fail after removing the workflow "
+        "`log-validation` step.\n"
+        f"Run URL: {observation.latest_pull_request_run_url}\n"
+        f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
+        f"Failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
+        f"Failed workflows: {observation.failed_status_check_workflow_names or ['<none>']}\n"
+        f"Missing-step message: {missing_step_message}"
+    )
+    _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
+
+
+def _evaluate_merge_block(
+    result: dict[str, object],
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    failures: list[str],
+) -> None:
+    step_failures: list[str] = []
+    if observation.pull_request_mergeable_state != "blocked":
+        step_failures.append(
+            "GitHub did not report the disposable pull request as merge-blocked after the "
+            f"failing contract check; observed mergeable state was `{observation.pull_request_mergeable_state or '<none>'}`."
+        )
+    if not (
+        observation.failed_status_check_names or observation.failed_status_check_workflow_names
+    ):
+        step_failures.append(
+            "there were no failed contributor-visible status checks to justify a merge block."
+        )
+
+    if step_failures:
+        message = (
+            "Step 3 failed: "
+            + " ".join(step_failures)
+            + "\n"
+            + f"Pull Request URL: {observation.pull_request_url}\n"
+            + f"Checks URL: {observation.pull_request_checks_url}\n"
+            + f"Mergeable state: {observation.pull_request_mergeable_state or '<none>'}\n"
+            + f"Failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
+            + "Failed workflows: "
+            + f"{observation.failed_status_check_workflow_names or ['<none>']}"
+        )
+        failures.append(message)
         _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
         return
 
     observed = (
-        "Inspected the CI output and found the failing `log-validation` surface plus the "
-        "expected missing-token error.\n"
-        f"Run URL: {observation.latest_pull_request_run_url}\n"
-        f"Observed steps: {observation.observed_step_names}\n"
-        f"Missing-token message: {missing_token_message}"
+        "Confirmed the disposable PR stayed merge-blocked after the failing schema validation "
+        "surface appeared.\n"
+        f"Pull Request URL: {observation.pull_request_url}\n"
+        f"Checks URL: {observation.pull_request_checks_url}\n"
+        f"Mergeable state: {observation.pull_request_mergeable_state}\n"
+        f"Failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
+        f"Failed workflows: {observation.failed_status_check_workflow_names or ['<none>']}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
 
@@ -330,76 +335,37 @@ def _record_live_user_verification(
     full_run_log_text: str,
     full_run_log_error: str | None,
 ) -> None:
-    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
     _record_human_verification(
         result,
         check=(
-            "Reviewed the same contributor-visible PR checks surface and workflow summary a "
-            "human maintainer would use."
+            "Reviewed the same contributor-visible PR checks and workflow summary a maintainer "
+            "would use before merging."
         ),
         observed=(
             f"PR checks URL: `{observation.pull_request_checks_url}`; run URL: "
-            f"`{observation.latest_pull_request_run_url or '<none>'}`; jobs: "
-            f"`{observation.observed_job_names or ['<none>']}`; steps: "
-            f"`{observation.observed_step_names or ['<none>']}`; run conclusion: "
-            f"`{observation.latest_pull_request_run_conclusion or '<none>'}`; accessibility "
-            f"check conclusion: `{observation.accessibility_status_check_conclusion or '<none>'}`."
+            f"`{observation.latest_pull_request_run_url or '<none>'}`; failed checks: "
+            f"`{observation.failed_status_check_names or ['<none>']}`; failed workflows: "
+            f"`{observation.failed_status_check_workflow_names or ['<none>']}`; mergeable "
+            f"state: `{observation.pull_request_mergeable_state or '<none>'}`."
         ),
     )
     _record_human_verification(
         result,
         check=(
-            "Read the hosted run log the way a reviewer would to look for the "
-            "`log-validation` failure and the missing-token message."
+            "Read the hosted GitHub Actions log the way a reviewer would to confirm the "
+            "workflow-contract failure reason."
         ),
         observed=(
-            f"Log read error: `{full_run_log_error or '<none>'}`; missing-token message: "
-            f"`{_extract_missing_token_message(log_validation_step_output) or '<none>'}`; Flutter "
-            f"engine lines: `{observation.flutter_engine_initialization_summary or '<none>'}`; "
-            f"semantics lines: `{observation.semantics_tree_discovery_summary or '<none>'}`; "
-            f"log excerpt: `{_one_line(_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation)) or '<none>'}`."
+            f"Log read error: `{full_run_log_error or '<none>'}`; missing-step message: "
+            f"`{_extract_missing_step_message(full_run_log_text) or '<none>'}`; visible steps: "
+            f"`{observation.observed_step_names or ['<none>']}`; log excerpt: "
+            f"`{_one_line(_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation)) or '<none>'}`."
         ),
     )
 
 
-def _has_log_validation_step(step_names: list[str], full_run_log_text: str) -> bool:
-    if any(LOG_VALIDATION_STEP_PATTERN.search(name or "") for name in step_names):
-        return True
-    return any(
-        LOG_VALIDATION_STEP_PATTERN.search(step_name)
-        for step_name in _surface_step_names_from_log(full_run_log_text)
-    )
-
-
-def _surface_step_names_from_log(full_run_log_text: str) -> list[str]:
-    step_names: list[str] = []
-    for raw_line in full_run_log_text.splitlines():
-        parts = raw_line.lstrip("\ufeff").split("\t", 2)
-        if len(parts) != 3:
-            continue
-        step_name = parts[1].strip()
-        if step_name:
-            step_names.append(step_name)
-    return step_names
-
-
-def _extract_log_validation_step_output(full_run_log_text: str) -> str:
-    lines: list[str] = []
-    for raw_line in full_run_log_text.splitlines():
-        parts = raw_line.lstrip("\ufeff").split("\t", 2)
-        if len(parts) != 3:
-            continue
-        step_name = parts[1].strip()
-        if not LOG_VALIDATION_STEP_PATTERN.search(step_name):
-            continue
-        payload = parts[2].strip()
-        if payload:
-            lines.append(payload)
-    return "\n".join(lines)
-
-
-def _extract_missing_token_message(text: str) -> str | None:
-    for pattern in MISSING_TOKEN_PATTERNS:
+def _extract_missing_step_message(text: str) -> str | None:
+    for pattern in MISSING_STEP_MESSAGE_PATTERNS:
         match = pattern.search(text)
         if match is not None:
             return _one_line(match.group(0))
@@ -411,22 +377,16 @@ def _extract_relevant_full_log_excerpt(
     *,
     observation: GitHubAccessibilityPullRequestGateObservation,
 ) -> str:
-    log_validation_step_output = _extract_log_validation_step_output(full_run_log_text)
-    if log_validation_step_output.strip():
-        return _snippet(log_validation_step_output, limit=1600)
     if not full_run_log_text.strip():
         return observation.run_log_excerpt or ""
 
     lowered = full_run_log_text.lower()
     markers = [
         "log-validation",
-        "log validation",
-        "engine state tokens",
-        "run axe-core accessibility checks",
-        "accessibility checks",
-        "flutter engine initialization",
-        "semantics tree discovery",
-        "accessibility runtime surface ready",
+        "contributor-visible",
+        "workflow configuration",
+        "unit-tests.yml",
+        "run unit and golden tests",
         "process completed with exit code 1",
     ]
     for marker in markers:
@@ -434,8 +394,8 @@ def _extract_relevant_full_log_excerpt(
         if index >= 0:
             start = max(index - 250, 0)
             end = min(index + 1250, len(full_run_log_text))
-            return _snippet(full_run_log_text[start:end], limit=1600)
-    return _snippet(full_run_log_text, limit=1600)
+            return _snippet(full_run_log_text[start:end], limit=1800)
+    return _snippet(full_run_log_text, limit=1800)
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -459,7 +419,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-943 failed"))
+    error = str(result.get("error", "AssertionError: TS-950 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -489,9 +449,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Created a disposable pull request against the live repository that silences the accessibility engine-state logger only through {{testing/accessibility/}} changes.",
-        "* Waited for the real {{Flutter Required Checks}} pull-request workflow to complete on GitHub Actions.",
-        "* Inspected the contributor-visible workflow summary and full run log for a failing {{log-validation}} step plus a missing-engine-token error.",
+        "* Created a disposable pull request against the live repository that removes only the mandatory {{log-validation}} step from {{.github/workflows/unit-tests.yml}}.",
+        "* Waited for the real {{Flutter Required Checks}} pull-request workflow to finish on GitHub Actions.",
+        "* Inspected the contributor-visible workflow summary and hosted run log for an explicit missing-{{log-validation}} contract failure and merge-blocked PR state.",
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -533,9 +493,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Created a disposable pull request against the live repository that silences the accessibility engine-state logger only through `testing/accessibility/` changes.",
-        "- Waited for the real `Flutter Required Checks` pull-request workflow to complete on GitHub Actions.",
-        "- Inspected the contributor-visible workflow summary and full run log for a failing `log-validation` step plus a missing-engine-token error.",
+        "- Created a disposable pull request against the live repository that removes only the mandatory `log-validation` step from `.github/workflows/unit-tests.yml`.",
+        "- Waited for the real `Flutter Required Checks` pull-request workflow to finish on GitHub Actions.",
+        "- Inspected the contributor-visible workflow summary and hosted run log for an explicit missing-`log-validation` contract failure and merge-blocked PR state.",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -577,8 +537,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-943 as a disposable PR probe against the live GitHub Actions accessibility workflow.",
-        "- The probe suppresses the engine-state logger only through `testing/accessibility/` changes and checks whether CI fails for missing engine-state tokens.",
+        "- Added TS-950 as a disposable PR probe against the live GitHub Actions workflow contract.",
+        "- The probe removes the workflow `log-validation` step and checks whether CI reports the missing-step contract failure and blocks merge.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -587,7 +547,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"using GitHub CLI on `{result['os']}`."
         ),
         (
-            "- Outcome: the live CI surface rejected the missing engine-state tokens with a failing log-validation step."
+            "- Outcome: the live CI surface rejected the workflow change and blocked merge when the `log-validation` step was removed."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -612,7 +572,7 @@ def _bug_description(result: dict[str, object]) -> str:
         if isinstance(step, dict) and isinstance(step.get("step"), int)
     }
     return (
-        f"# {TICKET_KEY} - CI does not fail when engine-state log tokens are missing\n\n"
+        f"# {TICKET_KEY} - CI does not reject workflow changes that remove the mandatory log-validation step\n\n"
         "## Steps to reproduce\n"
         f"1. {REQUEST_STEPS[0]}  \n"
         f"   - Actual: {step_map.get(1, {}).get('observed', '<missing>')}  \n"
@@ -629,10 +589,10 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** The live disposable PR run completed without surfacing a failing "
-        "`log-validation` step or an explicit missing-engine-token error even though the "
-        "engine-state logging wrapper was silenced and the accessibility-stage log no "
-        "longer contained the required engine/semantics tokens.\n\n"
+        "- **Actual:** The live disposable PR did not expose a contributor-visible failing "
+        "schema/contract message that the `log-validation` step was missing and/or did not "
+        "leave the pull request merge-blocked after removing that step from "
+        "`.github/workflows/unit-tests.yml`.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('pull_request_url', '<missing pull request URL>')}\n"
         "- **Browser:** GitHub CLI / GitHub Actions hosted log surface\n"
@@ -644,13 +604,13 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Run command:** `{result.get('run_command')}`\n"
         f"- **Config:** `{CONFIG_PATH}`\n\n"
         "## Screenshots or logs\n"
-        "- **Flutter engine log entries:**\n"
+        "- **Observed failed status checks:**\n"
         "```text\n"
-        f"{result.get('flutter_engine_initialization_log_entries', ['<none>'])}\n"
+        f"{result.get('failed_status_check_names', ['<none>'])}\n"
         "```\n"
-        "- **Semantics discovery log entries:**\n"
+        "- **Observed failed workflows:**\n"
         "```text\n"
-        f"{result.get('semantics_tree_discovery_log_entries', ['<none>'])}\n"
+        f"{result.get('failed_status_check_workflow_names', ['<none>'])}\n"
         "```\n"
         "- **Full workflow/log excerpt:**\n"
         "```text\n"

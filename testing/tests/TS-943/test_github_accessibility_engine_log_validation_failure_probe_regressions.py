@@ -101,7 +101,7 @@ test('TrackState web app has no axe-core accessibility violations', async ({
             """,
             "",
         )
-
+        self.assertIn("mandatory engine state tokens were not found", excerpt)
         self.assertIn("mandatory engine state tokens were not found", excerpt)
 
     def test_runtime_marker_extractors_ignore_missing_token_list_message(self) -> None:
@@ -121,7 +121,6 @@ test('TrackState web app has no axe-core accessibility violations', async ({
             self.probe._extract_runtime_accessibility_surface_summary(log_text),  # noqa: SLF001
             "",
         )
-
     def test_helper_source_returns_noop_logger(self) -> None:
         source = self.probe._helper_source()  # noqa: SLF001
 
