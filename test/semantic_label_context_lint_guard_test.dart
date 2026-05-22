@@ -18,14 +18,16 @@ void main() {
       );
       final source = targetFile.readAsStringSync();
       final mutatedSource = source.replaceFirst(
-        'return l10n.workspaceSyncAttentionNeededSemanticLabel;',
-        'return l10n.workspaceSyncAttentionNeeded;',
+        'semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),',
+        'semanticLabel: l10n.workspaceSyncAttentionNeededVisibleLabel,',
       );
 
       expect(
         mutatedSource,
         isNot(equals(source)),
-        reason: 'Expected the test mutation to weaken the semantic label.',
+        reason:
+            'Expected the test mutation to weaken the sync semantic label '
+            'call-site contract.',
       );
       targetFile.writeAsStringSync(mutatedSource);
 
