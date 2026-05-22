@@ -264,6 +264,7 @@ void main() {
 
       var localWorkspaceAvailable = false;
       final openedLocalRepositories = <String>[];
+      var directoryPickerCalls = 0;
 
       Future<void> openWorkspaceSwitcher() async {
         final switcherSheet = find.byKey(
@@ -323,6 +324,12 @@ void main() {
           TrackStateApp(
             repositoryFactory: DemoTrackStateRepository.new,
             workspaceProfileService: service,
+            workspaceDirectoryPicker:
+                ({String? confirmButtonText, String? initialDirectory}) async {
+                  directoryPickerCalls += 1;
+                  expect(initialDirectory, '/tmp/guarded');
+                  return '/tmp/guarded';
+                },
             openLocalRepository:
                 ({
                   required String repositoryPath,
@@ -385,12 +392,19 @@ void main() {
         const ValueKey('workspace-local:/tmp/guarded@main'),
       );
       expect(localRow, findsOneWidget);
-      await tester.tap(
+      expect(
         find.byKey(const ValueKey('workspace-open-local:/tmp/guarded@main')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-local:/tmp/guarded@main'),
+        ),
       );
       await tester.pumpAndSettle();
 
       expect(openedLocalRepositories, ['/tmp/guarded', '/tmp/guarded']);
+      expect(directoryPickerCalls, 1);
       expect(
         (await service.loadState()).unavailableLocalWorkspaceIds,
         isNot(contains(activeLocalWorkspaceId)),

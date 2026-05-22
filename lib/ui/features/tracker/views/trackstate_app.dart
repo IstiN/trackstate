@@ -1231,8 +1231,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       showFailureMessage: false,
     );
     if (prepared != null) {
-      final selectedState = await widget.workspaceProfileService.selectProfile(
+      var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
       );
       await _commitPreparedWorkspaceSwitch(
         prepared,
