@@ -580,6 +580,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
             "status_checks": [],
             "status_check_names": [],
             "status_check_workflow_names": [],
+            "failed_status_check_names": [],
+            "failed_status_check_workflow_names": [],
         }
 
         while time.time() < deadline:
@@ -596,6 +598,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "status_checks": surface["status_checks"],
                 "status_check_names": surface["status_check_names"],
                 "status_check_workflow_names": surface["status_check_workflow_names"],
+                "failed_status_check_names": surface["failed_status_check_names"],
+                "failed_status_check_workflow_names": surface[
+                    "failed_status_check_workflow_names"
+                ],
             }
             if (
                 mergeable_state
@@ -1009,10 +1015,11 @@ class Ts908ProbeSurface extends StatelessWidget {
             )
 
         updated_source, replacements = re.subn(
-            r"runApp\(\s*const\s+TrackStateApp\(\)\s*\);",
+            r"runApp\(\s*.*?\s*\);",
             "runApp(const _Ts908RenderedProbeApp());",
             source,
             count=1,
+            flags=re.DOTALL,
         )
         if replacements != 1:
             raise GitHubAccessibilityPullRequestGateError(

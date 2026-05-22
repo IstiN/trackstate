@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -477,15 +478,36 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    steps = _step_entries(result)
+    failing_step = next(
+        (entry for entry in steps if str(entry.get("status", "")).lower() == "failed"),
+        None,
+    )
+    failed_observation = (
+        str(failing_step.get("observed", "")).strip() if isinstance(failing_step, dict) else ""
+    )
     return "\n".join(
         [
             f"# {TICKET_KEY} - Live PR CI does not expose an accessibility gate result for contrast and semantic defects",
             "",
             "## Steps to reproduce",
-            "1. Create a Pull Request that introduces a UI element with a text-to-background contrast ratio below 4.5:1.",
-            "2. In the same PR, include a component with a non-descriptive ARIA label.",
-            "3. Push the changes to trigger the CI pipeline.",
-            "4. Inspect the results of the automated accessibility check stage.",
+            *_bug_step_lines(result),
+            "",
+            "## Expected result",
+            f"- {EXPECTED_RESULT}",
+            "",
+            "## Actual result",
+            (
+                "- The live PR workflow ran, but GitHub did not expose a failing accessibility "
+                "stage/check result that reported both the contrast ratio violation and the "
+                "semantic label defect. The PR checks surface only showed the existing PR "
+                "workflow/checks rather than a contributor-visible accessibility failure."
+            ),
+            (
+                f"- Failing step detail: {failed_observation}"
+                if failed_observation
+                else "- Failing step detail: <missing>"
+            ),
             "",
             "## Exact test reproduction",
             (
@@ -511,15 +533,13 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"run-log semantic markers: {result.get('run_log_matched_semantic_markers', [])}."
             ),
             "",
-            "## Expected result",
-            f"- {EXPECTED_RESULT}",
-            "",
-            "## Actual result",
+            "## Actual vs Expected",
+            f"- **Expected:** {EXPECTED_RESULT}",
             (
-                "- The live PR workflow ran, but GitHub did not expose a failing accessibility "
-                "stage/check result that reported both the contrast ratio violation and the "
-                "semantic label defect. The PR checks surface only showed the existing PR "
-                "workflow/checks rather than a contributor-visible accessibility failure."
+                "- **Actual:** "
+                "The PR checks surface only exposed the existing workflow/check output and "
+                "did not show a contributor-visible failing accessibility result that "
+                "reported both the contrast and semantic defects."
             ),
             "",
             "## Missing production capability",
@@ -537,6 +557,7 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Pull Request: `{result.get('pull_request_url', '')}`",
             f"- Pull Request checks: `{result.get('pull_request_checks_url', '')}`",
             f"- Workflow run: `{result.get('latest_pull_request_run_url', '')}`",
+            f"- Client: `GitHub CLI`",
             f"- OS: `{result.get('os', '')}`",
             "",
             "## Failing command",
@@ -625,15 +646,16 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
-    steps = result.get("steps")
-    if not isinstance(steps, list):
+    steps = _step_entries(result)
+    if not steps:
         return str(result.get("error", "Unknown failure"))
     for entry in steps:
-        if not isinstance(entry, dict):
-            continue
         status = str(entry.get("status", "")).lower()
         if status == "failed":
-            return f"Step {entry.get('step')} failed: {entry.get('observed')}"
+            step = entry.get("step")
+            observed = str(entry.get("observed", "")).strip()
+            cleaned = re.sub(r"^Step \d+ failed:\s*", "", observed)
+            return f"Step {step} failed: {cleaned or observed}"
     return str(result.get("error", "Unknown failure"))
 
 
@@ -644,6 +666,29 @@ def _jira_inline(value: str) -> str:
         .replace("[", "\\[")
         .replace("]", "\\]")
     )
+
+
+def _step_entries(result: dict[str, object]) -> list[dict[str, object]]:
+    steps = result.get("steps")
+    if not isinstance(steps, list):
+        return []
+    return [entry for entry in steps if isinstance(entry, dict)]
+
+
+def _bug_step_lines(result: dict[str, object]) -> list[str]:
+    lines: list[str] = []
+    steps = _step_entries(result)
+    if not steps:
+        return REQUEST_STEPS
+    for entry in steps:
+        step = entry.get("step")
+        action = str(entry.get("action", "")).strip()
+        observed = str(entry.get("observed", "")).strip()
+        status = str(entry.get("status", "")).lower()
+        status_marker = "✅ Passed" if status == "passed" else "❌ Failed"
+        lines.append(f"{step}. {action} — {status_marker}.")
+        lines.append(f"   Actual: {observed or '<missing observation>'}")
+    return lines
 
 
 if __name__ == "__main__":

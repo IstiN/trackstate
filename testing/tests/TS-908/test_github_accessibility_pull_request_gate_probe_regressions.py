@@ -210,10 +210,18 @@ jobs:
             """
 import 'package:flutter/widgets.dart';
 
+const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
+  'TRACKSTATE_USE_DEMO_REPOSITORY',
+);
+
 import 'ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
-  runApp(const TrackStateApp());
+  runApp(
+    _useDemoRepositoryForAccessibility
+        ? const TrackStateApp(repository: DemoTrackStateRepository())
+        : const TrackStateApp(),
+  );
 }
 """.strip()
         )
