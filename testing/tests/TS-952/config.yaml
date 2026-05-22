@@ -1,0 +1,39 @@
+test_id: TS-952
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, checks, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts952_missing_placeholder_simulation.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts952-missing-semantics-placeholder
+  commit_message: "TS-952 probe: verify missing semantics placeholder fails with descriptive pre-flight error"
+  pull_request_title: "TS-952 disposable probe: verify descriptive missing-placeholder pre-flight failure"
+  pull_request_body: "Disposable PR created by TS-952 automation to simulate a missing flt-semantics-placeholder in the live accessibility gate and verify that GitHub Actions fails with a descriptive pre-flight error instead of falling through to generic timeout-prone polling."
+  expected_accessibility_markers:
+    - accessibility
+    - placeholder
+    - flt-semantics-placeholder
+    - pre-flight
+  contrast_evidence_markers:
+    - timeout
+    - page.waitForSelector
+    - page.waitForFunction
+    - waiting for nodes
+  semantic_evidence_markers:
+    - placeholder
+    - flt-semantics-placeholder
+    - missing
+    - pre-flight
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files so the live PR workflow simulates an application state where flt-semantics-placeholder never becomes available.
+  - Verifies the contributor-visible Actions failure stays on the missing-placeholder pre-flight path and does not degrade into generic Playwright timeout/polling evidence.
