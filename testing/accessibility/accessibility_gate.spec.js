@@ -4,10 +4,14 @@ const {
   collectAccessibilityViolations,
   formatViolations,
 } = require('./accessibility_gate');
+const {
+  installTs944EarlyEngineCrashSimulation,
+} = require('./ts944_early_engine_crash_simulation');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
+  await installTs944EarlyEngineCrashSimulation(page);
   await captureFlutterStartupDiagnostics(page, {
     log: (entry) => console.log(entry),
   });
