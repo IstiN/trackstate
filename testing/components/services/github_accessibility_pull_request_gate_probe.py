@@ -220,6 +220,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
             ),
+            default_branch_probe_host_present=bool(
+                pull_request_observation.get("default_branch_probe_host_present")
+            ),
+            default_branch_probe_host_summary=str(
+                pull_request_observation.get("default_branch_probe_host_summary", "")
+            ),
             flutter_engine_initialization_log_entries=list(
                 pull_request_observation.get("flutter_engine_initialization_log_entries", [])
             ),
@@ -242,6 +248,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
         cleanup_closed_pull_request = False
         cleanup_deleted_branch = False
         observation: dict[str, object] | None = None
+        (
+            default_branch_probe_host_present,
+            default_branch_probe_host_summary,
+        ) = self._default_branch_probe_host_details(self._config.base_branch)
 
         try:
             self._run_command(["gh", "auth", "setup-git"], cwd=None)
@@ -406,7 +416,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or default_branch_probe_host_present
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -481,6 +494,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "default_branch_probe_host_present": default_branch_probe_host_present,
+                "default_branch_probe_host_summary": default_branch_probe_host_summary,
                 "flutter_engine_initialization_log_entries": (
                     flutter_engine_initialization_log_entries
                 ),
@@ -609,6 +624,45 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 f"{quote(workflow_path, safe='/')}?ref={quote(ref, safe='')}"
             ),
             field_args=["-H", "Accept: application/vnd.github.raw+json"],
+        )
+
+    def _read_repository_file_text(self, file_path: str, ref: str) -> str:
+        return self._github_api_client.request_text(
+            endpoint=(
+                f"/repos/{self._config.repository}/contents/"
+                f"{quote(file_path, safe='/')}?ref={quote(ref, safe='')}"
+            ),
+            field_args=["-H", "Accept: application/vnd.github.raw+json"],
+        )
+
+    def _default_branch_probe_host_details(self, ref: str) -> tuple[bool, str]:
+        try:
+            source = self._read_repository_file_text(self._config.probe_render_host_path, ref)
+        except GitHubApiClientError as error:
+            return (
+                False,
+                f"Could not read {self._config.probe_render_host_path}@{ref}: {error}",
+            )
+
+        matched_indicators: list[str] = []
+        probe_widget_name = self._probe_widget_name()
+        rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        if probe_widget_name in source:
+            matched_indicators.append(probe_widget_name)
+        if rendered_probe_app_class_name in source:
+            matched_indicators.append(rendered_probe_app_class_name)
+
+        if not matched_indicators:
+            return (
+                False,
+                f"{self._config.probe_render_host_path}@{ref} did not expose "
+                f"{probe_widget_name} or {rendered_probe_app_class_name}.",
+            )
+
+        return (
+            True,
+            f"{self._config.probe_render_host_path}@{ref} already exposed "
+            f"{', '.join(matched_indicators)}.",
         )
 
     def _wait_for_pull_request_run(

@@ -180,6 +180,12 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
             ),
+            default_branch_probe_host_present=bool(
+                pull_request_observation.get("default_branch_probe_host_present")
+            ),
+            default_branch_probe_host_summary=str(
+                pull_request_observation.get("default_branch_probe_host_summary", "")
+            ),
         )
 
         return GitHubAccessibilityBranchProtectionMergeBlockObservation(
@@ -205,6 +211,10 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
         cleanup_closed_pull_request = False
         cleanup_deleted_branch = False
         observation: dict[str, object] | None = None
+        (
+            default_branch_probe_host_present,
+            default_branch_probe_host_summary,
+        ) = self._default_branch_probe_host_details(self._config.base_branch)
 
         try:
             self._run_command(["gh", "auth", "setup-git"], cwd=None)
@@ -345,7 +355,10 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or default_branch_probe_host_present
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -407,6 +420,8 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "default_branch_probe_host_present": default_branch_probe_host_present,
+                "default_branch_probe_host_summary": default_branch_probe_host_summary,
             }
         finally:
             if pull_request_number is not None:
