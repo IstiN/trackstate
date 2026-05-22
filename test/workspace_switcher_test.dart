@@ -233,6 +233,98 @@ void main() {
   );
 
   testWidgets(
+    'refresh preserves the saved local unavailable state until a manual workspace action occurs',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/guarded@main';
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/guarded',
+          defaultBranch: 'main',
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      var localWorkspaceAvailable = false;
+
+      Future<void> expectUnavailableLocalWorkspace() async {
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+        );
+        await tester.pumpAndSettle();
+
+        final activeRow = find.byKey(
+          const ValueKey('workspace-local:/tmp/guarded@main'),
+        );
+        expect(activeRow, findsOneWidget);
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Active')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Unavailable')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Local Git')),
+          findsNothing,
+        );
+      }
+
+      Future<void> pumpApp() async {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repositoryFactory: DemoTrackStateRepository.new,
+            workspaceProfileService: service,
+            openLocalRepository:
+                ({
+                  required String repositoryPath,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async {
+                  if (!localWorkspaceAvailable) {
+                    throw StateError('Missing repository $repositoryPath');
+                  }
+                  return DemoTrackStateRepository(
+                    snapshot: await _snapshotForRepository(repositoryPath),
+                  );
+                },
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      await pumpApp();
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      await expectUnavailableLocalWorkspace();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+
+      localWorkspaceAvailable = true;
+      await pumpApp();
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      await expectUnavailableLocalWorkspace();
+    },
+  );
+
+  testWidgets(
     'startup restore keeps the saved active local workspace selected when local startup access is unavailable',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -3464,6 +3556,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       profiles: resolveWorkspaceDisplayNames([...state.profiles, created]),
       activeWorkspaceId: select ? created.id : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     return state.profiles.firstWhere((profile) => profile.id == created.id);
   }
@@ -3481,6 +3574,8 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
                 : nextProfiles.first.id
           : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId}),
     );
     return state;
   }
@@ -3500,6 +3595,20 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
+    );
+    return state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    state = state.copyWith(
+      unavailableLocalWorkspaceIds: isAvailable
+          ? state.unavailableLocalWorkspaceIds.difference({workspaceId})
+          : <String>{...state.unavailableLocalWorkspaceIds, workspaceId},
     );
     return state;
   }
@@ -3535,6 +3644,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: workspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     return state;
   }
@@ -3553,6 +3663,8 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: select ? updated.id : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId, updated.id}),
     );
     return updated;
   }
