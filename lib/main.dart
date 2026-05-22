@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'data/repositories/trackstate_repository.dart';
 import 'ui/features/tracker/views/trackstate_app.dart';
+import 'ts934_accessibility_engine_logging_probe.dart';
 import 'ts908_probe_surface.dart';
 
 const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
@@ -9,9 +10,9 @@ const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
 );
 
 void main() {
-  runApp(_Ts908RenderedProbeApp(child: _useDemoRepositoryForAccessibility
+  runApp(_Ts924RenderedProbeApp(child: _Ts908RenderedProbeApp(child: _useDemoRepositoryForAccessibility
         ? const TrackStateApp(repository: DemoTrackStateRepository())
-        : const TrackStateApp(),));
+        : const TrackStateApp(),)));
 }
 
 class _Ts908RenderedProbeApp extends StatelessWidget {
@@ -35,6 +36,34 @@ class _Ts908RenderedProbeApp extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: const Ts908ProbeSurface(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Ts924RenderedProbeApp extends StatelessWidget {
+  const _Ts924RenderedProbeApp({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    assert(() {
+      debugPrint(
+        'Accessibility probe preserved original app entrypoint: ${child.runtimeType}',
+      );
+      return true;
+    }());
+    return MaterialApp(
+      title: 'TrackState.AI',
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: const Ts924ProbeSurface(),
           ),
         ),
       ),
