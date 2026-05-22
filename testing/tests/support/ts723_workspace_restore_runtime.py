@@ -37,7 +37,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(viewport={"width": 1440, "height": 900})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         self._context.add_init_script(script=self._build_preload_script())
         self._page = self._context.new_page()
@@ -83,6 +83,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
   const workspaceState = {json.dumps(serialized_workspace_state)};
   const trackedHandleName = {json.dumps(self._active_local_handle_name)};
   const probePrefix = {json.dumps(self.RUNTIME_PROBE_PREFIX)};
+  const trackedHandleLineage = new WeakMap();
 
   for (const key of [
     'trackstate.workspaceProfiles.state',
@@ -98,14 +99,83 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     window.localStorage.setItem(key, token);
   }}
 
+  const handleName = (handle) => {{
+    if (!handle || typeof handle !== 'object' || !('name' in handle)) {{
+      return null;
+    }}
+    const rawName = handle.name;
+    if (typeof rawName !== 'string') {{
+      return null;
+    }}
+    const normalized = rawName.trim();
+    return normalized || null;
+  }};
+
+  const extendLineage = (lineage, childName) => {{
+    if (!Array.isArray(lineage) || lineage.length === 0) {{
+      return null;
+    }}
+    if (typeof childName !== 'string' || !childName.trim()) {{
+      return [...lineage];
+    }}
+    const normalizedChildName = childName.trim();
+    if (lineage[lineage.length - 1] === normalizedChildName) {{
+      return [...lineage];
+    }}
+    return [...lineage, normalizedChildName];
+  }};
+
+  const trackHandle = (handle, lineage) => {{
+    if (!handle || typeof handle !== 'object' || !Array.isArray(lineage) || lineage.length === 0) {{
+      return handle;
+    }}
+    trackedHandleLineage.set(handle, [...lineage]);
+    return handle;
+  }};
+
+  const trackedLineageForHandle = (handle) => {{
+    if (!handle || typeof handle !== 'object') {{
+      return null;
+    }}
+    const existing = trackedHandleLineage.get(handle);
+    if (Array.isArray(existing) && existing.length > 0) {{
+      return [...existing];
+    }}
+    const name = handleName(handle);
+    if (trackedHandleName && name === trackedHandleName) {{
+      const rootLineage = [trackedHandleName];
+      trackedHandleLineage.set(handle, rootLineage);
+      return [...rootLineage];
+    }}
+    return null;
+  }};
+
   const isTrackedHandle = (handle) => {{
-    return Boolean(
-      trackedHandleName &&
-      handle &&
-      typeof handle === 'object' &&
-      'name' in handle &&
-      String(handle.name || '') === trackedHandleName
-    );
+    return Array.isArray(trackedLineageForHandle(handle));
+  }};
+
+  const trackDescendantHandle = (parentLineage, handle, childName) => {{
+    const lineage = extendLineage(parentLineage, childName ?? handleName(handle));
+    if (!lineage) {{
+      return handle;
+    }}
+    return trackHandle(handle, lineage);
+  }};
+
+  const trackReturnedValue = (value, lineage, args) => {{
+    if (!lineage) {{
+      return value;
+    }}
+    if (Array.isArray(value)) {{
+      if (value.length >= 2) {{
+        const entryName = typeof value[0] === 'string' ? value[0] : null;
+        trackDescendantHandle(lineage, value[1], entryName);
+      }}
+      return value;
+    }}
+    const requestedChildName =
+      Array.isArray(args) && typeof args[0] === 'string' ? args[0] : null;
+    return trackDescendantHandle(lineage, value, requestedChildName);
   }};
 
   const normalizeError = (error) => {{
@@ -143,14 +213,21 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         const iterator = iterable[Symbol.asyncIterator]();
         return {{
           next(...args) {{
-            return Promise.resolve(iterator.next(...args)).catch((error) => {{
-              emitProbe({{
-                ...details,
-                stage: 'next',
-                error: normalizeError(error),
+            return Promise.resolve(iterator.next(...args))
+              .then((result) => {{
+                if (result && !result.done) {{
+                  trackReturnedValue(result.value, details.handleLineage, args);
+                }}
+                return result;
+              }})
+              .catch((error) => {{
+                emitProbe({{
+                  ...details,
+                  stage: 'next',
+                  error: normalizeError(error),
+                }});
+                throw error;
               }});
-              throw error;
-            }});
           }},
           return(...args) {{
             if (typeof iterator.return !== 'function') {{
@@ -175,12 +252,14 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
       return;
     }}
     prototype[methodName] = function (...args) {{
-      const tracked = isTrackedHandle(this);
+      const handleLineage = trackedLineageForHandle(this);
+      const tracked = Array.isArray(handleLineage);
       const details = tracked
         ? {{
             method: methodName,
             handleKind: this?.kind ?? null,
-            handleName: typeof this?.name === 'string' ? this.name : null,
+            handleName: handleName(this),
+            handleLineage,
           }}
         : null;
       let result;
@@ -200,7 +279,19 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         return result;
       }}
       if (wrapResult) {{
-        return wrapResult(result, details);
+        if (result && typeof result.then === 'function') {{
+          return result
+            .then((resolved) => wrapResult(resolved, details, args))
+            .catch((error) => {{
+              emitProbe({{
+                ...details,
+                stage: 'reject',
+                error: normalizeError(error),
+              }});
+              throw error;
+            }});
+        }}
+        return wrapResult(result, details, args);
       }}
       if (result && typeof result.then === 'function') {{
         return result.catch((error) => {{
@@ -233,8 +324,16 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     'values',
     (result, details) => wrapAsyncIterable(result, details),
   );
-  wrapHandleMethod(globalThis.FileSystemDirectoryHandle?.prototype, 'getDirectoryHandle');
-  wrapHandleMethod(globalThis.FileSystemDirectoryHandle?.prototype, 'getFileHandle');
+  wrapHandleMethod(
+    globalThis.FileSystemDirectoryHandle?.prototype,
+    'getDirectoryHandle',
+    (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+  );
+  wrapHandleMethod(
+    globalThis.FileSystemDirectoryHandle?.prototype,
+    'getFileHandle',
+    (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+  );
   wrapHandleMethod(globalThis.FileSystemDirectoryHandle?.prototype, 'resolve');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'getFile');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'createWritable');
