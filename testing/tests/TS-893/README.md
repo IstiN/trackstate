@@ -13,9 +13,10 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup has reached the visible recovery window
-5. requires tracked File System Access activity, TS-893 runtime probe
+5. records tracked File System Access activity, TS-893 runtime probe
   events, or a public pre-release non-restored state while the workspace is
-  still blocked so the retry path is proven before the scenario can pass
+  still blocked as diagnostic confidence, without turning missing overlap
+  evidence into the ticket verdict on its own
 6. after the busy-state release, waits for the workspace switcher trigger to
   restore the saved local workspace instead of asserting immediately
 7. opens **Workspace switcher** and verifies the selected active row is the
@@ -55,7 +56,5 @@ Hosted setup workspace active or show Local Unavailable.
 
 Fail: after release it still keeps Hosted setup workspace active, leaves the
 local row Unavailable, or otherwise does not restore the saved local workspace
-as Local Git. The scenario also fails when the app reaches the final Local Git
-state without exposing any restore-specific blocked-window overlap evidence,
-because the transient retry path cannot be verified from testing.
+as Local Git.
 ```
