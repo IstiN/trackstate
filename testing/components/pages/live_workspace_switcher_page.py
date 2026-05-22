@@ -349,6 +349,7 @@ class WorkspaceSwitcherTabStopObservation:
     tab_index_value: int
     dom_index: int
     keyboard_focusable: bool
+    disabled: bool
     outer_html: str
 
 
@@ -414,6 +415,45 @@ class WorkspaceSwitcherSurfaceObservation:
     badges: tuple[WorkspaceSwitcherBadgeObservation, ...]
     interactive_icons: tuple[WorkspaceSwitcherIconObservation, ...]
     interactive_texts: tuple[WorkspaceSwitcherInteractiveTextObservation, ...]
+
+
+def _merge_surface_payload_items(
+    primary_items: list[dict[str, object]],
+    panel_scoped_items: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    merged = list(primary_items)
+    for panel_item in panel_scoped_items:
+        label = str(panel_item.get("label", "")).strip()
+        if not label:
+            continue
+        if any(_surface_payload_items_match(item, panel_item) for item in merged):
+            continue
+        merged.append(dict(panel_item))
+    return merged
+
+
+def _surface_payload_items_match(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    left_label = str(left.get("label", "")).strip()
+    right_label = str(right.get("label", "")).strip()
+    if left_label != right_label:
+        return False
+    left_tag = str(left.get("tagName", "")).strip()
+    right_tag = str(right.get("tagName", "")).strip()
+    if left_tag != right_tag:
+        return False
+    left_role = str(left.get("role", "")).strip()
+    right_role = str(right.get("role", "")).strip()
+    if left_role != right_role:
+        return False
+    return (
+        abs(float(left.get("x", 0.0)) - float(right.get("x", 0.0))) < 1
+        and abs(float(left.get("y", 0.0)) - float(right.get("y", 0.0))) < 1
+        and abs(float(left.get("width", 0.0)) - float(right.get("width", 0.0))) < 1
+        and abs(float(left.get("height", 0.0)) - float(right.get("height", 0.0))) < 1
+    )
 
 
 @dataclass(frozen=True)
@@ -522,6 +562,7 @@ class LiveWorkspaceSwitcherPage:
     _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
     _button_selector = 'button, flt-semantics[role="button"], [role="button"]'
+    _workspace_trigger_selector = '[aria-label^="Workspace switcher:"]'
     _switcher_heading = "Workspace switcher"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -939,16 +980,21 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         try:
             self._session.focus(
-                self._top_bar_button_selector,
-                has_text="Workspace switcher:",
+                self._workspace_trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The visible workspace switcher trigger could not be focused before the "
-                "keyboard blur scenario.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
+            try:
+                self._session.focus(
+                    'button[aria-label^="Workspace switcher:"], [role="button"][aria-label^="Workspace switcher:"]',
+                    timeout_ms=timeout_ms,
+                )
+            except WebAppTimeoutError:
+                raise AssertionError(
+                    "The visible workspace switcher trigger could not be focused before the "
+                    "keyboard blur scenario.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                ) from error
         active = self._session.active_element()
         if self._is_workspace_trigger_label(active.accessible_name):
             return
@@ -981,7 +1027,11 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
         self.focus_search_field(timeout_ms=timeout_ms)
-        return self._collect_tab_sequence(tab_count=tab_count, timeout_ms=timeout_ms)
+        return self._collect_tab_sequence(
+            tab_count=tab_count,
+            timeout_ms=timeout_ms,
+            stop_when_workspace_trigger_reached=True,
+        )
 
     def collect_tab_sequence(
         self,
@@ -1178,6 +1228,7 @@ class LiveWorkspaceSwitcherPage:
               };
               const visibleText = (element) =>
                 normalize(element?.innerText || element?.textContent || '');
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const labelFor = (element) =>
                 normalize(
                   element?.getAttribute?.('aria-label')
@@ -1224,7 +1275,21 @@ class LiveWorkspaceSwitcherPage:
                 .find((element) => {
                   const elementLabel = labelFor(element);
                   const elementText = visibleText(element);
-                  return elementLabel === label || elementText === label;
+                  const combined = normalize(`${elementLabel} ${elementText}`);
+                  const isActionButton = elementLabel.startsWith('Delete:')
+                    || elementLabel.startsWith('Open:')
+                    || elementText === 'Active';
+                  return elementLabel === label
+                    || elementText === label
+                    || (
+                      displayNameHint.length > 0
+                      && !isActionButton
+                      && (
+                        elementLabel === displayNameHint
+                        || elementText === displayNameHint
+                        || combined.includes(displayNameHint)
+                      )
+                    );
                 });
               if (!candidate) {
                 return null;
@@ -1463,13 +1528,49 @@ class LiveWorkspaceSwitcherPage:
                 'select',
                 '[tabindex]',
               ].join(',');
-              const candidates = Array.from(switcher.querySelectorAll(interactiveSelector))
+              const isSwitcherOwnedControl = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                if (panelId === 'trackstate-workspace-switcher') {
+                  return true;
+                }
+                return switcher.contains(element);
+              };
+              const panelScopedControls = Array.from(document.querySelectorAll(interactiveSelector))
+                .filter((element) => isSwitcherOwnedControl(element));
+              const orderedElements = panelScopedControls
+                .filter((element, index, all) => all.indexOf(element) === index);
+              const candidates = orderedElements
                 .map((element, domIndex) => {
                   const label = labelFor(element);
                   const text = visibleText(element);
                   const tabIndexValue = Number.isFinite(element.tabIndex)
                     ? element.tabIndex
                     : -1;
+                  const role = element.getAttribute('role');
+                  const tagName = element.tagName;
+                  const style = window.getComputedStyle(element);
+                  const pointerEvents = style.pointerEvents;
+                  const hasMeaningfulLabel = label.length > 0 || text.length > 0;
+                  const hasFocusableDescendant = Array.from(element.querySelectorAll(interactiveSelector))
+                    .some((descendant) => descendant !== element && isVisible(descendant));
+                  const anonymousWrapper = (
+                    tagName === 'FLT-SEMANTICS'
+                    && !role
+                    && !hasMeaningfulLabel
+                    && (pointerEvents === 'none' || hasFocusableDescendant)
+                  );
+                  const ariaDisabled = normalize(element.getAttribute('aria-disabled')).toLowerCase();
+                  const disabled =
+                    typeof element.disabled === 'boolean'
+                      ? element.disabled
+                      : element.hasAttribute('disabled');
+                  const keyboardReachable =
+                    tabIndexValue >= 0
+                    && !disabled
+                    && ariaDisabled != 'true';
                   return {
                     domIndex,
                     element,
@@ -1477,17 +1578,25 @@ class LiveWorkspaceSwitcherPage:
                     text,
                     tabIndexValue,
                     tabindex: element.getAttribute('tabindex'),
-                    role: element.getAttribute('role'),
-                    tagName: element.tagName,
-                    keyboardFocusable: tabIndexValue >= 0,
+                    role,
+                    tagName,
+                    pointerEvents,
+                    keyboardFocusable: keyboardReachable,
+                    disabled,
                     headingMatch: text.includes(heading) || label.startsWith('Workspace switcher:'),
+                    hasMeaningfulLabel,
+                    anonymousWrapper,
                   };
                 })
                 .filter((candidate) =>
                   candidate.keyboardFocusable
                   && isVisible(candidate.element)
+                  && isSwitcherOwnedControl(candidate.element)
                   && isInsidePanel(candidate.element)
                   && !candidate.headingMatch
+                  && candidate.hasMeaningfulLabel
+                  && !candidate.anonymousWrapper
+                  && candidate.pointerEvents !== 'none'
                 )
                 .sort((left, right) => {
                   const leftPositive = left.tabIndexValue > 0;
@@ -1509,6 +1618,7 @@ class LiveWorkspaceSwitcherPage:
                   tabIndexValue: candidate.tabIndexValue,
                   domIndex: candidate.domIndex,
                   keyboardFocusable: candidate.keyboardFocusable,
+                  disabled: candidate.disabled,
                   outerHTML: candidate.element.outerHTML?.slice?.(0, 400) || '',
                 }));
               return candidates.length > 0 ? candidates : null;
@@ -1542,11 +1652,459 @@ class LiveWorkspaceSwitcherPage:
                 tab_index_value=int(item.get("tabIndexValue", -1)),
                 dom_index=int(item.get("domIndex", -1)),
                 keyboard_focusable=bool(item.get("keyboardFocusable")),
+                disabled=bool(item.get("disabled")),
                 outer_html=str(item.get("outerHTML", "")),
             )
             for item in payload
             if isinstance(item, dict)
         )
+    def focus_internal_tab_stop(
+        self,
+        label: str,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        observable_labels = {
+            observation.label or observation.visible_text
+            for observation in self.observe_internal_tab_stops(
+                panel=panel,
+                timeout_ms=timeout_ms,
+            )
+            if observation.label or observation.visible_text
+        }
+        if label not in observable_labels:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a keyboard-reachable internal '
+                f'tab stop matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        try:
+            target_payload = self._session.evaluate(
+                """
+                ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  const isInsidePanel = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const centerX = rect.left + (rect.width / 2);
+                    const centerY = rect.top + (rect.height / 2);
+                    return centerX >= panelLeft
+                      && centerX <= panelRight
+                      && centerY >= panelTop
+                      && centerY <= panelBottom;
+                  };
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const interactiveSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                    'a[href]',
+                    'input',
+                    'textarea',
+                    'select',
+                    '[tabindex]',
+                  ].join(',');
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return switcher.contains(element);
+                  };
+                  const orderedElements = Array.from(document.querySelectorAll(interactiveSelector))
+                    .filter((element) => isSwitcherOwnedControl(element))
+                    .filter((element, index, all) => all.indexOf(element) === index);
+                  const target = orderedElements.find((element) => {
+                    if (
+                      !isVisible(element)
+                      || !isSwitcherOwnedControl(element)
+                      || !isInsidePanel(element)
+                    ) {
+                      return false;
+                    }
+                    const tabIndexValue = Number.isFinite(element.tabIndex)
+                      ? element.tabIndex
+                      : -1;
+                    const ariaDisabled = normalize(element.getAttribute('aria-disabled')).toLowerCase();
+                    const disabled =
+                    typeof element.disabled === 'boolean'
+                      ? element.disabled
+                      : element.hasAttribute('disabled');
+                    if (tabIndexValue < 0) {
+                    return false;
+                    }
+                    if (disabled || ariaDisabled === 'true') {
+                    return false;
+                    }
+                    const elementLabel = labelFor(element);
+                    const elementText = visibleText(element);
+                    const role = element.getAttribute('role');
+                    const tagName = element.tagName;
+                    const style = window.getComputedStyle(element);
+                    const pointerEvents = style.pointerEvents;
+                    const hasMeaningfulLabel = elementLabel.length > 0 || elementText.length > 0;
+                    const hasFocusableDescendant = Array.from(element.querySelectorAll(interactiveSelector))
+                      .some((descendant) => descendant !== element && isVisible(descendant));
+                    const anonymousWrapper = (
+                      tagName === 'FLT-SEMANTICS'
+                      && !role
+                      && !hasMeaningfulLabel
+                      && (pointerEvents === 'none' || hasFocusableDescendant)
+                    );
+                    if (
+                      !hasMeaningfulLabel
+                      || anonymousWrapper
+                      || pointerEvents === 'none'
+                    ) {
+                      return false;
+                    }
+                    return elementLabel === label || elementText === label;
+                  });
+                  if (!target) {
+                    return null;
+                  }
+                  target.focus({ preventScroll: true });
+                  const active = document.activeElement;
+                  const focused = active === target || target.contains(active);
+                  const activeRect = active?.getBoundingClientRect?.();
+                  const activeVisible = !!activeRect
+                    && activeRect.width > 0
+                    && activeRect.height > 0
+                    && window.getComputedStyle(active).visibility !== 'hidden'
+                    && window.getComputedStyle(active).display !== 'none';
+                  const activeInViewport = !!activeRect
+                    && activeRect.bottom > 0
+                    && activeRect.right > 0
+                    && activeRect.top < window.innerHeight
+                    && activeRect.left < window.innerWidth;
+                  const activeLabel = labelFor(active);
+                  const activePanelId = active?.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                  const activeWithinSwitcher = (
+                    !!active
+                    && (
+                      activePanelId === 'trackstate-workspace-switcher'
+                      || switcher.contains(active)
+                    )
+                  );
+                  const activeOnTrigger = activeLabel.startsWith('Workspace switcher:');
+                  return {
+                    focused,
+                    activeLabel,
+                    activeRole: active?.getAttribute?.('role') || null,
+                    activeTagName: active?.tagName || '',
+                    activeOuterHtml: active?.outerHTML?.slice?.(0, 400) || '',
+                    activeVisible,
+                    activeInViewport,
+                    activeWithinSwitcher,
+                    activeOnTrigger,
+                    focusOwnedBySwitcher: activeWithinSwitcher || activeOnTrigger,
+                  };
+                }
+                """,
+                arg={
+                   "heading": self._switcher_heading,
+                   "label": label,
+                    "panelLeft": panel.left,
+                    "panelTop": panel.top,
+                    "panelRight": panel.left + panel.width,
+                    "panelBottom": panel.top + panel.height,
+                },
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable internal tab stop '
+                f'matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(target_payload, dict) or not bool(target_payload.get("focused")):
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable internal tab stop '
+                f'matching "{label}".\n'
+                f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        observation = WorkspaceSwitcherFocusTargetObservation(
+            active_label=(
+                str(target_payload.get("activeLabel"))
+                if target_payload.get("activeLabel") is not None
+                else None
+            ),
+            active_role=(
+                str(target_payload.get("activeRole"))
+                if target_payload.get("activeRole") is not None
+                else None
+            ),
+            active_tag_name=str(target_payload.get("activeTagName", "")),
+            active_outer_html=str(target_payload.get("activeOuterHtml", "")),
+            active_visible=bool(target_payload.get("activeVisible")),
+            active_in_viewport=bool(target_payload.get("activeInViewport")),
+            active_within_switcher=bool(target_payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(target_payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(target_payload.get("focusOwnedBySwitcher")),
+        )
+        if (
+            not observation.focus_owned_by_switcher
+            or not observation.active_within_switcher
+        ):
+            raise AssertionError(
+                f'Focusing the visible internal tab stop "{label}" did not keep keyboard '
+                "focus inside the open workspace switcher.\n"
+                f"Observed focus label: {observation.active_label!r}\n"
+                f"Observed focus role: {observation.active_role!r}\n"
+                f"Observed focus tag: {observation.active_tag_name!r}\n"
+                f"Observed focus within switcher: {observation.active_within_switcher!r}\n"
+                f"Observed focus owned by switcher: {observation.focus_owned_by_switcher!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return observation
+
+    def focus_saved_workspace_row(
+        self,
+        display_name: str,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({ displayName, panelLeft, panelTop, panelRight, panelBottom }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  const interactiveSelector = [
+                    '[data-trackstate-browser-focus-row-id]',
+                    '[data-trackstate-browser-focus-id]',
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                    'a[href]',
+                    'input',
+                    'textarea',
+                    'select',
+                    '[tabindex]',
+                  ].join(',');
+                  const orderedElements = Array.from(document.querySelectorAll(interactiveSelector))
+                    .filter((element, index, all) => all.indexOf(element) === index)
+                    .filter((element) => isVisible(element));
+                  const rowCandidates = orderedElements.filter((element) => {
+                    const tabIndexValue = Number.isFinite(element.tabIndex)
+                      ? element.tabIndex
+                      : -1;
+                    const ariaDisabled = normalize(element.getAttribute('aria-disabled')).toLowerCase();
+                    const disabled =
+                      typeof element.disabled === 'boolean'
+                        ? element.disabled
+                        : element.hasAttribute('disabled');
+                    if (tabIndexValue < 0 || disabled || ariaDisabled === 'true') {
+                      return false;
+                    }
+                    const elementLabel = labelFor(element);
+                    const elementText = visibleText(element);
+                    const combined = normalize(`${elementLabel} ${elementText}`);
+                    if (!combined.includes(displayName)) {
+                      return false;
+                    }
+                    return !elementLabel.startsWith('Open:')
+                      && !elementLabel.startsWith('Delete:')
+                      && !elementLabel.startsWith('Workspace switcher:')
+                      && !elementText.startsWith('Open:')
+                      && !elementText.startsWith('Delete:')
+                      && !elementText.startsWith('Workspace switcher:');
+                  });
+                  const target = rowCandidates.find((element) =>
+                    element.hasAttribute('data-trackstate-browser-focus-row-id')
+                    || element.getAttribute('flt-semantics-identifier')?.includes?.('workspace-switcher-row')
+                  ) || rowCandidates.find((element) =>
+                    normalize(element.getAttribute('aria-current')).toLowerCase() === 'true'
+                    || normalize(element.getAttribute('aria-selected')).toLowerCase() === 'true'
+                    || normalize(element.getAttribute('data-trackstate-browser-focus-selected')).toLowerCase() === 'true'
+                  ) || rowCandidates[0] || null;
+                  if (!target) {
+                    return null;
+                  }
+                  target.focus({ preventScroll: true });
+                  const active = document.activeElement;
+                  return active === target || target.contains(active)
+                    ? {
+                        activeLabel: labelFor(active),
+                        activeTagName: active?.tagName || '',
+                      }
+                    : null;
+                }
+                """,
+                arg={
+                    "displayName": display_name,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable saved workspace row '
+                f'for "{display_name}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        observation = self.observe_switcher_focus_target(panel=panel)
+        if (
+            not observation.focus_owned_by_switcher
+            or not observation.active_within_switcher
+        ):
+            raise AssertionError(
+                f'Focusing the visible saved workspace row "{display_name}" did not keep '
+                "keyboard focus inside the open workspace switcher.\n"
+                f"Observed focus label: {observation.active_label!r}\n"
+                f"Observed focus role: {observation.active_role!r}\n"
+                f"Observed focus tag: {observation.active_tag_name!r}\n"
+                f"Observed focus within switcher: {observation.active_within_switcher!r}\n"
+                f"Observed focus owned by switcher: {observation.focus_owned_by_switcher!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return observation
+
+    def debug_saved_workspace_row_candidates(
+        self,
+        display_name: str,
+    ) -> list[dict[str, object]]:
+        payload = self._session.evaluate(
+            """
+            ({ displayName }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.getAttribute?.('title')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              return Array.from(
+                document.querySelectorAll(
+                  '[data-trackstate-browser-focus-row-id],[data-trackstate-browser-focus-id],flt-semantics[role="button"],button,[role="button"]',
+                ),
+              )
+                .filter((element, index, all) => all.indexOf(element) === index)
+                .filter((element) => isVisible(element))
+                .map((element) => {
+                  const label = labelFor(element);
+                  const text = normalize(element?.innerText || element?.textContent || '');
+                  return {
+                    tag_name: element.tagName,
+                    role: element.getAttribute('role'),
+                    label,
+                    text,
+                    tabindex: element.getAttribute('tabindex'),
+                    tab_index_value: Number.isFinite(element.tabIndex) ? element.tabIndex : null,
+                    disabled:
+                      typeof element.disabled === 'boolean'
+                        ? element.disabled
+                        : element.hasAttribute('disabled'),
+                    aria_current: element.getAttribute('aria-current'),
+                    aria_selected: element.getAttribute('aria-selected'),
+                    focus_id: element.getAttribute('data-trackstate-browser-focus-id'),
+                    row_id: element.getAttribute('data-trackstate-browser-focus-row-id'),
+                    identifier: element.getAttribute('flt-semantics-identifier'),
+                    outer_html: (element.outerHTML || '').slice(0, 400),
+                  };
+                })
+                .filter((candidate) =>
+                  JSON.stringify(candidate).includes(displayName),
+                );
+            }
+            """,
+            arg={"displayName": display_name},
+        )
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
+
+
     def click_switcher_button(
         self,
         label: str,
@@ -2357,6 +2915,143 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{body_text}",
             )
         return tuple(rows)
+
+    def observe_accessible_saved_workspace_rows(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> tuple[WorkspaceSwitcherRowObservation, ...]:
+        del timeout_ms
+        payload = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const accessibleLabel = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                    || element?.getAttribute?.('alt')
+                    || element?.getAttribute?.('title')
+                    || element?.innerText
+                    || element?.textContent
+                    || ''
+                );
+              const stateLabels = [
+                'Local Git',
+                'Needs sign-in',
+                'Connected',
+                'Read-only',
+                'Saved hosted workspace',
+                'Unavailable',
+                'Attachments limited',
+              ];
+              const actionLabelMatcher = (label) =>
+                label === 'Active'
+                || label.startsWith('Retry:')
+                || label.startsWith('Open:')
+                || label.startsWith('Re-authenticate:')
+                || label.startsWith('Reauthenticate:')
+                || label.startsWith('Delete:');
+              const visibleButtons = Array.from(
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+              ).filter(isVisible);
+              const rows = visibleButtons
+                .map((element) => {
+                  const summaryLabel = accessibleLabel(element);
+                  if (
+                    summaryLabel.startsWith('Workspace switcher:')
+                    || !summaryLabel.includes('Branch:')
+                  ) {
+                    return null;
+                  }
+                  const summaryParts = summaryLabel.split(',').map((part) => normalize(part));
+                  if (summaryParts.length < 4) {
+                    return null;
+                  }
+                  const displayName = summaryParts[0];
+                  const targetTypeLabel = summaryParts[1];
+                  const stateLabel = summaryParts[2];
+                  const detailText = summaryParts.slice(3).join(', ');
+                  if (
+                    !displayName
+                    || (targetTypeLabel !== 'Hosted' && targetTypeLabel !== 'Local')
+                    || !stateLabels.includes(stateLabel)
+                    || !detailText.includes('Branch:')
+                  ) {
+                    return null;
+                  }
+                  let rowElement = element;
+                  let current = element.parentElement;
+                  while (current && current !== document.body) {
+                    const labels = Array.from(
+                      current.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+                    )
+                      .filter(isVisible)
+                      .map((candidate) => accessibleLabel(candidate))
+                      .filter((label) => actionLabelMatcher(label));
+                    if (
+                      labels.some((label) => label.startsWith('Delete:'))
+                      && labels.some((label) => !label.startsWith('Delete:'))
+                    ) {
+                      rowElement = current;
+                      break;
+                    }
+                    current = current.parentElement;
+                  }
+                  const buttonLabels = Array.from(
+                    rowElement.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+                  )
+                    .filter(isVisible)
+                    .map((candidate) => accessibleLabel(candidate))
+                    .filter((label) => actionLabelMatcher(label));
+                  return {
+                    displayName,
+                    targetTypeLabel,
+                    stateLabel,
+                    detailText,
+                    visibleText: [summaryLabel, ...buttonLabels].join(' ').trim(),
+                    selected: buttonLabels.includes('Active'),
+                    semanticsLabel: summaryLabel,
+                    iconAccessibilityLabel: null,
+                    actionLabels: buttonLabels.filter((label) => !label.startsWith('Delete:')),
+                    buttonLabels,
+                  };
+                })
+                .filter((row) => row !== null);
+              return rows;
+            }
+            """,
+        )
+        if not isinstance(payload, list) or not payload:
+            raise AssertionError(
+                "The open workspace switcher did not expose any accessible saved workspace rows.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return tuple(
+            WorkspaceSwitcherRowObservation(
+                display_name=row.get("displayName"),
+                target_type_label=row.get("targetTypeLabel"),
+                state_label=row.get("stateLabel"),
+                detail_text=str(row.get("detailText", "")),
+                visible_text=str(row.get("visibleText", "")),
+                selected=bool(row.get("selected")),
+                semantics_label=row.get("semanticsLabel"),
+                icon_accessibility_label=row.get("iconAccessibilityLabel"),
+                action_labels=tuple(str(label) for label in row.get("actionLabels", [])),
+                button_labels=tuple(str(label) for label in row.get("buttonLabels", [])),
+            )
+            for row in payload
+        )
 
     def observe_saved_workspace_row(
         self,
@@ -3384,9 +4079,8 @@ class LiveWorkspaceSwitcherPage:
                 else None
             ),
         )
-
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
-        self.open_switcher(timeout_ms=timeout_ms)
+        self._click_trigger(timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def observe_surface(
@@ -3594,6 +4288,19 @@ class LiveWorkspaceSwitcherPage:
                   tagName: element.tagName.toLowerCase(),
                   ...rectPayload(element),
                 }));
+              const panelScopedControlElements = panelScopedControls
+                .map((element) => ({
+                  label: labelFor(element),
+                  accessibleLabel: normalize(
+                    element.getAttribute('aria-label')
+                    || element.getAttribute('placeholder')
+                    || '',
+                  ),
+                  role: element.getAttribute('role'),
+                  tagName: element.tagName.toLowerCase(),
+                  ...rectPayload(element),
+                }))
+                .filter((element) => element.label.length > 0);
               const missingInteractiveLabels = interactiveElements
                 .filter((element) => element.label.length === 0)
                 .map((element, index) =>
@@ -3681,6 +4388,30 @@ class LiveWorkspaceSwitcherPage:
                 }
                 interactiveTexts.push(candidate);
               }
+              const panelScopedControlTexts = panelScopedControls
+                .map((element) => {
+                  const label = labelFor(element);
+                  const visibleText = visibleTextFor(element) || label;
+                  if (!label && !visibleText) {
+                    return null;
+                  }
+                  const backgroundColor = resolveBackgroundColor(
+                    element,
+                    toHex(window.getComputedStyle(switcher).backgroundColor),
+                  );
+                  const foregroundColor = resolveForegroundColor(element);
+                  return {
+                    label,
+                    visibleText,
+                    role: element.getAttribute('role'),
+                    foregroundColor,
+                    backgroundColor,
+                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                    ...rectPayload(element),
+                    tagName: element.tagName.toLowerCase(),
+                  };
+                })
+                .filter((element) => element !== null);
               const badgeLabels = new Set([
                 'Hosted',
                 'Local',
@@ -3711,9 +4442,11 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 };
               });
-              const workspaceTrigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
+              const triggerCandidates = [
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+              ].filter((element, index, all) => all.indexOf(element) === index);
+              const workspaceTrigger = triggerCandidates.find((candidate) =>
                 isVisible(candidate)
                 && labelFor(candidate).startsWith('Workspace switcher:'),
               );
@@ -3760,12 +4493,14 @@ class LiveWorkspaceSwitcherPage:
                   ? 'Workspace switcher'
                   : normalize(switcher.innerText || switcher.textContent),
                 interactiveElements,
+                panelScopedControls: panelScopedControlElements,
                 semanticsNodes,
                 missingInteractiveLabels,
                 missingSemanticsLabels,
                 badges,
                 interactiveIcons,
                 interactiveTexts,
+                panelScopedControlTexts,
               };
             }
             """,
@@ -3776,6 +4511,14 @@ class LiveWorkspaceSwitcherPage:
                 "The deployed app did not expose a readable workspace switcher surface.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        interactive_elements_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveElements", [])),
+            list(payload.get("panelScopedControls", [])),
+        )
+        interactive_texts_payload = _merge_surface_payload_items(
+            list(payload.get("interactiveTexts", [])),
+            list(payload.get("panelScopedControlTexts", [])),
+        )
         return WorkspaceSwitcherSurfaceObservation(
             body_text=str(payload.get("bodyText", "")),
             dialog_visible=bool(payload.get("dialogVisible")),
@@ -3791,7 +4534,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveElements", [])
+                for item in interactive_elements_payload
             ),
             semantics_nodes=tuple(
                 WorkspaceSwitcherSemanticsObservation(
@@ -3887,7 +4630,7 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("interactiveTexts", [])
+                for item in interactive_texts_payload
             ),
         )
 
@@ -4274,6 +5017,77 @@ class LiveWorkspaceSwitcherPage:
                 rows.push(candidate);
               }
 
+              if (rows.length === 0) {
+                const summaryPattern = new RegExp(
+                  `^(.*?),\\s*(Hosted|Local),\\s*(${stateLabels.join('|')}),\\s*(.+Branch:.+)$`,
+                );
+                const accessibleRows = visibleElements(
+                  document,
+                  'button[aria-label],[role="button"][aria-label],flt-semantics[aria-label]',
+                )
+                  .map((element) => {
+                    const summaryLabel = accessibleLabel(element);
+                    const summaryMatch = summaryLabel.match(summaryPattern);
+                    if (!summaryMatch) {
+                      return null;
+                    }
+                    let rowElement = element;
+                    let current = element.parentElement;
+                    while (current && current !== switcher) {
+                      const labels = visibleElements(
+                        current,
+                        'flt-semantics[role="button"],[role="button"],button',
+                      )
+                        .map((candidate) => accessibleLabel(candidate))
+                        .filter((label) => label.length > 0);
+                      if (
+                        labels.some((label) => label.startsWith('Delete:'))
+                        && labels.some((label) =>
+                          label === 'Active'
+                          || label.startsWith('Retry:')
+                          || label.startsWith('Open:')
+                          || label.startsWith('Re-authenticate:')
+                          || label.startsWith('Reauthenticate:')
+                        )
+                      ) {
+                        rowElement = current;
+                        break;
+                      }
+                      current = current.parentElement;
+                    }
+                    const buttonLabels = visibleElements(
+                      rowElement,
+                      'flt-semantics[role="button"],[role="button"],button',
+                    )
+                      .map((candidate) => accessibleLabel(candidate))
+                      .filter((label) => label.length > 0);
+                    return {
+                      displayName: summaryMatch[1],
+                      targetTypeLabel: summaryMatch[2],
+                      stateLabel: summaryMatch[3],
+                      detailText: summaryMatch[4],
+                      visibleText: [summaryLabel, ...buttonLabels].join(' ').trim(),
+                      selected: buttonLabels.includes('Active'),
+                      semanticsLabel: summaryLabel,
+                      iconAccessibilityLabel: null,
+                      actionLabels: buttonLabels.filter((label) =>
+                        label === 'Active'
+                        || label.startsWith('Retry:')
+                        || label.startsWith('Open:')
+                        || label.startsWith('Re-authenticate:')
+                        || label.startsWith('Reauthenticate:')
+                      ),
+                      buttonLabels,
+                    };
+                  })
+                  .filter((candidate) => candidate !== null);
+                return {
+                  bodyText,
+                  switcherText: normalize(switcher.innerText || ''),
+                  rows: accessibleRows,
+                };
+              }
+
               return {
                 bodyText,
                 switcherText: normalize(switcher.innerText || ''),
@@ -4415,12 +5229,20 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const labelFor = (element) =>
-                normalize(element.getAttribute('aria-label') || element.innerText || '');
+                normalize(element.getAttribute('aria-label') || element.innerText || element.textContent || '');
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"],[role="button"],button'),
+                document.querySelectorAll(
+                  'button, flt-semantics[role="button"], [role="button"], [aria-label^="Workspace switcher:"]',
+                ),
               ).filter(isVisible);
               const trigger = buttons
-                .filter((element) => labelFor(element).startsWith('Workspace switcher:'))
+                .filter((element) => {
+                  const label = labelFor(element);
+                  const text = visibleText(element);
+                  return label.includes('Workspace switcher:') || text.includes('Workspace switcher:');
+                })
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
                   const rightRect = right.getBoundingClientRect();
@@ -4442,7 +5264,7 @@ class LiveWorkspaceSwitcherPage:
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
                 semanticLabel: labelFor(trigger),
-                visibleText: normalize(rawText),
+                visibleText: visibleText(trigger),
                 rawTextLines,
                 iconCount,
                 left: rect.left,
@@ -4451,7 +5273,7 @@ class LiveWorkspaceSwitcherPage:
                 height: rect.height,
                 topButtonLabels: buttons
                   .filter((element) => element.getBoundingClientRect().top < 160)
-                  .map((element) => labelFor(element))
+                  .map((element) => labelFor(element) || visibleText(element))
                   .filter((label) => label.length > 0),
               };
             }
@@ -6460,7 +7282,7 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const trigger = Array.from(
-                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
               )
                 .filter((candidate) =>
                   isVisible(candidate)
@@ -6521,7 +7343,7 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const trigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
               ).find((candidate) =>
                 isVisible(candidate)
                 && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
@@ -6598,6 +7420,7 @@ class LiveWorkspaceSwitcherPage:
         *,
         tab_count: int,
         timeout_ms: int,
+        stop_when_workspace_trigger_reached: bool = False,
     ) -> tuple[FocusNavigationStep, ...]:
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, tab_count + 1):
@@ -6615,6 +7438,11 @@ class LiveWorkspaceSwitcherPage:
                     after_outer_html=after.outer_html,
                 )
             )
+            if (
+                stop_when_workspace_trigger_reached
+                and self._is_workspace_trigger_label(after.accessible_name)
+            ):
+                break
         return tuple(steps)
 
     def _wait_for_surface(self, *, timeout_ms: int) -> None:
@@ -6947,48 +7775,80 @@ class LiveWorkspaceSwitcherPage:
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
         try:
-            clicked = self._session.wait_for_function(
-                """
-                ({ triggerLabelPrefix }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const labelFor = (element) =>
-                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
-                  const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"],button'),
-                  )
-                    .filter(isVisible)
-                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
-                  if (!trigger) {
-                    return null;
-                  }
-                  trigger.click();
-                  return labelFor(trigger);
-                }
-                """,
-                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+            self._session.click(
+                self._workspace_trigger_selector,
                 timeout_ms=timeout_ms,
             )
-        except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The live app did not expose a clickable workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
-        if not isinstance(clicked, str) or not clicked.startswith(self._trigger_label_prefix):
-            raise AssertionError(
-                "The live app did not expose a clickable workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
+            return
+        except WebAppTimeoutError:
+            pass
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=self._trigger_label_prefix,
+                timeout_ms=timeout_ms,
             )
+            return
+        except WebAppTimeoutError as original_error:
+            try:
+                clicked = self._session.wait_for_function(
+                    """
+                    ({ triggerLabelPrefix }) => {
+                      const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                      const isVisible = (element) => {
+                        if (!element) {
+                          return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0
+                          && rect.height > 0
+                          && style.visibility !== 'hidden'
+                          && style.display !== 'none';
+                      };
+                      const labelFor = (element) =>
+                        normalize(
+                          element?.getAttribute?.('aria-label')
+                          || element?.innerText
+                          || element?.textContent
+                          || '',
+                        );
+                      const trigger = Array.from(
+                        document.querySelectorAll(
+                          'button, flt-semantics[role="button"], [role="button"], [aria-label^="Workspace switcher:"]',
+                        ),
+                      )
+                        .filter((candidate) => isVisible(candidate) && labelFor(candidate).startsWith(triggerLabelPrefix))
+                        .sort((left, right) => {
+                          const leftRect = left.getBoundingClientRect();
+                          const rightRect = right.getBoundingClientRect();
+                          return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                        })[0] ?? null;
+                      if (!trigger) {
+                        return null;
+                      }
+                      trigger.click();
+                      return labelFor(trigger);
+                    }
+                    """,
+                    arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                    timeout_ms=timeout_ms,
+                )
+                if isinstance(clicked, str) and clicked.startswith(self._trigger_label_prefix):
+                    return
+            except WebAppTimeoutError:
+                pass
+            try:
+                self._session.click(
+                    'button[aria-label^="Workspace switcher:"], [role="button"][aria-label^="Workspace switcher:"]',
+                    timeout_ms=timeout_ms,
+                )
+                return
+            except WebAppTimeoutError as fallback_error:
+                raise AssertionError(
+                    "The live app did not expose a clickable workspace switcher trigger.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                ) from fallback_error
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:

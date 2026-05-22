@@ -10,7 +10,7 @@ runtime_inputs:
   base_branch: main
   target_workflow_name: Flutter Required Checks
   target_workflow_path: .github/workflows/unit-tests.yml
-  probe_path: lib/ts925_probe_surface.dart
+  probe_path: lib/ts908_probe_surface.dart
   probe_render_host_path: lib/main.dart
   branch_prefix: ts925-accessibility-fail-fast
   commit_message: "TS-925 probe: verify accessibility failure blocks downstream deployment"
@@ -53,5 +53,5 @@ runtime_inputs:
   pull_request_timeout_seconds: 180
   ui_timeout_seconds: 60
 notes:
-  - Reuses the live disposable accessibility-failure PR path from TS-908, then verifies whether any downstream deploy/publish stage is exposed and blocked after the accessibility job fails.
-  - Captures a real GitHub Actions run-page screenshot for human-style verification.
+  - Reuses the live rendered TS-908 accessibility-failure probe path from main, then verifies whether any downstream deploy/publish stage is exposed and blocked after the accessibility job fails.
+  - Records real GitHub Actions run-page evidence for human-style verification.

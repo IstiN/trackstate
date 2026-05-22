@@ -220,6 +220,24 @@ class GitHubAccessibilityPullRequestGateProbeService:
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
             ),
+            default_branch_probe_host_present=bool(
+                pull_request_observation.get("default_branch_probe_host_present")
+            ),
+            default_branch_probe_host_summary=str(
+                pull_request_observation.get("default_branch_probe_host_summary", "")
+            ),
+            flutter_engine_initialization_log_entries=list(
+                pull_request_observation.get("flutter_engine_initialization_log_entries", [])
+            ),
+            flutter_engine_initialization_summary=str(
+                pull_request_observation.get("flutter_engine_initialization_summary", "")
+            ),
+            semantics_tree_discovery_log_entries=list(
+                pull_request_observation.get("semantics_tree_discovery_log_entries", [])
+            ),
+            semantics_tree_discovery_summary=str(
+                pull_request_observation.get("semantics_tree_discovery_summary", "")
+            ),
         )
 
     def _create_and_observe_pull_request(self, workflow_id: int) -> dict[str, object]:
@@ -230,6 +248,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
         cleanup_closed_pull_request = False
         cleanup_deleted_branch = False
         observation: dict[str, object] | None = None
+        (
+            default_branch_probe_host_present,
+            default_branch_probe_host_summary,
+        ) = self._default_branch_probe_host_details(self._config.base_branch)
 
         try:
             self._run_command(["gh", "auth", "setup-git"], cwd=None)
@@ -267,8 +289,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
             render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
+                render_host_original_source
             )
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
@@ -330,16 +353,20 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 surface_observation["status_checks"]
             )
             run_log_text, run_log_error = self._try_read_run_log(run_id)
-            run_log_matched_accessibility_markers = self._matched_markers(
+            accessibility_stage_run_log_text = self._accessibility_stage_run_log_text(
                 run_log_text,
+                jobs,
+            )
+            run_log_matched_accessibility_markers = self._matched_markers(
+                accessibility_stage_run_log_text,
                 self._config.expected_accessibility_markers,
             )
             run_log_matched_contrast_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.contrast_evidence_markers,
             )
             run_log_matched_semantic_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.semantic_evidence_markers,
             )
             evidence_text = "\n".join(
@@ -348,7 +375,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                     *surface_observation["status_check_workflow_names"],
                     *self._job_names(jobs),
                     *self._step_names(jobs),
-                    run_log_text,
+                    accessibility_stage_run_log_text,
                 ]
             )
             matched_accessibility_markers = self._matched_markers(
@@ -365,7 +392,19 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
             probe_semantic_label = self._extract_probe_semantic_label(probe_source)
             runtime_accessibility_surface_summary = (
-                self._extract_runtime_accessibility_surface_summary(run_log_text)
+                self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
+            )
+            flutter_engine_initialization_log_entries = (
+                self._extract_flutter_engine_initialization_log_entries(
+                    accessibility_stage_run_log_text
+                )
+            )
+            semantics_tree_discovery_log_entries = (
+                self._extract_semantics_tree_discovery_log_entries(
+                    accessibility_stage_run_log_text
+                )
             )
 
             observation = {
@@ -378,7 +417,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or default_branch_probe_host_present
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -434,7 +478,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "run_log_mentions_semantic_issue": bool(
                     run_log_matched_semantic_markers
                 ),
-                "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
+                "run_log_excerpt": self._extract_log_excerpt(
+                    accessibility_stage_run_log_text,
+                    evidence_text,
+                ),
                 "run_log_error": run_log_error,
                 "runtime_accessibility_surface_present": bool(
                     runtime_accessibility_surface_summary
@@ -442,14 +489,28 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "default_branch_probe_host_present": default_branch_probe_host_present,
+                "default_branch_probe_host_summary": default_branch_probe_host_summary,
+                "flutter_engine_initialization_log_entries": (
+                    flutter_engine_initialization_log_entries
+                ),
+                "flutter_engine_initialization_summary": self._summarize_log_entries(
+                    flutter_engine_initialization_log_entries
+                ),
+                "semantics_tree_discovery_log_entries": (
+                    semantics_tree_discovery_log_entries
+                ),
+                "semantics_tree_discovery_summary": self._summarize_log_entries(
+                    semantics_tree_discovery_log_entries
+                ),
             }
         finally:
             if pull_request_number is not None:
@@ -566,6 +627,45 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 f"{quote(workflow_path, safe='/')}?ref={quote(ref, safe='')}"
             ),
             field_args=["-H", "Accept: application/vnd.github.raw+json"],
+        )
+
+    def _read_repository_file_text(self, file_path: str, ref: str) -> str:
+        return self._github_api_client.request_text(
+            endpoint=(
+                f"/repos/{self._config.repository}/contents/"
+                f"{quote(file_path, safe='/')}?ref={quote(ref, safe='')}"
+            ),
+            field_args=["-H", "Accept: application/vnd.github.raw+json"],
+        )
+
+    def _default_branch_probe_host_details(self, ref: str) -> tuple[bool, str]:
+        try:
+            source = self._read_repository_file_text(self._config.probe_render_host_path, ref)
+        except GitHubApiClientError as error:
+            return (
+                False,
+                f"Could not read {self._config.probe_render_host_path}@{ref}: {error}",
+            )
+
+        matched_indicators: list[str] = []
+        probe_widget_name = self._probe_widget_name()
+        rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        if probe_widget_name in source:
+            matched_indicators.append(probe_widget_name)
+        if rendered_probe_app_class_name in source:
+            matched_indicators.append(rendered_probe_app_class_name)
+
+        if not matched_indicators:
+            return (
+                False,
+                f"{self._config.probe_render_host_path}@{ref} did not expose "
+                f"{probe_widget_name} or {rendered_probe_app_class_name}.",
+            )
+
+        return (
+            True,
+            f"{self._config.probe_render_host_path}@{ref} already exposed "
+            f"{', '.join(matched_indicators)}.",
         )
 
     def _wait_for_pull_request_run(
@@ -793,7 +893,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 for run in runs_to_consider
             ):
                 return "failure"
-            success_conclusions = {"success", "neutral", "skipped"}
+            success_conclusions = {"success"}
             if all(
                 self._optional_string(run.get("conclusion")) in success_conclusions
                 for run in runs_to_consider
@@ -948,6 +1048,16 @@ class GitHubAccessibilityPullRequestGateProbeService:
         matches = [marker for marker in markers if marker.lower() in normalized]
         return self._dedupe(matches)
 
+    def _accessibility_job_names(self, jobs: list[dict[str, Any]]) -> list[str]:
+        accessibility_job_names: list[str] = []
+        for job in jobs:
+            name = job.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if self._contains_any_marker(name, self._config.accessibility_job_markers):
+                accessibility_job_names.append(name.strip())
+        return self._dedupe(accessibility_job_names)
+
     @staticmethod
     def _extract_probe_semantic_label(probe_source: str) -> str | None:
         match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
@@ -957,23 +1067,99 @@ class GitHubAccessibilityPullRequestGateProbeService:
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
-        del probe_source
+        if "final lowContrastColor = colorScheme.surface;" in " ".join(probe_source.split()):
+            return (
+                "Uses `colorScheme.surface` text on `colorScheme.surface` to guarantee a "
+                "WCAG contrast failure while remaining theme-token-safe."
+            )
+        if "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source:
+            return (
+                "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+                "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            )
         return (
             "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            "`colorScheme.surface` or an equivalent theme-token-safe low-contrast signal."
+        )
+
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
         )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
-        if not run_log_text.strip():
-            return ""
-        match = re.search(
-            r"Accessibility runtime surface ready:[^\r\n]*",
+        for line in self._extract_matching_log_lines(
             run_log_text,
-            flags=re.IGNORECASE,
+            markers=["accessibility runtime surface ready"],
+        ):
+            return line
+        return ""
+
+    def _extract_flutter_engine_initialization_log_entries(
+        self,
+        run_log_text: str,
+    ) -> list[str]:
+        return self._extract_matching_log_lines(
+            run_log_text,
+            markers=["flutter engine initialization"],
         )
-        if match is None:
+
+    def _extract_semantics_tree_discovery_log_entries(
+        self,
+        run_log_text: str,
+    ) -> list[str]:
+        return self._extract_matching_log_lines(
+            run_log_text,
+            markers=[
+                "semantics tree discovery",
+                "accessibility runtime surface ready",
+            ],
+        )
+
+    def _extract_matching_log_lines(
+        self,
+        run_log_text: str,
+        *,
+        markers: list[str],
+    ) -> list[str]:
+        if not run_log_text.strip():
+            return []
+
+        lowered_markers = [marker.lower() for marker in markers if marker.strip()]
+        matches: list[str] = []
+        for raw_line in run_log_text.splitlines():
+            normalized_line = " ".join(raw_line.split()).strip()
+            if not normalized_line:
+                continue
+            if any(
+                self._line_contains_runtime_marker(normalized_line, marker)
+                for marker in lowered_markers
+            ):
+                matches.append(self._snippet(normalized_line, limit=300))
+        return self._dedupe(matches)
+
+    @staticmethod
+    def _line_contains_runtime_marker(normalized_line: str, marker: str) -> bool:
+        lowered_line = normalized_line.lower()
+        marker = marker.lower().strip()
+        if not marker:
+            return False
+        return lowered_line.startswith(marker) or bool(
+            re.search(
+                r"\d{4}-\d{2}-\d{2}t[\d:.]+z\s+" + re.escape(marker),
+                lowered_line,
+            )
+        )
+
+    def _summarize_log_entries(self, entries: list[str]) -> str:
+        if not entries:
             return ""
-        return self._snippet(match.group(0), limit=400)
+        return self._snippet(" | ".join(entries[:3]), limit=400)
 
     def _extract_log_excerpt(self, run_log_text: str, fallback_text: str) -> str:
         text = run_log_text or fallback_text
@@ -994,6 +1180,17 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 start = max(index - 200, 0)
                 end = min(index + 800, len(text))
                 return self._snippet(text[start:end], limit=1000)
+        preferred_runtime_markers = [
+            "flutter engine initialization",
+            "semantics tree discovery",
+            "accessibility runtime surface ready",
+        ]
+        for marker in preferred_runtime_markers:
+            index = lowered.find(marker)
+            if index >= 0:
+                start = max(index - 200, 0)
+                end = min(index + 800, len(text))
+                return self._snippet(text[start:end], limit=1000)
         markers = [
             *self._config.expected_accessibility_markers,
             *self._config.contrast_evidence_markers,
@@ -1006,6 +1203,29 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 end = min(index + 600, len(text))
                 return self._snippet(text[start:end], limit=800)
         return self._snippet(text, limit=800)
+
+    def _accessibility_stage_run_log_text(
+        self,
+        run_log_text: str,
+        jobs: list[dict[str, Any]],
+    ) -> str:
+        if not run_log_text.strip():
+            return ""
+        accessibility_job_names = self._accessibility_job_names(jobs)
+        if not accessibility_job_names:
+            return ""
+
+        scoped_lines: list[str] = []
+        for raw_line in run_log_text.splitlines():
+            normalized_line = " ".join(raw_line.split()).strip()
+            if not normalized_line:
+                continue
+            if self._line_belongs_to_any_job(
+                normalized_line,
+                accessibility_job_names,
+            ):
+                scoped_lines.append(normalized_line)
+        return "\n".join(scoped_lines)
 
     def _close_pull_request(self, pull_request_number: int) -> bool:
         try:
@@ -1109,6 +1329,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
     def _probe_source() -> str:
         return """import 'package:flutter/material.dart';
 
+import 'ui/features/tracker/services/accessibility_probe_signal.dart';
+
 class Ts908ProbeSurface extends StatelessWidget {
   const Ts908ProbeSurface({super.key});
 
@@ -1116,16 +1338,25 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
+    const probeText = 'Sync issue';
+    const semanticsLabel = 'button';
+
+    publishAccessibilityContrastProbeSignal(
+      text: probeText,
+      semanticsLabel: semanticsLabel,
+      foreground: lowContrastColor,
+      background: colorScheme.surface,
+    );
 
     return Semantics(
-      label: 'button',
+      label: semanticsLabel,
       button: true,
       child: Container(
         color: colorScheme.surface,
         padding: const EdgeInsets.all(12),
         child: Text(
-          'Sync issue',
+          probeText,
           style: textStyle?.copyWith(color: lowContrastColor) ??
               TextStyle(color: lowContrastColor),
         ),
@@ -1138,12 +1369,10 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
-        rendered_probe_overlay_class_name = self._rendered_probe_overlay_class_name()
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
-            or rendered_probe_overlay_class_name in source
         ):
             return source
 
@@ -1195,40 +1424,28 @@ class Ts908ProbeSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {{
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        child,
-        Positioned(
-          top: 24,
-          left: 24,
-          child: Directionality(
-            textDirection: TextDirection.ltr,
-            child: {overlay_class}(),
+    assert(() {{
+      debugPrint(
+        'Accessibility probe preserved original app entrypoint: ${{child.runtimeType}}',
+      );
+      return true;
+    }}());
+    return MaterialApp(
+      title: 'TrackState.AI',
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: const {probe_widget}(),
           ),
         ),
-      ],
-    );
-  }}
-}}
-
-class {overlay_class} extends StatelessWidget {{
-  const {overlay_class}();
-
-  @override
-  Widget build(BuildContext context) {{
-    return Theme(
-      data: ThemeData(useMaterial3: true),
-      child: Material(
-        color: Colors.transparent,
-        child: const {probe_widget}(),
       ),
     );
   }}
 }}
 """.format(
                 app_class=rendered_probe_app_class_name,
-                overlay_class=rendered_probe_overlay_class_name,
                 probe_widget=probe_widget_name,
             )
         )
@@ -1371,6 +1588,26 @@ class {overlay_class} extends StatelessWidget {{
     def _contains_any_marker(text: str, markers: list[str]) -> bool:
         lowered = text.lower()
         return any(marker.lower() in lowered for marker in markers if marker.strip())
+
+    @staticmethod
+    def _line_belongs_to_any_job(normalized_line: str, job_names: list[str]) -> bool:
+        lowered_line = normalized_line.lower()
+        for job_name in job_names:
+            stripped_name = job_name.strip()
+            if not stripped_name:
+                continue
+            lowered_job_name = stripped_name.lower()
+            if (
+                lowered_line == lowered_job_name
+                or lowered_line.startswith(f"{lowered_job_name} ")
+            ):
+                return True
+        return False
+
+    def _render_host_renders_probe(self, render_host_source: str) -> bool:
+        probe_import = Path(self._config.probe_path).name
+        probe_widget_name = self._probe_widget_name()
+        return probe_import in render_host_source and probe_widget_name in render_host_source
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:
