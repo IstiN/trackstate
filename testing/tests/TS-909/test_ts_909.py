@@ -5,6 +5,7 @@ import platform
 import sys
 import traceback
 from pathlib import Path
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -175,6 +176,7 @@ def _evaluate_pull_request_compose_surface(
     pulls_result = probe.pull_requests(config.repository, state="open")
 
     if not branches_result.succeeded:
+        result["failure_kind"] = "setup"
         _record_step(
             result,
             step=1,
@@ -192,6 +194,7 @@ def _evaluate_pull_request_compose_surface(
         return
 
     if not pulls_result.succeeded:
+        result["failure_kind"] = "setup"
         _record_step(
             result,
             step=1,
@@ -218,6 +221,7 @@ def _evaluate_pull_request_compose_surface(
     result["candidate_compare_heads"] = candidate_heads[:10]
 
     if not candidate_heads:
+        result["failure_kind"] = "setup"
         _record_step(
             result,
             step=1,
@@ -248,13 +252,35 @@ def _evaluate_pull_request_compose_surface(
     try:
         with create_github_pull_request_compose_page() as compose_page:
             for head_branch in candidate_heads[:10]:
-                observation = compose_page.open_compose_surface(
-                    repository=verification.target_repository,
-                    base_branch=default_branch,
-                    head_branch=head_branch,
-                    expected_texts=expected_surface_texts,
-                    screenshot_path=None,
-                )
+                try:
+                    observation = compose_page.open_compose_surface(
+                        repository=verification.target_repository,
+                        base_branch=default_branch,
+                        head_branch=head_branch,
+                        expected_texts=expected_surface_texts,
+                        screenshot_path=None,
+                    )
+                except AssertionError as error:
+                    error_text = str(error)
+                    compare_attempts.append(
+                        {
+                            "head_branch": head_branch,
+                            "url": _compose_compare_url(
+                                repository=verification.target_repository,
+                                base_branch=default_branch,
+                                head_branch=head_branch,
+                            ),
+                            "matched_text": None,
+                            "body_text_excerpt": _snippet(error_text),
+                            "description_selector": None,
+                            "description_value_excerpt": None,
+                            "error": error_text,
+                        }
+                    )
+                    if _looks_like_unauthenticated_compare_surface(error_text):
+                        result["failure_kind"] = "setup"
+                        break
+                    continue
                 last_observation = observation
                 compare_attempts.append(
                     {
@@ -381,6 +407,9 @@ def _evaluate_template_body(
     verification: PullRequestTemplateChecklistVerificationResult,
     config: PullRequestTemplateChecklistConfig,
 ) -> None:
+    if _step_status(result, 1) != "passed":
+        return
+
     body_source_name, body_source_path, body_source_field, body_source_text = _resolved_template_body_source(
         result=result,
     )
@@ -936,6 +965,15 @@ def _step_outcome(result: dict[str, object], step_number: int) -> str:
     return "No observation was recorded for this step."
 
 
+def _step_status(result: dict[str, object], step_number: int) -> str | None:
+    for item in result.get("steps", []):
+        if not isinstance(item, dict) or item.get("step") != step_number:
+            continue
+        status = item.get("status")
+        return status if isinstance(status, str) and status else None
+    return None
+
+
 def _snippet(text: str, *, limit: int = 400) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
@@ -959,7 +997,23 @@ def _looks_like_unauthenticated_github_browser(
 
 def _looks_like_unauthenticated_compare_surface(body_text: str) -> bool:
     lowered_body = body_text.lower()
-    return "sign in" in lowered_body and "comparing changes" in lowered_body
+    return (
+        ("sign in" in lowered_body and "comparing changes" in lowered_body)
+        or "github.com/login" in lowered_body
+        or "username or email address" in lowered_body
+    )
+
+
+def _compose_compare_url(
+    *,
+    repository: str,
+    base_branch: str,
+    head_branch: str,
+) -> str:
+    return (
+        f"https://github.com/{repository}/compare/"
+        f"{quote(base_branch, safe='')}...{quote(head_branch, safe='')}?expand=1"
+    )
 
 
 if __name__ == "__main__":

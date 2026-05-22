@@ -46,9 +46,11 @@ class GitHubPullRequestComposePage:
                 expected_texts,
                 timeout_ms=timeout_seconds * 1_000,
             )
-            description_selector, description_value = self._read_description_field(
-                timeout_seconds=timeout_seconds
-            )
+            description_selector, description_value = (None, None)
+            if match.matched_text == "Open a pull request":
+                description_selector, description_value = self._read_description_field(
+                    timeout_seconds=timeout_seconds
+                )
             return GitHubPullRequestComposeObservation(
                 url=url,
                 matched_text=match.matched_text,
