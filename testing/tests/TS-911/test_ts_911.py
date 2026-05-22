@@ -143,7 +143,27 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime = tracker_page.open()
+                try:
+                    runtime = tracker_page.open()
+                except AssertionError as error:
+                    visible_body_text = _visible_body_text_from_text(str(error))
+                    result["runtime_state"] = "not-interactive"
+                    result["runtime_body_text"] = visible_body_text
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the live URL in Chromium and observed the first "
+                            "rendered screen exactly as a user would before any "
+                            "workspace-switcher interaction."
+                        ),
+                        observed=(
+                            "After waiting for the initial page load, the app remained "
+                            f"almost blank and exposed only {visible_body_text!r}; no "
+                            "workspace switcher trigger, dashboard, or other interactive "
+                            "app-shell controls became visible."
+                        ),
+                    )
+                    raise
                 result["runtime_state"] = runtime.kind
                 result["runtime_body_text"] = runtime.body_text
                 if runtime.kind != "ready":
@@ -967,6 +987,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "1. Kept the Step 1-derived first internal target as the source of truth instead of overwriting it with whichever control happened to hold focus.",
         "2. Established the ticket precondition by focusing that exact first internal target directly through the page object before evaluating the reverse-wrap behavior.",
         "3. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
+        "4. Moved `displayNameHint` into `observe_switcher_button_state()` and removed the duplicate declaration from `observe_switcher_button_focusability()` so the shared workspace-switcher helpers use the same display-name fallback safely.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1012,7 +1033,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, and kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel.",
+        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel, and fixed the shared `displayNameHint` helper regression in the workspace-switcher page object.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1020,14 +1041,43 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         f"- Expected result: {EXPECTED_RESULT}",
-        f"- Observed outcome: {_actual_vs_expected_summary(result) if passed else failure_summary}",
+        (
+            f"- Observed outcome: "
+            f"{_actual_vs_expected_summary(result) if passed or _is_runtime_bootstrap_failure(result) else failure_summary}"
+        ),
     ]
     if result.get("screenshot"):
         lines.append(f"- Screenshot: `{result['screenshot']}`")
     return "\n".join(lines) + "\n"
 
 
+def _is_runtime_bootstrap_failure(result: dict[str, object]) -> bool:
+    return _failed_step_number(result) == 1 and "never reached an interactive state" in str(
+        result.get("error", ""),
+    )
+
+
+def _visible_body_text_from_result(result: dict[str, object]) -> str:
+    runtime_body_text = str(result.get("runtime_body_text") or "").strip()
+    if runtime_body_text:
+        return runtime_body_text
+
+    return _visible_body_text_from_text(
+        str(result.get("error", "")) or _failed_step_summary(result),
+    )
+
+
+def _visible_body_text_from_text(text: str) -> str:
+    marker = "Visible body text:"
+    if marker in text:
+        return text.split(marker, 1)[1].strip()
+    return "<unknown>"
+
+
 def _bug_description(result: dict[str, object]) -> str:
+    if _is_runtime_bootstrap_failure(result):
+        return _runtime_bootstrap_bug_description(result)
+
     reproduction_steps = [
         "1. Open the TrackState application in a desktop browser.",
         "2. Open the workspace switcher panel from Dashboard.",
@@ -1090,7 +1140,99 @@ def _bug_description(result: dict[str, object]) -> str:
     ) + "\n"
 
 
+def _runtime_bootstrap_bug_description(result: dict[str, object]) -> str:
+    visible_body_text = _visible_body_text_from_result(result)
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - Deployed TrackState app never reaches an interactive state",
+            "",
+            "## Summary",
+            _actual_vs_expected_summary(result),
+            "",
+            "## Exact steps to reproduce",
+            "1. Open the TrackState application in a desktop browser at `https://istin.github.io/trackstate-setup/`.",
+            "2. Wait for the initial TrackState UI to finish loading.",
+            "3. Look for the top-bar workspace switcher trigger and the rest of the interactive app shell.",
+            "4. Attempt to open the workspace switcher panel.",
+            "5. Observe the rendered page state.",
+            "",
+            "## Exact steps from the test case with observations",
+            _annotated_request_steps(result),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            f"- **Expected:** {EXPECTED_RESULT}",
+            (
+                "- **Actual:** The deployed app never rendered the interactive "
+                "workspace-switcher flow. Chromium showed "
+                f"{visible_body_text!r} on an otherwise blank page, so the "
+                "workspace switcher trigger and panel never became available."
+            ),
+            "",
+            "## Broken production capability",
+            "The deployed TrackState app must render an interactive desktop shell "
+            "before the workspace-switcher keyboard behavior can be validated. "
+            "Because the live page stalls in a blank `Sync issue` state, the "
+            "workspace switcher cannot be opened and the TS-911 Shift+Tab scenario "
+            "is blocked by a production-visible rendering/bootstrap defect.",
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Browser: `{result.get('browser')}`",
+            f"- OS: `{result.get('os')}`",
+            f"- Viewport: `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
+            f"- Run command: `{RUN_COMMAND}`",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', 'not captured')}`",
+            f"- Visible body text: `{visible_body_text}`",
+            "- Step log:",
+            "```json",
+            json.dumps(
+                {
+                    "steps": _steps(result),
+                    "runtime_state": result.get("runtime_state"),
+                    "runtime_body_text": result.get("runtime_body_text"),
+                    "initial_state": result.get("initial_state"),
+                },
+                indent=2,
+            ),
+            "```",
+        ],
+    ) + "\n"
+
+
 def _annotated_request_steps(result: dict[str, object]) -> str:
+    if _is_runtime_bootstrap_failure(result):
+        visible_body_text = _visible_body_text_from_result(result)
+        lines = [
+            (
+                "1. The TrackState application is opened in a desktop browser.\n"
+                "   ❌ The URL opened in Chromium, but the page never rendered the "
+                f"interactive app shell; the visible body text was {visible_body_text!r}."
+            ),
+            (
+                "2. The workspace switcher panel is currently open.\n"
+                "   ❌ Not possible: no workspace switcher trigger or dashboard shell "
+                "became visible, so the panel could not be opened."
+            ),
+            (
+                "3. Keyboard focus is positioned on the first interactive element within the panel.\n"
+                "   ❌ Not reached because the workspace switcher panel never rendered."
+            ),
+            (
+                "4. Press the 'Shift + Tab' keys on the keyboard.\n"
+                "   ❌ Not reached because the page never advanced past the blank "
+                "`Sync issue` state."
+            ),
+        ]
+        return "\n".join(lines)
+
     before_state = result.get("first_keyboard_target_state")
     after_state = result.get("after_shift_tab_state")
     lines = [
@@ -1120,6 +1262,15 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
 
 
 def _actual_vs_expected_summary(result: dict[str, object]) -> str:
+    if _is_runtime_bootstrap_failure(result):
+        visible_body_text = _visible_body_text_from_result(result)
+        return (
+            "The deployed app never rendered an interactive TrackState shell. "
+            f"Chromium showed {visible_body_text!r} on an otherwise blank page, "
+            "so the workspace switcher could not be opened and the Shift+Tab "
+            "focus-wrap scenario never became reachable."
+        )
+
     after_state = result.get("after_shift_tab_state")
     if not isinstance(after_state, dict):
         return _failed_step_summary(result)
@@ -1144,6 +1295,13 @@ def _failed_step_label(result: dict[str, object]) -> str:
     if failed is None:
         return "No failed automation step recorded"
     return f"Step {failed['step']} — {failed['action']}"
+
+
+def _failed_step_number(result: dict[str, object]) -> int | None:
+    failed = next((step for step in _steps(result) if step["status"] == "failed"), None)
+    if failed is None:
+        return None
+    return int(failed.get("step", -1))
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
@@ -1638,7 +1796,7 @@ def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
         {
             "inReplyToId": thread.get("rootCommentId"),
             "threadId": thread.get("threadId"),
-            "reply": _review_reply_text(passed=passed, result=result),
+            "reply": _review_reply_text(thread=thread, passed=passed, result=result),
         }
         for thread in _discussion_threads()
     ]
@@ -1665,7 +1823,12 @@ def _discussion_threads() -> list[dict[str, object]]:
     ]
 
 
-def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+def _review_reply_text(
+    *,
+    thread: dict[str, object],
+    passed: bool,
+    result: dict[str, object],
+) -> str:
     rerun_summary = (
         f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         if passed
@@ -1674,6 +1837,18 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
             f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result).splitlines()[0]}"
         )
     )
+    thread_body = str(thread.get("body", ""))
+    thread_path = str(thread.get("path", ""))
+    if "displayNameHint" in thread_body or thread_path.endswith(
+        "live_workspace_switcher_page.py",
+    ):
+        return (
+            "Fixed: moved `const displayNameHint = normalize(label.split(',')[0] || '');` "
+            "into `observe_switcher_button_state()` and removed the duplicate declaration "
+            "from `observe_switcher_button_focusability()`, so both shared browser-side "
+            "helpers now use the same display-name fallback without throwing or shadowing. "
+            f"{rerun_summary}"
+        )
     return (
         "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
         "source of truth, establishes that exact label directly through the page "
