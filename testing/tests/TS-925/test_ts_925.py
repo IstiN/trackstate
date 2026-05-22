@@ -102,7 +102,7 @@ def main() -> None:
         "default_branch": config.base_branch,
         "target_workflow_name": config.target_workflow_name,
         "target_workflow_path": config.target_workflow_path,
-        "browser": "Chromium (Playwright)",
+        "browser": "GitHub Actions page verification",
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
@@ -134,6 +134,12 @@ def main() -> None:
         result["downstream_job"] = None if downstream_job is None else asdict(downstream_job)
         result["run_page"] = None if run_page is None else asdict(run_page)
         result["run_page_error"] = run_page_error
+        if run_page is not None:
+            result["browser"] = (
+                "Chromium (Playwright)"
+                if run_page.screenshot_path
+                else "GitHub Actions HTML session (urllib fallback)"
+            )
 
         failures: list[str] = []
         _evaluate_pr_probe(result, observation, failures)
@@ -581,7 +587,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Created a disposable pull request against the live repository with the rendered accessibility probe path used for the deployed PR accessibility gate.",
         "* Waited for the live pull-request GitHub Actions workflow run and read its status checks, jobs, and logs.",
-        "* Opened the live run page for human-style verification and captured a screenshot.",
+        "* Opened the live run page for human-style verification and recorded visible page evidence.",
         "* Checked whether a downstream deploy or publish stage existed and whether it stayed blocked after the accessibility failure.",
         "",
         "h4. Human-style verification",
@@ -595,7 +601,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             f"* Environment: repository {{{{{result['repository']}}}}} @ "
-            f"{{{{{result['default_branch']}}}}}, browser {{Chromium (Playwright)}}, "
+            f"{{{{{result['default_branch']}}}}}, browser {{{{{result['browser']}}}}}, "
             f"OS {{{{{result['os']}}}}}."
         ),
         "",
@@ -626,7 +632,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Created a disposable pull request against the live repository with the rendered accessibility probe path used for the deployed PR accessibility gate.",
         "- Waited for the live pull-request GitHub Actions workflow run and read its status checks, jobs, and logs.",
-        "- Opened the live run page for human-style verification and captured a screenshot.",
+        "- Opened the live run page for human-style verification and recorded visible page evidence.",
         "- Checked whether a downstream deploy or publish stage existed and whether it stayed blocked after the accessibility failure.",
         "",
         "## Human-style verification",
@@ -640,7 +646,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             f"- Environment: repository `{result['repository']}` @ "
-            f"`{result['default_branch']}`, browser `Chromium (Playwright)`, "
+            f"`{result['default_branch']}`, browser `{result['browser']}`, "
             f"OS `{result['os']}`."
         ),
         "",
@@ -671,13 +677,13 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         "- Fixed the TS-925 rework findings by preserving valid multiline `runApp(...)` probe injection and by requiring explicit axe-core execution evidence before treating Step 4 as a product-gap failure.",
-        "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and captures a real run-page screenshot.",
+        "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and records real run-page evidence.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['repository']}` @ `{result['default_branch']}` "
-            f"using Chromium (Playwright) on `{result['os']}`."
+            f"using {result['browser']} on `{result['os']}`."
         ),
         (
             "- Outcome: the accessibility failure blocked the downstream deploy/publish stage."
