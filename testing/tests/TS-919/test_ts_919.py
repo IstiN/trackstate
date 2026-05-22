@@ -15,6 +15,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherRowObservation,
+    WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -40,9 +41,9 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 ACCEPTED_ACTION_LABELS = ("Re-authenticate", "Retry")
 DISALLOWED_ACTION_LABELS = ("Open",)
 REWORK_SUMMARY = (
-    "Added a live Playwright regression test for the unavailable saved workspace row "
-    "label so the deployed Workspace switcher must expose `Re-authenticate` or "
-    "`Retry` instead of the stale `Open` action."
+    "Moved the workspace-switcher trigger and unavailable-row inspection behind "
+    "`LiveWorkspaceSwitcherPage` public APIs so TS-919 no longer reaches into raw "
+    "Playwright session internals."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -138,8 +139,8 @@ def main() -> None:
                 except Exception:
                     pass
 
-                trigger_before = _observe_workspace_trigger_button(tracker_page)
-                result["trigger_before_open"] = trigger_before
+                trigger_before = page.observe_trigger(timeout_ms=20_000)
+                result["trigger_before_open"] = _trigger_payload(trigger_before)
                 _record_human_verification(
                     result,
                     check=(
@@ -147,15 +148,19 @@ def main() -> None:
                         "the hosted workspace was visibly active in the header."
                     ),
                     observed=(
-                        f"trigger_label={trigger_before.get('aria_label')!r}; "
-                        f"trigger_tag={trigger_before.get('tag_name')!r}"
+                        f"trigger_label={trigger_before.semantic_label!r}; "
+                        f"trigger_workspace_type={trigger_before.workspace_type!r}"
                     ),
                 )
 
-                _open_workspace_switcher(page, timeout_ms=20_000)
-                switcher = page.observe_open_switcher(timeout_ms=20_000)
-                local_row = _observe_local_workspace_row(
-                    tracker_page,
+                switcher = page.open_and_observe(timeout_ms=20_000)
+                local_row = page.observe_saved_workspace_row(
+                    display_name=LOCAL_DISPLAY_NAME,
+                    target_path=LOCAL_TARGET,
+                    target_type_label="Local",
+                    expected_state_label="Unavailable",
+                    accepted_action_labels=ACCEPTED_ACTION_LABELS,
+                    disallowed_action_labels=DISALLOWED_ACTION_LABELS,
                     timeout_ms=20_000,
                 )
 
@@ -343,13 +348,13 @@ def _find_named_local_row(
 def _assert_unavailable_local_row(
     *,
     local_row: WorkspaceSwitcherRowObservation | None,
-    trigger: dict[str, object],
+    trigger: WorkspaceSwitcherTriggerObservation,
     switcher: WorkspaceSwitcherObservation,
 ) -> None:
     if local_row is None:
         raise AssertionError(
             "Step 2 failed: the Workspace switcher did not expose the local workspace row.\n"
-            f"Observed trigger label: {trigger.get('aria_label')!r}\n"
+            f"Observed trigger label: {trigger.semantic_label!r}\n"
             f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
@@ -359,196 +364,6 @@ def _assert_unavailable_local_row(
             "`Unavailable` state.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-
-
-def _observe_local_workspace_row(
-    tracker_page,
-    *,
-    timeout_ms: int,
-) -> WorkspaceSwitcherRowObservation:
-    payload = tracker_page.session.wait_for_function(
-        """
-        ({ displayName, targetPath, acceptedActions, disallowedActions }) => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const accessibleLabel = (element) => normalize(element?.getAttribute?.('aria-label') || '');
-          const allButtons = Array.from(
-            document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
-          ).filter((candidate) => isVisible(candidate));
-          const rowButton = allButtons.find((candidate) => {
-            const label = accessibleLabel(candidate);
-            return label.includes(displayName)
-              && label.includes(targetPath)
-              && label.includes('Local')
-              && label.includes('Unavailable');
-          });
-          if (!rowButton) {
-            return null;
-          }
-          const rowLabel = accessibleLabel(rowButton);
-          const rect = rowButton.getBoundingClientRect();
-          const actionButtons = allButtons
-            .filter((candidate) => {
-              const label = accessibleLabel(candidate);
-              const candidateRect = candidate.getBoundingClientRect();
-              return label.endsWith(`: ${displayName}`)
-                && candidateRect.top >= (rect.bottom - 4)
-                && candidateRect.top <= (rect.bottom + 64)
-                && candidateRect.left >= (rect.left - 8)
-                && candidateRect.left <= (rect.right + 120);
-            })
-            .map((candidate) => accessibleLabel(candidate));
-          const actionLabels = actionButtons
-            .map((label) => label.split(':', 1)[0].trim())
-            .filter((label) =>
-              acceptedActions.includes(label)
-              || disallowedActions.includes(label)
-              || label === 'Delete',
-            );
-          return {
-            displayName,
-            targetTypeLabel: rowLabel.includes('Local') ? 'Local' : null,
-            stateLabel: rowLabel.includes('Unavailable') ? 'Unavailable' : null,
-            detailText: rowLabel.includes(targetPath) ? rowLabel.split(',').slice(3).join(',').trim() : '',
-            visibleText: rowLabel,
-            selected: rowLabel.includes('Active'),
-            semanticsLabel: rowLabel || null,
-            iconAccessibilityLabel: null,
-            actionLabels,
-            buttonLabels: actionButtons,
-          };
-        }
-        """,
-        arg={
-            "displayName": LOCAL_DISPLAY_NAME,
-            "targetPath": LOCAL_TARGET,
-            "acceptedActions": list(ACCEPTED_ACTION_LABELS),
-            "disallowedActions": list(DISALLOWED_ACTION_LABELS),
-        },
-        timeout_ms=timeout_ms,
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "Step 2 failed: the open Workspace switcher did not expose a readable local workspace row.",
-        )
-    return WorkspaceSwitcherRowObservation(
-        display_name=str(payload.get("displayName", "")),
-        target_type_label=(
-            None if payload.get("targetTypeLabel") is None else str(payload.get("targetTypeLabel"))
-        ),
-        state_label=None if payload.get("stateLabel") is None else str(payload.get("stateLabel")),
-        detail_text=str(payload.get("detailText", "")),
-        visible_text=str(payload.get("visibleText", "")),
-        selected=bool(payload.get("selected")),
-        semantics_label=(
-            None if payload.get("semanticsLabel") is None else str(payload.get("semanticsLabel"))
-        ),
-        icon_accessibility_label=None,
-        action_labels=tuple(str(label) for label in payload.get("actionLabels", [])),
-        button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
-    )
-
-
-def _observe_workspace_trigger_button(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const trigger = Array.from(
-            document.querySelectorAll('button[aria-label^="Workspace switcher:"],[role="button"][aria-label^="Workspace switcher:"],flt-semantics[role="button"]'),
-          )
-            .filter(isVisible)
-            .map((element) => ({
-              element,
-              ariaLabel: normalize(element.getAttribute('aria-label') || ''),
-              innerText: normalize(element.innerText || ''),
-            }))
-            .find((candidate) =>
-              candidate.ariaLabel.startsWith('Workspace switcher:')
-              || candidate.innerText.startsWith('Workspace switcher:'),
-            );
-          if (!trigger) {
-            return null;
-          }
-          return {
-            aria_label: trigger.ariaLabel,
-            inner_text: trigger.innerText,
-            tag_name: trigger.element.tagName,
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "Precondition failed: the live app did not expose a visible workspace switcher trigger in the header.",
-        )
-    return {
-        "aria_label": str(payload.get("aria_label", "")),
-        "inner_text": str(payload.get("inner_text", "")),
-        "tag_name": str(payload.get("tag_name", "")),
-    }
-
-
-def _open_workspace_switcher(page: LiveWorkspaceSwitcherPage, *, timeout_ms: int) -> None:
-    clicked = page._session.evaluate(
-        """
-        () => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const trigger = Array.from(
-            document.querySelectorAll('button[aria-label^="Workspace switcher:"],[role="button"][aria-label^="Workspace switcher:"],flt-semantics[role="button"]'),
-          )
-            .filter(isVisible)
-            .find((element) => {
-              const aria = normalize(element.getAttribute('aria-label') || '');
-              const text = normalize(element.innerText || '');
-              return aria.startsWith('Workspace switcher:') || text.startsWith('Workspace switcher:');
-            });
-          if (!trigger) {
-            return false;
-          }
-          trigger.click();
-          return true;
-        }
-        """,
-    )
-    if clicked is not True:
-        raise AssertionError(
-            "Step 1 failed: the application header did not expose a clickable workspace switcher trigger.",
-        )
-    page.observe_open_switcher(timeout_ms=timeout_ms)
-
 
 def _workspace_action_label(
     row: WorkspaceSwitcherRowObservation | None,

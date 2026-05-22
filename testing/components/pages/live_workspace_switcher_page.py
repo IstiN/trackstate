@@ -2357,6 +2357,154 @@ class LiveWorkspaceSwitcherPage:
             )
         return tuple(rows)
 
+    def observe_saved_workspace_row(
+        self,
+        *,
+        display_name: str,
+        target_path: str,
+        target_type_label: str | None = None,
+        expected_state_label: str | None = None,
+        accepted_action_labels: tuple[str, ...] = (),
+        disallowed_action_labels: tuple[str, ...] = (),
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherRowObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({
+                  displayName,
+                  targetPath,
+                  targetTypeLabel,
+                  expectedStateLabel,
+                  acceptedActions,
+                  disallowedActions,
+                }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const accessibleLabel = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                        || element?.getAttribute?.('alt')
+                        || element?.getAttribute?.('title')
+                        || element?.innerText
+                        || '',
+                    );
+                  const allButtons = Array.from(
+                    document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+                  ).filter((candidate) => isVisible(candidate));
+                  const rowButton = allButtons.find((candidate) => {
+                    const label = accessibleLabel(candidate);
+                    if (!label.includes(displayName) || !label.includes(targetPath)) {
+                      return false;
+                    }
+                    if (targetTypeLabel && !label.includes(targetTypeLabel)) {
+                      return false;
+                    }
+                    if (expectedStateLabel && !label.includes(expectedStateLabel)) {
+                      return false;
+                    }
+                    return true;
+                  });
+                  if (!rowButton) {
+                    return null;
+                  }
+                  const rowLabel = accessibleLabel(rowButton);
+                  const rect = rowButton.getBoundingClientRect();
+                  const buttonLabels = allButtons
+                    .filter((candidate) => {
+                      const label = accessibleLabel(candidate);
+                      const candidateRect = candidate.getBoundingClientRect();
+                      return label.endsWith(`: ${displayName}`)
+                        && candidateRect.top >= (rect.bottom - 4)
+                        && candidateRect.top <= (rect.bottom + 64)
+                        && candidateRect.left >= (rect.left - 8)
+                        && candidateRect.left <= (rect.right + 120);
+                    })
+                    .map((candidate) => accessibleLabel(candidate));
+                  const actionLabels = buttonLabels
+                    .map((label) => label.split(':', 1)[0].trim())
+                    .filter((label) =>
+                      acceptedActions.includes(label)
+                      || disallowedActions.includes(label)
+                      || label === 'Delete',
+                    );
+                  const headerParts = rowLabel.split(',').map((part) => normalize(part));
+                  const detailText =
+                    headerParts.length >= 4
+                      ? headerParts.slice(3).join(', ')
+                      : (rowLabel.includes(targetPath) ? rowLabel : '');
+                  return {
+                    displayName,
+                    targetTypeLabel: targetTypeLabel && rowLabel.includes(targetTypeLabel)
+                      ? targetTypeLabel
+                      : null,
+                    stateLabel: expectedStateLabel && rowLabel.includes(expectedStateLabel)
+                      ? expectedStateLabel
+                      : null,
+                    detailText,
+                    visibleText: rowLabel,
+                    selected: rowLabel.includes('Active'),
+                    semanticsLabel: rowLabel || null,
+                    iconAccessibilityLabel: null,
+                    actionLabels,
+                    buttonLabels,
+                  };
+                }
+                """,
+                arg={
+                    "displayName": display_name,
+                    "targetPath": target_path,
+                    "targetTypeLabel": target_type_label,
+                    "expectedStateLabel": expected_state_label,
+                    "acceptedActions": list(accepted_action_labels),
+                    "disallowedActions": list(disallowed_action_labels),
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open Workspace switcher did not expose the "{display_name}" saved '
+                "workspace row with readable state and action labels.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f'The open Workspace switcher did not expose the "{display_name}" saved '
+                "workspace row with readable state and action labels."
+            )
+        return WorkspaceSwitcherRowObservation(
+            display_name=str(payload.get("displayName", "")),
+            target_type_label=(
+                None if payload.get("targetTypeLabel") is None else str(payload.get("targetTypeLabel"))
+            ),
+            state_label=(
+                None if payload.get("stateLabel") is None else str(payload.get("stateLabel"))
+            ),
+            detail_text=str(payload.get("detailText", "")),
+            visible_text=str(payload.get("visibleText", "")),
+            selected=bool(payload.get("selected")),
+            semantics_label=(
+                None if payload.get("semanticsLabel") is None else str(payload.get("semanticsLabel"))
+            ),
+            icon_accessibility_label=(
+                None
+                if payload.get("iconAccessibilityLabel") is None
+                else str(payload.get("iconAccessibilityLabel"))
+            ),
+            action_labels=tuple(str(label) for label in payload.get("actionLabels", [])),
+            button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
+        )
+
     def click_saved_workspace_row_surface(
         self,
         display_name: str,
@@ -4145,10 +4293,10 @@ class LiveWorkspaceSwitcherPage:
               const labelFor = (element) =>
                 normalize(element.getAttribute('aria-label') || element.innerText || '');
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
               ).filter(isVisible);
               const trigger = buttons
-                .filter((element) => labelFor(element).includes('Workspace switcher:'))
+                .filter((element) => labelFor(element).startsWith('Workspace switcher:'))
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
                   const rightRect = right.getBoundingClientRect();
@@ -6503,11 +6651,87 @@ class LiveWorkspaceSwitcherPage:
         return (label or "").startswith("Workspace switcher:")
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
-            timeout_ms=timeout_ms,
+        try:
+            self._session.wait_for_function(
+                """
+                (triggerLabelPrefix) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  return Array.from(
+                    document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+                  )
+                    .filter((candidate) => isVisible(candidate))
+                    .some((candidate) => {
+                      const label = normalize(
+                        candidate.getAttribute('aria-label')
+                          || candidate.innerText
+                          || candidate.textContent
+                          || '',
+                      );
+                      return label.startsWith(triggerLabelPrefix);
+                    });
+                }
+                """,
+                arg=self._trigger_label_prefix,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a clickable workspace switcher trigger.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        clicked = self._session.evaluate(
+            """
+            (triggerLabelPrefix) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const trigger = Array.from(
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+              )
+                .filter((candidate) => isVisible(candidate))
+                .find((candidate) => {
+                  const label = normalize(
+                    candidate.getAttribute('aria-label')
+                      || candidate.innerText
+                      || candidate.textContent
+                      || '',
+                  );
+                  return label.startsWith(triggerLabelPrefix);
+                });
+              if (!trigger) {
+                return false;
+              }
+              trigger.click();
+              return true;
+            }
+            """,
+            arg=self._trigger_label_prefix,
         )
+        if clicked is not True:
+            raise AssertionError(
+                "The live app did not expose a clickable workspace switcher trigger.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:
