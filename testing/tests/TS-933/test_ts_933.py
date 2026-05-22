@@ -224,7 +224,7 @@ def _evaluate_error_log(
         )
 
     descriptive_error_present = _has_descriptive_semantics_failure_message(log_excerpt)
-    generic_timeout_present = _contains_generic_playwright_timeout(log_excerpt)
+    generic_timeout_present = _run_log_contains_generic_playwright_timeout(observation)
 
     if not descriptive_error_present:
         step_failures.append(
@@ -244,6 +244,7 @@ def _evaluate_error_log(
             + "\n"
             + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
             + f"Runtime accessibility evidence: {observation.runtime_accessibility_surface_summary or '<none>'}\n"
+            + f"Run-log timeout markers: {observation.run_log_matched_contrast_markers or ['<none>']}\n"
             + f"Run log excerpt:\n{log_excerpt or '<none>'}"
         )
         failures.append(message)
@@ -255,6 +256,7 @@ def _evaluate_error_log(
         "message instead of the generic Playwright timeout.\n"
         f"Run URL: {observation.latest_pull_request_run_url}\n"
         f"Runtime accessibility evidence: {observation.runtime_accessibility_surface_summary or '<none>'}\n"
+        f"Run-log timeout markers: {observation.run_log_matched_contrast_markers or ['<none>']}\n"
         f"Run log excerpt:\n{log_excerpt}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
@@ -296,6 +298,16 @@ def _contains_generic_playwright_timeout(text: str) -> bool:
     normalized = text.lower()
     return "page.waitforfunction" in normalized or (
         "test timeout of" in normalized and "playwright" in normalized
+    )
+
+
+def _run_log_contains_generic_playwright_timeout(
+    observation: GitHubAccessibilityPullRequestGateObservation,
+) -> bool:
+    return (
+        observation.run_log_mentions_contrast_issue
+        or bool(observation.run_log_matched_contrast_markers)
+        or _contains_generic_playwright_timeout(observation.run_log_excerpt or "")
     )
 
 

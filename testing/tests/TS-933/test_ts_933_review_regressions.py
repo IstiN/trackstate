@@ -33,10 +33,13 @@ class Ts933ReviewRegressionTest(unittest.TestCase):
         *,
         run_log_excerpt: str,
         run_log_error: str | None = None,
+        run_log_matched_contrast_markers: list[str] | None = None,
+        run_log_mentions_contrast_issue: bool | None = None,
         run_conclusion: str = "failure",
         accessibility_check_conclusion: str = "failure",
         run_status: str = "completed",
     ) -> GitHubAccessibilityPullRequestGateObservation:
+        matched_contrast_markers = list(run_log_matched_contrast_markers or [])
         return GitHubAccessibilityPullRequestGateObservation(
             repository="IstiN/trackstate",
             default_branch="main",
@@ -108,10 +111,14 @@ class Ts933ReviewRegressionTest(unittest.TestCase):
             matched_contrast_markers=[],
             matched_semantic_markers=["semantics", "nodes"],
             run_log_matched_accessibility_markers=["accessibility", "semantics"],
-            run_log_matched_contrast_markers=[],
+            run_log_matched_contrast_markers=matched_contrast_markers,
             run_log_matched_semantic_markers=["semantics", "nodes"],
             run_log_mentions_accessibility=True,
-            run_log_mentions_contrast_issue=False,
+            run_log_mentions_contrast_issue=(
+                bool(matched_contrast_markers)
+                if run_log_mentions_contrast_issue is None
+                else run_log_mentions_contrast_issue
+            ),
             run_log_mentions_semantic_issue=True,
             run_log_excerpt=run_log_excerpt,
             run_log_error=run_log_error,
@@ -160,6 +167,28 @@ class Ts933ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("generic Playwright", failures[0])
+
+    def test_step_3_rejects_timeout_present_elsewhere_in_full_run_log(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt=(
+                    "Error: Flutter engine failed to render semantics nodes during "
+                    "initialization after the accessibility polling threshold."
+                ),
+                run_log_matched_contrast_markers=["timeout", "playwright"],
+                run_log_mentions_contrast_issue=True,
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("generic Playwright", failures[0])
+        self.assertIn("Run-log timeout markers", failures[0])
 
     def test_step_2_requires_failed_accessibility_check(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
