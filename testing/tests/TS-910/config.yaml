@@ -7,6 +7,7 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored hosted token.
+  - Uses the default desktop viewport for accessibility tickets: 1440x900.
   - Opens the desktop workspace switcher and starts keyboard focus on the selected first saved workspace row.
   - Presses Tab until the visible Save and switch footer button is reached, then presses Tab once more.
   - Verifies focus stays trapped inside the panel and wraps back to the first internal row instead of escaping or sticking on the footer button.
