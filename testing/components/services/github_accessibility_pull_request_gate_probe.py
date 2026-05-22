@@ -19,6 +19,10 @@ from testing.core.config.github_accessibility_pull_request_gate_config import (
 )
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (
     GitHubAccessibilityPullRequestGateObservation,
+    GitHubAccessibilityWorkflowContractObservation,
+)
+from testing.core.interfaces.github_actions_preflight_gate_probe import (
+    GitHubActionsWorkflowJobObservation,
 )
 from testing.core.interfaces.github_api_client import (
     GitHubApiClient,
@@ -55,13 +59,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             self._config.target_workflow_path,
             default_branch,
         )
-        (
-            target_workflow_declares_pull_request_trigger,
-            target_workflow_job_names,
-            target_workflow_step_names,
-        ) = self._workflow_contract(workflow_text)
+        workflow_contract = self._workflow_contract(workflow_text)
 
         pull_request_observation = self._create_and_observe_pull_request(workflow_id)
+        observed_run_jobs = self._coerce_job_observations(
+            pull_request_observation.get("observed_run_jobs")
+        )
 
         return GitHubAccessibilityPullRequestGateObservation(
             repository=self._config.repository,
@@ -70,11 +73,15 @@ class GitHubAccessibilityPullRequestGateProbeService:
             target_workflow_path=self._config.target_workflow_path,
             target_workflow_id=workflow_id,
             target_workflow_present_on_default_branch=True,
-            target_workflow_declares_pull_request_trigger=(
-                target_workflow_declares_pull_request_trigger
+            target_workflow_declares_pull_request_trigger=workflow_contract.declares_pull_request_trigger,
+            target_workflow_job_names=workflow_contract.job_names,
+            target_workflow_step_names=workflow_contract.step_names,
+            target_workflow_accessibility_job_names=workflow_contract.accessibility_job_names,
+            target_workflow_downstream_job_names=workflow_contract.downstream_job_names,
+            target_workflow_downstream_job_depends_on_accessibility=(
+                workflow_contract.downstream_job_depends_on_accessibility
             ),
-            target_workflow_job_names=target_workflow_job_names,
-            target_workflow_step_names=target_workflow_step_names,
+            target_workflow=workflow_contract,
             pull_request_number=int(pull_request_observation["pull_request_number"]),
             pull_request_url=str(pull_request_observation["pull_request_url"]),
             pull_request_checks_url=str(
@@ -130,6 +137,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
             observed_branch_run_conclusions=list(
                 pull_request_observation["observed_branch_run_conclusions"]
             ),
+            observed_run_jobs=observed_run_jobs,
             observed_job_names=list(pull_request_observation["observed_job_names"]),
             observed_step_names=list(pull_request_observation["observed_step_names"]),
             observed_status_check_names=list(
@@ -371,6 +379,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                     "pull_request_status_state"
                 ],
                 **run_observation,
+                "observed_run_jobs": self._to_workflow_job_observations(jobs),
                 "observed_job_names": self._job_names(jobs),
                 "observed_step_names": self._step_names(jobs),
                 "observed_status_check_names": surface_observation["status_check_names"],
@@ -469,7 +478,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
             f"{self._config.target_workflow_path} in {self._config.repository}."
         )
 
-    def _workflow_contract(self, workflow_text: str) -> tuple[bool, list[str], list[str]]:
+    def _workflow_contract(
+        self,
+        workflow_text: str,
+    ) -> GitHubAccessibilityWorkflowContractObservation:
         parsed = yaml.load(workflow_text, Loader=yaml.BaseLoader) or {}
         if not isinstance(parsed, dict):
             raise GitHubAccessibilityPullRequestGateError(
@@ -482,15 +494,37 @@ class GitHubAccessibilityPullRequestGateProbeService:
         )
         jobs_payload = parsed.get("jobs")
         if not isinstance(jobs_payload, dict):
-            return declares_pull_request, [], []
+            return GitHubAccessibilityWorkflowContractObservation(
+                declares_pull_request_trigger=declares_pull_request,
+                job_names=[],
+                step_names=[],
+                accessibility_job_names=[],
+                downstream_job_names=[],
+                downstream_job_depends_on_accessibility=False,
+            )
 
         job_names: list[str] = []
         step_names: list[str] = []
+        accessibility_job_names: list[str] = []
+        accessibility_job_ids: list[str] = []
+        downstream_job_names: list[str] = []
+        downstream_dependencies: list[str] = []
         for job_id, job_payload in jobs_payload.items():
             if not isinstance(job_payload, dict):
                 continue
             job_name = self._optional_string(job_payload.get("name")) or str(job_id)
             job_names.append(job_name)
+            combined = f"{job_id} {job_name}".lower()
+            if self._contains_any_marker(combined, self._config.accessibility_job_markers):
+                accessibility_job_names.append(job_name)
+                accessibility_job_ids.append(str(job_id))
+            if self._contains_any_marker(combined, self._config.downstream_job_markers):
+                downstream_job_names.append(job_name)
+                needs = job_payload.get("needs")
+                if isinstance(needs, list):
+                    downstream_dependencies.extend(str(item) for item in needs)
+                elif isinstance(needs, str):
+                    downstream_dependencies.append(needs)
             raw_steps = job_payload.get("steps")
             if not isinstance(raw_steps, list):
                 continue
@@ -500,7 +534,17 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 step_name = self._optional_string(step_payload.get("name"))
                 if step_name:
                     step_names.append(step_name)
-        return declares_pull_request, self._dedupe(job_names), self._dedupe(step_names)
+        accessibility_targets = set(accessibility_job_ids + accessibility_job_names)
+        return GitHubAccessibilityWorkflowContractObservation(
+            declares_pull_request_trigger=declares_pull_request,
+            job_names=self._dedupe(job_names),
+            step_names=self._dedupe(step_names),
+            accessibility_job_names=self._dedupe(accessibility_job_names),
+            downstream_job_names=self._dedupe(downstream_job_names),
+            downstream_job_depends_on_accessibility=any(
+                dependency in accessibility_targets for dependency in downstream_dependencies
+            ),
+        )
 
     def _read_workflow_text(self, workflow_path: str, ref: str) -> str:
         return self._github_api_client.request_text(
@@ -820,6 +864,49 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 f"GitHub Actions jobs response for run {run_id} did not return a list."
             )
         return [job for job in jobs if isinstance(job, dict)]
+
+    def _to_workflow_job_observations(
+        self,
+        jobs: list[dict[str, Any]],
+    ) -> list[GitHubActionsWorkflowJobObservation]:
+        return [
+            job
+            for entry in jobs
+            if (job := self._coerce_job_observation(entry)) is not None
+        ]
+
+    def _coerce_job_observations(
+        self,
+        raw_jobs: object,
+    ) -> list[GitHubActionsWorkflowJobObservation]:
+        if not isinstance(raw_jobs, list):
+            return []
+        return [
+            job
+            for entry in raw_jobs
+            if (job := self._coerce_job_observation(entry)) is not None
+        ]
+
+    def _coerce_job_observation(
+        self,
+        entry: object,
+    ) -> GitHubActionsWorkflowJobObservation | None:
+        if isinstance(entry, GitHubActionsWorkflowJobObservation):
+            return entry
+        if not isinstance(entry, dict):
+            return None
+        job_id = entry.get("id")
+        if not isinstance(job_id, int):
+            return None
+        return GitHubActionsWorkflowJobObservation(
+            id=job_id,
+            name=self._optional_string(entry.get("name")) or "",
+            status=self._optional_string(entry.get("status")),
+            conclusion=self._optional_string(entry.get("conclusion")),
+            html_url=self._optional_string(entry.get("html_url")) or "",
+            started_at=self._optional_string(entry.get("started_at")),
+            completed_at=self._optional_string(entry.get("completed_at")),
+        )
 
     def _try_read_run_log(self, run_id: int | None) -> tuple[str, str | None]:
         if run_id is None:
@@ -1198,6 +1285,11 @@ class _Ts908ProbeOverlay extends StatelessWidget {
             return None
         stripped = value.strip()
         return stripped.lower() or None
+
+    @staticmethod
+    def _contains_any_marker(text: str, markers: list[str]) -> bool:
+        lowered = text.lower()
+        return any(marker.lower() in lowered for marker in markers if marker.strip())
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:

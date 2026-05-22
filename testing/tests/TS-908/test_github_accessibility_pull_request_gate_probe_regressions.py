@@ -62,6 +62,17 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "observed_branch_run_urls": ["https://github.com/IstiN/trackstate/actions/runs/456"],
             "observed_branch_run_statuses": ["completed"],
             "observed_branch_run_conclusions": ["success"],
+            "observed_run_jobs": [
+                {
+                    "id": 4561,
+                    "name": "Flutter checks",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "html_url": "https://github.com/IstiN/trackstate/actions/runs/456/job/4561",
+                    "started_at": "2026-05-22T07:40:00Z",
+                    "completed_at": "2026-05-22T07:41:00Z",
+                }
+            ],
             "observed_job_names": ["Flutter checks"],
             "observed_step_names": ["Analyze", "Build web app"],
             "observed_status_check_names": ["Flutter checks"],
@@ -136,6 +147,20 @@ jobs:
         run: flutter analyze
       - name: Build web app
         run: flutter build web
+  accessibility-checks:
+    name: Accessibility checks
+    runs-on: ubuntu-latest
+    needs: flutter-checks
+    steps:
+      - name: Run axe-core accessibility checks
+        run: npm run test:a11y
+  deploy-preview:
+    name: Deploy preview
+    runs-on: ubuntu-latest
+    needs: accessibility-checks
+    steps:
+      - name: Publish preview
+        run: echo deploy
 """.strip()
 
         probe = GitHubAccessibilityPullRequestGateProbeService(
@@ -164,8 +189,21 @@ jobs:
 
         self.assertTrue(observation.target_workflow_present_on_default_branch)
         self.assertTrue(observation.target_workflow_declares_pull_request_trigger)
-        self.assertEqual(observation.target_workflow_job_names, ["Flutter checks"])
-        self.assertEqual(observation.target_workflow_step_names, ["Analyze", "Build web app"])
+        self.assertEqual(
+            observation.target_workflow_job_names,
+            ["Flutter checks", "Accessibility checks", "Deploy preview"],
+        )
+        self.assertEqual(
+            observation.target_workflow_step_names,
+            ["Analyze", "Build web app", "Run axe-core accessibility checks", "Publish preview"],
+        )
+        self.assertEqual(
+            observation.target_workflow_accessibility_job_names,
+            ["Accessibility checks"],
+        )
+        self.assertEqual(observation.target_workflow_downstream_job_names, ["Deploy preview"])
+        self.assertTrue(observation.target_workflow_downstream_job_depends_on_accessibility)
+        self.assertEqual(observation.target_workflow.downstream_job_names, ["Deploy preview"])
         self.assertEqual(
             observation.pull_request_file_paths,
             ["lib/main.dart", "lib/ts908_probe_surface.dart"],
@@ -173,6 +211,8 @@ jobs:
         self.assertEqual(observation.probe_render_host_path, "lib/main.dart")
         self.assertTrue(observation.probe_rendered_in_application)
         self.assertEqual(observation.latest_pull_request_run_event, "pull_request")
+        self.assertEqual(len(observation.observed_run_jobs), 1)
+        self.assertEqual(observation.observed_run_jobs[0].name, "Flutter checks")
         self.assertFalse(observation.run_log_mentions_accessibility)
         self.assertTrue(observation.cleanup_closed_pull_request)
         self.assertTrue(observation.cleanup_deleted_branch)

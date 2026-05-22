@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,12 @@ class GitHubAccessibilityPullRequestGateConfig:
     expected_accessibility_markers: list[str]
     contrast_evidence_markers: list[str]
     semantic_evidence_markers: list[str]
+    accessibility_job_markers: list[str] = field(
+        default_factory=lambda: ["Accessibility checks", "accessibility"]
+    )
+    downstream_job_markers: list[str] = field(
+        default_factory=lambda: ["Deploy", "deployment", "publish", "pages", "distribution"]
+    )
     poll_interval_seconds: int = 5
     run_timeout_seconds: int = 600
     pull_request_timeout_seconds: int = 120
@@ -88,6 +94,16 @@ class GitHubAccessibilityPullRequestGateConfig:
                 "semantic_evidence_markers",
                 path,
             ),
+            accessibility_job_markers=cls._optional_string_list(
+                runtime_inputs,
+                "accessibility_job_markers",
+                default=["Accessibility checks", "accessibility"],
+            ),
+            downstream_job_markers=cls._optional_string_list(
+                runtime_inputs,
+                "downstream_job_markers",
+                default=["Deploy", "deployment", "publish", "pages", "distribution"],
+            ),
             poll_interval_seconds=cls._require_positive_int(
                 runtime_inputs,
                 "poll_interval_seconds",
@@ -153,3 +169,16 @@ class GitHubAccessibilityPullRequestGateConfig:
                 f"{key} must be a positive integer in {path}."
             )
         return value
+
+    @staticmethod
+    def _optional_string_list(
+        payload: dict[str, Any],
+        key: str,
+        *,
+        default: list[str],
+    ) -> list[str]:
+        raw = payload.get(key, default)
+        if not isinstance(raw, list):
+            return list(default)
+        values = [str(entry).strip() for entry in raw if str(entry).strip()]
+        return values or list(default)

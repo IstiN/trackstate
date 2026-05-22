@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import json
-import os
 import platform
-import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -61,13 +59,6 @@ EXPECTED_RESULT = (
 FAILURE_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
 
 
-@dataclass(frozen=True)
-class WorkflowContractObservation:
-    accessibility_job_names: list[str]
-    downstream_job_names: list[str]
-    downstream_job_depends_on_accessibility: bool
-
-
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     raw_config = _load_yaml(CONFIG_PATH)
@@ -119,12 +110,7 @@ def main() -> None:
         observation = probe.validate()
         result.update(observation.to_dict())
 
-        workflow_contract = _read_workflow_contract(
-            REPO_ROOT / config.target_workflow_path,
-            accessibility_job_markers=accessibility_job_markers,
-            downstream_job_markers=downstream_job_markers,
-        )
-        jobs = _read_run_jobs(config.repository, observation.latest_pull_request_run_id)
+        jobs = list(observation.observed_run_jobs)
         accessibility_job = _find_matching_job(jobs, accessibility_job_markers)
         downstream_job = _find_matching_job(jobs, downstream_job_markers)
         run_page: GitHubActionsPageObservation | None = None
@@ -132,14 +118,13 @@ def main() -> None:
         try:
             run_page = _open_run_page(
                 observation=observation,
-                workflow_contract=workflow_contract,
                 jobs=jobs,
                 timeout_seconds=ui_timeout_seconds,
             )
         except Exception as page_error:  # keep deployment assertions running
             run_page_error = f"{type(page_error).__name__}: {page_error}"
 
-        result["workflow_contract"] = asdict(workflow_contract)
+        result["workflow_contract"] = asdict(observation.target_workflow)
         result["workflow_jobs"] = [asdict(job) for job in jobs]
         result["accessibility_job"] = (
             None if accessibility_job is None else asdict(accessibility_job)
@@ -161,7 +146,6 @@ def main() -> None:
         _evaluate_downstream_gate(
             result,
             observation=observation,
-            workflow_contract=workflow_contract,
             jobs=jobs,
             accessibility_job=accessibility_job,
             downstream_job=downstream_job,
@@ -327,7 +311,6 @@ def _evaluate_downstream_gate(
     result: dict[str, object],
     *,
     observation: GitHubAccessibilityPullRequestGateObservation,
-    workflow_contract: WorkflowContractObservation,
     jobs: list[GitHubActionsWorkflowJobObservation],
     accessibility_job: GitHubActionsWorkflowJobObservation | None,
     downstream_job: GitHubActionsWorkflowJobObservation | None,
@@ -372,7 +355,7 @@ def _evaluate_downstream_gate(
         _record_step(result, step=4, status="failed", action=REQUEST_STEPS[3], observed=message)
         return
 
-    if not workflow_contract.downstream_job_names:
+    if not observation.target_workflow_downstream_job_names:
         message = (
             "Step 4 failed: the target workflow does not define any downstream deploy/publish "
             "stage to block after the accessibility audit fails.\n"
@@ -385,12 +368,12 @@ def _evaluate_downstream_gate(
         _record_step(result, step=4, status="failed", action=REQUEST_STEPS[3], observed=message)
         return
 
-    if not workflow_contract.downstream_job_depends_on_accessibility:
+    if not observation.target_workflow_downstream_job_depends_on_accessibility:
         message = (
             "Step 4 failed: the workflow defines a deploy/publish stage, but it is not wired "
             "to depend on the accessibility audit job.\n"
-            f"Accessibility jobs in workflow: {workflow_contract.accessibility_job_names}\n"
-            f"Downstream jobs in workflow: {workflow_contract.downstream_job_names}\n"
+            f"Accessibility jobs in workflow: {observation.target_workflow_accessibility_job_names}\n"
+            f"Downstream jobs in workflow: {observation.target_workflow_downstream_job_names}\n"
             f"Run URL: {observation.latest_pull_request_run_url}"
         )
         failures.append(message)
@@ -402,7 +385,7 @@ def _evaluate_downstream_gate(
             "Step 4 failed: the workflow contract defines a downstream deploy/publish stage, "
             "but the live run did not expose that stage in the job list after the accessibility "
             "audit failed.\n"
-            f"Workflow downstream jobs: {workflow_contract.downstream_job_names}\n"
+            f"Workflow downstream jobs: {observation.target_workflow_downstream_job_names}\n"
             f"Observed run jobs: {_job_list_summary(jobs)}\n"
             f"Run URL: {observation.latest_pull_request_run_url}"
         )
@@ -429,7 +412,7 @@ def _evaluate_downstream_gate(
         "deploy/publish stage remained blocked.\n"
         f"Accessibility job: {_single_job_summary(accessibility_job)}\n"
         f"Downstream job: {_single_job_summary(downstream_job)}\n"
-        f"Workflow downstream jobs: {workflow_contract.downstream_job_names}"
+        f"Workflow downstream jobs: {observation.target_workflow_downstream_job_names}"
     )
     _record_step(result, step=4, status="passed", action=REQUEST_STEPS[3], observed=observed)
 
@@ -459,95 +442,6 @@ def _positive_int(payload: dict[str, object], key: str, *, default: int) -> int:
     return value if isinstance(value, int) and value > 0 else default
 
 
-def _read_workflow_contract(
-    path: Path,
-    *,
-    accessibility_job_markers: list[str],
-    downstream_job_markers: list[str],
-) -> WorkflowContractObservation:
-    parsed = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
-    if not isinstance(parsed, dict):
-        return WorkflowContractObservation([], [], False)
-
-    jobs_payload = parsed.get("jobs")
-    if not isinstance(jobs_payload, dict):
-        return WorkflowContractObservation([], [], False)
-
-    accessibility_job_names: list[str] = []
-    accessibility_job_ids: list[str] = []
-    downstream_job_names: list[str] = []
-    downstream_dependencies: list[str] = []
-    for job_id, job_payload in jobs_payload.items():
-        if not isinstance(job_payload, dict):
-            continue
-        job_name = str(job_payload.get("name") or job_id)
-        combined = f"{job_id} {job_name}".lower()
-        if _contains_any_marker(combined, accessibility_job_markers):
-            accessibility_job_names.append(job_name)
-            accessibility_job_ids.append(str(job_id))
-        if _contains_any_marker(combined, downstream_job_markers):
-            downstream_job_names.append(job_name)
-            needs = job_payload.get("needs")
-            if isinstance(needs, list):
-                downstream_dependencies.extend(str(item) for item in needs)
-            elif isinstance(needs, str):
-                downstream_dependencies.append(needs)
-
-    downstream_depends_on_accessibility = any(
-        dependency in set(accessibility_job_ids + accessibility_job_names)
-        for dependency in downstream_dependencies
-    )
-    return WorkflowContractObservation(
-        accessibility_job_names=accessibility_job_names,
-        downstream_job_names=downstream_job_names,
-        downstream_job_depends_on_accessibility=downstream_depends_on_accessibility,
-    )
-
-
-def _read_run_jobs(
-    repository: str,
-    run_id: int | None,
-) -> list[GitHubActionsWorkflowJobObservation]:
-    if run_id is None:
-        return []
-    completed = _run_command(
-        [
-            "gh",
-            "api",
-            f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100",
-        ]
-    )
-    payload = json.loads(completed.stdout)
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            f"TS-925 expected a JSON object from the GitHub jobs API, got {type(payload)}."
-        )
-    raw_jobs = payload.get("jobs")
-    if not isinstance(raw_jobs, list):
-        raise AssertionError(
-            f"TS-925 expected a jobs list for run {run_id}, got {type(raw_jobs)}."
-        )
-    jobs: list[GitHubActionsWorkflowJobObservation] = []
-    for entry in raw_jobs:
-        if not isinstance(entry, dict):
-            continue
-        job_id = entry.get("id")
-        if not isinstance(job_id, int):
-            continue
-        jobs.append(
-            GitHubActionsWorkflowJobObservation(
-                id=job_id,
-                name=_optional_string(entry.get("name")) or "",
-                status=_optional_string(entry.get("status")),
-                conclusion=_optional_string(entry.get("conclusion")),
-                html_url=_optional_string(entry.get("html_url")) or "",
-                started_at=_optional_string(entry.get("started_at")),
-                completed_at=_optional_string(entry.get("completed_at")),
-            )
-        )
-    return jobs
-
-
 def _find_matching_job(
     jobs: list[GitHubActionsWorkflowJobObservation],
     markers: list[str],
@@ -567,7 +461,6 @@ def _find_matching_job(
 def _open_run_page(
     *,
     observation: GitHubAccessibilityPullRequestGateObservation,
-    workflow_contract: WorkflowContractObservation,
     jobs: list[GitHubActionsWorkflowJobObservation],
     timeout_seconds: int,
 ) -> GitHubActionsPageObservation:
@@ -579,7 +472,7 @@ def _open_run_page(
     expected_texts = [
         observation.target_workflow_name,
         *[job.name for job in jobs[:4] if job.name],
-        *workflow_contract.downstream_job_names,
+        *observation.target_workflow_downstream_job_names,
         "Accessibility checks",
     ]
     with create_github_actions_page() as actions_page:
@@ -589,27 +482,6 @@ def _open_run_page(
             screenshot_path=str(RUN_SCREENSHOT_PATH),
             timeout_seconds=timeout_seconds,
         )
-
-
-def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-        text=True,
-        env={
-            **os.environ,
-            "GH_PAGER": "cat",
-            "GIT_TERMINAL_PROMPT": "0",
-        },
-    )
-    if completed.returncode != 0:
-        raise AssertionError(
-            f"{' '.join(command)} failed with exit code {completed.returncode}.\n"
-            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
-        )
-    return completed
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -1009,11 +881,6 @@ def _nested_string(result: dict[str, object], path: list[str]) -> str | None:
 
 def _jira_inline(text: str) -> str:
     return text.replace("{", "\\{").replace("}", "\\}")
-
-
-def _contains_any_marker(text: str, markers: list[str]) -> bool:
-    lowered = text.lower()
-    return any(marker.lower() in lowered for marker in markers if marker.strip())
 
 
 def _optional_string(value: object) -> str | None:
