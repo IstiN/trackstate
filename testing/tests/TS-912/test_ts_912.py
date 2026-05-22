@@ -40,7 +40,7 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts912-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-894", "TS-915"]
+LINKED_BUGS = ["TS-894", "TS-915", "TS-947"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -163,7 +163,67 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                try:
+                    runtime_observation = tracker_page.open()
+                except AssertionError as error:
+                    visible_body_text = tracker_page.body_text()
+                    result["runtime_state"] = "failed_to_load"
+                    result["runtime_body_text"] = visible_body_text
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the deployed page at the ticket viewport as a user before "
+                            "any workspace-switcher interaction."
+                        ),
+                        observed=(
+                            "The page never rendered the expected navigation shell or workspace "
+                            "switcher trigger and instead stayed on a minimal visible surface "
+                            f"with body text {visible_body_text!r}."
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "The deployed app never reached the interactive shell needed to "
+                            "open the Workspace switcher from the application header.\n"
+                            f"{error}\n"
+                            f"Observed body text:\n{visible_body_text}"
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Not reached because step 1 never rendered the interactive app "
+                            "shell with the Workspace switcher."
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=(
+                            "Not reached because step 1 never rendered the interactive app "
+                            "shell with the Workspace switcher."
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "Not reached because step 1 never rendered the interactive app "
+                            "shell with the Workspace switcher."
+                        ),
+                    )
+                    raise
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 result["runtime_state"] = runtime_observation.kind
                 result["runtime_body_text"] = runtime_observation.body_text
@@ -852,10 +912,10 @@ def _trigger_from_payload(payload: dict[str, object]) -> WorkspaceSwitcherTrigge
         workspace_type=str(payload["workspace_type"]),
         state_label=str(payload["state_label"]),
         icon_count=int(payload["icon_count"]),
-        left=float(payload["left"]),
-        top=float(payload["top"]),
-        width=float(payload["width"]),
-        height=float(payload["height"]),
+        left=float(payload.get("left", 0.0)),
+        top=float(payload.get("top", 0.0)),
+        width=float(payload.get("width", 0.0)),
+        height=float(payload.get("height", 0.0)),
         top_button_labels=tuple(str(label) for label in payload["top_button_labels"]),
     )
 
@@ -914,6 +974,8 @@ def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str
         if value is None:
             continue
         parsed = json.loads(value)
+        if isinstance(parsed, str):
+            parsed = json.loads(parsed)
         if isinstance(parsed, dict):
             return parsed
     return None
@@ -1356,6 +1418,18 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
     manual_action_label = result.get("manual_restore_action_label")
+    missing_capability = (
+        "The deployed web build does not expose a working manual re-authentication / "
+        "directory-access grant flow for the saved unavailable local workspace from the "
+        "Workspace switcher. The closest visible saved-workspace action remains "
+        f"`{manual_action_label}` and it fails before any browser directory-access "
+        "callback is triggered."
+        if manual_action_label
+        else "The deployed web build never reaches the interactive application shell. "
+        "Instead of rendering the workspace switcher and saved workspaces, the live page "
+        "stays on a minimal `Sync issue` surface, so the manual re-authentication scenario "
+        "cannot even be started from the user's perspective."
+    )
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -1374,13 +1448,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         EXPECTED_RESULT,
         "",
         "## Missing or broken production capability",
-        (
-            "The deployed web build does not expose a working manual re-authentication / "
-            "directory-access grant flow for the saved unavailable local workspace from the "
-            "Workspace switcher. The closest visible saved-workspace action remains "
-            f"`{manual_action_label}` and it fails before any browser directory-access "
-            "callback is triggered."
-        ),
+        missing_capability,
         "",
         "## Environment details",
         f"- URL: {result.get('app_url')}",
