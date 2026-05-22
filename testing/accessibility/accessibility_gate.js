@@ -14,6 +14,7 @@ const accessibilityGateRules = [
 ];
 
 const flutterSemanticsInitializationTimeoutMs = 15000;
+const flutterSemanticsPlaceholderSelector = 'flt-semantics-placeholder';
 const flutterRuntimeContrastProbeSelector =
   '#trackstate-accessibility-probe-color-contrast'
   + '[data-trackstate-accessibility-probe="color-contrast"]';
@@ -26,9 +27,33 @@ function isSemanticsInitializationTimeout(error) {
   const normalizedMessage = error.message.toLowerCase();
   return normalizedMessage.includes('timeout')
     && (
-      normalizedMessage.includes('waitforfunction')
+      normalizedMessage.includes('waitforselector')
+      || normalizedMessage.includes('waitforfunction')
       || normalizedMessage.includes('test timeout')
     );
+}
+
+function formatMissingPlaceholderPreflightError(
+    selector = flutterSemanticsPlaceholderSelector,
+) {
+  return (
+    'Accessibility pre-flight failed because '
+    + `${selector} was missing before the scan could begin.`
+  );
+}
+
+async function waitForSemanticsPlaceholder(page) {
+  try {
+    await page.waitForSelector(flutterSemanticsPlaceholderSelector, {
+      state: 'attached',
+      timeout: flutterSemanticsInitializationTimeoutMs,
+    });
+  } catch (error) {
+    if (!isSemanticsInitializationTimeout(error)) {
+      throw error;
+    }
+    throw new Error(formatMissingPlaceholderPreflightError());
+  }
 }
 
 async function enableFlutterSemantics(
@@ -38,12 +63,9 @@ async function enableFlutterSemantics(
       onHostReady,
     } = {},
 ) {
-  await page.waitForSelector('flt-semantics-placeholder', {
-    state: 'attached',
-    timeout: flutterSemanticsInitializationTimeoutMs,
-  });
+  await waitForSemanticsPlaceholder(page);
   onPlaceholderReady?.();
-  await page.locator('flt-semantics-placeholder').evaluate((element) => {
+  await page.locator(flutterSemanticsPlaceholderSelector).evaluate((element) => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
   await page.waitForSelector('flt-semantics-host', {
@@ -473,9 +495,11 @@ module.exports = {
   enableFlutterSemantics,
   isSemanticsInitializationTimeout,
   formatFlutterEngineInitializationEvidence,
+  formatMissingPlaceholderPreflightError,
   formatPlaceholderVerificationEvidence,
   formatSemanticsTreeDiscoveryStatus,
   formatFlutterSemanticsEvidence,
   formatViolations,
   readFlutterSemanticsEvidence,
+  waitForSemanticsPlaceholder,
 };
