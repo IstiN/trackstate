@@ -1369,6 +1369,102 @@ class LiveWorkspaceSwitcherPage:
             )
         return observation
 
+    def click_switcher_button(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            clicked = self._session.wait_for_function(
+                """
+                ({ heading, label }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const buttonSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                  ].join(',');
+                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                    .filter(isVisible)
+                    .find((element) => {
+                      const elementLabel = labelFor(element);
+                      const elementText = visibleText(element);
+                      return elementLabel === label || elementText === label;
+                    });
+                  if (!candidate) {
+                    return null;
+                  }
+                  candidate.click();
+                  return {
+                    label: labelFor(candidate),
+                    visibleText: visibleText(candidate),
+                  };
+                }
+                """,
+                arg={"heading": self._switcher_heading, "label": label},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a clickable button labelled "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(clicked, dict):
+            raise AssertionError(
+                f'The open workspace switcher did not expose a clickable button labelled "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+
     def focus_switcher_text_field(
         self,
         label: str,
