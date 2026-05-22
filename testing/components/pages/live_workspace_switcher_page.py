@@ -340,6 +340,21 @@ class WorkspaceSwitcherButtonFocusabilityObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherButtonStateObservation:
+    label: str
+    visible_text: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    tab_index_value: int
+    aria_disabled: str | None
+    disabled: bool
+    keyboard_focusable: bool
+    active_within: bool
+    outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherTabStopObservation:
     label: str
     visible_text: str
@@ -1328,6 +1343,137 @@ class LiveWorkspaceSwitcherPage:
                 if payload.get("tabindex") is not None
                 else None
             ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            active_within=bool(payload.get("activeWithin")),
+            outer_html=str(payload.get("outerHTML", "")),
+        )
+
+    def observe_switcher_button_state(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherButtonStateObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ heading, label }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleText = (element) =>
+                normalize(element?.innerText || element?.textContent || '');
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.getAttribute?.('placeholder')
+                  || element?.getAttribute?.('title')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              let switcher = Array.from(
+                document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+              )
+                .filter(isVisible)
+                .find((element) => visibleText(element).includes(heading)) || null;
+              if (!switcher) {
+                const candidates = Array.from(document.querySelectorAll('*'))
+                  .filter(isVisible)
+                  .filter((element) => {
+                    const text = visibleText(element);
+                    return text.includes(heading)
+                      && (
+                        text.includes('Saved workspaces')
+                        || text.includes('Save and switch')
+                        || text.includes('Hosted Local')
+                      );
+                  })
+                  .sort((left, right) => {
+                    const leftRect = left.getBoundingClientRect();
+                    const rightRect = right.getBoundingClientRect();
+                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                  });
+                switcher = candidates[0] || null;
+              }
+              if (!switcher) {
+                return null;
+              }
+              const buttonSelector = [
+                'flt-semantics[role="button"]',
+                'button',
+                '[role="button"]',
+              ].join(',');
+              const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                .filter(isVisible)
+                .find((element) => {
+                  const elementLabel = labelFor(element);
+                  const elementText = visibleText(element);
+                  return elementLabel === label || elementText === label;
+                });
+              if (!candidate) {
+                return null;
+              }
+              const active = document.activeElement instanceof Element
+                ? document.activeElement
+                : null;
+              const tabindex = candidate.getAttribute('tabindex');
+              const tabIndexValue = Number.isFinite(candidate.tabIndex)
+                ? candidate.tabIndex
+                : -1;
+              const ariaDisabled = normalize(candidate.getAttribute('aria-disabled'));
+              const disabled =
+                typeof candidate.disabled === 'boolean'
+                  ? candidate.disabled
+                  : candidate.hasAttribute('disabled');
+              return {
+                label: labelFor(candidate),
+                visibleText: visibleText(candidate),
+                role: candidate.getAttribute('role'),
+                tagName: candidate.tagName,
+                tabindex,
+                tabIndexValue,
+                ariaDisabled: ariaDisabled.length > 0 ? ariaDisabled : null,
+                disabled,
+                keyboardFocusable: tabIndexValue >= 0,
+                activeWithin: Boolean(active && (active === candidate || candidate.contains(active))),
+                outerHTML: candidate.outerHTML,
+              };
+            }
+            """,
+            arg={"heading": self._switcher_heading, "label": label},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f'The open workspace switcher did not expose a visible button labelled "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherButtonStateObservation(
+            label=str(payload.get("label", label)),
+            visible_text=str(payload.get("visibleText", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            tab_index_value=int(payload.get("tabIndexValue", -1)),
+            aria_disabled=(
+                str(payload.get("ariaDisabled"))
+                if payload.get("ariaDisabled") is not None
+                else None
+            ),
+            disabled=bool(payload.get("disabled")),
             keyboard_focusable=bool(payload.get("keyboardFocusable")),
             active_within=bool(payload.get("activeWithin")),
             outer_html=str(payload.get("outerHTML", "")),

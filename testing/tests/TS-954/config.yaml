@@ -1,0 +1,12 @@
+test_id: TS-954
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with preloaded hosted workspace profiles in a pristine state.
+  - Opens the desktop workspace switcher and verifies the footer still renders Save and switch before any workspace changes are made.
+  - Confirms the visible Save and switch control reports a disabled state and remains reachable through keyboard Tab traversal so the focus trap can wrap back to the first row.
+  - If the deployed app never renders the interactive shell or workspace switcher, the test records that live startup failure as a failed product bug with detailed outputs.
