@@ -35,6 +35,7 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
+THEME_FILE_PATH = REPO_ROOT / "lib" / "ui" / "core" / "trackstate_theme.dart"
 
 REQUEST_STEPS = [
     (
@@ -63,6 +64,11 @@ def main() -> None:
         _parse_rgb(config.text_color),
         _parse_rgb(config.background_color),
     )
+    theme_boundary = _load_light_theme_boundary_pair(THEME_FILE_PATH)
+    resolved_ratio = _contrast_ratio(
+        _parse_rgb(theme_boundary["text_color"]),
+        _parse_rgb(theme_boundary["background_color"]),
+    )
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -78,6 +84,9 @@ def main() -> None:
         "exact_contrast_ratio": config.exact_contrast_ratio,
         "contrast_tolerance": config.contrast_tolerance,
         "configured_contrast_ratio": round(contrast_ratio, 4),
+        "resolved_probe_text_color": theme_boundary["text_color"],
+        "resolved_probe_background_color": theme_boundary["background_color"],
+        "resolved_probe_contrast_ratio": round(resolved_ratio, 4),
         "text_color": config.text_color,
         "background_color": config.background_color,
         "visible_text": config.visible_text,
@@ -117,6 +126,9 @@ def _evaluate_probe_pull_request(
     failures: list[str],
 ) -> None:
     configured_ratio = float(result["configured_contrast_ratio"])
+    resolved_text_color = str(result["resolved_probe_text_color"])
+    resolved_background_color = str(result["resolved_probe_background_color"])
+    resolved_ratio = float(result["resolved_probe_contrast_ratio"])
     if observation.pull_request_probe_path not in observation.pull_request_file_paths:
         message = (
             "Step 1 failed: the disposable Pull Request was created, but GitHub did not "
@@ -140,14 +152,26 @@ def _evaluate_probe_pull_request(
         _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    if abs(configured_ratio - config.exact_contrast_ratio) > config.contrast_tolerance:
+    if resolved_text_color != config.text_color or resolved_background_color != config.background_color:
         message = (
-            "Step 1 failed: the configured boundary probe colors do not stay on the required "
+            "Step 1 failed: the live probe still renders from theme tokens, but the current "
+            "production token values no longer match the TS-926 boundary pair.\n"
+            f"Resolved probe foreground/background: {resolved_text_color} on {resolved_background_color}\n"
+            f"Configured boundary pair: {config.text_color} on {config.background_color}\n"
+            f"Theme file: {THEME_FILE_PATH}"
+        )
+        failures.append(message)
+        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
+        return
+
+    if abs(resolved_ratio - config.exact_contrast_ratio) > config.contrast_tolerance:
+        message = (
+            "Step 1 failed: the live probe theme-token pair does not stay on the required "
             "exact 4.5:1 contrast boundary.\n"
             f"Expected ratio: {config.exact_contrast_ratio}:1 (+/- {config.contrast_tolerance})\n"
-            f"Configured ratio: {configured_ratio}:1\n"
-            f"Foreground: {config.text_color}\n"
-            f"Background: {config.background_color}"
+            f"Resolved probe ratio: {resolved_ratio}:1\n"
+            f"Resolved foreground/background: {resolved_text_color} on {resolved_background_color}\n"
+            f"Theme file: {THEME_FILE_PATH}"
         )
         failures.append(message)
         _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
@@ -165,14 +189,20 @@ def _evaluate_probe_pull_request(
 
     observed = (
         "Created a disposable PR that patches the live app entrypoint to render the exact "
-        "boundary probe.\n"
+        "boundary probe through `context.ts.primary` on `context.ts.surfaceAlt`, then "
+        "resolved those same production theme tokens from the repository before checking "
+        "the boundary.\n"
         f"Pull Request URL: {observation.pull_request_url}\n"
         f"Probe file: {observation.pull_request_probe_path}\n"
         f"Render host: {observation.probe_render_host_path}\n"
         f"Configured visible text: {config.visible_text!r}\n"
         f"Configured button label: {config.accessible_button_label!r}\n"
+        f"Resolved probe foreground/background: {resolved_text_color} on {resolved_background_color}\n"
+        f"Resolved probe contrast ratio: {resolved_ratio}:1\n"
         f"Configured foreground/background: {config.text_color} on {config.background_color}\n"
-        f"Configured contrast ratio: {configured_ratio}:1"
+        f"Configured contrast ratio: {configured_ratio}:1\n"
+        "Probe contrast technique: "
+        f"{observation.probe_contrast_technique}"
     )
     _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
 
@@ -419,7 +449,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Reworked TS-926 to create a disposable pull request and validate the live GitHub Actions PR workflow instead of replaying a local surrogate.",
         "- Moved the boundary probe generation into a reusable testing service so the ticket script depends on abstractions rather than Playwright internals.",
-        "- Patched the disposable PR app entrypoint to render an exact 4.5:1 contrast probe with descriptive button text.",
+        "- Kept the disposable probe on production theme tokens and tied Step 1 to the actual rendered artifact by resolving `TrackStateColors.light.primary` and `surfaceAlt` before asserting the 4.5:1 boundary.",
         "- Inspected the hosted PR checks surface, workflow jobs/steps, and Playwright accessibility logs for the real CI outcome.",
         "",
         "## Human-style verification",
@@ -464,6 +494,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "- Reworked TS-926 to validate the real PR-triggered GitHub Actions accessibility workflow instead of a local Playwright-only surrogate.",
         "- Moved the boundary probe behind a reusable testing service and removed the ticket-local raw Playwright spec layer.",
+        "- Coupled Step 1 to the real disposable PR artifact by resolving the same production theme tokens that the probe renders, rather than proving the boundary from config alone.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -529,10 +560,11 @@ def _review_reply_text(*, result: dict[str, object], passed: bool) -> str:
         else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
     )
     return (
-        "Fixed: aligned the TS-926 regression fixtures with the current "
-        "`GitHubAccessibilityPullRequestGateObservation` contract, tightened the ticket so "
-        "only a real hosted accessibility check conclusion of `success` plus runtime "
-        "accessibility log evidence can pass, and added the required review-replies output. "
+        "Fixed: Step 1 now stays coupled to the real disposable PR artifact by keeping the "
+        "probe on `context.ts.primary` / `context.ts.surfaceAlt` and resolving those same "
+        "production theme-token values from `trackstate_theme.dart` before asserting the "
+        "exact 4.5:1 boundary. The rerun still requires a hosted accessibility check "
+        "conclusion of `success` plus runtime accessibility evidence. "
         f"{rerun_summary}"
     )
 
@@ -692,6 +724,37 @@ def _parse_rgb(value: str) -> tuple[int, int, int]:
     if match is None:
         raise ValueError(f"Unsupported RGB value: {value!r}")
     return tuple(int(channel) for channel in match.groups())
+
+
+def _load_light_theme_boundary_pair(path: Path) -> dict[str, str]:
+    theme_source = path.read_text(encoding="utf-8")
+    light_match = re.search(
+        r"static const light = TrackStateColors\((?P<body>.*?)\n\s*\);",
+        theme_source,
+        flags=re.DOTALL,
+    )
+    if light_match is None:
+        raise ValueError(f"Could not locate TrackStateColors.light in {path}.")
+    light_body = light_match.group("body")
+    return {
+        "text_color": _extract_theme_rgb(light_body, token_name="primary", path=path),
+        "background_color": _extract_theme_rgb(light_body, token_name="surfaceAlt", path=path),
+    }
+
+
+def _extract_theme_rgb(body: str, *, token_name: str, path: Path) -> str:
+    match = re.search(
+        rf"{token_name}:\s*Color\(0x(?P<hex>[0-9A-Fa-f]{{8}})\)",
+        body,
+    )
+    if match is None:
+        raise ValueError(f"Could not locate TrackStateColors.light.{token_name} in {path}.")
+    color_hex = match.group("hex")[-6:]
+    return "rgb({red}, {green}, {blue})".format(
+        red=int(color_hex[0:2], 16),
+        green=int(color_hex[2:4], 16),
+        blue=int(color_hex[4:6], 16),
+    )
 
 
 def _contrast_ratio(

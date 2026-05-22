@@ -97,6 +97,14 @@ class Ts926ProbeSurface extends StatelessWidget {{
         escaped = value.replace("\\", "\\\\").replace("'", "\\'")
         return f"'{escaped}'"
 
+    def _probe_contrast_technique(self, probe_source: str) -> str:
+        del probe_source
+        return (
+            "Uses `context.ts.primary` text on `context.ts.surfaceAlt` so the disposable "
+            "probe stays theme-token-compliant while Step 1 resolves those same production "
+            "tokens back to their current RGB values before asserting the exact boundary."
+        )
+
     def _inject_probe_into_render_host(self, source: str) -> str:
         if "Ts926ProbeSurface" in source:
             return source
