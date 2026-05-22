@@ -13,8 +13,8 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup has reached the visible recovery window
-5. records any saved-workspace overlap diagnostics before release from tracked
-  File System Access activity on the saved local workspace lineage, a tracked
+5. requires restore-specific overlap evidence before release from tracked File
+  System Access activity on the saved local workspace lineage, a tracked
   TS-893 runtime failure probe, or a public pre-release non-restored
   workspace state while the workspace is still blocked, then waits after the
   busy-state release for the workspace switcher trigger to restore the saved
@@ -54,7 +54,8 @@ Pass: after the temporary busy state is released during startup, the prepared
 active local workspace is restored as the selected Local Git row and the app
 does not keep Hosted setup workspace active or show Local Unavailable.
 
-Fail: after the temporary busy state is released, startup still keeps Hosted
-setup workspace active, leaves the local row Unavailable, or otherwise does not
-restore the saved local workspace as Local Git.
+Fail: while the workspace is still blocked, startup never exposes
+restore-specific overlap evidence for the retry path, or after release it still
+keeps Hosted setup workspace active, leaves the local row Unavailable, or
+otherwise does not restore the saved local workspace as Local Git.
 ```
