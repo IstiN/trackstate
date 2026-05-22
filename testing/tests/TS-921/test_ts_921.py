@@ -35,6 +35,7 @@ TICKET_KEY = "TS-921"
 TEST_CASE_TITLE = (
     "Manual re-authentication with non-workspace directory keeps Local Unavailable state"
 )
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-921/test_ts_921.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
@@ -42,14 +43,14 @@ LOCAL_TARGET = "/tmp/trackstate-ts921-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 WRONG_DIRECTORY_NAME = "ts921-wrong-directory"
-LINKED_BUGS = ["TS-942", "TS-915", "TS-914"]
+LINKED_BUGS = ["TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Kept the wrong-directory rejection checks scoped to explicit mismatch "
-    "messaging and now records the live startup-shell blockage as a real failed "
-    "test/product bug with the required failure outputs."
+    "Resolved the TS-921 rework conflict, kept the live wrong-directory outcome "
+    "driven by the current rerun, and now builds review replies from the actual "
+    "unresolved PR thread metadata instead of stale hardcoded IDs."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -69,6 +70,7 @@ RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts921_failure.png"
 
@@ -336,22 +338,10 @@ def main() -> None:
                 )
                 result["wrong_picker_before"] = _read_wrong_picker_state(tracker_page)
                 page.click_saved_workspace_action_button(action_label, timeout_ms=10_000)
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=(
-                        "Activated the unavailable-workspace retry action while the browser "
-                        "directory picker override returned the wrong directory handle.\n"
-                        f"wrong_picker_before={json.dumps(result['wrong_picker_before'], indent=2)}"
-                    ),
-                )
-
                 callback_observed, callback_observation = poll_until(
                     probe=lambda: _observe_retry_callback(tracker_page),
                     is_satisfied=lambda observation: observation[
-                        "directory_access_callback_observed"
+                        "browser_access_callback_observed"
                     ],
                     timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
                     interval_seconds=1,
@@ -365,40 +355,109 @@ def main() -> None:
                 if not callback_observed:
                     _record_step(
                         result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=(
+                            "The unavailable-workspace retry action never opened the browser "
+                            "directory picker / access flow for the wrong-directory selection.\n"
+                            f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                        ),
+                    )
+                    _record_step(
+                        result,
                         step=4,
                         status="failed",
                         action=REQUEST_STEPS[3],
                         observed=(
-                            "The manual retry action never triggered the browser directory "
-                            "picker callback for the wrong-directory selection.\n"
-                            f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                            "Not reached because step 3 never opened the browser directory "
+                            "picker / access flow."
                         ),
                     )
                     raise AssertionError(
-                        "Step 4 failed: the unavailable-workspace retry action never triggered "
-                        "the browser directory picker callback.\n"
+                        "Step 3 failed: the unavailable-workspace retry action never opened "
+                        "the browser directory picker / access flow.\n"
                         f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
                     )
+                if result["wrong_directory_selected"] is None:
+                    selection_confirmed, callback_observation = poll_until(
+                        probe=lambda: _observe_retry_callback(tracker_page),
+                        is_satisfied=lambda observation: (
+                            observation["wrong_picker"].get("selectedDirectoryName")
+                            is not None
+                        ),
+                        timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
+                        interval_seconds=1,
+                    )
+                    result["callback_observation"] = callback_observation
+                    result["manual_reauth_probe_after_click"] = callback_observation[
+                        "probe"
+                    ]
+                    result["wrong_picker_after_click"] = callback_observation[
+                        "wrong_picker"
+                    ]
+                    result["wrong_directory_selected"] = callback_observation[
+                        "wrong_picker"
+                    ].get("selectedDirectoryName")
+                    if not selection_confirmed:
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "The unavailable-workspace retry action opened the browser "
+                                "directory picker / access flow, but the follow-up poll never "
+                                "confirmed that the wrong directory handle was selected.\n"
+                                f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                            ),
+                        )
+                        _record_step(
+                            result,
+                            step=4,
+                            status="failed",
+                            action=REQUEST_STEPS[3],
+                            observed=(
+                                "Not reached because step 3 never confirmed the wrong directory "
+                                "selection."
+                            ),
+                        )
+                        raise AssertionError(
+                            "Step 3 failed: the follow-up poll never confirmed "
+                            "`wrong_picker.selectedDirectoryName` for the wrong-directory "
+                            "selection.\n"
+                            f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
+                        )
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=REQUEST_STEPS[2],
+                    observed=(
+                        "The unavailable-workspace retry action opened the overridden browser "
+                        "directory picker flow and selected the wrong directory handle.\n"
+                        f"selected_directory={result['wrong_directory_selected']!r}\n"
+                        f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                    ),
+                )
 
                 post_retry_started_at = time.monotonic()
                 settled, settled_observation = poll_until(
-                    probe=lambda: _observe_post_retry_state(
-                        tracker_page=tracker_page,
-                        page=page,
-                        expected_local_workspace_id=local_workspace_id,
-                        post_retry_started_at=post_retry_started_at,
-                    ),
-                    is_satisfied=lambda observation: (
-                        _is_expected_wrong_directory_rejection(
-                            str(observation.get("user_visible_error") or ""),
-                        )
-                        or bool(observation.get("active_workspace_is_local"))
-                        or _local_row_promoted_to_local_git(
-                            observation.get("local_row"),
-                        )
-                    ),
-                    timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
-                    interval_seconds=1,
+probe=lambda: _observe_post_retry_state(
+    tracker_page=tracker_page,
+    page=page,
+    expected_local_workspace_id=local_workspace_id,
+    post_retry_started_at=post_retry_started_at,
+),
+is_satisfied=lambda observation: bool(
+    observation.get("user_visible_error")
+)
+or bool(observation.get("active_workspace_is_local"))
+or _local_row_promoted_to_local_git(
+    observation.get("local_row"),
+),
+timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
+interval_seconds=1,
                 )
                 result["post_retry_observation"] = settled_observation
                 result["console_events"] = list(runtime_context.console_events)
@@ -649,7 +708,15 @@ def _observe_retry_callback(tracker_page: TrackStateTrackerPage) -> dict[str, ob
         "probe": probe,
         "wrong_picker": wrong_picker,
         "body_text": tracker_page.body_text(),
-        "directory_access_callback_observed": bool(probe["showDirectoryPickerCalls"]),
+        "directory_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"] or wrong_picker["calls"]
+        ),
+        "browser_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"]
+            or probe["requestPermissionCalls"]
+            or wrong_picker["calls"]
+            or wrong_picker.get("selectedDirectoryName")
+        ),
     }
 
 
@@ -774,6 +841,17 @@ def _assert_wrong_directory_rejected(
             f"Observed post-retry state: {json.dumps(observation, indent=2)}"
         )
     user_visible_error = str(observation.get("user_visible_error") or "").strip()
+    body_text = str(observation.get("body_text") or "")
+    if "Unsupported operation: Process.run" in user_visible_error or (
+        "Unsupported operation: Process.run" in body_text
+    ):
+        raise AssertionError(
+            "Step 4 failed: after selecting the wrong directory, the app showed "
+            "`Unsupported operation: Process.run` instead of a directory/workspace "
+            "mismatch error.\n"
+            f"Observed message: {user_visible_error!r}\n"
+            f"Observed post-retry state: {json.dumps(observation, indent=2)}"
+        )
     if not user_visible_error:
         raise AssertionError(
             "Step 4 failed: selecting the wrong directory did not leave any visible user-facing "
@@ -1175,7 +1253,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -1197,7 +1278,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
@@ -1298,38 +1382,66 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "The wrong-directory retry stayed visible to the user as a failure and did not "
-            "promote the workspace to Local Git.\n"
+    status = "passed" if passed else "failed"
+    lines = [f"# {TICKET_KEY} {status}", ""]
+    if not passed:
+        lines.extend(
+            [
+                "## Issues/Notes",
+                f"- Re-run failed: {_failed_step_summary(result)}",
+                "",
+            ],
         )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The deployed app blocked the TS-921 scenario before the wrong-directory retry could run.')}\n"
+    lines.extend(
+        [
+            "## Approach",
+            f"- {REWORK_SUMMARY}",
+            (
+                "- Re-ran the live deployed workspace re-authentication flow and captured the "
+                "current user-visible outcome after the wrong-directory selection."
+            ),
+            "",
+            "## Files Modified",
+            "- `testing/tests/TS-921/test_ts_921.py`",
+            "",
+            "## Test Coverage",
+            f"- Test case: `{TICKET_KEY} - {TEST_CASE_TITLE}`",
+            f"- Result: `{status}`",
+            f"- Command: `{RUN_COMMAND}`",
+            (
+                f"- Environment: `{result.get('app_url')}` on Chromium/Playwright "
+                f"({result.get('os')}) against `{result.get('repository')}` @ "
+                f"`{result.get('repository_ref')}`."
+            ),
+            f"- Step results: {', '.join(_step_status_summary(result))}",
+        ],
     )
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
 
 
-def _build_review_replies() -> str:
+def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
     return (
         json.dumps(
-            {
-                "replies": [
-                    {
-                        "inReplyToId": 3290577660,
-                        "threadId": "PRRT_kwDOSU6Gf86ENETH",
-                        "reply": (
-                            "Updated: the deployed app still hard-stops on the visible `Sync "
-                            "issue` surface before the Workspace switcher exists, so TS-921 now "
-                            "keeps that as a real failed test/product bug and emits the required "
-                            "failed result payload plus `bug_description.md` for downstream bug "
-                            "handling."
-                        ),
-                    },
-                ],
-            },
+            {"replies": replies},
+            indent=2,
         )
         + "\n"
     )
@@ -1356,50 +1468,44 @@ def _build_bug_description(result: dict[str, object]) -> str:
         )
 
     lines = [
-        f"# {TICKET_KEY} bug report",
+        "h4. Environment",
+        f"* URL: {result.get('app_url')}",
+        f"* Browser: {result.get('browser')}",
+        f"* OS: {result.get('os')}",
+        f"* Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+        f"* Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+        f"* Wrong directory handle returned by test: {WRONG_DIRECTORY_NAME}",
         "",
-        "## Steps to reproduce",
+        "h4. Steps to Reproduce",
         *annotated_steps,
         "",
-        "## Exact error message or assertion failure",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
-        "",
-        "## Actual result",
-        str(result.get("error", "The wrong-directory retry did not match the expected result.")),
-        "",
-        "## Missing or broken production capability",
-        (
-            "The deployed web app does not render the interactive shell or Workspace "
-            "switcher needed to start manual re-authentication. After accessibility is "
-            "enabled, the page remains stuck on a single visible `Sync issue` control, "
-            "so the TS-921 retry flow cannot be reached."
-        ),
-        "",
-        "## Expected result",
+        "h4. Expected Result",
         EXPECTED_RESULT,
         "",
-        "## Environment details",
-        f"- URL: {result.get('app_url')}",
-        f"- Browser: {result.get('browser')}",
-        f"- OS: {result.get('os')}",
-        f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"- Wrong directory handle returned by test: {WRONG_DIRECTORY_NAME}",
-        f"- Run command: `{RUN_COMMAND}`",
+        "h4. Actual Result",
+        str(result.get("error", "The wrong-directory retry did not match the expected result.")),
         "",
-        "## Observed state",
-        f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
-        f"- Trigger before action: `{json.dumps(result.get('trigger_before'), ensure_ascii=True)}`",
-        f"- Switcher before action: `{json.dumps(result.get('switcher_before'), ensure_ascii=True)}`",
-        f"- Saved local row before action: `{json.dumps(result.get('saved_local_row_before'), ensure_ascii=True)}`",
-        f"- Callback observation: `{json.dumps(result.get('callback_observation'), ensure_ascii=True)}`",
-        f"- Post-retry observation: `{json.dumps(result.get('post_retry_observation'), ensure_ascii=True)}`",
-        f"- Console events: `{json.dumps(result.get('console_events'), ensure_ascii=True)}`",
-        f"- Page errors: `{json.dumps(result.get('page_errors'), ensure_ascii=True)}`",
+        "h4. Missing or Broken Production Capability",
+        _missing_or_broken_capability(result),
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
+        str(result.get("traceback", result.get("error", ""))),
+        "{code}",
+        "",
+        "h4. Notes",
+        f"* Run command: {RUN_COMMAND}",
+        f"* Startup observation: {json.dumps(result.get('startup_observation'), ensure_ascii=True)}",
+        f"* Trigger before action: {json.dumps(result.get('trigger_before'), ensure_ascii=True)}",
+        f"* Switcher before action: {json.dumps(result.get('switcher_before'), ensure_ascii=True)}",
+        f"* Saved local row before action: {json.dumps(result.get('saved_local_row_before'), ensure_ascii=True)}",
+        f"* Callback observation: {json.dumps(result.get('callback_observation'), ensure_ascii=True)}",
+        f"* Post-retry observation: {json.dumps(result.get('post_retry_observation'), ensure_ascii=True)}",
+        f"* Console events: {json.dumps(result.get('console_events'), ensure_ascii=True)}",
+        f"* Page errors: {json.dumps(result.get('page_errors'), ensure_ascii=True)}",
     ]
     if result.get("screenshot"):
-        lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{result['screenshot']}`"])
+        lines.append(f"* Screenshot: {result['screenshot']}")
     return "\n".join(lines) + "\n"
 
 
@@ -1416,6 +1522,113 @@ def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
             "could run.",
         ),
     )
+
+
+def _missing_or_broken_capability(result: dict[str, object]) -> str:
+    error = str(result.get("error", ""))
+    if "interactive shell" in error or "Workspace switcher required" in error:
+        return (
+            "The deployed web app never rendered the interactive shell or Workspace "
+            "switcher needed to start manual re-authentication, so the TS-921 flow could "
+            "not be reached."
+        )
+    if "never opened the browser directory picker / access flow" in error:
+        return (
+            "Clicking `Retry` on the unavailable local workspace did not open the browser "
+            "directory picker / access flow, so the user could not continue manual "
+            "re-authentication."
+        )
+    if "Unsupported operation: Process.run" in error:
+        return (
+            "After the user selected a wrong directory for manual re-authentication, the "
+            "deployed web app surfaced `Unsupported operation: Process.run` instead of a "
+            "clear directory/workspace mismatch message while keeping the workspace in "
+            "`Local Unavailable`."
+        )
+    return (
+        "The deployed web app did not produce the expected wrong-directory mismatch "
+        "outcome required by TS-921."
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId") or thread.get("id")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+                "body": thread.get("body"),
+            },
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-921 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else (
+            "Re-ran the current TS-921 test and it still failed: "
+            f"{_snippet(_current_failure_summary(result), limit=240)}"
+        )
+    )
+    return (
+        "Fixed: `review_replies.json` is now generated from the unresolved entries in "
+        f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}` and the current rerun result, "
+        "so it no longer hardcodes stale PR thread IDs or an outdated failure mode. "
+        f"{rerun_summary}"
+    )
+
+
+def _failed_step_summary(result: dict[str, object]) -> str:
+    failed_steps = [
+        step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    ]
+    if not failed_steps:
+        return str(result.get("error", "The test failed before step details were recorded."))
+    first_failed_step = failed_steps[0]
+    return (
+        f"Step {first_failed_step.get('step')} failed. "
+        f"{_snippet(str(first_failed_step.get('observed', '')), limit=500)}"
+    )
+
+
+def _current_failure_summary(result: dict[str, object]) -> str:
+    error = str(result.get("error", "")).strip()
+    if error:
+        return error.splitlines()[0]
+    return _failed_step_summary(result)
+
+
+def _step_status_summary(result: dict[str, object]) -> list[str]:
+    summaries: list[str] = []
+    for step in result.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        summaries.append(f"{step.get('step')}={step.get('status')}")
+    return summaries or ["<no steps recorded>"]
+
+
+def _snippet(text: str, *, limit: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
