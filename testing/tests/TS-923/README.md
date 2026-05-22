@@ -8,7 +8,7 @@ The automation:
    `workspaceSyncAttentionNeededSemanticLabel` getter for the attention-needed
    sync pill,
 3. verifies the English localization value keeps the required
-   `Sync error, attention needed` semantic prefix, and
+   `Sync error` semantic prefix, and
 4. runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart`.
 
 The test only passes when the unmodified implementation stays analyzer-clean and

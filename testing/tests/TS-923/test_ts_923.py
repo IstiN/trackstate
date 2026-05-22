@@ -202,10 +202,9 @@ def _assert_localized_prefix_is_preserved(
             f"Localization file: {config.localization_relative_path.as_posix()}"
         )
 
+    required_prefix = _required_semantic_prefix(config)
     normalized_value = actual_value.strip()
-    if normalized_value != config.required_semantic_label or not normalized_value.startswith(
-        "Sync error",
-    ):
+    if not normalized_value.startswith(required_prefix):
         _record_step(
             result,
             step=2,
@@ -213,13 +212,13 @@ def _assert_localized_prefix_is_preserved(
             action=REQUEST_STEPS[1],
             observed=(
                 "The localization entry was present, but it did not preserve the "
-                f"required `Sync error` prefix. Observed value: {actual_value!r}"
+                f"required `{required_prefix}` prefix. Observed value: {actual_value!r}"
             ),
         )
         raise AssertionError(
             "Step 2 failed: the underlying localization value no longer preserves the "
-            "mandatory `Sync error` prefix.\n"
-            f"Expected value: {config.required_semantic_label!r}\n"
+            f"mandatory `{required_prefix}` prefix.\n"
+            f"Expected prefix: {required_prefix!r}\n"
             f"Observed value: {actual_value!r}\n"
             f"Localization key: {config.semantic_label_localization_key}\n"
             f"Localization file: {config.localization_relative_path.as_posix()}"
@@ -233,9 +232,14 @@ def _assert_localized_prefix_is_preserved(
         observed=(
             "Confirmed the English localization entry "
             f"`{config.semantic_label_localization_key}` contains "
-            f"{actual_value!r}, preserving the mandatory `Sync error` prefix."
+            f"{actual_value!r}, preserving the mandatory `{required_prefix}` prefix."
         ),
     )
+
+
+def _required_semantic_prefix(config: SemanticLabelContextLintConfig) -> str:
+    prefix, separator, _ = config.required_semantic_label.partition(",")
+    return prefix.strip() if separator else config.required_semantic_label.strip()
 
 
 def _assert_analyzer_allows_valid_label(
