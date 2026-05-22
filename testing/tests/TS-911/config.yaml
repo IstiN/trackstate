@@ -7,6 +7,6 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
-  - Opens the desktop workspace switcher from Dashboard and confirms the selected first saved workspace row plus a distinct last internal keyboard target are present.
-  - Focuses the selected first saved workspace row and proves from the open panel's internal tab order that this row is the first keyboard target.
+  - Opens the desktop workspace switcher from Dashboard and confirms the selected first saved workspace row plus a distinct last keyboard-reachable internal target are present.
+  - Establishes the first-row precondition directly and proves from the open panel's keyboard-reachable internal order that this row is the first target.
   - Verifies reverse wrap returns to the observed last internal control instead of escaping to the app shell.

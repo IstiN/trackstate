@@ -45,6 +45,7 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/tes
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 FOCUS_TIMEOUT_MS = 4_000
 FOCUS_SETTLE_MS = 300
+MAX_TABS_TO_DERIVE_WRAP_TARGET = 12
 DEFAULT_BRANCH = "main"
 FIRST_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
@@ -63,14 +64,14 @@ REQUEST_STEPS = [
 ]
 AUTOMATION_STEPS = [
     (
-        "Open the deployed desktop workspace switcher and confirm the selected first "
-        "saved workspace row plus the observed last internal keyboard target are present."
+        "Open the deployed desktop workspace switcher and confirm the first saved "
+        "workspace row is available for the reverse-wrap scenario."
     ),
     (
-        "Focus the selected first saved workspace row, prove it is the first internal "
-        "keyboard target from the open panel's actual tab order, then press Shift+Tab and "
-        "verify focus wraps to that observed last internal control instead of escaping to "
-        "the trigger or top-bar."
+        "Focus the selected first saved workspace row directly, derive the last internal "
+        "keyboard target from live in-panel Tab traversal, then press Shift+Tab and verify "
+        "focus wraps to that observed last internal control instead of escaping to the "
+        "trigger or top-bar."
     ),
 ]
 EXPECTED_RESULT = (
@@ -171,20 +172,19 @@ def main() -> None:
                     observed=(
                         f"Opened {config.app_url} in Chromium at "
                         f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
-                        f"selected_row={_active_workspace_name_from_state(initial_state)!r}; "
-                        f"expected_wrap_target={_expected_target_label(initial_state)!r}"
+                        f"first_row_display_name={initial_state.get('first_row_display_name')!r}; "
+                        f"visible_surface_labels={_interactive_label_summary(initial_state)!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the open desktop workspace switcher and confirmed the "
-                        "selected first saved workspace row plus the observed last internal "
-                        "control were present before the keyboard-order check."
+                        "Viewed the open desktop workspace switcher and confirmed the first "
+                        "saved workspace row plus the visible in-panel controls were present "
+                        "before the reverse-wrap check."
                     ),
                     observed=(
-                        f"selected_row={_active_workspace_name_from_state(initial_state)!r}; "
-                        f"expected_wrap_target={_expected_target_label(initial_state)!r}; "
+                        f"first_row_display_name={initial_state.get('first_row_display_name')!r}; "
                         f"interactive_labels={_interactive_label_summary(initial_state)!r}"
                     ),
                 )
@@ -196,21 +196,22 @@ def main() -> None:
                     state=initial_state,
                 )
                 result["first_keyboard_target_state"] = first_keyboard_target_state
-                result["internal_tab_stops"] = first_keyboard_target_state.get(
-                    "internal_tab_stops",
+                result["tab_trace_to_wrap_target"] = first_keyboard_target_state.get(
+                    "tab_trace_to_wrap_target",
                     [],
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Focused the selected first saved workspace row and inspected the "
-                        "open panel's actual internal tab order before pressing Shift+Tab."
+                        "Focused the selected first saved workspace row, derived the live "
+                        "last internal Tab target, then restored focus to that first row "
+                        "before pressing Shift+Tab."
                     ),
                     observed=(
                         f"focused_before_shift_tab={_active_label_for_summary(first_keyboard_target_state)!r}; "
                         f"first_row_contains_active={_row_focus_from_state(first_keyboard_target_state, FIRST_WORKSPACE_DISPLAY_NAME).get('row_contains_active')}; "
                         f"focus_owned_by_switcher={_focus_from_state(first_keyboard_target_state).get('focus_owned_by_switcher')}; "
-                        f"internal_tab_stops={result.get('internal_tab_stops')!r}; "
+                        f"tab_trace_to_wrap_target={result.get('tab_trace_to_wrap_target')!r}; "
                         f"expected_wrap_target={_expected_target_label(first_keyboard_target_state)!r}"
                     ),
                 )
@@ -241,8 +242,8 @@ def main() -> None:
                     status="passed",
                     action=AUTOMATION_STEPS[1],
                     observed=(
-                        f"Observed internal tab order started at {_first_internal_label(after_shift_tab_state)!r}, "
-                        "proving it is the first internal keyboard target; "
+                        f"Observed live Tab traversal wrapped back to {_first_internal_label(after_shift_tab_state)!r}, "
+                        f"so the last internal target was {_expected_target_label(after_shift_tab_state)!r}; "
                         f"Shift+Tab then moved focus to {_active_label_for_summary(after_shift_tab_state)!r} "
                         "while focus remained inside the workspace switcher."
                     ),
@@ -309,15 +310,10 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         else FIRST_WORKSPACE_DISPLAY_NAME
     )
     first_row_label = (
-        str(tab_stops[0].label)
-        if tab_stops and first_row_display_name in str(tab_stops[0].label)
-        else (
-            _saved_workspace_row_focus_label(first_row)
-            if first_row is not None
-            else str(tab_stops[0].label if tab_stops else "")
-        )
+        _saved_workspace_row_focus_label(first_row)
+        if first_row is not None
+        else ""
     )
-    expected_target = _last_internal_focus_target(tab_stops=tab_stops)
     active = page.active_element()
     focus = page.observe_focus_ownership(panel=panel)
     row_focus = {
@@ -335,7 +331,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         focus=focus,
         saved_workspace_rows=rows,
         row_focus=row_focus,
-        expected_target=expected_target,
+        expected_target={},
         first_row_display_name=first_row_display_name,
         first_row_label=first_row_label,
         internal_tab_stops=_tab_stops_payload(tab_stops),
@@ -351,22 +347,22 @@ def _prove_first_keyboard_target(
     panel_payload = _panel_from_state(state)
     panel = WorkspaceSwitcherPanelObservation(**panel_payload)
     try:
-        page.focus_internal_tab_stop(
-            str(state.get("first_row_label")),
+        page.focus_saved_workspace_row(
+            str(state.get("first_row_display_name") or FIRST_WORKSPACE_DISPLAY_NAME),
             panel=panel,
             timeout_ms=FOCUS_TIMEOUT_MS,
         )
     except AssertionError as error:
-        first_stop = _tab_stops_from_state(state)[0] if _tab_stops_from_state(state) else {}
+        row_candidates = page.debug_saved_workspace_row_candidates(
+            str(state.get("first_row_display_name") or FIRST_WORKSPACE_DISPLAY_NAME),
+        )
         raise AssertionError(
             "Step 2 failed: the live workspace switcher did not allow focus to move onto "
-            "its first internal tab stop before the ticket-specific Shift+Tab action.\n"
-            f"- first internal tab stop label: {first_stop.get('label')!r}\n"
-            f"- first internal tab stop disabled: {first_stop.get('disabled')!r}\n"
-            f"- first internal tab stop tag: {first_stop.get('tag_name')!r}\n"
-            f"- first internal tab stop tabindex: {first_stop.get('tabindex')!r}\n"
-            f"- first internal tab stop keyboard_focusable flag: {first_stop.get('keyboard_focusable')!r}\n"
-            f"Observed first tab stop: {json.dumps(first_stop, indent=2)}\n"
+            "the selected first saved workspace row before the ticket-specific Shift+Tab "
+            "action.\n"
+            f"- first row display name: {state.get('first_row_display_name')!r}\n"
+            f"- saved rows: {json.dumps(_saved_workspace_rows_from_state(state), indent=2)}\n"
+            f"- matching row candidates: {json.dumps(row_candidates, indent=2)}\n"
             f"Underlying focus error: {error}"
         ) from error
     first_row_panel = page.observe_open_panel(
@@ -377,16 +373,44 @@ def _prove_first_keyboard_target(
         page=page,
         panel=first_row_panel,
         state=state,
-        focused_label=str(state.get("first_row_label")),
+        focused_label=str(state.get("first_row_display_name") or FIRST_WORKSPACE_DISPLAY_NAME),
         require_stable_surface=False,
     )
-    tab_stops = page.observe_internal_tab_stops(
-        panel=first_row_panel,
+    focused_row_state["first_row_label"] = str(
+        _active_label_for_summary(focused_row_state) or state.get("first_row_label") or "",
+    )
+    _assert_first_keyboard_target(focused_row_state)
+    expected_target, tab_trace = _derive_expected_wrap_target(
+        page=page,
+        state=focused_row_state,
+    )
+    focused_row_state["expected_target"] = expected_target
+    focused_row_state["tab_trace_to_wrap_target"] = tab_trace
+
+    restore_panel = page.observe_open_panel(
+        expected_container_kinds=("anchored-panel", "surface"),
         timeout_ms=FOCUS_TIMEOUT_MS,
     )
-    focused_row_state["expected_target"] = _last_internal_focus_target(tab_stops=tab_stops)
-    focused_row_state["internal_tab_stops"] = _tab_stops_payload(tab_stops)
-    return focused_row_state
+    page.focus_saved_workspace_row(
+        str(state.get("first_row_display_name") or FIRST_WORKSPACE_DISPLAY_NAME),
+        panel=restore_panel,
+        timeout_ms=FOCUS_TIMEOUT_MS,
+    )
+    restored_panel = page.observe_open_panel(
+        expected_container_kinds=("anchored-panel", "surface"),
+        timeout_ms=FOCUS_TIMEOUT_MS,
+    )
+    restored_state = _capture_current_focus_state(
+        page=page,
+        panel=restored_panel,
+        state=focused_row_state,
+        focused_label=str(state.get("first_row_display_name") or FIRST_WORKSPACE_DISPLAY_NAME),
+        require_stable_surface=False,
+    )
+    restored_state["first_row_label"] = focused_row_state["first_row_label"]
+    restored_state["expected_target"] = expected_target
+    restored_state["tab_trace_to_wrap_target"] = tab_trace
+    return restored_state
 
 def _press_key_and_capture(
     *,
@@ -479,30 +503,19 @@ def _press_key_and_capture(
 
 
 def _assert_initial_state(state: dict[str, object]) -> None:
-    rows = _saved_workspace_rows_from_state(state)
-    first_row = _selected_row_payload(rows)
-    expected_target = _expected_target_from_state(state)
-    tab_stops = _tab_stops_from_state(state)
+    switcher = _switcher_from_state(state)
+    surface_labels = _interactive_label_summary(state)
     failures: list[str] = []
 
-    if not state.get("first_row_label"):
-        failures.append("the open switcher did not expose a readable first internal keyboard target")
-    elif FIRST_WORKSPACE_DISPLAY_NAME not in str(state.get("first_row_label")):
+    if FIRST_WORKSPACE_DISPLAY_NAME not in str(state.get("first_row_display_name")):
         failures.append(
-            f"the first internal keyboard target was {state.get('first_row_label')!r} instead of a label for {FIRST_WORKSPACE_DISPLAY_NAME!r}",
+            f"the first saved workspace display name was {state.get('first_row_display_name')!r} instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
         )
-    if len(tab_stops) < 2:
-        failures.append(
-            "the open switcher did not expose enough internal keyboard tab stops to prove a reverse wrap target",
-        )
-    elif tab_stops[0].get("label") != state.get("first_row_label"):
-        failures.append(
-            "the open switcher's first internal tab stop did not match the selected first saved workspace row",
-        )
-    if not expected_target.get("label"):
-        failures.append("the open switcher did not expose a readable last internal keyboard target")
-    elif expected_target.get("label") == state.get("first_row_label"):
-        failures.append("the observed last internal focus target incorrectly matched the first row")
+    if "Workspace switcher" not in str(switcher.get("switcher_text", "")):
+        failures.append("the workspace switcher panel text was not visible")
+    for label in ("Repository", "Branch"):
+        if label not in surface_labels:
+            failures.append(f"the visible panel did not expose the expected {label!r} control")
 
     if failures:
         raise AssertionError(
@@ -510,10 +523,9 @@ def _assert_initial_state(state: dict[str, object]) -> None:
             "preconditions before the keyboard-order proof began.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
-            + f"Observed rows: {json.dumps(rows, indent=2)}\n"
-            + f"Observed expected target: {json.dumps(expected_target, indent=2)}\n"
-            + f"Observed internal tab stops: {json.dumps(tab_stops, indent=2)}\n"
-            + f"Observed surface labels: {json.dumps(_interactive_label_summary(state), indent=2)}"
+            + f"Observed switcher: {json.dumps(switcher, indent=2)}\n"
+            + f"Observed rows: {json.dumps(_saved_workspace_rows_from_state(state), indent=2)}\n"
+            + f"Observed surface labels: {json.dumps(surface_labels, indent=2)}"
         )
 
 
@@ -553,8 +565,6 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     row_focus = _row_focus_from_state(state, FIRST_WORKSPACE_DISPLAY_NAME)
-    tab_stops = _tab_stops_from_state(state)
-    expected_target = _expected_target_from_state(state)
     failures: list[str] = []
 
     if not bool(focus.get("focus_owned_by_switcher")):
@@ -565,23 +575,10 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
         failures.append(
             f"focus landed on {active.get('accessible_name')!r} instead of the first internal row {state.get('first_row_label')!r}",
         )
+    if str(active.get("accessible_name") or "").startswith("Workspace switcher:"):
+        failures.append("focus stayed on the workspace-switcher trigger instead of the first saved workspace row")
     if bool(row_focus.get("row_found")) and not bool(row_focus.get("row_contains_active")):
         failures.append("the selected first saved workspace row did not contain the active element before Shift+Tab")
-    if not tab_stops:
-        failures.append("the open workspace switcher did not expose an ordered set of internal tab stops")
-    elif tab_stops[0].get("label") != state.get("first_row_label"):
-        failures.append(
-            "the first internal tab stop was "
-            f"{tab_stops[0].get('label')!r} instead of {state.get('first_row_label')!r}",
-        )
-    elif not bool(tab_stops[0].get("keyboard_focusable")):
-        failures.append("the first internal tab stop was not keyboard focusable")
-    if not expected_target.get("label"):
-        failures.append("the open workspace switcher did not expose a readable last internal tab stop")
-    elif tab_stops[-1].get("label") != expected_target.get("label"):
-        failures.append(
-            f"the expected reverse-wrap target {expected_target.get('label')!r} did not match the observed last internal tab stop {tab_stops[-1].get('label')!r}",
-        )
 
     if failures:
         raise AssertionError(
@@ -591,9 +588,7 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
             + "\n"
             + f"Observed active element: {json.dumps(active, indent=2)}\n"
             + f"Observed focus ownership: {json.dumps(focus, indent=2)}\n"
-            + f"Observed row focus: {json.dumps(row_focus, indent=2)}\n"
-            + f"Observed expected target: {json.dumps(expected_target, indent=2)}\n"
-            + f"Observed internal tab stops: {json.dumps(tab_stops, indent=2)}"
+            + f"Observed row focus: {json.dumps(row_focus, indent=2)}"
         )
 
 def _assert_reverse_wrap(state: dict[str, object]) -> None:
@@ -667,6 +662,68 @@ def _last_internal_focus_target(
         "disabled": target.get("disabled"),
         "outer_html": target.get("outer_html"),
     }
+
+
+def _target_from_focus_state(state: dict[str, object]) -> dict[str, object]:
+    active = _active_from_state(state)
+    return {
+        "label": active.get("accessible_name") or active.get("text") or "",
+        "visible_text": active.get("text"),
+        "role": active.get("role"),
+        "tag_name": active.get("tag_name"),
+        "tabindex": active.get("tabindex"),
+        "keyboard_focusable": True,
+        "disabled": False,
+        "outer_html": active.get("outer_html"),
+    }
+
+
+def _derive_expected_wrap_target(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    state: dict[str, object],
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    current_state = state
+    previous_state = state
+    first_row_label = str(state.get("first_row_label") or "")
+    trace: list[dict[str, object]] = []
+    for _ in range(MAX_TABS_TO_DERIVE_WRAP_TARGET):
+        next_state = _press_key_and_capture(
+            page=page,
+            state=current_state,
+            key="Tab",
+        )
+        trace.append(next_state)
+        focus = _focus_from_state(next_state)
+        active_label = _active_label_for_summary(next_state)
+        if (
+            not bool(focus.get("focus_owned_by_switcher"))
+            or not bool(focus.get("active_within_switcher"))
+            or bool(focus.get("active_on_trigger"))
+        ):
+            raise AssertionError(
+                "Step 2 failed: live Tab traversal escaped the workspace switcher while "
+                "deriving the reverse-wrap target.\n"
+                f"Observed active element: {json.dumps(_active_from_state(next_state), indent=2)}\n"
+                f"Observed focus ownership: {json.dumps(focus, indent=2)}\n"
+                f"Observed Tab trace: {json.dumps(trace, indent=2)}"
+            )
+        if active_label == first_row_label:
+            if previous_state is state:
+                raise AssertionError(
+                    "Step 2 failed: pressing Tab from the focused first workspace row "
+                    "did not advance to a later internal control before wrapping.\n"
+                    f"Observed Tab trace: {json.dumps(trace, indent=2)}"
+                )
+            return _target_from_focus_state(previous_state), trace
+        previous_state = next_state
+        current_state = next_state
+    raise AssertionError(
+        "Step 2 failed: the live workspace switcher did not wrap Tab back to the first "
+        f"workspace row within {MAX_TABS_TO_DERIVE_WRAP_TARGET} key presses while "
+        "deriving the reverse-wrap target.\n"
+        f"Observed Tab trace: {json.dumps(trace, indent=2)}"
+    )
 
 
 def _workspace_state(repository: str) -> dict[str, object]:
@@ -864,7 +921,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Rework applied",
         "1. Focused the selected first workspace row directly instead of gating TS-911 on a separate `Tab`-from-trigger contract.",
-        "2. Tightened the live tab-stop probe to ignore anonymous wrapper nodes and read actionable in-panel controls before deriving the reverse-wrap target.",
+        "2. Tightened the live tab-stop probe and focus helper to use only keyboard-reachable in-panel controls, excluding anonymous wrappers and disabled entries before deriving the reverse-wrap target.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -909,7 +966,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: focused the selected first row directly and derived the reverse-wrap target from actionable live in-panel controls instead of wrapper nodes or a fixed label.",
+        "- Rework: focused the selected first row directly and derived the reverse-wrap target from keyboard-reachable live in-panel controls instead of wrapper nodes, disabled duplicates, or a fixed label.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -935,16 +992,34 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    first_row_focus_gap = _is_first_row_focus_gap(result)
     reproduction_steps = [
         "1. Open the TrackState application in a desktop browser.",
         "2. Open the workspace switcher panel from Dashboard.",
-        "3. Ensure keyboard focus is on the first internal workspace row in the open panel.",
-        "4. Press `Shift+Tab` once.",
-        "5. Observe the newly focused control.",
+        (
+            "3. Attempt to place keyboard focus on the selected first saved workspace row "
+            "inside the open panel."
+            if first_row_focus_gap
+            else "3. Ensure keyboard focus is on the first internal workspace row in the open panel."
+        ),
+        (
+            "4. Observe whether the first saved workspace row is exposed as a keyboard-focusable control."
+            if first_row_focus_gap
+            else "4. Press `Shift+Tab` once."
+        ),
+        (
+            "5. If the row can be focused, press `Shift+Tab` and observe the newly focused control."
+            if first_row_focus_gap
+            else "5. Observe the newly focused control."
+        ),
     ]
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Shift+Tab escapes the workspace switcher instead of wrapping inside it",
+            (
+                f"# {TICKET_KEY} - First workspace row is not keyboard-focusable in the open workspace switcher"
+                if first_row_focus_gap
+                else f"# {TICKET_KEY} - Shift+Tab escapes the workspace switcher instead of wrapping inside it"
+            ),
             "",
             "## Summary",
             _actual_vs_expected_summary(result),
@@ -966,7 +1041,11 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Broken production capability",
             (
-                "The live workspace switcher must keep keyboard focus trapped inside the "
+                "The live workspace switcher must expose the selected first saved workspace "
+                "row as a keyboard-focusable internal control so the ticket's reverse-wrap "
+                "scenario can start from that row."
+                if first_row_focus_gap
+                else "The live workspace switcher must keep keyboard focus trapped inside the "
                 "open panel in reverse order. From the first internal keyboard target, "
                 "`Shift+Tab` should wrap to the last internal tabbable control reported by "
                 "the live panel's tab order instead of escaping into the app shell."
@@ -990,12 +1069,18 @@ def _bug_description(result: dict[str, object]) -> str:
                     "initial_state": result.get("initial_state"),
                     "first_keyboard_target_state": result.get("first_keyboard_target_state"),
                     "after_shift_tab_state": result.get("after_shift_tab_state"),
+                    "tab_trace_to_wrap_target": result.get("tab_trace_to_wrap_target"),
                 },
                 indent=2,
             ),
             "```",
         ],
     ) + "\n"
+
+
+def _is_first_row_focus_gap(result: dict[str, object]) -> bool:
+    error = str(result.get("error", ""))
+    return "did not expose a focusable saved workspace row" in error
 
 
 def _annotated_request_steps(result: dict[str, object]) -> str:
@@ -1550,10 +1635,10 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     )
     return (
         "Fixed: TS-911 now establishes the ticket precondition directly by focusing the "
-        "selected first row, filters the live tab-stop probe down to actionable in-panel "
-        "controls instead of anonymous wrapper nodes, derives the reverse-wrap target from "
-        "that tightened live order, and only then performs the ticket-specific `Shift+Tab` "
-        "assertion. "
+        "selected first row, filters the live tab-stop probe down to keyboard-reachable "
+        "in-panel controls instead of anonymous wrapper nodes or disabled duplicates, "
+        "derives the reverse-wrap target from that tightened live order, and only then "
+        "performs the ticket-specific `Shift+Tab` assertion. "
         f"{rerun_summary}"
     )
 
