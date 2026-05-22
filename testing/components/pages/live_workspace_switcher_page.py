@@ -1244,7 +1244,6 @@ class LiveWorkspaceSwitcherPage:
               };
               const visibleText = (element) =>
                 normalize(element?.innerText || element?.textContent || '');
-              const displayNameHint = normalize(label.split(',')[0] || '');
               const labelFor = (element) =>
                 normalize(
                   element?.getAttribute?.('aria-label')
@@ -1359,6 +1358,7 @@ class LiveWorkspaceSwitcherPage:
             """
             ({ heading, label }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const isVisible = (element) => {
                 if (!element) {
                   return false;

@@ -987,6 +987,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "1. Kept the Step 1-derived first internal target as the source of truth instead of overwriting it with whichever control happened to hold focus.",
         "2. Established the ticket precondition by focusing that exact first internal target directly through the page object before evaluating the reverse-wrap behavior.",
         "3. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
+        "4. Moved `displayNameHint` into `observe_switcher_button_state()` and removed the duplicate declaration from `observe_switcher_button_focusability()` so the shared workspace-switcher helpers use the same display-name fallback safely.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1032,7 +1033,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, and kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel.",
+        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel, and fixed the shared `displayNameHint` helper regression in the workspace-switcher page object.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1842,10 +1843,10 @@ def _review_reply_text(
         "live_workspace_switcher_page.py",
     ):
         return (
-            "Fixed: added `const displayNameHint = normalize(label.split(',')[0] || '');` "
-            "to `observe_switcher_button_state()` so the browser-side matcher no longer "
-            "references an undefined variable and now mirrors the display-name fallback "
-            "used by `observe_switcher_button_focusability()`. "
+            "Fixed: moved `const displayNameHint = normalize(label.split(',')[0] || '');` "
+            "into `observe_switcher_button_state()` and removed the duplicate declaration "
+            "from `observe_switcher_button_focusability()`, so both shared browser-side "
+            "helpers now use the same display-name fallback without throwing or shadowing. "
             f"{rerun_summary}"
         )
     return (
