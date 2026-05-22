@@ -78,7 +78,7 @@ def main() -> None:
             "width": MOBILE_VIEWPORT_WIDTH,
             "height": MOBILE_VIEWPORT_HEIGHT,
         },
-        "preloaded_workspace_state": _workspace_state(),
+        "preloaded_workspace_state": _workspace_state(HOSTED_TARGET, DEFAULT_BRANCH),
         "steps": [],
         "human_verification": [],
     }
@@ -87,7 +87,7 @@ def main() -> None:
         config = load_live_setup_test_config()
         service = LiveSetupRepositoryService(config=config)
         token = service.token
-        workspace_state = _workspace_state()
+        workspace_state = _workspace_state(service.repository, service.ref)
         result.update(
             {
                 "app_url": config.app_url,
@@ -284,9 +284,9 @@ def main() -> None:
     print("TS-927 passed")
 
 
-def _workspace_state() -> dict[str, object]:
-    hosted_id = f"hosted:{HOSTED_TARGET.lower()}@{DEFAULT_BRANCH}"
-    local_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
+def _workspace_state(repository: str, repository_ref: str) -> dict[str, object]:
+    hosted_id = f"hosted:{repository.lower()}@{repository_ref}"
+    local_id = f"local:{LOCAL_TARGET}@{repository_ref}"
     return {
         "activeWorkspaceId": hosted_id,
         "migrationComplete": True,
@@ -295,9 +295,9 @@ def _workspace_state() -> dict[str, object]:
                 "id": hosted_id,
                 "displayName": "",
                 "targetType": "hosted",
-                "target": HOSTED_TARGET,
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
+                "target": repository,
+                "defaultBranch": repository_ref,
+                "writeBranch": repository_ref,
                 "lastOpenedAt": "2026-05-13T12:00:00.000Z",
             },
             {
@@ -305,8 +305,8 @@ def _workspace_state() -> dict[str, object]:
                 "displayName": "",
                 "targetType": "local",
                 "target": LOCAL_TARGET,
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
+                "defaultBranch": repository_ref,
+                "writeBranch": repository_ref,
                 "lastOpenedAt": "2026-05-12T12:00:00.000Z",
             },
         ],
@@ -329,12 +329,21 @@ def _assert_mobile_focus_result(
             "workspace switcher trigger in the mobile header.\n"
             f"{_mobile_focus_summary(observation)}"
         )
-    ring_visible = (
-        "none" not in observation.after_outline.lower()
-        or "rgba(0, 0, 0, 0)" not in observation.after_outline_color.lower()
-        or observation.after_box_shadow.lower() != "none"
+    indicator_changed = any(
+        before != after
+        for before, after in (
+            (observation.before_outline, observation.after_outline),
+            (observation.before_outline_color, observation.after_outline_color),
+            (observation.before_outline_width, observation.after_outline_width),
+            (observation.before_box_shadow, observation.after_box_shadow),
+        )
     )
-    if not ring_visible:
+    has_outline = _has_nonzero_outline(
+        observation.after_outline,
+        observation.after_outline_width,
+    )
+    has_box_shadow = _has_box_shadow(observation.after_box_shadow)
+    if not has_outline and not has_box_shadow:
         raise AssertionError(
             "Step 3 failed: focus reached the condensed workspace switcher trigger, "
             "but the user-visible focus treatment was not clearly visible.\n"
@@ -345,8 +354,24 @@ def _assert_mobile_focus_result(
         "The focus sequence reached the condensed workspace switcher trigger in "
         f"logical Tab order at step {trigger_step}, and the focused trigger exposed "
         "a visible outline or shadow-based focus ring. "
+        f"focus_indicator_changed={indicator_changed}; "
         f"{_mobile_focus_summary(observation)}"
     )
+
+
+def _has_nonzero_outline(outline: str, outline_width: str) -> bool:
+    outline_normalized = outline.strip().lower()
+    if not outline_normalized or outline_normalized == "none":
+        return False
+    width_normalized = outline_width.strip().lower()
+    if width_normalized in {"", "0", "0px", "0px none rgb(0, 0, 0)"}:
+        return False
+    return "0px" not in width_normalized
+
+
+def _has_box_shadow(box_shadow: str) -> bool:
+    normalized = box_shadow.strip().lower()
+    return bool(normalized) and normalized != "none"
 
 
 def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
@@ -376,7 +401,9 @@ def _mobile_focus_summary(observation: MobileTriggerFocusObservation) -> str:
         f"active_role_after_focus={observation.active_role_after_focus!r}; "
         f"active_tag_after_focus={observation.active_tag_name_after_focus!r}; "
         f"before_outline={observation.before_outline!r}; "
+        f"before_outline_width={observation.before_outline_width!r}; "
         f"after_outline={observation.after_outline!r}; "
+        f"after_outline_width={observation.after_outline_width!r}; "
         f"after_outline_color={observation.after_outline_color!r}; "
         f"after_box_shadow={observation.after_box_shadow!r}"
     )
