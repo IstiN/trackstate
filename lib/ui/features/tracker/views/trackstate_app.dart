@@ -4964,7 +4964,8 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
   return switch (status.health) {
     WorkspaceSyncHealth.synced => l10n.syncStatus,
     WorkspaceSyncHealth.checking => l10n.workspaceSyncChecking,
-    WorkspaceSyncHealth.attentionNeeded => l10n.workspaceSyncAttentionNeeded,
+    WorkspaceSyncHealth.attentionNeeded =>
+      l10n.workspaceSyncAttentionNeededVisibleLabel,
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
 }
