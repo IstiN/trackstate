@@ -178,14 +178,11 @@ def _evaluate_pr_probe(
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
 ) -> None:
-    missing_files = [
-        path
-        for path in (observation.pull_request_probe_path, observation.probe_render_host_path)
-        if path not in observation.pull_request_file_paths
-    ]
     step_failures: list[str] = []
-    if missing_files:
-        step_failures.append(f"GitHub did not record expected PR files: {missing_files}.")
+    if observation.pull_request_probe_path not in observation.pull_request_file_paths:
+        step_failures.append(
+            "GitHub did not record the expected probe file in the disposable PR artifact."
+        )
     if not observation.probe_rendered_in_application:
         step_failures.append(
             "the disposable PR did not wire the low-contrast probe into a rendered app surface."
@@ -210,10 +207,10 @@ def _evaluate_pr_probe(
 
     observed = (
         "Created a disposable PR and verified that GitHub recorded the rendered low-contrast "
-        f"probe file `{observation.pull_request_probe_path}` plus render host "
-        f"`{observation.probe_render_host_path}`.\n"
+        f"probe file `{observation.pull_request_probe_path}`.\n"
         f"Pull Request URL: {observation.pull_request_url}\n"
         f"Observed PR files: {observation.pull_request_file_paths}\n"
+        f"Render host: {observation.probe_render_host_path}\n"
         f"Probe technique: {observation.probe_contrast_technique}\n"
         "Note: the shared live probe also includes a weak semantics label, but the "
         "fail-fast assertion for TS-925 is driven by the requested contrast violation."
@@ -788,9 +785,36 @@ def _review_reply_text(
 
 def _bug_description(result: dict[str, object]) -> str:
     failed_summary = _failed_step_summary(result)
+    step_4_observed = _step_observed(result, 4)
+    title = (
+        f"# {TICKET_KEY} - Accessibility gate passes a low-contrast PR, so deployment is not blocked"
+        if "did not expose a verifiable accessibility audit failure" in step_4_observed
+        else f"# {TICKET_KEY} - Accessibility failure does not block a downstream deployment stage"
+    )
+    actual_result = (
+        "- The disposable PR rendered the low-contrast probe and the accessibility audit ran, "
+        "but `Accessibility checks` concluded success instead of failing for the contrast "
+        "defect, so the downstream deploy/publish stage was not blocked."
+        if "did not expose a verifiable accessibility audit failure" in step_4_observed
+        else (
+            "- The accessibility failure was observed, but the workflow did not provide a "
+            "downstream deploy/publish stage that was visibly skipped or blocked after "
+            "that failure."
+            if _step_status(result, 4) != "passed"
+            else "- The downstream deploy/publish stage was visibly blocked after the accessibility failure."
+        )
+    )
+    missing_capability = (
+        "- The production accessibility gate does not fail a live pull request that renders "
+        "the low-contrast Flutter probe used by this test case, so the CI workflow cannot "
+        "demonstrate fail-fast blocking on the requested contrast defect."
+        if "did not expose a verifiable accessibility audit failure" in step_4_observed
+        else "- The production workflow does not expose a downstream deploy/publish stage that "
+        "is visibly blocked after the accessibility audit fails."
+    )
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Accessibility failure does not block a downstream deployment stage",
+            title,
             "",
             "## Steps to reproduce",
             (
@@ -829,13 +853,10 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- {EXPECTED_RESULT}",
             "",
             "## Actual result",
-            (
-                "- The accessibility failure was observed, but the workflow did not provide a "
-                "downstream deploy/publish stage that was visibly skipped or blocked after "
-                "that failure."
-                if not _step_status(result, 4) == "passed"
-                else "- The downstream deploy/publish stage was visibly blocked after the accessibility failure."
-            ),
+            actual_result,
+            "",
+            "## Missing / broken production capability",
+            missing_capability,
             "",
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",

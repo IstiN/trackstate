@@ -70,10 +70,10 @@ class Ts925ReviewRegressionTest(unittest.TestCase):
             pull_request_checks_url="https://github.com/IstiN/trackstate/pull/123/checks",
             pull_request_head_branch="ts925-accessibility-fail-fast",
             pull_request_head_sha="abc123",
-            pull_request_probe_path="lib/ts925_probe_surface.dart",
+            pull_request_probe_path="lib/ts908_probe_surface.dart",
             probe_render_host_path="lib/main.dart",
             probe_rendered_in_application=True,
-            pull_request_file_paths=["lib/main.dart", "lib/ts925_probe_surface.dart"],
+            pull_request_file_paths=["lib/ts908_probe_surface.dart"],
             pull_request_state="open",
             pull_request_mergeable_state="clean",
             pull_request_status_state="failure",
@@ -124,10 +124,32 @@ class Ts925ReviewRegressionTest(unittest.TestCase):
             probe_contains_low_contrast_indicator=True,
             probe_contains_semantic_label_indicator=True,
             probe_semantic_label="button",
-            probe_contrast_technique="Uses onSurface.withAlpha(89) on surface.",
+            probe_contrast_technique="Uses colorScheme.surface text on colorScheme.surface.",
             cleanup_closed_pull_request=True,
             cleanup_deleted_branch=True,
         )
+
+    def test_step_1_accepts_rendered_probe_file_without_render_host_diff(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+        observation = self._observation(
+            observed_step_names=[
+                "Build web app for accessibility scan",
+                "Run axe-core accessibility checks",
+            ],
+            run_log_matched_accessibility_markers=["axe-core", "accessibility"],
+            run_log_matched_contrast_markers=["ratio"],
+            run_log_excerpt="Run axe-core accessibility checks",
+        )
+
+        self.module._evaluate_pr_probe(  # type: ignore[attr-defined]
+            result,
+            observation,
+            failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
 
     def test_step_4_rejects_build_failure_before_audit_executes(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}

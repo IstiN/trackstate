@@ -36,6 +36,9 @@ class GitHubAccessibilityCompliantPullRequestGateProbeRegressionTest(
             "label: 'Sync status message: accessibility checks passed'",
             source,
         )
+        self.assertIn("container: true", source)
+        self.assertIn("readOnly: true", source)
+        self.assertIn("ExcludeSemantics(", source)
         self.assertIn("colorScheme.onSurface", source)
         self.assertIn("colorScheme.surface", source)
         self.assertNotIn("withAlpha(89)", source)

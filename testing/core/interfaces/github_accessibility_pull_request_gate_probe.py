@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from testing.core.interfaces.github_actions_preflight_gate_probe import (
@@ -85,6 +85,10 @@ class GitHubAccessibilityPullRequestGateObservation:
     probe_contrast_technique: str
     cleanup_closed_pull_request: bool
     cleanup_deleted_branch: bool
+    flutter_engine_initialization_log_entries: list[str] = field(default_factory=list)
+    flutter_engine_initialization_summary: str = ""
+    semantics_tree_discovery_log_entries: list[str] = field(default_factory=list)
+    semantics_tree_discovery_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

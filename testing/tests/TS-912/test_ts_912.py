@@ -40,7 +40,7 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts912-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-894"]
+LINKED_BUGS = ["TS-894", "TS-915"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -48,6 +48,7 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts912_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts912_failure.png"
@@ -1158,9 +1159,11 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     jira_comment = _build_jira_comment(result, passed=True)
     pr_body = _build_pr_body(result, passed=True)
     response = _build_response_summary(result, passed=True)
+    review_replies = _build_review_replies()
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
     RESPONSE_PATH.write_text(response, encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(review_replies, encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -1182,10 +1185,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     jira_comment = _build_jira_comment(result, passed=False)
     pr_body = _build_pr_body(result, passed=False)
     response = _build_response_summary(result, passed=False)
+    review_replies = _build_review_replies()
     bug_description = _build_bug_description(result)
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
     RESPONSE_PATH.write_text(response, encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(review_replies, encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(bug_description, encoding="utf-8")
 
 
@@ -1316,6 +1321,10 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"{REWORK_SUMMARY}\n\n"
         f"{result.get('error', 'The restore flow did not reach the expected Local Git state.')}\n"
     )
+
+
+def _build_review_replies() -> str:
+    return json.dumps({"replies": []}) + "\n"
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
