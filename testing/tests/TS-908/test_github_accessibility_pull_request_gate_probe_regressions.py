@@ -93,6 +93,31 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
         }
 
 
+class _SurfaceProbeService(_StubProbeService):
+    def _read_json_object(self, endpoint: str, *, method: str = "GET", field_args=None):
+        del method, field_args
+        if endpoint != "/repos/IstiN/trackstate/pulls/123":
+            raise AssertionError(f"Unexpected endpoint: {endpoint}")
+        return {
+            "head": {"sha": "abc123"},
+            "mergeable_state": "clean",
+        }
+
+    def _read_check_runs_state(self, head_sha: str) -> str | None:
+        assert head_sha == "abc123"
+        return "failure"
+
+    def _read_pull_request_status_surface(self, pull_request_number: int) -> dict[str, object]:
+        assert pull_request_number == 123
+        return {
+            "status_checks": [],
+            "status_check_names": ["Accessibility checks"],
+            "status_check_workflow_names": ["Flutter Required Checks"],
+            "failed_status_check_names": ["Accessibility checks"],
+            "failed_status_check_workflow_names": ["Flutter Required Checks"],
+        }
+
+
 class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = GitHubAccessibilityPullRequestGateConfig(
@@ -222,6 +247,17 @@ void main() {
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
         self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
         self.assertIn("child: Ts908ProbeSurface()", patched)
+
+    def test_wait_for_pull_request_surface_keeps_failed_check_fields(self) -> None:
+        probe = _SurfaceProbeService(self.config)
+
+        surface = probe._wait_for_pull_request_surface(123, head_sha="abc123")  # noqa: SLF001
+
+        self.assertEqual(surface["failed_status_check_names"], ["Accessibility checks"])
+        self.assertEqual(
+            surface["failed_status_check_workflow_names"],
+            ["Flutter Required Checks"],
+        )
 
 
 if __name__ == "__main__":

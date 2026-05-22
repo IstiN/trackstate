@@ -1,32 +1,34 @@
 from __future__ import annotations
 
 import json
-import os
 import platform
-import subprocess
+import re
 import sys
 import traceback
 from pathlib import Path
-
-import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.core.models.cli_command_result import CliCommandResult  # noqa: E402
+from testing.core.config.github_accessibility_boundary_pull_request_probe_config import (  # noqa: E402
+    GitHubAccessibilityBoundaryPullRequestProbeConfig,
+)
+from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (  # noqa: E402
+    GitHubAccessibilityPullRequestGateObservation,
+)
+from testing.tests.support.github_accessibility_boundary_pull_request_probe_factory import (  # noqa: E402
+    create_github_accessibility_boundary_pull_request_probe,
+)
 
 TICKET_KEY = "TS-926"
 TEST_CASE_TITLE = (
     "UI element with exactly 4.5:1 contrast — axe-core audit identifies as compliant"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-926/test_ts_926.py"
+TEST_FILE_PATH = "testing/tests/TS-926/test_ts_926.py"
 CONFIG_PATH = REPO_ROOT / "testing/tests/TS-926/config.yaml"
-PLAYWRIGHT_CONFIG_PATH = REPO_ROOT / "testing/tests/TS-926/playwright.config.js"
-PLAYWRIGHT_SPEC_PATH = REPO_ROOT / "testing/tests/TS-926/ts926_accessibility_boundary.spec.js"
-PLAYWRIGHT_SPEC_ARG = "ts926_accessibility_boundary.spec.js"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
@@ -44,320 +46,259 @@ EXPECTED_RESULT = (
     "The axe-core scanner identifies the 4.5:1 ratio as compliant, the test "
     "returns a success exit code, and the CI gate passes."
 )
+SUCCESS_CONCLUSIONS = {"success", "neutral", "skipped"}
 
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    config = GitHubAccessibilityBoundaryPullRequestProbeConfig.from_file(CONFIG_PATH)
+    probe = create_github_accessibility_boundary_pull_request_probe(
+        REPO_ROOT,
+        config_path=CONFIG_PATH,
+    )
 
-    config = _load_config(CONFIG_PATH)
-    screenshot_path = OUTPUTS_DIR / str(config["screenshot_name"])
-    observation_path = OUTPUTS_DIR / str(config["observation_name"])
-    screenshot_path.unlink(missing_ok=True)
-    observation_path.unlink(missing_ok=True)
-
+    contrast_ratio = _contrast_ratio(
+        _parse_rgb(config.text_color),
+        _parse_rgb(config.background_color),
+    )
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
         "run_command": RUN_COMMAND,
-        "test_file_path": str(Path("testing/tests/TS-926/test_ts_926.py")),
-        "spec_file_path": str(Path("testing/tests/TS-926/ts926_accessibility_boundary.spec.js")),
-        "config_path": str(Path("testing/tests/TS-926/config.yaml")),
-        "browser": "Chromium (Playwright)",
-        "os": platform.platform(),
+        "test_file_path": TEST_FILE_PATH,
         "expected_result": EXPECTED_RESULT,
-        "exact_contrast_ratio": config["exact_contrast_ratio"],
-        "contrast_tolerance": config["contrast_tolerance"],
-        "text_color": config["text_color"],
-        "background_color": config["background_color"],
-        "visible_text": config["visible_text"],
-        "accessible_button_label": config["accessible_button_label"],
+        "repository": config.repository,
+        "default_branch": config.base_branch,
+        "target_workflow_name": config.target_workflow_name,
+        "target_workflow_path": config.target_workflow_path,
+        "browser": "GitHub CLI",
+        "os": platform.platform(),
+        "exact_contrast_ratio": config.exact_contrast_ratio,
+        "contrast_tolerance": config.contrast_tolerance,
+        "configured_contrast_ratio": round(contrast_ratio, 4),
+        "text_color": config.text_color,
+        "background_color": config.background_color,
+        "visible_text": config.visible_text,
+        "accessible_button_label": config.accessible_button_label,
+        "probe_path": config.probe_path,
+        "probe_render_host_path": config.probe_render_host_path,
         "steps": [],
         "human_verification": [],
     }
 
-    install_result: CliCommandResult | None = None
-    browser_install_result: CliCommandResult | None = None
-    playwright_result: CliCommandResult | None = None
-    observation: dict[str, object] = {}
-
     try:
-        install_result = _run_command(("npm", "ci"))
-        browser_install_result = _run_command(
-            ("npx", "playwright", "install", "--with-deps", "chromium")
-        )
-        playwright_result = _run_command(
-            (
-                "npm",
-                "run",
-                "test:a11y",
-                "--",
-                f"--config={PLAYWRIGHT_CONFIG_PATH}",
-                PLAYWRIGHT_SPEC_ARG,
-                "--reporter=line",
-            ),
-            extra_env={
-                "TS926_SCREENSHOT_PATH": str(screenshot_path),
-                "TS926_OBSERVATION_PATH": str(observation_path),
-            },
-        )
-        if observation_path.exists():
-            observation = json.loads(observation_path.read_text(encoding="utf-8"))
-        result["playwright_stdout"] = playwright_result.stdout
-        result["playwright_stderr"] = playwright_result.stderr
-        result["playwright_exit_code"] = playwright_result.exit_code
-        result["screenshot_path"] = str(screenshot_path)
-        result["observation_path"] = str(observation_path)
-        result["observation"] = observation
+        observation = probe.validate()
+        result.update(observation.to_dict())
 
-        _evaluate_step_1(result, observation=observation, config=config)
-        _evaluate_step_2(result, playwright_result=playwright_result)
-        _evaluate_step_3(result, playwright_result=playwright_result)
-        _record_human_verification(
-            result,
-            check=(
-                "Viewed the rendered boundary probe the same way a user would, using the "
-                "saved Playwright screenshot plus the visible-text capture from the live page."
-            ),
-            observed=(
-                f"Screenshot: `{screenshot_path}`. Visible text: "
-                f"`{observation.get('visibleText', '<missing>')}` inside the boundary card; "
-                f"button label: `{observation.get('buttonAriaLabel', '<missing>')}`; "
-                f"card background: `{observation.get('renderedBackground', '<missing>')}`; "
-                f"computed contrast: `{observation.get('contrastRatio', '<missing>')}:1`."
-            ),
-        )
-        _record_human_verification(
-            result,
-            check=(
-                "Reviewed the Playwright terminal output exactly as a developer or CI user "
-                "would see it after the accessibility audit finished."
-            ),
-            observed=(
-                f"Exit code: {playwright_result.exit_code}; output included "
-                f"`{_passed_summary(playwright_result)}` and did not surface "
-                "`color-contrast` or `non-descriptive-label` failures."
-            ),
-        )
+        failures: list[str] = []
+        _evaluate_probe_pull_request(result, config=config, observation=observation, failures=failures)
+        _evaluate_live_ci_trigger(result, observation=observation, failures=failures)
+        _evaluate_accessibility_audit_logs(result, observation=observation, failures=failures)
 
-        failures = _failed_steps(result)
         if failures:
             raise AssertionError("\n".join(failures))
     except Exception as error:
-        result.setdefault("error", _format_error(error))
+        result.setdefault("error", f"{type(error).__name__}: {error}")
         result.setdefault("traceback", traceback.format_exc())
-        if install_result is not None:
-            result["npm_ci"] = _command_payload(install_result)
-        if browser_install_result is not None:
-            result["playwright_install"] = _command_payload(browser_install_result)
-        if playwright_result is not None:
-            result["playwright_command"] = _command_payload(playwright_result)
         _write_failure_outputs(result)
         raise
 
-    result["npm_ci"] = _command_payload(install_result)
-    result["playwright_install"] = _command_payload(browser_install_result)
-    result["playwright_command"] = _command_payload(playwright_result)
     _write_pass_outputs(result)
-    print(f"{TICKET_KEY} passed")
+    print("TS-926 passed")
 
 
-def _load_config(path: Path) -> dict[str, object]:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    runtime_inputs = payload.get("runtime_inputs") or {}
-    if not isinstance(runtime_inputs, dict):
-        raise ValueError(f"{path} must contain a runtime_inputs mapping.")
-    return runtime_inputs
-
-
-def _run_command(
-    command: tuple[str, ...],
-    *,
-    extra_env: dict[str, str] | None = None,
-) -> CliCommandResult:
-    env = os.environ.copy()
-    env.setdefault("CI", "1")
-    if extra_env:
-        env.update(extra_env)
-
-    completed = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return CliCommandResult(
-        command=command,
-        exit_code=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-    )
-
-
-def _evaluate_step_1(
+def _evaluate_probe_pull_request(
     result: dict[str, object],
     *,
-    observation: dict[str, object],
-    config: dict[str, object],
+    config: GitHubAccessibilityBoundaryPullRequestProbeConfig,
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    failures: list[str],
 ) -> None:
-    tolerance = float(config["contrast_tolerance"])
-    expected_ratio = float(config["exact_contrast_ratio"])
-    observed_text = str(observation.get("visibleText", ""))
-    observed_label = str(observation.get("buttonAriaLabel", ""))
-    observed_ratio = observation.get("contrastRatio")
-
-    if not observation:
-        observed = (
-            "The Playwright probe did not write its boundary observation file, so the "
-            "automation could not confirm the rendered text, label, or contrast ratio."
+    configured_ratio = float(result["configured_contrast_ratio"])
+    if observation.pull_request_probe_path not in observation.pull_request_file_paths:
+        message = (
+            "Step 1 failed: the disposable Pull Request was created, but GitHub did not "
+            "report the expected boundary probe file on that PR.\n"
+            f"Pull Request URL: {observation.pull_request_url}\n"
+            f"Expected file: {observation.pull_request_probe_path}\n"
+            f"Observed PR files: {observation.pull_request_file_paths}"
         )
-        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=observed)
+        failures.append(message)
+        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    if observed_text != str(config["visible_text"]):
-        observed = (
-            "The boundary probe rendered, but the visible text did not match the expected "
-            f"user-facing sample.\nExpected: {config['visible_text']!r}\nObserved: {observed_text!r}"
+    if observation.probe_render_host_path not in observation.pull_request_file_paths:
+        message = (
+            "Step 1 failed: the disposable Pull Request did not patch the app entrypoint to "
+            "render the boundary probe through the production-visible app surface.\n"
+            f"Expected render host: {observation.probe_render_host_path}\n"
+            f"Observed PR files: {observation.pull_request_file_paths}"
         )
-        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=observed)
+        failures.append(message)
+        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    if observed_label != str(config["accessible_button_label"]):
-        observed = (
-            "The boundary probe rendered, but the interactive control did not expose the "
-            "expected descriptive accessible label.\n"
-            f"Expected: {config['accessible_button_label']!r}\nObserved: {observed_label!r}"
+    if abs(configured_ratio - config.exact_contrast_ratio) > config.contrast_tolerance:
+        message = (
+            "Step 1 failed: the configured boundary probe colors do not stay on the required "
+            "exact 4.5:1 contrast boundary.\n"
+            f"Expected ratio: {config.exact_contrast_ratio}:1 (+/- {config.contrast_tolerance})\n"
+            f"Configured ratio: {configured_ratio}:1\n"
+            f"Foreground: {config.text_color}\n"
+            f"Background: {config.background_color}"
         )
-        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=observed)
+        failures.append(message)
+        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    if not isinstance(observed_ratio, (int, float)):
-        observed = (
-            "The boundary probe rendered, but it did not report a numeric contrast ratio.\n"
-            f"Observation payload: {json.dumps(observation, indent=2)}"
+    if config.accessible_button_label.strip().lower() in {"button", "click", "open", "go"}:
+        message = (
+            "Step 1 failed: the boundary probe control label is too generic to prove the "
+            "ticket keeps the interactive control descriptive.\n"
+            f"Configured label: {config.accessible_button_label!r}"
         )
-        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=observed)
+        failures.append(message)
+        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    if abs(float(observed_ratio) - expected_ratio) > tolerance:
-        observed = (
-            "The rendered probe did not stay on the exact boundary ratio required by the "
-            "ticket.\n"
-            f"Expected ratio: {expected_ratio}:1 (+/- {tolerance})\n"
-            f"Observed ratio: {observed_ratio}:1\n"
-            f"Rendered foreground: {observation.get('renderedForeground', '<missing>')}\n"
-            f"Rendered background: {observation.get('renderedBackground', '<missing>')}"
+    observed = (
+        "Created a disposable PR that patches the live app entrypoint to render the exact "
+        "boundary probe.\n"
+        f"Pull Request URL: {observation.pull_request_url}\n"
+        f"Probe file: {observation.pull_request_probe_path}\n"
+        f"Render host: {observation.probe_render_host_path}\n"
+        f"Configured visible text: {config.visible_text!r}\n"
+        f"Configured button label: {config.accessible_button_label!r}\n"
+        f"Configured foreground/background: {config.text_color} on {config.background_color}\n"
+        f"Configured contrast ratio: {configured_ratio}:1"
+    )
+    _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
+
+
+def _evaluate_live_ci_trigger(
+    result: dict[str, object],
+    *,
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    failures: list[str],
+) -> None:
+    if observation.latest_pull_request_run_id is None:
+        message = (
+            "Step 2 failed: GitHub Actions did not expose a contributor-visible "
+            "`pull_request` workflow run for the disposable PR branch.\n"
+            f"Pull Request URL: {observation.pull_request_url}\n"
+            f"Branch: {observation.pull_request_head_branch}\n"
+            f"Observed branch runs: {observation.observed_branch_run_names}\n"
+            f"Observed run URLs: {observation.observed_branch_run_urls}"
         )
-        _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=observed)
+        failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
         return
 
-    _record_step(
+    if observation.latest_pull_request_run_event != "pull_request":
+        message = (
+            "Step 2 failed: the observed workflow run was not triggered by the disposable "
+            "Pull Request.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Observed event: {observation.latest_pull_request_run_event}"
+        )
+        failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
+        return
+
+    if observation.latest_pull_request_run_conclusion not in SUCCESS_CONCLUSIONS:
+        message = (
+            "Step 2 failed: the live PR workflow did not pass for the exact-boundary probe.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Status: {observation.latest_pull_request_run_status}\n"
+            f"Conclusion: {observation.latest_pull_request_run_conclusion}\n"
+            f"Failed status checks: {observation.failed_status_check_names}"
+        )
+        failures.append(message)
+        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=message)
+        return
+
+    observed = (
+        "GitHub Actions executed the real PR workflow for the disposable boundary probe and "
+        "the run completed successfully.\n"
+        f"Run URL: {observation.latest_pull_request_run_url}\n"
+        f"Status: {observation.latest_pull_request_run_status}\n"
+        f"Conclusion: {observation.latest_pull_request_run_conclusion}\n"
+        f"Observed status checks: {observation.observed_status_check_names or ['<none>']}"
+    )
+    _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
+
+
+def _evaluate_accessibility_audit_logs(
+    result: dict[str, object],
+    *,
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    failures: list[str],
+) -> None:
+    _record_human_verification(
         result,
-        step=1,
-        status="passed",
-        action=REQUEST_STEPS[0],
+        check=(
+            "Inspected the disposable PR checks surface and live workflow output through "
+            "GitHub CLI (`gh pr view`, `gh run view --log`)."
+        ),
         observed=(
-            "Rendered the boundary probe page with the expected visible text and a "
-            "descriptive interactive label, and measured the actual rendered contrast at "
-            f"{float(observed_ratio):.4f}:1.\n"
-            f"Rendered foreground: {observation.get('renderedForeground', '<missing>')}\n"
-            f"Rendered background: {observation.get('renderedBackground', '<missing>')}"
+            f"PR checks URL: `{observation.pull_request_checks_url}`; run URL: "
+            f"`{observation.latest_pull_request_run_url}`; observed jobs: "
+            f"{observation.observed_job_names or ['<none>']}; observed steps: "
+            f"{observation.observed_step_names or ['<none>']}; status checks: "
+            f"{observation.observed_status_check_names or ['<none>']}; log excerpt: "
+            f"`{observation.run_log_excerpt or '<none>'}`."
         ),
     )
 
-
-def _evaluate_step_2(
-    result: dict[str, object],
-    *,
-    playwright_result: CliCommandResult,
-) -> None:
-    if not playwright_result.succeeded:
-        observed = (
-            "The Playwright accessibility audit returned a non-zero exit code instead of "
-            "passing like the CI gate should for a compliant 4.5:1 boundary sample.\n"
-            f"Command: {playwright_result.command_text}\n"
-            f"Exit code: {playwright_result.exit_code}\n"
-            f"stdout:\n{playwright_result.stdout}\n"
-            f"stderr:\n{playwright_result.stderr}"
+    if observation.run_log_error:
+        message = (
+            "Step 3 failed: the automation could not read the hosted workflow logs for the "
+            "real PR run.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Log error: {observation.run_log_error}"
         )
-        _record_step(result, step=2, status="failed", action=REQUEST_STEPS[1], observed=observed)
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
         return
 
-    _record_step(
-        result,
-        step=2,
-        status="passed",
-        action=REQUEST_STEPS[1],
-        observed=(
-            "Ran the same Playwright accessibility command shape that the CI job uses, and "
-            f"it exited successfully with code {playwright_result.exit_code}.\n"
-            f"Command: {playwright_result.command_text}"
-        ),
+    if not observation.matched_accessibility_markers:
+        message = (
+            "Step 3 failed: the hosted PR workflow surface did not expose accessibility-audit "
+            "evidence in the jobs, steps, checks, or logs.\n"
+            f"Observed jobs: {observation.observed_job_names}\n"
+            f"Observed steps: {observation.observed_step_names}\n"
+            f"Observed checks: {observation.observed_status_check_names}\n"
+            f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
+
+    forbidden_markers = [
+        *observation.run_log_matched_contrast_markers,
+        *observation.run_log_matched_semantic_markers,
+    ]
+    if forbidden_markers:
+        message = (
+            "Step 3 failed: the hosted accessibility audit logs still reported violation "
+            "markers for the exact-boundary probe.\n"
+            f"Run URL: {observation.latest_pull_request_run_url}\n"
+            f"Forbidden markers: {forbidden_markers}\n"
+            f"Log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
+
+    observed = (
+        "Reviewed the hosted Playwright accessibility audit logs on the real PR workflow and "
+        "confirmed the run stayed clean.\n"
+        f"Matched accessibility markers: {observation.matched_accessibility_markers}\n"
+        f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
+        f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
+        f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
     )
-
-
-def _evaluate_step_3(
-    result: dict[str, object],
-    *,
-    playwright_result: CliCommandResult,
-) -> None:
-    combined_output = f"{playwright_result.stdout}\n{playwright_result.stderr}".lower()
-    forbidden_markers = ["color-contrast", "non-descriptive-label"]
-    found_markers = [marker for marker in forbidden_markers if marker in combined_output]
-    passed_summary = _passed_summary(playwright_result)
-
-    if found_markers:
-        observed = (
-            "The Playwright accessibility audit logs still mentioned violation markers even "
-            "though this boundary sample should be compliant.\n"
-            f"Found markers: {found_markers}\n"
-            f"stdout:\n{playwright_result.stdout}\n"
-            f"stderr:\n{playwright_result.stderr}"
-        )
-        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=observed)
-        return
-
-    if not playwright_result.succeeded:
-        observed = (
-            "The Playwright audit logs were available, but the run itself failed, so the "
-            "user-visible audit result did not match the expected compliant pass state.\n"
-            f"stdout:\n{playwright_result.stdout}\n"
-            f"stderr:\n{playwright_result.stderr}"
-        )
-        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=observed)
-        return
-
-    _record_step(
-        result,
-        step=3,
-        status="passed",
-        action=REQUEST_STEPS[2],
-        observed=(
-            "Reviewed the Playwright accessibility audit logs and confirmed the run stayed "
-            "clean: no `color-contrast` or `non-descriptive-label` markers appeared, and "
-            f"the runner reported `{passed_summary}`."
-        ),
-    )
-
-
-def _passed_summary(playwright_result: CliCommandResult) -> str:
-    combined = f"{playwright_result.stdout}\n{playwright_result.stderr}"
-    for marker in ("1 passed", "1 test passed"):
-        if marker in combined:
-            return marker
-    return "successful Playwright completion"
-
-
-def _command_payload(command_result: CliCommandResult | None) -> dict[str, object] | None:
-    if command_result is None:
-        return None
-    return {
-        "command": command_result.command_text,
-        "exit_code": command_result.exit_code,
-        "stdout": command_result.stdout,
-        "stderr": command_result.stderr,
-    }
+    _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -375,7 +316,6 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
 
@@ -396,54 +336,9 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
-
-
-def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "✅ PASSED" if passed else "❌ FAILED"
-    lines = [
-        "h3. Test Automation Result",
-        "",
-        f"*Status:* {status}",
-        f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
-        "",
-        "h4. What was automated",
-        "* Rendered a local boundary-condition probe page that uses the same Playwright + axe-core helper as the CI accessibility gate.",
-        "* Verified the user-visible text, descriptive button label, and measured rendered contrast ratio before running the audit.",
-        "* Executed the Playwright accessibility audit and treated its exit code as the CI-gate outcome for this scanner-behavior ticket.",
-        "* Reviewed the audit logs for any color-contrast or non-descriptive-label failures.",
-        "",
-        "h4. Human-style verification",
-        *_human_lines(result, jira=True),
-        "",
-        "h4. Result",
-        (
-            "* Matched the expected result."
-            if passed
-            else f"* Did not match the expected result. {_failed_step_summary(result)}"
-        ),
-        (
-            f"* Environment: browser Chromium (Playwright), OS {{{{{result['os']}}}}}, "
-            f"spec {{{{testing/tests/TS-926/ts926_accessibility_boundary.spec.js}}}}."
-        ),
-        "",
-        "h4. Step results",
-        *_step_lines(result, jira=True),
-    ]
-    if not passed:
-        lines.extend(
-            [
-                "",
-                "h4. Exact error",
-                "{code}",
-                str(result.get("traceback", result.get("error", ""))),
-                "{code}",
-            ]
-        )
-    return "\n".join(lines) + "\n"
 
 
 def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
@@ -455,13 +350,13 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Rendered a local boundary-condition probe page that uses the same Playwright + axe-core helper as the CI accessibility gate.",
-        "- Verified the visible text, descriptive button label, and measured rendered contrast ratio before the audit ran.",
-        "- Executed the Playwright accessibility audit and used its exit code as the CI-gate result for this scanner-behavior ticket.",
-        "- Reviewed the audit logs to confirm no `color-contrast` or `non-descriptive-label` failures appeared.",
+        "- Reworked TS-926 to create a disposable pull request and validate the live GitHub Actions PR workflow instead of replaying a local surrogate.",
+        "- Moved the boundary probe generation into a reusable testing service so the ticket script depends on abstractions rather than Playwright internals.",
+        "- Patched the disposable PR app entrypoint to render an exact 4.5:1 contrast probe with descriptive button text.",
+        "- Inspected the hosted PR checks surface, workflow jobs/steps, and Playwright accessibility logs for the real CI outcome.",
         "",
         "## Human-style verification",
-        *_human_lines(result, jira=False),
+        *_human_lines(result),
         "",
         "## Result",
         (
@@ -470,12 +365,12 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
             else f"- Did not match the expected result. {_failed_step_summary(result)}"
         ),
         (
-            f"- Environment: browser `Chromium (Playwright)`, OS `{result['os']}`, "
-            "spec `testing/tests/TS-926/ts926_accessibility_boundary.spec.js`."
+            f"- Environment: repository `{result['repository']}` @ "
+            f"`{result['default_branch']}`, client `GitHub CLI`, OS `{result['os']}`."
         ),
         "",
         "## Step results",
-        *_step_lines(result, jira=False),
+        *_step_lines(result),
         "",
         "## How to run",
         "```bash",
@@ -500,14 +395,17 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added an isolated TS-926 Playwright boundary probe for the shared axe-core accessibility runner.",
-        "- The probe renders visible text at the 4.5:1 WCAG AA boundary and keeps the interactive control label descriptive.",
+        "- Reworked TS-926 to validate the real PR-triggered GitHub Actions accessibility workflow instead of a local Playwright-only surrogate.",
+        "- Moved the boundary probe behind a reusable testing service and removed the ticket-local raw Playwright spec layer.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
-        f"- Browser: `Chromium (Playwright)` on `{result['os']}`.",
         (
-            "- Outcome: the shared accessibility runner treated the exact 4.5:1 boundary as compliant and exited successfully."
+            f"- Environment: `{result['repository']}` @ `{result['default_branch']}` "
+            f"using GitHub CLI on `{result['os']}`."
+        ),
+        (
+            "- Outcome: the live PR pipeline treated the exact 4.5:1 boundary probe as compliant and the hosted accessibility audit stayed clean."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -528,37 +426,33 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Axe-core boundary contrast sample is not treated as compliant",
+            f"# {TICKET_KEY} - Live PR accessibility workflow does not validate the exact 4.5:1 compliant boundary as expected",
             "",
             "## Steps to reproduce",
-            (
-                "1. Create a Pull Request with a UI component where the text color and "
-                "background color provide a contrast ratio of exactly 4.5:1. "
-                + _step_status_summary(result, 1)
-            ),
-            (
-                "2. Push the changes to trigger the CI pipeline. "
-                + _step_status_summary(result, 2)
-            ),
-            (
-                "3. Review the logs of the Playwright accessibility audit. "
-                + _step_status_summary(result, 3)
-            ),
+            "1. Create a Pull Request with a UI component where the text color and background color provide a contrast ratio of exactly 4.5:1.",
+            "2. Push the changes to trigger the CI pipeline.",
+            "3. Review the logs of the Playwright accessibility audit.",
             "",
             "## Exact test reproduction",
             (
-                "1. The automation rendered `Boundary contrast sample` with "
-                f"`{result.get('text_color', '')}` on `{result.get('background_color', '')}` "
-                "and exposed a descriptive button label."
+                "1. The automation created a disposable PR, added "
+                f"`{result.get('pull_request_probe_path', '')}`, and patched "
+                f"`{result.get('probe_render_host_path', '')}` so the exact-boundary probe is "
+                "rendered on app startup."
             ),
             (
-                "2. It ran the shared axe-core helper through Playwright using:\n"
-                f"   `{result.get('playwright_command', {}).get('command', RUN_COMMAND)}`"
+                "2. GitHub Actions executed the contributor-visible PR workflow run "
+                f"`{result.get('latest_pull_request_run_url', '')}` for that disposable PR."
             ),
             (
-                "3. It captured the rendered probe screenshot at "
-                f"`{result.get('screenshot_path', '<missing>')}` and the observation JSON at "
-                f"`{result.get('observation_path', '<missing>')}`."
+                "3. The PR checks surface "
+                f"`{result.get('pull_request_checks_url', '')}` exposed status checks "
+                f"{result.get('observed_status_check_names', [])} and workflow names "
+                f"{result.get('observed_status_check_workflow_names', [])}."
+            ),
+            (
+                "4. The hosted workflow did not demonstrate the expected clean accessibility "
+                "result for the exact-boundary compliant probe."
             ),
             "",
             "## Expected result",
@@ -566,41 +460,38 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual result",
             (
-                "- The accessibility runner did not treat the boundary sample as a clean "
-                "pass. See the failing step details, command output, and recorded "
-                "observation below."
+                "- The live PR workflow or hosted accessibility audit logs did not show the "
+                "expected passing CI outcome for the exact 4.5:1 compliant boundary probe."
             ),
             "",
-            "## Actual observed data",
-            f"- Observation: `{json.dumps(result.get('observation', {}), ensure_ascii=True)}`",
-            f"- Screenshot: `{result.get('screenshot_path', '<missing>')}`",
+            "## Missing or broken production capability",
+            (
+                "- The production CI pipeline or hosted accessibility reporting surface does "
+                "not reliably expose the expected clean pass result for this compliant "
+                "boundary case. From testing/ alone, the automation can create the disposable "
+                "PR and inspect real runs/logs, but it cannot repair the missing or incorrect "
+                "product behavior outside the testing layer."
+            ),
             "",
             "## Environment",
-            "- Browser: `Chromium (Playwright)`",
+            f"- Repository: `{result.get('repository', '')}`",
+            f"- Branch: `{result.get('default_branch', '')}`",
+            f"- Pull Request: `{result.get('pull_request_url', '')}`",
+            f"- Pull Request checks: `{result.get('pull_request_checks_url', '')}`",
+            f"- Workflow run: `{result.get('latest_pull_request_run_url', '')}`",
             f"- OS: `{result.get('os', '')}`",
-            f"- Spec: `{result.get('spec_file_path', '')}`",
             "",
-            "## Exact error message / assertion failure",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing output",
             "```text",
             str(result.get("traceback", result.get("error", "<missing traceback>"))),
             "```",
-            "",
-            "## Relevant command output",
-            "```text",
-            _combined_command_output(result),
-            "```",
         ]
     ) + "\n"
-
-
-def _combined_command_output(result: dict[str, object]) -> str:
-    command = result.get("playwright_command")
-    if not isinstance(command, dict):
-        return "<missing command output>"
-    return (
-        f"stdout:\n{command.get('stdout', '')}\n\n"
-        f"stderr:\n{command.get('stderr', '')}"
-    )
 
 
 def _record_step(
@@ -634,20 +525,7 @@ def _record_human_verification(
     checks.append({"check": check, "observed": observed})
 
 
-def _failed_steps(result: dict[str, object]) -> list[str]:
-    failures: list[str] = []
-    steps = result.get("steps")
-    if not isinstance(steps, list):
-        return failures
-    for entry in steps:
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("status", "")).lower() == "failed":
-            failures.append(f"Step {entry.get('step')} failed: {entry.get('observed')}")
-    return failures
-
-
-def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+def _step_lines(result: dict[str, object]) -> list[str]:
     lines: list[str] = []
     steps = result.get("steps")
     if not isinstance(steps, list):
@@ -655,21 +533,15 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     for entry in steps:
         if not isinstance(entry, dict):
             continue
-        step = entry.get("step")
-        status = str(entry.get("status", "")).upper()
-        action = str(entry.get("action", ""))
-        observed = str(entry.get("observed", ""))
-        if jira:
-            action = _jira_inline(action)
-            observed = _jira_inline(observed)
-        prefix = f"* Step {step} — {status}: " if jira else f"- Step {step} — {status}: "
-        lines.append(prefix + action)
-        detail_prefix = "* " if jira else "  - "
-        lines.append(detail_prefix + observed)
+        lines.append(
+            f"- Step {entry.get('step')} — {str(entry.get('status', '')).upper()}: "
+            f"{entry.get('action', '')}"
+        )
+        lines.append(f"  - {entry.get('observed', '')}")
     return lines
 
 
-def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+def _human_lines(result: dict[str, object]) -> list[str]:
     lines: list[str] = []
     checks = result.get("human_verification")
     if not isinstance(checks, list):
@@ -677,50 +549,62 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     for entry in checks:
         if not isinstance(entry, dict):
             continue
-        check = str(entry.get("check", ""))
-        observed = str(entry.get("observed", ""))
-        if jira:
-            check = _jira_inline(check)
-            observed = _jira_inline(observed)
-        prefix = "* " if jira else "- "
-        lines.append(prefix + check)
-        lines.append(prefix + observed)
+        lines.append(f"- {entry.get('check', '')}")
+        lines.append(f"  - {entry.get('observed', '')}")
     return lines
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
-    failures = _failed_steps(result)
-    if failures:
-        return failures[0]
-    return str(result.get("error", "Unknown failure"))
-
-
-def _step_status_summary(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps")
     if not isinstance(steps, list):
-        return "❌ The automation did not record this step."
-    for entry in steps:
-        if not isinstance(entry, dict) or entry.get("step") != step_number:
-            continue
-        status = str(entry.get("status", "")).lower()
-        observed = str(entry.get("observed", ""))
-        icon = "✅" if status == "passed" else "❌"
-        return f"{icon} {observed}"
-    return "❌ The automation did not record this step."
+        return str(result.get("error", "The automation failed."))
+    failed = [
+        entry
+        for entry in steps
+        if isinstance(entry, dict) and str(entry.get("status")) == "failed"
+    ]
+    if not failed:
+        return str(result.get("error", "The automation failed."))
+    first = failed[0]
+    return f"Step {first.get('step')} failed. {first.get('observed', '')}"
 
 
-def _format_error(error: Exception) -> str:
-    return f"{type(error).__name__}: {error}"
-
-
-def _jira_inline(value: str) -> str:
-    return (
-        value.replace("{", "\\{")
-        .replace("}", "\\}")
-        .replace("[", "\\[")
-        .replace("]", "\\]")
-        .replace("`", "")
+def _parse_rgb(value: str) -> tuple[int, int, int]:
+    match = re.fullmatch(
+        r"rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)",
+        value.strip(),
+        flags=re.IGNORECASE,
     )
+    if match is None:
+        raise ValueError(f"Unsupported RGB value: {value!r}")
+    return tuple(int(channel) for channel in match.groups())
+
+
+def _contrast_ratio(
+    foreground: tuple[int, int, int],
+    background: tuple[int, int, int],
+) -> float:
+    foreground_luminance = _relative_luminance(foreground)
+    background_luminance = _relative_luminance(background)
+    lighter = max(foreground_luminance, background_luminance)
+    darker = min(foreground_luminance, background_luminance)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _relative_luminance(color: tuple[int, int, int]) -> float:
+    red, green, blue = color
+    return (
+        0.2126 * _normalize_srgb(red)
+        + 0.7152 * _normalize_srgb(green)
+        + 0.0722 * _normalize_srgb(blue)
+    )
+
+
+def _normalize_srgb(channel: int) -> float:
+    normalized = channel / 255
+    if normalized <= 0.04045:
+        return normalized / 12.92
+    return ((normalized + 0.055) / 1.055) ** 2.4
 
 
 if __name__ == "__main__":

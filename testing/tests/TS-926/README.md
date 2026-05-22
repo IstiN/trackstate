@@ -2,15 +2,16 @@
 
 ## Objective
 
-Verify that the Playwright + axe-core accessibility runner treats an exact
-WCAG AA text contrast boundary of 4.5:1 as compliant.
+Verify that the live PR-triggered GitHub Actions accessibility workflow treats
+an exact WCAG AA text contrast boundary of 4.5:1 as compliant.
 
 ## Automation approach
 
-1. Render a minimal probe page with visible text at an effective 4.5:1 contrast
-   ratio on a white background.
-2. Reuse the shared `testing/accessibility/accessibility_gate.js` helper that
-   the CI accessibility workflow uses.
-3. Confirm the rendered probe stays free of `color-contrast` and
-   `non-descriptive-label` violations and that the Playwright run exits
-   successfully.
+1. Create a disposable PR that injects a reusable Flutter probe surface with a
+   fixed exact-boundary color pair and descriptive button text into the app
+   entrypoint.
+2. Wait for the real pull-request GitHub Actions workflow to complete on that
+   disposable branch.
+3. Inspect the hosted PR checks surface plus the workflow jobs, steps, and
+   Playwright accessibility logs to confirm the compliant boundary probe passes
+   without `color-contrast` or `non-descriptive-label` violations.
