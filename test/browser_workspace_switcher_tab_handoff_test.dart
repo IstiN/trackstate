@@ -240,7 +240,7 @@ void main() {
   );
 
   test(
-    'Shift+Tab from the selected workspace row returns to the open trigger',
+    'Shift+Tab from the selected workspace row wraps to the last in-panel control',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -268,6 +268,20 @@ void main() {
             ),
             BrowserWorkspaceSwitcherTabStopSnapshot(
               isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
               isWithinWorkspaceSwitcher: false,
               isWithinWorkspaceRow: false,
               isSelectedWorkspaceRow: false,
@@ -277,7 +291,7 @@ void main() {
           currentIndex: 1,
           backwards: true,
         ),
-        0,
+        4,
       );
     },
   );

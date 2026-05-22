@@ -36,8 +36,15 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
   if (!backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
     return selectedRowIndex;
   }
-  if (backwards && triggerIndex != -1 && currentIndex == selectedRowIndex) {
-    return triggerIndex;
+  if (backwards && currentIndex == selectedRowIndex) {
+    final lastInPanelControlIndex = _lastInPanelControlIndex(focusStops);
+    if (lastInPanelControlIndex != -1) {
+      return lastInPanelControlIndex;
+    }
+    if (triggerIndex != -1) {
+      return triggerIndex;
+    }
+    return null;
   }
 
   final lastWorkspaceRowIndex = _lastWorkspaceRowIndex(focusStops);
@@ -65,6 +72,21 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
   }
 
   return currentIndex == firstPostRowControlIndex ? selectedRowIndex : null;
+}
+
+int _lastInPanelControlIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops,
+) {
+  for (var index = stops.length - 1; index >= 0; index -= 1) {
+    final stop = stops[index];
+    if (stop.isFocusable &&
+        stop.isWithinWorkspaceSwitcher &&
+        !stop.isWithinWorkspaceRow &&
+        !stop.isWorkspaceSwitcherTrigger) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 int _lastWorkspaceRowIndex(

@@ -3542,6 +3542,16 @@ void main() {
           isFocused: () => _focusWithinFinder(tester, triggerFinder),
         );
         expect(reachedCompactTrigger, isTrue);
+        expect(
+          find.descendant(
+            of: triggerFinder,
+            matching: _findActionableSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
 
         await tester.tap(
           find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
@@ -3568,6 +3578,16 @@ void main() {
         );
 
         expect(contrast, greaterThanOrEqualTo(4.5));
+
+        final deleteButton = tester.widget<TextButton>(
+          find.byKey(const ValueKey('workspace-delete-hosted:beta/repo@main')),
+        );
+        final deleteForeground = deleteButton.style!.foregroundColor!.resolve(
+          <WidgetState>{},
+        )!;
+        final deleteContrast = contrastRatio(deleteForeground, colors.surface);
+
+        expect(deleteContrast, greaterThanOrEqualTo(4.5));
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
