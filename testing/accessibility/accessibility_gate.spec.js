@@ -4,10 +4,14 @@ const {
   collectAccessibilityViolations,
   formatViolations,
 } = require('./accessibility_gate');
+const {
+  installTs953NetworkTimeoutSimulation,
+} = require('./ts953_network_timeout_simulation');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
+  await installTs953NetworkTimeoutSimulation(page);
   await captureFlutterStartupDiagnostics(page, {
     log: (entry) => console.log(entry),
   });
