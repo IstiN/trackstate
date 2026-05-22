@@ -1,13 +1,17 @@
 class BrowserWorkspaceSwitcherTabStopSnapshot {
   const BrowserWorkspaceSwitcherTabStopSnapshot({
     required this.isFocusable,
+    required this.isWithinWorkspaceSwitcher,
     required this.isWithinWorkspaceRow,
     required this.isSelectedWorkspaceRow,
+    required this.isWorkspaceSwitcherTrigger,
   });
 
   final bool isFocusable;
+  final bool isWithinWorkspaceSwitcher;
   final bool isWithinWorkspaceRow;
   final bool isSelectedWorkspaceRow;
+  final bool isWorkspaceSwitcherTrigger;
 }
 
 int? browserWorkspaceSwitcherTabHandoffIndex({
@@ -19,11 +23,21 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
     return null;
   }
 
+  final triggerIndex = focusStops.indexWhere(
+    (stop) => stop.isFocusable && stop.isWorkspaceSwitcherTrigger,
+  );
   final selectedRowIndex = focusStops.indexWhere(
     (stop) => stop.isFocusable && stop.isSelectedWorkspaceRow,
   );
   if (selectedRowIndex == -1) {
     return null;
+  }
+
+  if (!backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
+    return selectedRowIndex;
+  }
+  if (backwards && triggerIndex != -1 && currentIndex == selectedRowIndex) {
+    return triggerIndex;
   }
 
   final lastWorkspaceRowIndex = _lastWorkspaceRowIndex(focusStops);
@@ -61,7 +75,9 @@ int _firstPostRowControlIndex(
 }) {
   for (var index = startIndex; index < stops.length; index += 1) {
     final stop = stops[index];
-    if (stop.isFocusable && !stop.isWithinWorkspaceRow) {
+    if (stop.isFocusable &&
+        stop.isWithinWorkspaceSwitcher &&
+        !stop.isWithinWorkspaceRow) {
       return index;
     }
   }

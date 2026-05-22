@@ -36,9 +36,11 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
         repository: str,
         token: str,
         workspace_state: dict[str, object],
+        workspace_token_profile_ids: tuple[str, ...] = (),
     ) -> None:
         super().__init__(repository=repository, token=token)
         self._workspace_state = workspace_state
+        self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
 
     def __enter__(self) -> PlaywrightWebAppSession:
         session = super().__enter__()
@@ -51,6 +53,7 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
                 self._workspace_state,
                 repository=self._repository,
                 token=self._token,
+                workspace_token_profile_ids=self._workspace_token_profile_ids,
             ),
         )
         return session
@@ -61,6 +64,7 @@ def _build_preload_script(
     *,
     repository: str | None = None,
     token: str | None = None,
+    workspace_token_profile_ids: tuple[str, ...] = (),
 ) -> str:
     serialized_state = json.dumps(workspace_state)
     scripts = [
@@ -75,7 +79,10 @@ def _build_preload_script(
     ]
     if repository and token:
         repository_storage_key = repository.replace("/", ".")
-        workspace_storage_keys = _workspace_token_storage_keys(workspace_state)
+        workspace_storage_keys = _workspace_token_storage_keys(
+            workspace_state,
+            workspace_token_profile_ids=workspace_token_profile_ids,
+        )
         scripts.extend(
             [
                 f"const token = {json.dumps(token)};",
@@ -94,16 +101,21 @@ def _build_preload_script(
 
 def _workspace_token_storage_keys(
     workspace_state: dict[str, object],
+    *,
+    workspace_token_profile_ids: tuple[str, ...] = (),
 ) -> list[str]:
     raw_profiles = workspace_state.get("profiles", [])
     if not isinstance(raw_profiles, list):
+        return []
+    allowed_profile_ids = {profile_id for profile_id in workspace_token_profile_ids if profile_id}
+    if not allowed_profile_ids:
         return []
     keys: list[str] = []
     for profile in raw_profiles:
         if not isinstance(profile, dict):
             continue
         workspace_id = str(profile.get("id", "")).strip()
-        if not workspace_id:
+        if not workspace_id or workspace_id not in allowed_profile_ids:
             continue
         encoded_id = quote(workspace_id, safe="")
         keys.extend(

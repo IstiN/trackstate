@@ -829,8 +829,6 @@ def _actual_behavior_detail(result: dict[str, object]) -> str:
                 "instead of leaving the deleted local workspace unavailable."
             )
     return str(result.get("error", "The observed behavior did not match the expected unavailable state."))
-
-
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])
