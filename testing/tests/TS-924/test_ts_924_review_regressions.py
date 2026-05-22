@@ -6,6 +6,10 @@ from pathlib import Path
 
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (
     GitHubAccessibilityPullRequestGateObservation,
+    GitHubAccessibilityWorkflowContractObservation,
+)
+from testing.core.interfaces.github_actions_preflight_gate_probe import (
+    GitHubActionsWorkflowJobObservation,
 )
 
 
@@ -42,6 +46,17 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
             target_workflow_declares_pull_request_trigger=True,
             target_workflow_job_names=["Flutter checks"],
             target_workflow_step_names=["Build web app", "Run axe-core accessibility checks"],
+            target_workflow_accessibility_job_names=["Accessibility checks"],
+            target_workflow_downstream_job_names=["Deploy preview"],
+            target_workflow_downstream_job_depends_on_accessibility=True,
+            target_workflow=GitHubAccessibilityWorkflowContractObservation(
+                declares_pull_request_trigger=True,
+                job_names=["Flutter checks", "Accessibility checks", "Deploy preview"],
+                step_names=["Build web app", "Run axe-core accessibility checks"],
+                accessibility_job_names=["Accessibility checks"],
+                downstream_job_names=["Deploy preview"],
+                downstream_job_depends_on_accessibility=True,
+            ),
             pull_request_number=123,
             pull_request_url="https://github.com/IstiN/trackstate/pull/123",
             pull_request_checks_url="https://github.com/IstiN/trackstate/pull/123/checks",
@@ -63,6 +78,17 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
             observed_branch_run_urls=["https://github.com/IstiN/trackstate/actions/runs/456"],
             observed_branch_run_statuses=["completed"],
             observed_branch_run_conclusions=["success"],
+            observed_run_jobs=[
+                GitHubActionsWorkflowJobObservation(
+                    id=4561,
+                    name="Accessibility checks",
+                    status="completed",
+                    conclusion="success",
+                    html_url="https://github.com/IstiN/trackstate/actions/runs/456/job/4561",
+                    started_at="2026-05-22T10:50:00Z",
+                    completed_at="2026-05-22T10:51:00Z",
+                )
+            ],
             observed_job_names=["Flutter checks", "Accessibility checks"],
             observed_step_names=observed_step_names
             or ["Build web app for accessibility scan", "Run axe-core accessibility checks"],
