@@ -91,12 +91,12 @@ async function readFlutterSemanticsEvidence(page) {
     const semanticsHosts = document.querySelectorAll('flt-semantics-host');
     const semanticsNodes = Array.from(document.querySelectorAll('flt-semantics'));
     const sampleLabels = semanticsNodes
-        .map((element) =>
-          element.getAttribute('aria-label') ?? element.textContent ?? '',
-        )
-        .map((value) => value.replace(/\s+/g, ' ').trim())
-        .filter((value) => value.length > 0)
-        .slice(0, 5);
+      .map((element) =>
+        element.getAttribute('aria-label') ?? element.textContent ?? '',
+      )
+      .map((value) => value.replace(/\s+/g, ' ').trim())
+      .filter((value) => value.length > 0)
+      .slice(0, 5);
     return {
       placeholderCount: semanticsPlaceholders.length,
       hostCount: semanticsHosts.length,
