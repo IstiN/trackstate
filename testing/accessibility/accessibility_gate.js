@@ -13,15 +13,28 @@ const accessibilityGateRules = [
   'link-name',
 ];
 
-async function enableFlutterSemantics(page) {
-  await page.waitForSelector('flt-semantics-placeholder', { state: 'attached' });
+const flutterSemanticsTimeoutMs = 15000;
+
+async function enableFlutterSemantics(
+    page,
+    {
+      onPlaceholderReady,
+      onHostReady,
+    } = {},
+) {
+  await page.waitForSelector('flt-semantics-placeholder', {
+    state: 'attached',
+    timeout: flutterSemanticsTimeoutMs,
+  });
+  onPlaceholderReady?.();
   await page.locator('flt-semantics-placeholder').evaluate((element) => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
   await page.waitForSelector('flt-semantics-host', {
     state: 'attached',
-    timeout: 15000,
+    timeout: flutterSemanticsTimeoutMs,
   });
+  onHostReady?.();
   await page.waitForFunction(
       () => document.querySelectorAll('flt-semantics').length > 0,
   );
@@ -261,10 +274,88 @@ function formatFlutterSemanticsEvidence(evidence) {
   );
 }
 
+function formatFlutterEngineInitializationEvidence(state) {
+  return `Flutter engine initialization: ${state}`;
+}
+
+function formatSemanticsTreeDiscoveryStatus(status) {
+  return `Semantics tree discovery: ${status}`;
+}
+
+function appendAccessibilityLog(entries, entry, log) {
+  if (entries.at(-1) === entry) {
+    return;
+  }
+  entries.push(entry);
+  log(entry);
+}
+
+async function captureFlutterStartupDiagnostics(
+    page,
+    {
+      log = () => {},
+    } = {},
+) {
+  const engineEntries = [];
+  const semanticsEntries = [];
+
+  appendAccessibilityLog(
+      engineEntries,
+      formatFlutterEngineInitializationEvidence('bootstrap requested'),
+      log,
+  );
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  appendAccessibilityLog(
+      engineEntries,
+      formatFlutterEngineInitializationEvidence('page loaded'),
+      log,
+  );
+  appendAccessibilityLog(
+      semanticsEntries,
+      formatSemanticsTreeDiscoveryStatus('waiting for nodes'),
+      log,
+  );
+
+  const semanticsEvidence = await enableFlutterSemantics(page, {
+    onPlaceholderReady: () => {
+      appendAccessibilityLog(
+          engineEntries,
+          formatFlutterEngineInitializationEvidence(
+              'semantics placeholder attached',
+          ),
+          log,
+      );
+    },
+    onHostReady: () => {
+      appendAccessibilityLog(
+          engineEntries,
+          formatFlutterEngineInitializationEvidence('semantics host attached'),
+          log,
+      );
+    },
+  });
+
+  appendAccessibilityLog(
+      semanticsEntries,
+      formatFlutterSemanticsEvidence(semanticsEvidence),
+      log,
+  );
+
+  return {
+    engineEntries,
+    semanticsEntries,
+    semanticsEvidence,
+  };
+}
+
 module.exports = {
   accessibilityGateRules,
+  captureFlutterStartupDiagnostics,
   collectAccessibilityViolations,
   enableFlutterSemantics,
+  formatFlutterEngineInitializationEvidence,
+  formatSemanticsTreeDiscoveryStatus,
   formatFlutterSemanticsEvidence,
   formatViolations,
 };
