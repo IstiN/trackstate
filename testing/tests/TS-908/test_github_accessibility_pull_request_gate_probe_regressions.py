@@ -97,9 +97,11 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "run_log_error": None,
             "runtime_accessibility_surface_present": False,
             "runtime_accessibility_surface_summary": "",
+            "runtime_accessibility_sample_labels": [],
             "probe_contains_low_contrast_indicator": True,
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
+            "probe_visible_text": "Sync issue",
             "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
             "cleanup_closed_pull_request": True,
             "cleanup_deleted_branch": True,
@@ -311,6 +313,19 @@ void main() {
             'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
         )
 
+    def test_extract_runtime_accessibility_sample_labels_reads_summary_labels(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        labels = probe._extract_runtime_accessibility_sample_labels(  # noqa: SLF001
+            """
+            some prefix
+            Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["button", "Create tracker"]
+            trailing line
+            """
+        )
+
+        self.assertEqual(labels, ["button", "Create tracker"])
+
     def test_extract_flutter_engine_initialization_log_entries_reads_distinct_states(self) -> None:
         probe = _StubProbeService(self.config)
 
@@ -433,6 +448,12 @@ void main() {
         self.assertNotIn("runApp(const _Ts908RenderedProbeApp());", patched)
         self.assertIn("return MaterialApp(", patched)
         self.assertIn("Ts908ProbeSurface()", patched)
+
+    def test_probe_source_excludes_visible_text_from_semantics(self) -> None:
+        probe_source = _StubProbeService._probe_source()  # noqa: SLF001
+
+        self.assertIn("ExcludeSemantics(", probe_source)
+        self.assertIn("label: 'button'", probe_source)
 
 
 if __name__ == "__main__":

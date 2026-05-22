@@ -204,6 +204,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             runtime_accessibility_surface_summary=str(
                 pull_request_observation["runtime_accessibility_surface_summary"]
             ),
+            runtime_accessibility_sample_labels=list(
+                pull_request_observation.get("runtime_accessibility_sample_labels", [])
+            ),
             probe_contains_low_contrast_indicator=bool(
                 pull_request_observation["probe_contains_low_contrast_indicator"]
             ),
@@ -211,6 +214,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 pull_request_observation["probe_contains_semantic_label_indicator"]
             ),
             probe_semantic_label=str(pull_request_observation["probe_semantic_label"]),
+            probe_visible_text=str(pull_request_observation.get("probe_visible_text", "")),
             probe_contrast_technique=str(
                 pull_request_observation["probe_contrast_technique"]
             ),
@@ -380,8 +384,14 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 self._config.semantic_evidence_markers,
             )
             probe_semantic_label = self._extract_probe_semantic_label(probe_source)
+            probe_visible_text = self._extract_probe_visible_text(probe_source)
             runtime_accessibility_surface_summary = (
                 self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
+            )
+            runtime_accessibility_sample_labels = (
+                self._extract_runtime_accessibility_sample_labels(
                     accessibility_stage_run_log_text
                 )
             )
@@ -473,11 +483,15 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
+                "runtime_accessibility_sample_labels": (
+                    runtime_accessibility_sample_labels
+                ),
                 "probe_contains_low_contrast_indicator": (
                     "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
+                "probe_visible_text": probe_visible_text or "",
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
@@ -1016,6 +1030,13 @@ class GitHubAccessibilityPullRequestGateProbeService:
             "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
         )
 
+    @staticmethod
+    def _extract_probe_visible_text(probe_source: str) -> str | None:
+        match = re.search(r"Text\(\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
+        if match is None:
+            return None
+        return match.group("label")
+
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         if not run_log_text.strip():
             return ""
@@ -1027,6 +1048,27 @@ class GitHubAccessibilityPullRequestGateProbeService:
         if match is None:
             return ""
         return self._snippet(match.group(0), limit=400)
+
+    def _extract_runtime_accessibility_sample_labels(self, run_log_text: str) -> list[str]:
+        if not run_log_text.strip():
+            return []
+
+        labels: list[str] = []
+        for match in re.finditer(
+            r"sample-labels=\[(?P<labels>[^\]]*)\]",
+            run_log_text,
+            flags=re.IGNORECASE,
+        ):
+            labels_payload = f"[{match.group('labels')}]"
+            try:
+                parsed = json.loads(labels_payload)
+            except json.JSONDecodeError:
+                parsed = re.findall(r"""['"]([^'"]+)['"]""", match.group("labels"))
+            if isinstance(parsed, list):
+                labels.extend(
+                    item.strip() for item in parsed if isinstance(item, str) and item.strip()
+                )
+        return self._dedupe(labels)
 
     def _extract_flutter_engine_initialization_log_entries(
         self,
@@ -1252,15 +1294,18 @@ class Ts908ProbeSurface extends StatelessWidget {
     final lowContrastColor = colorScheme.onSurface.withAlpha(89);
 
     return Semantics(
+      container: true,
       label: 'button',
       button: true,
-      child: Container(
-        color: colorScheme.surface,
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          'Sync issue',
-          style: textStyle?.copyWith(color: lowContrastColor) ??
-              TextStyle(color: lowContrastColor),
+      child: ExcludeSemantics(
+        child: Container(
+          color: colorScheme.surface,
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'Sync issue',
+            style: textStyle?.copyWith(color: lowContrastColor) ??
+                TextStyle(color: lowContrastColor),
+          ),
         ),
       ),
     );
