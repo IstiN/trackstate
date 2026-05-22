@@ -45,6 +45,7 @@ LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
 PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS = 15
+PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS = 5
 PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS = 5
 LINKED_BUGS = ["TS-882", "TS-896"]
 RESTORE_MESSAGE_WAIT_SECONDS = 20
@@ -175,6 +176,7 @@ def main() -> None:
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
+        "pre_release_activity_timeout_seconds": PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
         "pre_release_runtime_probe_timeout_seconds": (
             PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS
         ),
@@ -232,6 +234,12 @@ def main() -> None:
                         pre_release_trigger,
                     )
                     pre_release_body_text = page.current_body_text()
+                    activity_captured, activity_events = poll_until(
+                        probe=lambda: runtime.activity_console_events,
+                        is_satisfied=lambda events: len(events) > 0,
+                        timeout_seconds=PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
+                        interval_seconds=0.5,
+                    )
                     runtime_probe_captured, runtime_probe_events = poll_until(
                         probe=lambda: runtime.probe_console_events,
                         is_satisfied=lambda events: len(events) > 0,
@@ -242,6 +250,13 @@ def main() -> None:
                         runtime_probe_events[-1] if runtime_probe_events else None
                     )
                     result["pre_release_body_text"] = pre_release_body_text
+                    result["pre_release_activity_captured"] = activity_captured
+                    result["pre_release_activity_events"] = [
+                        _console_event_payload(event) for event in activity_events
+                    ]
+                    result["pre_release_activity"] = _console_event_payload(
+                        activity_events[-1] if activity_events else None,
+                    )
                     result["pre_release_runtime_probe_captured"] = (
                         runtime_probe_captured
                     )
@@ -252,6 +267,37 @@ def main() -> None:
                         _console_event_payload(event) for event in runtime_probe_events
                     ]
                     result["busy_blocker_before_release"] = blocker.snapshot()
+                    if not activity_captured:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=REQUEST_STEPS[1],
+                            observed=(
+                                "Kept the local workspace blocked until the header workspace "
+                                "trigger was already observable, but startup never exposed "
+                                "any File System Access activity for the saved local "
+                                "workspace before access was restored.\n"
+                                + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
+                                + f"pre_release_body_text={pre_release_body_text!r}\n"
+                                + "pre_release_activity_events="
+                                + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                                + "pre_release_runtime_probe_events="
+                                + f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
+                                + f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
+                            ),
+                        )
+                        raise AssertionError(
+                            "Step 2 failed: startup never exposed File System Access "
+                            "activity for the saved local workspace before the busy state was "
+                            "released.\n"
+                            f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
+                            f"Observed pre_release_body_text:\n{pre_release_body_text}\n"
+                            "Observed pre_release_activity_events="
+                            f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                            "Observed pre_release_runtime_probe_events="
+                            f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}"
+                        )
                     blocker.release()
                     released = blocker.wait_for_release(timeout_seconds=5)
                     result["busy_blocker_final"] = blocker.snapshot()
@@ -274,9 +320,16 @@ def main() -> None:
                         action=REQUEST_STEPS[1],
                         observed=(
                             "Kept the local workspace blocked until the header workspace "
-                            "trigger was already observable, then restored access while "
-                            "startup recovery was still in progress.\n"
+                            "trigger was already observable, confirmed File System Access "
+                            "activity on the saved local workspace while access was "
+                            "still blocked, then restored access while startup recovery was "
+                            "still in progress.\n"
                             + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
+                            + "pre_release_activity="
+                            + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
+                            + "pre_release_activity_events="
+                            + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                            + f"pre_release_activity_captured={activity_captured}\n"
                             + (
                                 "pre_release_runtime_probe="
                                 f"{json.dumps(_console_event_payload(pre_release_runtime_probe), indent=2)}\n"
@@ -314,6 +367,8 @@ def main() -> None:
                                 "restored the prepared local workspace in the workspace "
                                 "switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                "Observed pre_release_activity="
+                                f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
                                 f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
@@ -333,6 +388,8 @@ def main() -> None:
                                 "never restored the prepared local workspace in the "
                                 "workspace switcher trigger "
                                 f"within {TRIGGER_WAIT_SECONDS} seconds. "
+                                "Observed pre_release_activity="
+                                f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
                                 f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
@@ -376,11 +433,16 @@ def main() -> None:
                         result,
                         check=(
                             "Viewed the header workspace trigger while the local workspace "
-                            "was still blocked, recorded any TS-893 runtime probe for the "
-                            "failed local handle revalidation before releasing access, then "
+                            "was still blocked, confirmed File System Access activity for "
+                            "the saved local workspace before releasing "
+                            "access, recorded any TS-893 runtime failure probe, then "
                             "checked the restored trigger again after recovery."
                         ),
                         observed=(
+                            "pre_release_activity="
+                            f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
+                            "pre_release_activity_events="
+                            f"{json.dumps(result['pre_release_activity_events'], ensure_ascii=True)}; "
                             "pre_release_runtime_probe="
                             f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
                             "pre_release_runtime_probe_events="
@@ -835,7 +897,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "* Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
-        "* Required overlap evidence from a TS-893 runtime probe tied to a failed File System Access operation on the blocked local workspace before releasing access, and also recorded any visible restore recovery message without requiring that banner for a pass.",
+        "* Required overlap evidence from tracked File System Access activity on the saved local workspace while it was still blocked before releasing access, and also recorded any TS-893 runtime failure probe plus any visible restore recovery message diagnostically.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -883,7 +945,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "- Kept access to the prepared local workspace blocked until the startup header trigger was already visible, then restored access so the unblock could not happen before startup reached the recovery path.",
-        "- Recorded any TS-893 runtime probe tied to a failed File System Access operation on the blocked local workspace before releasing access, and also recorded any visible restore recovery message without requiring either signal for a pass.",
+        "- Required overlap evidence from tracked File System Access activity on the saved local workspace while it was still blocked before releasing access, and also recorded any TS-893 runtime failure probe plus any visible restore recovery message diagnostically.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
@@ -925,7 +987,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-893 live startup coverage for transient busy local workspace restoration.",
+        "- Added TS-893 live startup coverage that now requires pre-release local-workspace File System Access overlap before restoring access.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -955,11 +1017,19 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
-    trigger = result.get("trigger_observation")
+    trigger = result.get("trigger_observation") or result.get(
+        "pre_release_trigger_observation",
+    )
     switcher = result.get("switcher_observation")
     active_local_row = result.get("active_local_row")
     selected_row = result.get("selected_row")
-    blocker_final = result.get("busy_blocker_final")
+    blocker_final = (
+        result.get("busy_blocker_final")
+        or result.get("busy_blocker_before_release")
+        or result.get("busy_blocker_initial")
+    )
+    activity = result.get("pre_release_activity")
+    activity_events = result.get("pre_release_activity_events")
     runtime_probe = result.get("pre_release_runtime_probe")
     restore_message = result.get("restore_message")
     return "\n".join(
@@ -1001,6 +1071,16 @@ def _bug_description(result: dict[str, object]) -> str:
                 else "- **Observed busy-state release:** `<missing>`"
             ),
             (
+                f"- **Observed pre-release activity:** `{json.dumps(activity, ensure_ascii=True)}`"
+                if activity is not None
+                else "- **Observed pre-release activity:** `<missing>`"
+            ),
+            (
+                f"- **Observed pre-release activity events:** `{json.dumps(activity_events, ensure_ascii=True)}`"
+                if activity_events is not None
+                else "- **Observed pre-release activity events:** `<missing>`"
+            ),
+            (
                 f"- **Observed runtime probe:** `{json.dumps(runtime_probe, ensure_ascii=True)}`"
                 if runtime_probe is not None
                 else "- **Observed runtime probe:** `<missing>`"
@@ -1033,6 +1113,8 @@ def _bug_description(result: dict[str, object]) -> str:
                     "preloaded_workspace_state": result.get("preloaded_workspace_state"),
                     "busy_blocker_initial": result.get("busy_blocker_initial"),
                     "busy_blocker_final": result.get("busy_blocker_final"),
+                    "pre_release_activity": activity,
+                    "pre_release_activity_events": activity_events,
                     "pre_release_runtime_probe": runtime_probe,
                     "restore_message": restore_message,
                     "trigger_observation": trigger,
@@ -1154,6 +1236,11 @@ def _failed_step_number(result: dict[str, object]) -> int | None:
 
 
 def _bug_title(result: dict[str, object]) -> str:
+    if not _step_passed(result, 2):
+        return (
+            f"{TICKET_KEY} - Startup restore exposes no saved-local File System "
+            "Access activity while the busy handle is still blocked"
+        )
     return (
         f"{TICKET_KEY} - Startup retry does not restore the local workspace "
         "after transient busy access clears"
@@ -1161,10 +1248,24 @@ def _bug_title(result: dict[str, object]) -> str:
 
 
 def _bug_expected_result(result: dict[str, object]) -> str:
+    if not _step_passed(result, 2):
+        return (
+            "While the prepared local workspace is still blocked, startup should "
+            "attempt File System Access work for that saved local workspace before "
+            "the busy handle is released, then recover and keep the workspace "
+            "restorable as the active `Local Git` selection once access returns."
+        )
     return EXPECTED_RESULT
 
 
 def _bug_actual_result(result: dict[str, object]) -> str:
+    if not _step_passed(result, 2):
+        return (
+            "While the prepared local workspace was still blocked, startup never "
+            "exposed any File System Access activity for that saved local "
+            "workspace before access was released, so the transient busy "
+            "revalidation path could not be observed."
+        )
     if not _step_passed(result, 4):
         return (
             "After the temporary busy state was released and the test waited "
@@ -1176,6 +1277,13 @@ def _bug_actual_result(result: dict[str, object]) -> str:
 
 
 def _bug_missing_capability(result: dict[str, object]) -> str:
+    if not _step_passed(result, 2):
+        return (
+            "The startup restore flow does not expose any reliable saved-local "
+            "File System Access activity while the busy handle is still blocked, "
+            "so the transient revalidation/retry path cannot be verified before "
+            "access is restored."
+        )
     return (
         "Startup retry did not restore the prepared local workspace as the active "
         "`Local Git` selection after transient busy access cleared."

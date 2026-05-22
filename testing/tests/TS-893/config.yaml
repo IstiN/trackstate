@@ -10,6 +10,6 @@ notes:
   - Preloads an active local workspace plus one hosted workspace in browser storage.
   - Uses the default desktop viewport of 1440x900 for this ticket.
   - Simulates a transiently busy local workspace by revoking filesystem access to the prepared local repository, keeping it blocked until the header trigger is visible, then restoring access during startup recovery.
-  - Records any TS-893 runtime probe for a failed File System Access operation on the blocked local workspace before releasing access, and records any visible "Skipped ... during restore" banner without requiring either signal for the expected-result assertion.
+  - Requires tracked File System Access activity on the saved local workspace while it is still blocked before releasing access, and records any TS-893 runtime failure probe plus any visible "Skipped ... during restore" banner diagnostically.
   - Waits after the busy-state release for the workspace switcher trigger to restore the local workspace instead of asserting immediately.
   - Covers the deployed fixes linked from TS-882 and TS-896.

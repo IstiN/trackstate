@@ -13,10 +13,11 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup reaches the recovery path
-5. records any TS-893 runtime probe for a failed File System Access operation
-  on the blocked local workspace before access is restored, then waits after
-  the busy-state release for the workspace switcher trigger to
-  restore the saved local workspace instead of asserting immediately
+5. requires tracked File System Access activity on the saved local workspace
+  while it is still blocked before access is restored, records any TS-893
+  runtime failure probe, then waits after the busy-state release for the
+  workspace switcher trigger to restore the saved local workspace instead of
+  asserting immediately
 6. opens **Workspace switcher** and verifies the selected active row is the
   local workspace in the `Local Git` state rather than `Local Unavailable` or
   the hosted fallback

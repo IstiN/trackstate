@@ -20,6 +20,7 @@ class WorkspaceRestoreConsoleEvent:
 
 class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     RUNTIME_PROBE_PREFIX = "[TS-893][local-revalidation]"
+    RUNTIME_ACTIVITY_PREFIX = "[TS-893][local-revalidation-activity]"
 
     def __init__(
         self,
@@ -83,6 +84,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
   const workspaceState = {json.dumps(serialized_workspace_state)};
   const trackedHandleName = {json.dumps(self._active_local_handle_name)};
   const probePrefix = {json.dumps(self.RUNTIME_PROBE_PREFIX)};
+  const activityPrefix = {json.dumps(self.RUNTIME_ACTIVITY_PREFIX)};
   const trackedHandleLineage = new WeakMap();
 
   for (const key of [
@@ -204,6 +206,10 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     console.debug(`${{probePrefix}} ${{JSON.stringify(details)}}`);
   }};
 
+  const emitActivity = (details) => {{
+    console.debug(`${{activityPrefix}} ${{JSON.stringify(details)}}`);
+  }};
+
   const wrapAsyncIterable = (iterable, details) => {{
     if (!iterable || typeof iterable[Symbol.asyncIterator] !== 'function') {{
       return iterable;
@@ -254,19 +260,22 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     prototype[methodName] = function (...args) {{
       const handleLineage = trackedLineageForHandle(this);
       const tracked = Array.isArray(handleLineage);
-      const details = tracked
-        ? {{
-            method: methodName,
-            handleKind: this?.kind ?? null,
-            handleName: handleName(this),
-            handleLineage,
-          }}
-        : null;
+      const details = {{
+        method: methodName,
+        handleKind: this?.kind ?? null,
+        handleName: handleName(this),
+        handleLineage: tracked ? handleLineage : null,
+        tracked,
+      }};
       let result;
       try {{
+        emitActivity({{
+          ...details,
+          stage: 'invoke',
+        }});
         result = original.apply(this, args);
       }} catch (error) {{
-        if (details) {{
+        if (tracked) {{
           emitProbe({{
             ...details,
             stage: 'throw',
@@ -275,19 +284,18 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         }}
         throw error;
       }}
-      if (!details) {{
-        return result;
-      }}
       if (wrapResult) {{
         if (result && typeof result.then === 'function') {{
           return result
             .then((resolved) => wrapResult(resolved, details, args))
             .catch((error) => {{
-              emitProbe({{
-                ...details,
-                stage: 'reject',
-                error: normalizeError(error),
-              }});
+              if (tracked) {{
+                emitProbe({{
+                  ...details,
+                  stage: 'reject',
+                  error: normalizeError(error),
+                }});
+              }}
               throw error;
             }});
         }}
@@ -295,11 +303,13 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
       }}
       if (result && typeof result.then === 'function') {{
         return result.catch((error) => {{
-          emitProbe({{
-            ...details,
-            stage: 'reject',
-            error: normalizeError(error),
-          }});
+          if (tracked) {{
+            emitProbe({{
+              ...details,
+              stage: 'reject',
+              error: normalizeError(error),
+            }});
+          }}
           throw error;
         }});
       }}
@@ -361,6 +371,14 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
             event
             for event in self.console_events
             if event.text.startswith(self.RUNTIME_PROBE_PREFIX)
+        )
+
+    @property
+    def activity_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
+        return tuple(
+            event
+            for event in self.console_events
+            if event.text.startswith(self.RUNTIME_ACTIVITY_PREFIX)
         )
 
 
