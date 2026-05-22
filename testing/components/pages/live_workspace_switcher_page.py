@@ -944,11 +944,17 @@ class LiveWorkspaceSwitcherPage:
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The visible workspace switcher trigger could not be focused before the "
-                "keyboard blur scenario.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
+            try:
+                self._session.focus(
+                    'button[aria-label^="Workspace switcher:"], [role="button"][aria-label^="Workspace switcher:"]',
+                    timeout_ms=timeout_ms,
+                )
+            except WebAppTimeoutError:
+                raise AssertionError(
+                    "The visible workspace switcher trigger could not be focused before the "
+                    "keyboard blur scenario.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                ) from error
         active = self._session.active_element()
         if self._is_workspace_trigger_label(active.accessible_name):
             return
@@ -3171,11 +3177,7 @@ class LiveWorkspaceSwitcherPage:
         )
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
-        self._session.click(
-            self._top_bar_button_selector,
-            has_text="Workspace switcher:",
-            timeout_ms=timeout_ms,
-        )
+        self._click_trigger(timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def observe_surface(
@@ -4143,12 +4145,18 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const labelFor = (element) =>
-                normalize(element.getAttribute('aria-label') || element.innerText || '');
+                normalize(element.getAttribute('aria-label') || element.innerText || element.textContent || '');
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
               ).filter(isVisible);
               const trigger = buttons
-                .filter((element) => labelFor(element).includes('Workspace switcher:'))
+                .filter((element) => {
+                  const label = labelFor(element);
+                  const text = visibleText(element);
+                  return label.includes('Workspace switcher:') || text.includes('Workspace switcher:');
+                })
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
                   const rightRect = right.getBoundingClientRect();
@@ -4170,7 +4178,7 @@ class LiveWorkspaceSwitcherPage:
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
                 semanticLabel: labelFor(trigger),
-                visibleText: normalize(rawText),
+                visibleText: visibleText(trigger),
                 rawTextLines,
                 iconCount,
                 left: rect.left,
@@ -4179,7 +4187,7 @@ class LiveWorkspaceSwitcherPage:
                 height: rect.height,
                 topButtonLabels: buttons
                   .filter((element) => element.getBoundingClientRect().top < 160)
-                  .map((element) => labelFor(element))
+                  .map((element) => labelFor(element) || visibleText(element))
                   .filter((label) => label.length > 0),
               };
             }
@@ -4217,17 +4225,7 @@ class LiveWorkspaceSwitcherPage:
         )
 
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
-        try:
-            self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
-                timeout_ms=timeout_ms,
-            )
-        except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The live app did not expose a clickable workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
+        self._click_trigger(timeout_ms=timeout_ms)
 
     def toggle_switcher_via_trigger(self, *, timeout_ms: int = 30_000) -> None:
         try:
@@ -6503,11 +6501,25 @@ class LiveWorkspaceSwitcherPage:
         return (label or "").startswith("Workspace switcher:")
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
-            timeout_ms=timeout_ms,
-        )
+        try:
+            self._session.click(
+                self._button_selector,
+                has_text=self._trigger_label_prefix,
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError as original_error:
+            try:
+                self._session.click(
+                    'button[aria-label^="Workspace switcher:"], [role="button"][aria-label^="Workspace switcher:"]',
+                    timeout_ms=timeout_ms,
+                )
+                return
+            except WebAppTimeoutError as fallback_error:
+                raise AssertionError(
+                    "The live app did not expose a clickable workspace switcher trigger.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                ) from fallback_error
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:
