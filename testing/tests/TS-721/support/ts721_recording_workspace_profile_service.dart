@@ -38,6 +38,15 @@ class Ts721RecordingWorkspaceProfileService implements WorkspaceProfileService {
   ) => _delegate.saveHostedAccessMode(workspaceId, accessMode);
 
   @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) => _delegate.saveLocalWorkspaceAvailability(
+    workspaceId,
+    isAvailable: isAvailable,
+  );
+
+  @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
     selectedWorkspaceIds.add(workspaceId);
     return _delegate.selectProfile(workspaceId);
