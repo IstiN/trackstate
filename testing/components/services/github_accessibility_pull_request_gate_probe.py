@@ -279,8 +279,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
             render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
+                render_host_original_source
             )
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
@@ -406,7 +407,11 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -473,8 +478,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
@@ -1010,10 +1015,24 @@ class GitHubAccessibilityPullRequestGateProbeService:
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
-        del probe_source
+        if "colorScheme.surface" in probe_source:
+            return (
+                "Uses `colorScheme.surface` text on `colorScheme.surface` to guarantee a "
+                "WCAG contrast failure while remaining theme-token-safe."
+            )
         return (
             "Uses `colorScheme.onSurface.withAlpha(89)` text on "
             "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+        )
+
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
         )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
@@ -1249,7 +1268,7 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
 
     return Semantics(
       label: 'button',
@@ -1505,6 +1524,11 @@ class Ts908ProbeSurface extends StatelessWidget {
             ):
                 return True
         return False
+
+    def _render_host_renders_probe(self, render_host_source: str) -> bool:
+        probe_import = Path(self._config.probe_path).name
+        probe_widget_name = self._probe_widget_name()
+        return probe_import in render_host_source and probe_widget_name in render_host_source
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:

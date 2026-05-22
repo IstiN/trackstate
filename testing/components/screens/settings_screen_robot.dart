@@ -255,6 +255,7 @@ class SettingsScreenRobot {
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pump();
     await tester.enterText(field.first, text);
+    FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
   }
 
