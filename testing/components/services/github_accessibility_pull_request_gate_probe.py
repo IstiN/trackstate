@@ -220,6 +220,18 @@ class GitHubAccessibilityPullRequestGateProbeService:
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
             ),
+            flutter_engine_initialization_log_entries=list(
+                pull_request_observation.get("flutter_engine_initialization_log_entries", [])
+            ),
+            flutter_engine_initialization_summary=str(
+                pull_request_observation.get("flutter_engine_initialization_summary", "")
+            ),
+            semantics_tree_discovery_log_entries=list(
+                pull_request_observation.get("semantics_tree_discovery_log_entries", [])
+            ),
+            semantics_tree_discovery_summary=str(
+                pull_request_observation.get("semantics_tree_discovery_summary", "")
+            ),
         )
 
     def _create_and_observe_pull_request(self, workflow_id: int) -> dict[str, object]:
@@ -367,6 +379,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             runtime_accessibility_surface_summary = (
                 self._extract_runtime_accessibility_surface_summary(run_log_text)
             )
+            flutter_engine_initialization_log_entries = (
+                self._extract_flutter_engine_initialization_log_entries(run_log_text)
+            )
+            semantics_tree_discovery_log_entries = (
+                self._extract_semantics_tree_discovery_log_entries(run_log_text)
+            )
 
             observation = {
                 "pull_request_number": pull_request_number,
@@ -450,6 +468,18 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "flutter_engine_initialization_log_entries": (
+                    flutter_engine_initialization_log_entries
+                ),
+                "flutter_engine_initialization_summary": self._summarize_log_entries(
+                    flutter_engine_initialization_log_entries
+                ),
+                "semantics_tree_discovery_log_entries": (
+                    semantics_tree_discovery_log_entries
+                ),
+                "semantics_tree_discovery_summary": self._summarize_log_entries(
+                    semantics_tree_discovery_log_entries
+                ),
             }
         finally:
             if pull_request_number is not None:
@@ -975,6 +1005,52 @@ class GitHubAccessibilityPullRequestGateProbeService:
             return ""
         return self._snippet(match.group(0), limit=400)
 
+    def _extract_flutter_engine_initialization_log_entries(
+        self,
+        run_log_text: str,
+    ) -> list[str]:
+        return self._extract_matching_log_lines(
+            run_log_text,
+            markers=["flutter engine initialization"],
+        )
+
+    def _extract_semantics_tree_discovery_log_entries(
+        self,
+        run_log_text: str,
+    ) -> list[str]:
+        return self._extract_matching_log_lines(
+            run_log_text,
+            markers=[
+                "semantics tree discovery",
+                "accessibility runtime surface ready",
+            ],
+        )
+
+    def _extract_matching_log_lines(
+        self,
+        run_log_text: str,
+        *,
+        markers: list[str],
+    ) -> list[str]:
+        if not run_log_text.strip():
+            return []
+
+        lowered_markers = [marker.lower() for marker in markers if marker.strip()]
+        matches: list[str] = []
+        for raw_line in run_log_text.splitlines():
+            normalized_line = " ".join(raw_line.split()).strip()
+            if not normalized_line:
+                continue
+            lowered_line = normalized_line.lower()
+            if any(marker in lowered_line for marker in lowered_markers):
+                matches.append(self._snippet(normalized_line, limit=300))
+        return self._dedupe(matches)
+
+    def _summarize_log_entries(self, entries: list[str]) -> str:
+        if not entries:
+            return ""
+        return self._snippet(" | ".join(entries[:3]), limit=400)
+
     def _extract_log_excerpt(self, run_log_text: str, fallback_text: str) -> str:
         text = run_log_text or fallback_text
         if not text.strip():
@@ -989,6 +1065,17 @@ class GitHubAccessibilityPullRequestGateProbeService:
             "process completed with exit code 1",
         ]
         for marker in failure_markers:
+            index = lowered.find(marker)
+            if index >= 0:
+                start = max(index - 200, 0)
+                end = min(index + 800, len(text))
+                return self._snippet(text[start:end], limit=1000)
+        preferred_runtime_markers = [
+            "flutter engine initialization",
+            "semantics tree discovery",
+            "accessibility runtime surface ready",
+        ]
+        for marker in preferred_runtime_markers:
             index = lowered.find(marker)
             if index >= 0:
                 start = max(index - 200, 0)

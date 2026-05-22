@@ -13,9 +13,9 @@ from testing.core.interfaces.github_actions_preflight_gate_probe import (
 )
 
 
-def _load_ts_924_module():
-    module_path = Path(__file__).with_name("test_ts_924.py")
-    spec = importlib.util.spec_from_file_location("ts_924_runtime", module_path)
+def _load_ts_934_module():
+    module_path = Path(__file__).with_name("test_ts_934.py")
+    spec = importlib.util.spec_from_file_location("ts_934_runtime", module_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -23,18 +23,16 @@ def _load_ts_924_module():
     return module
 
 
-class Ts924ReviewRegressionTest(unittest.TestCase):
+class Ts934ReviewRegressionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = _load_ts_924_module()
+        cls.module = _load_ts_934_module()
 
     def _observation(
         self,
         *,
-        runtime_accessibility_surface_present: bool,
-        runtime_accessibility_surface_summary: str,
-        accessibility_status_check_conclusion: str | None,
-        observed_step_names: list[str] | None = None,
+        engine_entries: list[str],
+        semantics_entries: list[str],
     ) -> GitHubAccessibilityPullRequestGateObservation:
         return GitHubAccessibilityPullRequestGateObservation(
             repository="IstiN/trackstate",
@@ -44,7 +42,7 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
             target_workflow_id=1,
             target_workflow_present_on_default_branch=True,
             target_workflow_declares_pull_request_trigger=True,
-            target_workflow_job_names=["Flutter checks"],
+            target_workflow_job_names=["Flutter checks", "Accessibility checks"],
             target_workflow_step_names=["Build web app", "Run axe-core accessibility checks"],
             target_workflow_accessibility_job_names=["Accessibility checks"],
             target_workflow_downstream_job_names=["Deploy preview"],
@@ -60,12 +58,15 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
             pull_request_number=123,
             pull_request_url="https://github.com/IstiN/trackstate/pull/123",
             pull_request_checks_url="https://github.com/IstiN/trackstate/pull/123/checks",
-            pull_request_head_branch="ts924-accessibility-pass-gate",
+            pull_request_head_branch="ts934-accessibility-engine-logging",
             pull_request_head_sha="abc123",
-            pull_request_probe_path="lib/ts924_probe_surface.dart",
+            pull_request_probe_path="lib/ts934_accessibility_engine_logging_probe.dart",
             probe_render_host_path="lib/main.dart",
             probe_rendered_in_application=True,
-            pull_request_file_paths=["lib/main.dart", "lib/ts924_probe_surface.dart"],
+            pull_request_file_paths=[
+                "lib/main.dart",
+                "lib/ts934_accessibility_engine_logging_probe.dart",
+            ],
             pull_request_state="open",
             pull_request_mergeable_state="clean",
             pull_request_status_state="success",
@@ -85,80 +86,115 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
                     status="completed",
                     conclusion="success",
                     html_url="https://github.com/IstiN/trackstate/actions/runs/456/job/4561",
-                    started_at="2026-05-22T10:50:00Z",
-                    completed_at="2026-05-22T10:51:00Z",
+                    started_at="2026-05-22T11:05:00Z",
+                    completed_at="2026-05-22T11:06:00Z",
                 )
             ],
-            observed_job_names=["Flutter checks", "Accessibility checks"],
-            observed_step_names=observed_step_names
-            or ["Build web app for accessibility scan", "Run axe-core accessibility checks"],
-            observed_status_check_names=["Flutter checks", "Accessibility checks"],
+            observed_job_names=["Accessibility checks"],
+            observed_step_names=["Run axe-core accessibility checks"],
+            observed_status_check_names=["Accessibility checks"],
             observed_status_check_workflow_names=["Flutter Required Checks"],
             failed_status_check_names=[],
             failed_status_check_workflow_names=[],
             accessibility_status_check_name="Accessibility checks",
             accessibility_status_check_workflow_name="Flutter Required Checks",
             accessibility_status_check_status="completed",
-            accessibility_status_check_conclusion=accessibility_status_check_conclusion,
+            accessibility_status_check_conclusion="success",
             accessibility_status_check_url="https://example.test/accessibility",
             matched_accessibility_markers=["accessibility", "axe-core"],
             matched_contrast_markers=[],
-            matched_semantic_markers=["semantics", "label"],
+            matched_semantic_markers=["semantics"],
             run_log_matched_accessibility_markers=["accessibility", "axe-core"],
             run_log_matched_contrast_markers=[],
-            run_log_matched_semantic_markers=["semantics", "label"],
+            run_log_matched_semantic_markers=["semantics"],
             run_log_mentions_accessibility=True,
             run_log_mentions_contrast_issue=False,
             run_log_mentions_semantic_issue=True,
-            run_log_excerpt="Accessibility runtime surface ready",
+            run_log_excerpt="Accessibility checks\nFlutter engine initialization: bootstrap requested",
             run_log_error=None,
-            runtime_accessibility_surface_present=runtime_accessibility_surface_present,
-            runtime_accessibility_surface_summary=runtime_accessibility_surface_summary,
+            runtime_accessibility_surface_present=bool(semantics_entries),
+            runtime_accessibility_surface_summary=(
+                semantics_entries[0] if semantics_entries else ""
+            ),
             probe_contains_low_contrast_indicator=False,
             probe_contains_semantic_label_indicator=True,
-            probe_semantic_label="Sync status message: accessibility checks passed",
-            probe_contrast_technique="Uses onSurface text on surface.",
+            probe_semantic_label=(
+                GitHubAccessibilityCompliantPullRequestGateProbeService.expected_semantic_label
+            ),
+            probe_contrast_technique=(
+                GitHubAccessibilityCompliantPullRequestGateProbeService.contrast_technique
+            ),
             cleanup_closed_pull_request=True,
             cleanup_deleted_branch=True,
+            flutter_engine_initialization_log_entries=engine_entries,
+            flutter_engine_initialization_summary=" | ".join(engine_entries),
+            semantics_tree_discovery_log_entries=semantics_entries,
+            semantics_tree_discovery_summary=" | ".join(semantics_entries),
         )
 
-    def test_step_2_requires_runtime_accessibility_surface_evidence(self) -> None:
-        result: dict[str, object] = {"steps": []}
-        failures: list[str] = []
-
-        self.module._evaluate_compliant_component(  # type: ignore[attr-defined]
-            result,
-            self._observation(
-                runtime_accessibility_surface_present=False,
-                runtime_accessibility_surface_summary="",
-                accessibility_status_check_conclusion="success",
-            ),
-            failures,
-        )
-
-        self.assertEqual(len(failures), 1)
-        self.assertEqual(result["steps"][0]["status"], "failed")
-        self.assertIn("browser-visible runtime semantics evidence", result["steps"][0]["observed"])
-
-    def test_step_4_rejects_skipped_accessibility_check(self) -> None:
+    def test_step_3_requires_multiple_engine_states(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
         failures: list[str] = []
 
-        self.module._evaluate_accessibility_gate_result(  # type: ignore[attr-defined]
+        self.module._evaluate_flutter_engine_logging(  # type: ignore[attr-defined]
             result,
             self._observation(
-                runtime_accessibility_surface_present=True,
-                runtime_accessibility_surface_summary=(
-                    'Accessibility runtime surface ready: hosts=1; nodes=4; '
-                    'sample-labels=["Sync status message: accessibility checks passed"]'
-                ),
-                accessibility_status_check_conclusion="skipped",
+                engine_entries=["Flutter engine initialization: bootstrap requested"],
+                semantics_entries=["Accessibility runtime surface ready: hosts=1; nodes=5"],
             ),
             failures,
         )
 
         self.assertEqual(len(failures), 1)
         self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("Only one Flutter engine initialization state was logged", failures[0])
+
+    def test_step_3_requires_semantics_discovery_status(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_flutter_engine_logging(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                engine_entries=[
+                    "Flutter engine initialization: bootstrap requested",
+                    "Flutter engine initialization: engine ready",
+                ],
+                semantics_entries=[],
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("No log entry documented semantics-tree discovery status", failures[0])
+
+    def test_step_3_accepts_engine_and_semantics_entries(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_flutter_engine_logging(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                engine_entries=[
+                    "Flutter engine initialization: bootstrap requested",
+                    "Flutter engine initialization: engine ready",
+                ],
+                semantics_entries=[
+                    "Semantics tree discovery: waiting for nodes",
+                    "Accessibility runtime surface ready: hosts=1; nodes=5",
+                ],
+            ),
+            failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
+
+
+from testing.components.services.github_accessibility_compliant_pull_request_gate_probe import (  # noqa: E402,E305
+    GitHubAccessibilityCompliantPullRequestGateProbeService,
+)
 
 
 if __name__ == "__main__":
