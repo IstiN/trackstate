@@ -17,11 +17,15 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
-from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
+from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
+    StartupSurfaceObservation,
+    TrackStateTrackerPage,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
@@ -41,9 +45,10 @@ LINKED_BUGS = ["TS-960"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Re-authenticate", "Retry")
 REWORK_SUMMARY = (
-    "Added live startup coverage for the fail-soft shell path so the test now "
-    "treats a visible Sync issue-only surface as a real product failure instead "
-    "of masking it behind later workspace-switcher steps."
+    "Seeded the mismatched local workspace as the active startup target, moved "
+    "startup-surface probing behind `TrackStateTrackerPage`, and removed the "
+    "broad banner-dismiss exception swallow so TS-964 now drives the real "
+    "fail-soft restore path."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -51,9 +56,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts964_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts964_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Launch the application URL in a clean browser session.",
@@ -133,7 +140,7 @@ def main() -> None:
                     action=REQUEST_STEPS[0],
                     observed=(
                         "Opened the deployed app in a fresh Chromium session with a saved "
-                        "hosted active workspace plus one broken saved local workspace "
+                        "active broken local workspace plus one hosted fallback workspace "
                         "preloaded in browser storage."
                     ),
                 )
@@ -157,12 +164,14 @@ def main() -> None:
                         ),
                     )
 
-                try:
-                    page.dismiss_connection_banner()
-                except Exception:
-                    pass
+                page.dismiss_connection_banner()
 
-                startup_observation = _observe_startup_surface(tracker_page)
+                restore_message = _observe_restore_message(tracker_page, timeout_ms=5_000)
+                if restore_message is not None:
+                    result["restore_message"] = restore_message
+                startup_observation = _startup_surface_payload(
+                    tracker_page.observe_startup_surface(),
+                )
                 result["startup_observation"] = startup_observation
                 _record_step(
                     result,
@@ -174,6 +183,11 @@ def main() -> None:
                         "a terminal Sync issue screen.\n"
                         f"startup_observation={json.dumps(startup_observation, indent=2)}\n"
                         f"shell_observation={json.dumps(shell_observation, indent=2)}"
+                        + (
+                            f"\nrestore_message={restore_message!r}"
+                            if restore_message is not None
+                            else ""
+                        )
                     ),
                 )
 
@@ -270,7 +284,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
     local_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
     hosted_id = f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
     return {
-        "activeWorkspaceId": hosted_id,
+        "activeWorkspaceId": local_id,
         "migrationComplete": True,
         "unavailableLocalWorkspaceIds": [local_id],
         "profiles": [
@@ -389,62 +403,14 @@ def _record_human_verification(
     lines.append({"check": check, "observed": observed})
 
 
-def _observe_startup_surface(tracker_page: TrackStateTrackerPage) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const buttonLabels = Array.from(
-            document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
-          )
-            .filter(isVisible)
-            .map((element) =>
-              normalize(
-                element.getAttribute?.('aria-label')
-                || element.innerText
-                || element.textContent
-                || '',
-              ),
-            )
-            .filter((label) => label.length > 0);
-          return {
-            title: document.title || '',
-            locationHref: window.location.href,
-            locationHash: window.location.hash,
-            locationPathname: window.location.pathname,
-            bodyText: document.body?.innerText || document.body?.textContent || '',
-            buttonLabels,
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "title": "",
-            "location_href": "",
-            "location_hash": "",
-            "location_pathname": "",
-            "body_text": tracker_page.body_text(),
-            "button_labels": [],
-        }
+def _startup_surface_payload(observation: StartupSurfaceObservation) -> dict[str, object]:
     return {
-        "title": str(payload.get("title", "")),
-        "location_href": str(payload.get("locationHref", "")),
-        "location_hash": str(payload.get("locationHash", "")),
-        "location_pathname": str(payload.get("locationPathname", "")),
-        "body_text": str(payload.get("bodyText", "")),
-        "button_labels": [str(label) for label in payload.get("buttonLabels", [])],
+        "title": observation.title,
+        "location_href": observation.location_href,
+        "location_hash": observation.location_hash,
+        "location_pathname": observation.location_pathname,
+        "body_text": observation.body_text,
+        "button_labels": list(observation.button_labels),
     }
 
 
@@ -454,7 +420,7 @@ def _raise_startup_failure(
     tracker_page: TrackStateTrackerPage,
     reason: str,
 ) -> None:
-    startup_observation = _observe_startup_surface(tracker_page)
+    startup_observation = _startup_surface_payload(tracker_page.observe_startup_surface())
     result["runtime_state"] = "startup-failed"
     result["startup_observation"] = startup_observation
     result["runtime_body_text"] = startup_observation["body_text"]
@@ -529,6 +495,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -550,6 +520,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
@@ -565,7 +539,7 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Linked bugs considered*: {', '.join(LINKED_BUGS)}",
         "",
         "h4. What was automated",
-        "* Preloaded a hosted active workspace plus one broken saved local workspace in browser storage.",
+        "* Preloaded the broken saved local workspace as the active startup target, plus one hosted fallback workspace, in browser storage.",
         "* Opened the deployed app and verified startup settled into the global shell instead of remaining on Sync issue.",
         "* Verified the header workspace switcher trigger was visible after startup.",
         "* Opened Workspace switcher and checked that the seeded broken local workspace still appeared for manual recovery.",
@@ -610,7 +584,7 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
         f"**Linked bugs considered:** {', '.join(LINKED_BUGS)}",
         "",
         "## What was automated",
-        "- Preloaded the hosted-active plus broken-local workspace state required by the startup fail-soft scenario.",
+        "- Preloaded the broken local workspace as the active startup target plus a hosted fallback workspace.",
         "- Verified the deployed app reached the interactive shell instead of staying on a terminal Sync issue surface.",
         "- Confirmed the header workspace switcher trigger remained visible and interactive.",
         "- Opened the switcher and verified the seeded broken local workspace was still visible for manual recovery.",
@@ -802,6 +776,81 @@ def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, objec
         "action_labels": list(row.action_labels),
         "button_labels": list(row.button_labels),
     }
+
+
+def _observe_restore_message(
+    tracker_page: TrackStateTrackerPage,
+    *,
+    timeout_ms: int,
+) -> str | None:
+    try:
+        observation = tracker_page.observe_workspace_restore_message(
+            workspace_name=LOCAL_DISPLAY_NAME,
+            timeout_ms=timeout_ms,
+        )
+    except (AssertionError, WebAppTimeoutError):
+        return None
+    return observation.message_text
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    prefix = (
+        "Fixed: seeded the mismatched local workspace as the active startup target, "
+        "moved startup-surface probing into `TrackStateTrackerPage.observe_startup_surface()`, "
+        "and removed the broad banner-dismiss exception swallow."
+    )
+    if passed:
+        return f"{prefix} Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+    return (
+        f"{prefix} Re-ran `{RUN_COMMAND}`: still failing. "
+        f"Current failure: {_exact_error_summary(result)}"
+    )
+
+
+def _exact_error_summary(result: dict[str, object]) -> str:
+    traceback_text = str(result.get("traceback", "")).strip()
+    if traceback_text:
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate.startswith("AssertionError:"):
+                return candidate
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate:
+                return candidate
+    error = str(result.get("error", "")).strip()
+    if error:
+        first_line = error.splitlines()[0].strip()
+        return first_line if ":" in first_line else f"AssertionError: {first_line}"
+    return f"AssertionError: {TICKET_KEY} failed"
 
 
 if __name__ == "__main__":

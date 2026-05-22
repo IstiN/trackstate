@@ -36,6 +36,16 @@ class WorkspaceRestoreMessageObservation:
 
 
 @dataclass(frozen=True)
+class StartupSurfaceObservation:
+    title: str
+    location_href: str
+    location_hash: str
+    location_pathname: str
+    body_text: str
+    button_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherTriggerObservation:
     aria_label: str
     visible_text: str
@@ -457,6 +467,64 @@ class TrackStateTrackerPage:
             "connect_github_visible": bool(payload.get("connectGitHubVisible")),
             "shell_ready": bool(payload.get("shellReady")),
         }
+
+    def observe_startup_surface(self) -> StartupSurfaceObservation:
+        payload = self.session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const buttonLabels = Array.from(
+                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+              )
+                .filter(isVisible)
+                .map((element) =>
+                  normalize(
+                    element.getAttribute?.('aria-label')
+                    || element.innerText
+                    || element.textContent
+                    || '',
+                  ),
+                )
+                .filter((label) => label.length > 0);
+              return {
+                title: document.title || '',
+                locationHref: window.location.href,
+                locationHash: window.location.hash,
+                locationPathname: window.location.pathname,
+                bodyText: document.body?.innerText || document.body?.textContent || '',
+                buttonLabels,
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            return StartupSurfaceObservation(
+                title="",
+                location_href="",
+                location_hash="",
+                location_pathname="",
+                body_text=self.body_text(),
+                button_labels=(),
+            )
+        return StartupSurfaceObservation(
+            title=str(payload.get("title", "")),
+            location_href=str(payload.get("locationHref", "")),
+            location_hash=str(payload.get("locationHash", "")),
+            location_pathname=str(payload.get("locationPathname", "")),
+            body_text=str(payload.get("bodyText", "")),
+            button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
+        )
 
     def snapshot_local_storage(
         self,

@@ -4,8 +4,8 @@ Validates that startup uses the fail-soft pattern and still renders the
 interactive shell when the saved active local workspace cannot be restored.
 
 The automation:
-1. preloads one hosted active workspace plus one broken saved local workspace
-   into browser storage
+1. preloads the broken saved local workspace as the active startup target plus
+   one hosted fallback workspace into browser storage
 2. opens the deployed TrackState app in Chromium at `1440x900`
 3. waits for startup to settle and verifies the app does not remain on the
    terminal `Sync issue` surface
