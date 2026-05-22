@@ -4,6 +4,12 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+from testing.components.services.github_accessibility_pull_request_gate_probe import (
+    GitHubAccessibilityPullRequestGateProbeService,
+)
+from testing.core.config.github_accessibility_pull_request_gate_config import (
+    GitHubAccessibilityPullRequestGateConfig,
+)
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (
     GitHubAccessibilityPullRequestGateObservation,
     GitHubAccessibilityWorkflowContractObservation,
@@ -140,6 +146,30 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("browser-visible runtime semantics evidence", result["steps"][0]["observed"])
 
+    def test_step_2_requires_runtime_accessibility_surface_to_include_probe_label(self) -> None:
+        result: dict[str, object] = {"steps": []}
+        failures: list[str] = []
+
+        self.module._evaluate_compliant_component(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                runtime_accessibility_surface_present=True,
+                runtime_accessibility_surface_summary=(
+                    'Accessibility runtime surface ready: hosts=1; nodes=4; '
+                    'sample-labels=["Different runtime label"]'
+                ),
+                accessibility_status_check_conclusion="success",
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn(
+            "did not include the expected descriptive semantics label",
+            result["steps"][0]["observed"],
+        )
+
     def test_step_4_rejects_skipped_accessibility_check(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
         failures: list[str] = []
@@ -159,6 +189,87 @@ class Ts924ReviewRegressionTest(unittest.TestCase):
 
         self.assertEqual(len(failures), 1)
         self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_4_rejects_neutral_accessibility_check(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_accessibility_gate_result(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                runtime_accessibility_surface_present=True,
+                runtime_accessibility_surface_summary=(
+                    'Accessibility runtime surface ready: hosts=1; nodes=4; '
+                    'sample-labels=["Sync status message: accessibility checks passed"]'
+                ),
+                accessibility_status_check_conclusion="neutral",
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+
+class _ReadCheckRunsStateProbe(GitHubAccessibilityPullRequestGateProbeService):
+    def __init__(self, check_runs_payload: dict[str, object]) -> None:
+        config = GitHubAccessibilityPullRequestGateConfig(
+            repository="IstiN/trackstate",
+            base_branch="main",
+            target_workflow_name="Flutter Required Checks",
+            target_workflow_path=".github/workflows/unit-tests.yml",
+            probe_path="lib/ts924_probe_surface.dart",
+            probe_render_host_path="lib/main.dart",
+            branch_prefix="ts924-accessibility-pass-gate",
+            commit_message="TS-924 probe",
+            pull_request_title="TS-924 disposable probe",
+            pull_request_body="Disposable PR",
+            expected_accessibility_markers=["accessibility"],
+            contrast_evidence_markers=["contrast"],
+            semantic_evidence_markers=["semantic"],
+            poll_interval_seconds=5,
+            run_timeout_seconds=900,
+            pull_request_timeout_seconds=180,
+        )
+        super().__init__(config, github_api_client=object())  # type: ignore[arg-type]
+        self._check_runs_payload = check_runs_payload
+
+    def _read_json_object(  # type: ignore[override]
+        self,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        field_args: list[str] | None = None,
+    ) -> dict[str, object]:
+        del method, field_args
+        if endpoint.endswith("/check-runs?per_page=100"):
+            return self._check_runs_payload
+        if endpoint.endswith("/status"):
+            return {"state": "pending"}
+        raise AssertionError(f"Unexpected endpoint: {endpoint}")
+
+
+class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
+    def test_read_check_runs_state_does_not_treat_neutral_or_skipped_as_success(self) -> None:
+        neutral_probe = _ReadCheckRunsStateProbe(
+            {
+                "check_runs": [
+                    {"status": "completed", "conclusion": "neutral"},
+                    {"status": "completed", "conclusion": "success"},
+                ]
+            }
+        )
+        skipped_probe = _ReadCheckRunsStateProbe(
+            {
+                "check_runs": [
+                    {"status": "completed", "conclusion": "skipped"},
+                    {"status": "completed", "conclusion": "success"},
+                ]
+            }
+        )
+
+        self.assertEqual(neutral_probe._read_check_runs_state("abc123"), "pending")  # noqa: SLF001
+        self.assertEqual(skipped_probe._read_check_runs_state("abc123"), "pending")  # noqa: SLF001
 
 
 if __name__ == "__main__":

@@ -850,7 +850,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 for run in runs_to_consider
             ):
                 return "failure"
-            success_conclusions = {"success", "neutral", "skipped"}
+            success_conclusions = {"success"}
             if all(
                 self._optional_string(run.get("conclusion")) in success_conclusions
                 for run in runs_to_consider
