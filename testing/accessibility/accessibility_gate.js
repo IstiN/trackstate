@@ -15,6 +15,19 @@ const accessibilityGateRules = [
 
 const flutterSemanticsInitializationTimeoutMs = 15000;
 
+function isSemanticsInitializationTimeout(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalizedMessage = error.message.toLowerCase();
+  return normalizedMessage.includes('timeout')
+    && (
+      normalizedMessage.includes('waitforfunction')
+      || normalizedMessage.includes('test timeout')
+    );
+}
+
 async function enableFlutterSemantics(page) {
   await page.waitForSelector('flt-semantics-placeholder', { state: 'attached' });
   await page.locator('flt-semantics-placeholder').evaluate((element) => {
@@ -30,7 +43,11 @@ async function enableFlutterSemantics(page) {
       undefined,
       { timeout: flutterSemanticsInitializationTimeoutMs },
     );
-  } catch {
+  } catch (error) {
+    if (!isSemanticsInitializationTimeout(error)) {
+      throw error;
+    }
+
     let evidence;
     try {
       evidence = await readFlutterSemanticsEvidence(page);
