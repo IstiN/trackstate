@@ -32,7 +32,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     ) -> None:
         super().__init__(repository=repository, token=token)
         self._workspace_state = workspace_state
-        self._viewport = viewport or {"width": 1440, "height": 960}
+        self._viewport = viewport or {"width": 1440, "height": 900}
         self._active_local_handle_name = _active_local_handle_name(workspace_state)
         self.console_events: list[WorkspaceRestoreConsoleEvent] = []
         self.page_errors: list[str] = []
