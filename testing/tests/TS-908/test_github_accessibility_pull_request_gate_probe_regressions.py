@@ -159,6 +159,17 @@ class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
             pull_request_timeout_seconds=180,
         )
 
+    def test_probe_source_publishes_runtime_contrast_signal(self) -> None:
+        source = GitHubAccessibilityPullRequestGateProbeService._probe_source()
+
+        self.assertIn(
+            "import 'ui/features/tracker/services/accessibility_probe_signal.dart';",
+            source,
+        )
+        self.assertIn("publishAccessibilityContrastProbeSignal(", source)
+        self.assertIn("foreground: lowContrastColor", source)
+        self.assertIn("background: colorScheme.surface", source)
+
     def test_validate_combines_workflow_contract_with_live_pr_observation(self) -> None:
         workflow_text = """
 name: Flutter Required Checks
@@ -310,6 +321,85 @@ void main() {
             summary,
             'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
         )
+
+    def test_extract_flutter_engine_initialization_log_entries_reads_distinct_states(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        entries = probe._extract_flutter_engine_initialization_log_entries(  # noqa: SLF001
+            """
+            prefix
+            Accessibility checks 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested
+            Accessibility checks 2026-05-22T11:02:01Z Flutter engine initialization: engine ready
+            Accessibility checks 2026-05-22T11:02:01Z Flutter engine initialization: engine ready
+            suffix
+            """
+        )
+
+        self.assertEqual(
+            entries,
+            [
+                "Accessibility checks 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested",
+                "Accessibility checks 2026-05-22T11:02:01Z Flutter engine initialization: engine ready",
+            ],
+        )
+
+    def test_extract_semantics_tree_discovery_log_entries_keeps_runtime_status_lines(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        entries = probe._extract_semantics_tree_discovery_log_entries(  # noqa: SLF001
+            """
+            Accessibility checks 2026-05-22T11:02:03Z Semantics tree discovery: waiting for nodes
+            Accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]
+            """
+        )
+
+        self.assertEqual(
+            entries,
+            [
+                "Accessibility checks 2026-05-22T11:02:03Z Semantics tree discovery: waiting for nodes",
+                'Accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
+            ],
+        )
+
+    def test_accessibility_stage_log_scoping_ignores_other_job_markers(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        scoped_log = probe._accessibility_stage_run_log_text(  # noqa: SLF001
+            """
+            Flutter checks Run unit and golden tests 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested
+            Flutter checks Run unit and golden tests 2026-05-22T11:02:01Z Flutter engine initialization: engine ready
+            Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]
+            """,
+            [
+                {"name": "Flutter checks"},
+                {"name": "Accessibility checks"},
+            ],
+        )
+
+        self.assertEqual(
+            probe._extract_flutter_engine_initialization_log_entries(scoped_log),  # noqa: SLF001
+            [],
+        )
+        self.assertEqual(
+            probe._extract_semantics_tree_discovery_log_entries(scoped_log),  # noqa: SLF001
+            [
+                'Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
+            ],
+        )
+
+    def test_extract_log_excerpt_prefers_engine_and_runtime_markers(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        excerpt = probe._extract_log_excerpt(  # noqa: SLF001
+            """
+            Accessibility checks Detect accessibility changes 2026-05-22T11:01:00Z accessibility inputs resolved
+            Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested
+            Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5
+            """,
+            "",
+        )
+
+        self.assertIn("Flutter engine initialization: bootstrap requested", excerpt)
 
     def test_wait_for_pull_request_surface_keeps_failed_check_fields(self) -> None:
         probe = _SurfaceProbeService(self.config)

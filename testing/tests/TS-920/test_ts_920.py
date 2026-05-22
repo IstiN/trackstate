@@ -39,7 +39,7 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts920-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-915"]
+LINKED_BUGS = ["TS-947", "TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_PRECONDITION_WAIT_SECONDS = 20
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
@@ -48,7 +48,9 @@ REWORK_SUMMARY = (
     "Updated the TS-920 live Playwright regression to drive the real saved-workspace "
     "restore button through the page object and to simulate browser-access cancel "
     "outcomes for both picker and remembered-handle permission callbacks while "
-    "verifying the workspace stays unavailable."
+    "verifying the workspace stays unavailable. The test now also captures a "
+    "diagnostic startup snapshot if the deployed app never reaches the workspace "
+    "switcher."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -171,7 +173,54 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                try:
+                    runtime_observation = tracker_page.open()
+                except AssertionError as error:
+                    startup_observation = _observe_startup_surface(tracker_page)
+                    result["runtime_state"] = "startup-failed"
+                    result["runtime_body_text"] = startup_observation["body_text"]
+                    result["startup_observation"] = startup_observation
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "The deployed app never reached the interactive tracker shell, "
+                            "so the Workspace switcher could not be opened.\n"
+                            f"startup_observation={json.dumps(startup_observation, indent=2)}"
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed="Not reached because the deployed app never exposed the Workspace switcher.",
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed="Not reached because the deployed app never exposed the Workspace switcher.",
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the deployed page as a user would and checked the first "
+                            "visible interactive surface before any workspace action."
+                        ),
+                        observed=(
+                            f"visible_buttons={startup_observation['visible_button_labels']!r}; "
+                            f"visible_text={startup_observation['body_text']!r}; "
+                            f"url={startup_observation['url']!r}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 1 failed: the deployed app never reached an interactive state.\n"
+                        f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}"
+                    ) from error
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 result["runtime_state"] = runtime_observation.kind
                 result["runtime_body_text"] = runtime_observation.body_text
@@ -1146,6 +1195,62 @@ def _workspace_trigger_payload(
     }
 
 
+def _observe_startup_surface(tracker_page) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const isVisible = (element) => {
+            if (!element) {
+              return false;
+            }
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0
+              && rect.height > 0
+              && style.visibility !== 'hidden'
+              && style.display !== 'none';
+          };
+          const visibleButtons = Array.from(
+            document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]')
+          )
+            .filter((element) => isVisible(element))
+            .map((element) =>
+              normalize(
+                element.getAttribute?.('aria-label')
+                || element.innerText
+                || element.textContent
+                || '',
+              )
+            )
+            .filter((label) => label.length > 0);
+          const visibleAriaLabels = Array.from(document.querySelectorAll('[aria-label]'))
+            .filter((element) => isVisible(element))
+            .map((element) => normalize(element.getAttribute('aria-label') || ''))
+            .filter((label) => label.length > 0);
+          return {
+            bodyText: normalize(document.body.innerText),
+            visibleButtonLabels: visibleButtons,
+            visibleAriaLabels,
+            url: window.location.href,
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "body_text": tracker_page.body_text(),
+            "visible_button_labels": [],
+            "visible_aria_labels": [],
+            "url": "",
+        }
+    return {
+        "body_text": str(payload.get("bodyText", "")),
+        "visible_button_labels": list(payload.get("visibleButtonLabels", [])),
+        "visible_aria_labels": list(payload.get("visibleAriaLabels", [])),
+        "url": str(payload.get("url", "")),
+    }
+
 def _saved_row_from_payload(
     payload: dict[str, object] | None,
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:
@@ -1442,6 +1547,7 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _build_bug_description(result: dict[str, object]) -> str:
     steps = result.get("steps", [])
     screenshot = result.get("screenshot")
+    startup_observation = result.get("startup_observation")
     annotated_steps: list[str] = []
     for index, action in enumerate(REQUEST_STEPS, start=1):
         matching = next(
@@ -1485,7 +1591,13 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual vs expected",
         (
-            "Expected the manual restore action to trigger the browser directory "
+            "Expected the deployed app to load the hosted tracker shell, let the user "
+            "open the Workspace switcher, trigger the browser directory picker, and "
+            "then leave the local workspace in `Unavailable` after Cancel. "
+            "Instead, the live deployment stalled before the Workspace switcher was "
+            "reachable."
+            if isinstance(startup_observation, dict)
+            else "Expected the manual restore action to trigger the browser directory "
             "picker, then leave the workspace in `Unavailable` with the hosted "
             "workspace still active after Cancel. Instead, the live state or visible "
             "error output diverged from that expectation."
@@ -1502,6 +1614,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "",
         "## Observed state",
         f"- Trigger before action: `{json.dumps(result.get('trigger_before_action'), ensure_ascii=True)}`",
+        f"- Startup observation: `{json.dumps(startup_observation, ensure_ascii=True)}`",
         f"- Local row before action: `{json.dumps(result.get('local_row_before_action'), ensure_ascii=True)}`",
         f"- Manual action label: `{result.get('manual_restore_action_label')}`",
         f"- Manual cancel probe after action: `{json.dumps(result.get('manual_cancel_probe_after_action'), ensure_ascii=True)}`",
