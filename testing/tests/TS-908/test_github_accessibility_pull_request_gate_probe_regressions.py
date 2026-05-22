@@ -62,6 +62,17 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "observed_branch_run_urls": ["https://github.com/IstiN/trackstate/actions/runs/456"],
             "observed_branch_run_statuses": ["completed"],
             "observed_branch_run_conclusions": ["success"],
+            "observed_run_jobs": [
+                {
+                    "id": 4561,
+                    "name": "Flutter checks",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "html_url": "https://github.com/IstiN/trackstate/actions/runs/456/job/4561",
+                    "started_at": "2026-05-22T07:40:00Z",
+                    "completed_at": "2026-05-22T07:41:00Z",
+                }
+            ],
             "observed_job_names": ["Flutter checks"],
             "observed_step_names": ["Analyze", "Build web app"],
             "observed_status_check_names": ["Flutter checks"],
@@ -84,12 +95,39 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "run_log_mentions_semantic_issue": False,
             "run_log_excerpt": "",
             "run_log_error": None,
+            "runtime_accessibility_surface_present": False,
+            "runtime_accessibility_surface_summary": "",
             "probe_contains_low_contrast_indicator": True,
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
             "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
             "cleanup_closed_pull_request": True,
             "cleanup_deleted_branch": True,
+        }
+
+
+class _SurfaceProbeService(_StubProbeService):
+    def _read_json_object(self, endpoint: str, *, method: str = "GET", field_args=None):
+        del method, field_args
+        if endpoint != "/repos/IstiN/trackstate/pulls/123":
+            raise AssertionError(f"Unexpected endpoint: {endpoint}")
+        return {
+            "head": {"sha": "abc123"},
+            "mergeable_state": "clean",
+        }
+
+    def _read_check_runs_state(self, head_sha: str) -> str | None:
+        assert head_sha == "abc123"
+        return "failure"
+
+    def _read_pull_request_status_surface(self, pull_request_number: int) -> dict[str, object]:
+        assert pull_request_number == 123
+        return {
+            "status_checks": [],
+            "status_check_names": ["Accessibility checks"],
+            "status_check_workflow_names": ["Flutter Required Checks"],
+            "failed_status_check_names": ["Accessibility checks"],
+            "failed_status_check_workflow_names": ["Flutter Required Checks"],
         }
 
 
@@ -136,6 +174,20 @@ jobs:
         run: flutter analyze
       - name: Build web app
         run: flutter build web
+  accessibility-checks:
+    name: Accessibility checks
+    runs-on: ubuntu-latest
+    needs: flutter-checks
+    steps:
+      - name: Run axe-core accessibility checks
+        run: npm run test:a11y
+  deploy-preview:
+    name: Deploy preview
+    runs-on: ubuntu-latest
+    needs: accessibility-checks
+    steps:
+      - name: Publish preview
+        run: echo deploy
 """.strip()
 
         probe = GitHubAccessibilityPullRequestGateProbeService(
@@ -164,8 +216,21 @@ jobs:
 
         self.assertTrue(observation.target_workflow_present_on_default_branch)
         self.assertTrue(observation.target_workflow_declares_pull_request_trigger)
-        self.assertEqual(observation.target_workflow_job_names, ["Flutter checks"])
-        self.assertEqual(observation.target_workflow_step_names, ["Analyze", "Build web app"])
+        self.assertEqual(
+            observation.target_workflow_job_names,
+            ["Flutter checks", "Accessibility checks", "Deploy preview"],
+        )
+        self.assertEqual(
+            observation.target_workflow_step_names,
+            ["Analyze", "Build web app", "Run axe-core accessibility checks", "Publish preview"],
+        )
+        self.assertEqual(
+            observation.target_workflow_accessibility_job_names,
+            ["Accessibility checks"],
+        )
+        self.assertEqual(observation.target_workflow_downstream_job_names, ["Deploy preview"])
+        self.assertTrue(observation.target_workflow_downstream_job_depends_on_accessibility)
+        self.assertEqual(observation.target_workflow.downstream_job_names, ["Deploy preview"])
         self.assertEqual(
             observation.pull_request_file_paths,
             ["lib/main.dart", "lib/ts908_probe_surface.dart"],
@@ -173,6 +238,8 @@ jobs:
         self.assertEqual(observation.probe_render_host_path, "lib/main.dart")
         self.assertTrue(observation.probe_rendered_in_application)
         self.assertEqual(observation.latest_pull_request_run_event, "pull_request")
+        self.assertEqual(len(observation.observed_run_jobs), 1)
+        self.assertEqual(observation.observed_run_jobs[0].name, "Flutter checks")
         self.assertFalse(observation.run_log_mentions_accessibility)
         self.assertTrue(observation.cleanup_closed_pull_request)
         self.assertTrue(observation.cleanup_deleted_branch)
@@ -220,8 +287,70 @@ void main() {
 
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
-        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
-        self.assertIn("child: Ts908ProbeSurface()", patched)
+        self.assertIn(
+            "runApp(_Ts908RenderedProbeApp(child: const TrackStateApp()));",
+            patched,
+        )
+        self.assertIn("child: const Ts908ProbeSurface()", patched)
+
+    def test_extract_runtime_accessibility_surface_summary_reads_success_log_line(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        summary = probe._extract_runtime_accessibility_surface_summary(  # noqa: SLF001
+            """
+            some prefix
+            Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]
+            trailing line
+            """
+        )
+
+        self.assertEqual(
+            summary,
+            'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
+        )
+
+    def test_wait_for_pull_request_surface_keeps_failed_check_fields(self) -> None:
+        probe = _SurfaceProbeService(self.config)
+
+        surface = probe._wait_for_pull_request_surface(123, head_sha="abc123")  # noqa: SLF001
+
+        self.assertEqual(surface["failed_status_check_names"], ["Accessibility checks"])
+        self.assertEqual(
+            surface["failed_status_check_workflow_names"],
+            ["Flutter Required Checks"],
+        )
+
+    def test_inject_probe_into_render_host_supports_multiline_conditional_run_app(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        patched = probe._inject_probe_into_render_host(  # noqa: SLF001
+            """
+import 'package:flutter/widgets.dart';
+
+import 'data/repositories/trackstate_repository.dart';
+import 'ui/features/tracker/views/trackstate_app.dart';
+
+const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
+  'TRACKSTATE_USE_DEMO_REPOSITORY',
+);
+
+void main() {
+  runApp(
+    _useDemoRepositoryForAccessibility
+        ? const TrackStateApp(repository: DemoTrackStateRepository())
+        : const TrackStateApp(),
+  );
+}
+""".strip()
+        )
+
+        self.assertIn("import 'package:flutter/material.dart';", patched)
+        self.assertIn("import 'ts908_probe_surface.dart';", patched)
+        self.assertIn("runApp(_Ts908RenderedProbeApp(child:", patched)
+        self.assertIn("_useDemoRepositoryForAccessibility", patched)
+        self.assertIn(": const TrackStateApp()", patched)
+        self.assertNotIn("runApp(const _Ts908RenderedProbeApp());", patched)
+        self.assertIn("Ts908ProbeSurface()", patched)
 
 
 if __name__ == "__main__":

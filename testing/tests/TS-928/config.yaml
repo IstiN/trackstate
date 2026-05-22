@@ -1,0 +1,20 @@
+test_id: TS-928
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with preloaded saved workspace profiles.
+  - Uses the desktop viewport of 1440x900 because the ticket does not specify a different size.
+  - Opens the live workspace switcher and measures the visible Delete action text against the rendered panel background.
+  - Records the paired Delete icon colors as diagnostics, but the ticket pass/fail threshold is the 4.5:1 text contrast requirement.
+  - Covers the deployed TS-902 accessibility fix.
+runtime_inputs:
+  preferred_delete_control: Delete: istin/trackstate-setup
+  viewport: 1440x900
+  required_text_contrast_ratio: 4.5
+  linked_bugs:
+    - TS-902
+  run_command: mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-928/test_ts_928.py

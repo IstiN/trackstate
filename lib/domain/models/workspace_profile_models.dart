@@ -183,11 +183,13 @@ class WorkspaceProfilesState {
     this.profiles = const <WorkspaceProfile>[],
     this.activeWorkspaceId,
     this.migrationComplete = false,
+    this.unavailableLocalWorkspaceIds = const <String>{},
   });
 
   final List<WorkspaceProfile> profiles;
   final String? activeWorkspaceId;
   final bool migrationComplete;
+  final Set<String> unavailableLocalWorkspaceIds;
 
   bool get hasProfiles => profiles.isNotEmpty;
 
@@ -217,6 +219,7 @@ class WorkspaceProfilesState {
     List<WorkspaceProfile>? profiles,
     Object? activeWorkspaceId = _workspaceProfileNoop,
     bool? migrationComplete,
+    Set<String>? unavailableLocalWorkspaceIds,
   }) {
     return WorkspaceProfilesState(
       profiles: profiles ?? this.profiles,
@@ -224,6 +227,8 @@ class WorkspaceProfilesState {
           ? this.activeWorkspaceId
           : activeWorkspaceId as String?,
       migrationComplete: migrationComplete ?? this.migrationComplete,
+      unavailableLocalWorkspaceIds:
+          unavailableLocalWorkspaceIds ?? this.unavailableLocalWorkspaceIds,
     );
   }
 }
