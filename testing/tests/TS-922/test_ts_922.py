@@ -57,8 +57,8 @@ def main() -> None:
         flutter_version="3.35.3",
         target_relative_path=Path("lib/ui/features/tracker/views/trackstate_app.dart"),
         localization_relative_path=Path("lib/l10n/generated/app_localizations_en.dart"),
-        required_source_snippet="semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),",
-        replacement_source_snippet="semanticLabel: 'Attention needed',",
+        required_source_snippet="return l10n.workspaceSyncAttentionNeededSemanticLabel;",
+        replacement_source_snippet="return l10n.workspaceSyncAttentionNeeded;",
         required_semantic_label="Sync error, attention needed",
         generic_semantic_label="Attention needed",
         required_issue_terms=("sync", "error", "attention"),
@@ -118,12 +118,13 @@ def _evaluate(
     _record_human_verification(
         result,
         check=(
-            "Viewed the terminal output exactly as a developer would after editing "
-            "the sync widget to pass the raw string `Attention needed`."
+            "Viewed the terminal output exactly as a developer would after "
+            "downgrading the sync semantic-label helper to the non-contextual "
+            "`l10n.workspaceSyncAttentionNeeded` key."
         ),
         observed=(
             "The analysis run blocked the mutation with a terminal-visible "
-            f"type/argument contract diagnostic:\n{_combined_output(validation.mutated_analyze)}"
+            f"diagnostic:\n{_combined_output(validation.mutated_analyze)}"
         ),
     )
 
@@ -209,10 +210,18 @@ def _assert_semantic_parameter_located(
             "the sync widget no longer exposes a detectable `semanticLabel` field "
             "declaration in the live source"
         )
+    if (
+        "semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),"
+        not in validation.baseline_source
+    ):
+        failures.append(
+            "the live production call site no longer routes the sync widget "
+            "semantic label through `_workspaceSyncSemanticLabel(l10n, viewModel)`"
+        )
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production call site no longer passes the contextualized "
-            f"`{config.required_source_snippet}` snippet into the sync widget"
+            "the live `_workspaceSyncSemanticLabel` helper no longer returns the "
+            f"contextualized semantic-label getter `{config.required_source_snippet}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
@@ -238,9 +247,11 @@ def _assert_semantic_parameter_located(
         observed=(
             "Located the sync widget semantic/ARIA label parameter in "
             f"{config.target_relative_path.as_posix()} as `{parameter_contract}`. "
-            f"The live call site passes `{config.required_source_snippet}` and the "
-            f"English localization keeps both {config.required_semantic_label!r} "
-            f"and {config.generic_semantic_label!r} available."
+            "The live call site still passes "
+            "`semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),`, "
+            f"the helper returns `{config.required_source_snippet}`, and the English "
+            f"localization keeps both {config.required_semantic_label!r} and "
+            f"{config.generic_semantic_label!r} available."
         ),
     )
 
@@ -272,8 +283,9 @@ def _assert_mutation_applied(
             "In the disposable temp workspace, replaced "
             f"`{config.required_source_snippet}` with "
             f"`{config.replacement_source_snippet}` inside "
-            f"{config.target_relative_path.as_posix()}, so the sync widget now "
-            "receives the raw generic string instead of the contextualized helper."
+            f"{config.target_relative_path.as_posix()}, so the sync semantic-label "
+            "helper now returns the weaker non-contextual localization key instead "
+            "of the required contextualized semantic label."
         ),
     )
 
@@ -303,8 +315,9 @@ def _assert_compile_contract(
             action=REQUEST_STEPS[3],
             observed=(
                 f"Ran `{validation.mutated_analyze.command_text}` against the mutated "
-                "temp workspace. The command blocked the raw generic string with "
-                f"compile-time/analyzer diagnostics. Observed exit_code="
+                "temp workspace. The command blocked the non-contextual "
+                "semantic-label mutation with analyzer/compiler diagnostics. "
+                f"Observed exit_code="
                 f"{validation.mutated_analyze.exit_code}; "
                 f"diagnostic_signals={diagnostic_signals}; "
                 f"contract_markers={contract_markers}; terminal output:\n{output}"
@@ -319,7 +332,8 @@ def _assert_compile_contract(
         action=REQUEST_STEPS[3],
         observed=(
             f"Ran `{validation.mutated_analyze.command_text}` after replacing the "
-            f"sync widget semantic label with {config.replacement_source_snippet}. "
+            "sync semantic-label helper return with "
+            f"{config.replacement_source_snippet}. "
             f"Observed exit_code={validation.mutated_analyze.exit_code}; "
             f"clean_analysis={clean_analysis}; "
             f"diagnostic_signals={diagnostic_signals}; "
@@ -329,21 +343,23 @@ def _assert_compile_contract(
     _record_human_verification(
         result,
         check=(
-            "Viewed the terminal output as a developer after editing the sync "
-            "widget to pass the raw string `Attention needed` and rerunning "
-            "`flutter analyze`."
+            "Viewed the terminal output as a developer after downgrading the sync "
+            "semantic-label helper to `l10n.workspaceSyncAttentionNeeded` and "
+            "rerunning `flutter analyze`."
         ),
         observed=(
             "The command still looked like a clean compile/analyze run instead of "
-            "surfacing a blocking type or argument error for the generic string. "
+            "surfacing a blocking diagnostic for the weaker non-contextual "
+            "localization key. "
             f"Output:\n{output}"
         ),
     )
     raise AssertionError(
-        "Step 4 failed: passing the raw string `Attention needed` to the sync "
-        "widget did not trigger a blocking compiler or analyzer contract error.\n"
-        "Expected the mutated analysis run to report a type/argument diagnostic "
-        "that prevents generic status strings from compiling.\n"
+        "Step 4 failed: downgrading the sync semantic-label helper to "
+        "`l10n.workspaceSyncAttentionNeeded` did not trigger a blocking compiler "
+        "or analyzer diagnostic.\n"
+        "Expected the mutated analysis run to report a real diagnostic that "
+        "prevents weaker non-contextual semantic labels from compiling.\n"
         f"Observed command: {validation.mutated_analyze.command_text}\n"
         f"Observed exit code: {validation.mutated_analyze.exit_code}\n"
         f"Observed clean analysis: {clean_analysis}\n"
@@ -382,13 +398,10 @@ def _diagnostic_signals(
 
 def _compile_contract_markers(normalized_output: str) -> list[str]:
     markers = {
-        "argument-type": "argument type",
-        "cannot-assign": "can't be assigned",
-        "parameter-type": "parameter type",
         "undefined-named-parameter": "undefined_named_parameter",
         "undefined-getter": "undefined getter",
-        "semantic-label": "semanticlabel",
-        "raw-generic-string": "attention needed",
+        "workspace-sync-attention-needed": "workspacesyncattentionneeded",
+        "semantic-label": "semantic",
     }
     return [name for name, fragment in markers.items() if fragment in normalized_output]
 
@@ -545,7 +558,7 @@ def _bug_description(result: dict[str, object]) -> str:
         if isinstance(step, dict) and isinstance(step.get("step"), int)
     }
     return (
-        f"# {TICKET_KEY} - generic sync widget strings are not blocked at compile time\n\n"
+        f"# {TICKET_KEY} - weakened sync semantic labels are not blocked at compile time\n\n"
         "## Steps to reproduce\n"
         f"1. {REQUEST_STEPS[0]}  \n"
         f"   - Actual: {step_map.get(1, {}).get('observed', '<missing>')}  \n"
@@ -565,12 +578,13 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** After replacing the live sync widget semantic-label argument "
-        "with the raw string `Attention needed` in a disposable workspace copy, "
+        "- **Actual:** After replacing the live sync semantic-label helper return "
+        "with the weaker non-contextual localization key "
+        "`l10n.workspaceSyncAttentionNeeded` in a disposable workspace copy, "
         "`flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` still "
-        "completed without a blocking type or argument error. The live source "
-        f"exposes `{result.get('semantic_parameter_contract', '<undetected>')}`, so "
-        "generic status strings are not rejected at compile time.\n\n"
+        "completed without a blocking diagnostic. The live source still exposes "
+        f"`{result.get('semantic_parameter_contract', '<undetected>')}`, so weaker "
+        "non-contextual semantic labels are not rejected at compile time.\n\n"
         "## Environment details\n"
         "- **URL:** local repository checkout (no deployed URL required for this compiler/analyzer case)\n"
         "- **Browser:** N/A - local terminal validation\n"
