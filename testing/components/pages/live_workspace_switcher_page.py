@@ -2529,18 +2529,84 @@ class LiveWorkspaceSwitcherPage:
         *,
         timeout_ms: int = 10_000,
     ) -> None:
+        escaped_action_label = (
+            action_label.replace("\\", "\\\\").replace('"', '\\"')
+        )
         try:
             self._session.click(
                 'flt-semantics[role="button"],button,[role="button"]',
                 has_text=action_label,
                 timeout_ms=timeout_ms,
             )
+            return
         except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The open workspace switcher did not expose the expected saved workspace "
-                f"action button {action_label!r}.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
+            text_match_error = error
+
+        try:
+            self._session.click(
+                (
+                    'flt-semantics[role="button"][aria-label="'
+                    f'{escaped_action_label}'
+                    '"],button[aria-label="'
+                    f'{escaped_action_label}'
+                    '"],[role="button"][aria-label="'
+                    f'{escaped_action_label}'
+                    '"]'
+                ),
+                timeout_ms=timeout_ms,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        payload = self._session.evaluate(
+            """
+            (targetLabel) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const match = Array.from(
+                document.querySelectorAll(
+                  'flt-semantics[role="button"],button,[role="button"],[aria-label]'
+                )
+              )
+                .filter((element) => isVisible(element))
+                .find((element) => normalize(element.getAttribute('aria-label') || '') === targetLabel);
+              if (!match) {
+                return null;
+              }
+              const rect = match.getBoundingClientRect();
+              return {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+              };
+            }
+            """,
+            arg=action_label,
+        )
+        if isinstance(payload, dict):
+            self._session.mouse_click(
+                float(payload["left"]) + float(payload["width"]) / 2,
+                float(payload["top"]) + float(payload["height"]) / 2,
+            )
+            return
+
+        raise AssertionError(
+            "The open workspace switcher did not expose the expected saved workspace "
+            f"action button {action_label!r}.\n"
+            f"Observed body text:\n{self.current_body_text()}",
+        ) from text_match_error
 
     def wait_for_active_saved_workspace(
         self,
@@ -4366,9 +4432,41 @@ class LiveWorkspaceSwitcherPage:
 
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
         try:
-            self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
+            self._session.wait_for_function(
+                """
+                (triggerLabelPrefix) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(
+                      element.getAttribute?.('aria-label')
+                      || element.innerText
+                      || element.textContent
+                      || '',
+                    );
+                  const trigger = Array.from(
+                    document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  trigger.click();
+                  return labelFor(trigger);
+                }
+                """,
+                arg=self._trigger_label_prefix,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -6651,87 +6749,7 @@ class LiveWorkspaceSwitcherPage:
         return (label or "").startswith("Workspace switcher:")
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
-        try:
-            self._session.wait_for_function(
-                """
-                (triggerLabelPrefix) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  return Array.from(
-                    document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
-                  )
-                    .filter((candidate) => isVisible(candidate))
-                    .some((candidate) => {
-                      const label = normalize(
-                        candidate.getAttribute('aria-label')
-                          || candidate.innerText
-                          || candidate.textContent
-                          || '',
-                      );
-                      return label.startsWith(triggerLabelPrefix);
-                    });
-                }
-                """,
-                arg=self._trigger_label_prefix,
-                timeout_ms=timeout_ms,
-            )
-        except WebAppTimeoutError as error:
-            raise AssertionError(
-                "The live app did not expose a clickable workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
-        clicked = self._session.evaluate(
-            """
-            (triggerLabelPrefix) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const trigger = Array.from(
-                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
-              )
-                .filter((candidate) => isVisible(candidate))
-                .find((candidate) => {
-                  const label = normalize(
-                    candidate.getAttribute('aria-label')
-                      || candidate.innerText
-                      || candidate.textContent
-                      || '',
-                  );
-                  return label.startsWith(triggerLabelPrefix);
-                });
-              if (!trigger) {
-                return false;
-              }
-              trigger.click();
-              return true;
-            }
-            """,
-            arg=self._trigger_label_prefix,
-        )
-        if clicked is not True:
-            raise AssertionError(
-                "The live app did not expose a clickable workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            )
+        self.open_switcher(timeout_ms=timeout_ms)
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:

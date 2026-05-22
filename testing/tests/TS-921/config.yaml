@@ -1,0 +1,11 @@
+test_id: TS-921
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with preloaded hosted and local workspace profiles.
+  - Forces the manual unavailable-workspace retry flow to select a wrong directory through the browser picker surface.
+  - Verifies the app shows a user-visible failure and keeps the workspace unavailable instead of switching to Local Git.

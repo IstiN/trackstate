@@ -87,6 +87,8 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             run_log_mentions_semantic_issue=bool(run_log_matched_semantic_markers),
             run_log_excerpt="color contrast violation and aria-label defect",
             run_log_error=None,
+            runtime_accessibility_surface_present=False,
+            runtime_accessibility_surface_summary="",
             probe_contains_low_contrast_indicator=True,
             probe_contains_semantic_label_indicator=True,
             probe_semantic_label="button",
