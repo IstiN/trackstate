@@ -981,7 +981,7 @@ def _bug_description(result: dict[str, object]) -> str:
     restore_message = result.get("restore_message")
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Startup retry does not restore the local workspace after transient busy access clears",
+            f"# {_bug_title(result)}",
             "",
             "## Exact steps to reproduce",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
@@ -995,15 +995,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
             "",
             "## Actual vs Expected",
-            f"- **Expected:** {EXPECTED_RESULT}",
-            (
-                "- **Actual:** After the temporary busy state was released and the test "
-                f"waited {TRIGGER_WAIT_SECONDS} seconds for startup recovery, the header "
-                "trigger still showed the hosted fallback and the prepared local "
-                "workspace did not become the selected `Local Git` workspace."
-                if not _step_passed(result, 4)
-                else "- **Actual:** The active local workspace restored correctly."
-            ),
+            f"- **Expected:** {_bug_expected_result(result)}",
+            f"- **Actual:** {_bug_actual_result(result)}",
             (
                 f"- **Observed trigger:** `{_safe_dict_get(trigger, 'semantic_label')}`"
                 if isinstance(trigger, dict)
@@ -1034,6 +1027,7 @@ def _bug_description(result: dict[str, object]) -> str:
                 if restore_message
                 else "- **Observed restore message:** `<missing>`"
             ),
+            f"- **Missing or broken capability:** {_bug_missing_capability(result)}",
             "",
             "## Environment details",
             f"- **URL:** {result.get('app_url')}",
@@ -1165,6 +1159,77 @@ def _step_by_number(result: dict[str, object], step_number: int) -> dict[str, ob
 def _step_passed(result: dict[str, object], step_number: int) -> bool:
     step = _step_by_number(result, step_number)
     return step is not None and step.get("status") == "passed"
+
+
+def _failed_step_number(result: dict[str, object]) -> int | None:
+    for step in result.get("steps", []):
+        if isinstance(step, dict) and step.get("status") == "failed":
+            step_number = step.get("step")
+            if isinstance(step_number, int):
+                return step_number
+    return None
+
+
+def _is_runtime_probe_failure(result: dict[str, object]) -> bool:
+    return _failed_step_number(result) == 2 and result.get("pre_release_runtime_probe") is None
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    if _is_runtime_probe_failure(result):
+        return (
+            f"{TICKET_KEY} - Startup restore exposes no blocked local-handle "
+            "revalidation evidence before transient busy access is released"
+        )
+    return (
+        f"{TICKET_KEY} - Startup retry does not restore the local workspace "
+        "after transient busy access clears"
+    )
+
+
+def _bug_expected_result(result: dict[str, object]) -> str:
+    if _is_runtime_probe_failure(result):
+        return (
+            "While the active local workspace handle is still blocked during startup, "
+            "the application should attempt local-handle revalidation and emit the "
+            "TS-893 runtime probe for the failed File System Access operation before "
+            "access is restored. After the handle becomes available again, startup "
+            "should still recover the local workspace as the active `Local Git` row "
+            "without leaving the user on `Local Unavailable` or the hosted fallback."
+        )
+    return EXPECTED_RESULT
+
+
+def _bug_actual_result(result: dict[str, object]) -> str:
+    if _is_runtime_probe_failure(result):
+        return (
+            "The test kept the prepared local workspace blocked until the header "
+            "workspace trigger was already visible, but startup never emitted the "
+            "TS-893 runtime probe for the blocked local workspace before the busy "
+            "state was released. This leaves no evidence that startup revalidation "
+            "actually hit the transient failure and retry path for the active local "
+            "handle during the blocked window."
+        )
+    if not _step_passed(result, 4):
+        return (
+            "After the temporary busy state was released and the test waited "
+            f"{TRIGGER_WAIT_SECONDS} seconds for startup recovery, the header trigger "
+            "still showed the hosted fallback and the prepared local workspace did "
+            "not become the selected `Local Git` workspace."
+        )
+    return "The active local workspace restored correctly."
+
+
+def _bug_missing_capability(result: dict[str, object]) -> str:
+    if _is_runtime_probe_failure(result):
+        return (
+            "Startup restore did not expose the TS-893 runtime/console signal that "
+            "identifies a failed blocked-local File System Access revalidation "
+            "attempt before the transient busy handle was released."
+        )
+    return (
+        "Startup retry did not restore the prepared local workspace as the active "
+        "`Local Git` selection after transient busy access cleared."
+    )
 
 
 def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
