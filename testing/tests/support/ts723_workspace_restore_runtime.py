@@ -367,19 +367,74 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
 
     @property
     def probe_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
-        return tuple(
-            event
-            for event in self.console_events
-            if event.text.startswith(self.RUNTIME_PROBE_PREFIX)
-        )
+        return self._console_events_with_prefix(self.RUNTIME_PROBE_PREFIX)
 
     @property
     def activity_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
+        return self._console_events_with_prefix(self.RUNTIME_ACTIVITY_PREFIX)
+
+    @property
+    def tracked_probe_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
         return tuple(
             event
-            for event in self.console_events
-            if event.text.startswith(self.RUNTIME_ACTIVITY_PREFIX)
+            for event in self.probe_console_events
+            if self._is_tracked_saved_workspace_event(
+                event,
+                prefix=self.RUNTIME_PROBE_PREFIX,
+            )
         )
+
+    @property
+    def tracked_activity_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
+        return tuple(
+            event
+            for event in self.activity_console_events
+            if self._is_tracked_saved_workspace_event(
+                event,
+                prefix=self.RUNTIME_ACTIVITY_PREFIX,
+            )
+        )
+
+    def _console_events_with_prefix(
+        self,
+        prefix: str,
+    ) -> tuple[WorkspaceRestoreConsoleEvent, ...]:
+        return tuple(
+            event for event in self.console_events if event.text.startswith(prefix)
+        )
+
+    def _is_tracked_saved_workspace_event(
+        self,
+        event: WorkspaceRestoreConsoleEvent,
+        *,
+        prefix: str,
+    ) -> bool:
+        if not self._active_local_handle_name:
+            return False
+        payload = self._console_event_payload(event, prefix=prefix)
+        if not isinstance(payload, dict) or payload.get("tracked") is not True:
+            return False
+        lineage = payload.get("handleLineage")
+        return (
+            isinstance(lineage, list)
+            and len(lineage) > 0
+            and lineage[0] == self._active_local_handle_name
+        )
+
+    def _console_event_payload(
+        self,
+        event: WorkspaceRestoreConsoleEvent,
+        *,
+        prefix: str,
+    ) -> dict[str, object] | None:
+        payload = event.text[len(prefix) :].strip()
+        if not payload:
+            return None
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
 
 def _active_local_handle_name(workspace_state: dict[str, object]) -> str | None:

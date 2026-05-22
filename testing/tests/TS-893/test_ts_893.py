@@ -235,11 +235,12 @@ def main() -> None:
                     )
                     pre_release_body_text = page.current_body_text()
                     activity_captured, activity_events = poll_until(
-                        probe=lambda: runtime.activity_console_events,
+                        probe=lambda: runtime.tracked_activity_console_events,
                         is_satisfied=lambda events: len(events) > 0,
                         timeout_seconds=PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
                         interval_seconds=0.5,
                     )
+                    raw_activity_events = runtime.activity_console_events
                     runtime_probe_captured, runtime_probe_events = poll_until(
                         probe=lambda: runtime.probe_console_events,
                         is_satisfied=lambda events: len(events) > 0,
@@ -251,6 +252,9 @@ def main() -> None:
                     )
                     result["pre_release_body_text"] = pre_release_body_text
                     result["pre_release_activity_captured"] = activity_captured
+                    result["pre_release_all_activity_events"] = [
+                        _console_event_payload(event) for event in raw_activity_events
+                    ]
                     result["pre_release_activity_events"] = [
                         _console_event_payload(event) for event in activity_events
                     ]
@@ -276,10 +280,12 @@ def main() -> None:
                             observed=(
                                 "Kept the local workspace blocked until the header workspace "
                                 "trigger was already observable, but startup never exposed "
-                                "any File System Access activity for the saved local "
+                                "tracked File System Access activity for the saved local "
                                 "workspace before access was restored.\n"
                                 + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
                                 + f"pre_release_body_text={pre_release_body_text!r}\n"
+                                + "pre_release_all_activity_events="
+                                + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
                                 + "pre_release_activity_events="
                                 + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
                                 + "pre_release_runtime_probe_events="
@@ -288,11 +294,13 @@ def main() -> None:
                             ),
                         )
                         raise AssertionError(
-                            "Step 2 failed: startup never exposed File System Access "
-                            "activity for the saved local workspace before the busy state was "
-                            "released.\n"
+                            "Step 2 failed: startup never exposed tracked File System "
+                            "Access activity for the saved local workspace before the busy "
+                            "state was released.\n"
                             f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
                             f"Observed pre_release_body_text:\n{pre_release_body_text}\n"
+                            "Observed pre_release_all_activity_events="
+                            f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
                             "Observed pre_release_activity_events="
                             f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
                             "Observed pre_release_runtime_probe_events="
@@ -327,6 +335,8 @@ def main() -> None:
                             + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
                             + "pre_release_activity="
                             + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
+                            + "pre_release_all_activity_events="
+                            + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
                             + "pre_release_activity_events="
                             + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
                             + f"pre_release_activity_captured={activity_captured}\n"
@@ -441,6 +451,8 @@ def main() -> None:
                         observed=(
                             "pre_release_activity="
                             f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
+                            "pre_release_all_activity_events="
+                            f"{json.dumps(result['pre_release_all_activity_events'], ensure_ascii=True)}; "
                             "pre_release_activity_events="
                             f"{json.dumps(result['pre_release_activity_events'], ensure_ascii=True)}; "
                             "pre_release_runtime_probe="
@@ -865,7 +877,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-893 failed"))
+    error = _exact_error_summary(result)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1029,6 +1041,7 @@ def _bug_description(result: dict[str, object]) -> str:
         or result.get("busy_blocker_initial")
     )
     activity = result.get("pre_release_activity")
+    all_activity_events = result.get("pre_release_all_activity_events")
     activity_events = result.get("pre_release_activity_events")
     runtime_probe = result.get("pre_release_runtime_probe")
     restore_message = result.get("restore_message")
@@ -1069,6 +1082,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"- **Observed busy-state release:** `{json.dumps(blocker_final, ensure_ascii=True)}`"
                 if blocker_final is not None
                 else "- **Observed busy-state release:** `<missing>`"
+            ),
+            (
+                f"- **Observed raw pre-release activity events:** `{json.dumps(all_activity_events, ensure_ascii=True)}`"
+                if all_activity_events is not None
+                else "- **Observed raw pre-release activity events:** `<missing>`"
             ),
             (
                 f"- **Observed pre-release activity:** `{json.dumps(activity, ensure_ascii=True)}`"
@@ -1114,6 +1132,7 @@ def _bug_description(result: dict[str, object]) -> str:
                     "busy_blocker_initial": result.get("busy_blocker_initial"),
                     "busy_blocker_final": result.get("busy_blocker_final"),
                     "pre_release_activity": activity,
+                    "pre_release_all_activity_events": all_activity_events,
                     "pre_release_activity_events": activity_events,
                     "pre_release_runtime_probe": runtime_probe,
                     "restore_message": restore_message,
@@ -1181,6 +1200,19 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     return str(result.get("error", "The scenario failed without recorded step details."))
 
 
+def _exact_error_summary(result: dict[str, object]) -> str:
+    traceback_text = str(result.get("traceback", "")).strip()
+    if traceback_text:
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate:
+                return candidate
+    error = str(result.get("error", "")).strip()
+    if error:
+        return error if ":" in error.splitlines()[0] else f"AssertionError: {error}"
+    return "AssertionError: TS-893 failed"
+
+
 def _observe_restore_message(
     tracker_page,
     *,
@@ -1201,10 +1233,33 @@ def _console_event_payload(event: object) -> dict[str, object] | None:
         return None
     level = getattr(event, "level", None)
     text = getattr(event, "text", None)
-    return {
+    payload: dict[str, object] = {
         "level": None if level is None else str(level),
         "text": None if text is None else str(text),
     }
+    if isinstance(text, str):
+        for prefix in (
+            Ts723WorkspaceRestoreRuntime.RUNTIME_ACTIVITY_PREFIX,
+            Ts723WorkspaceRestoreRuntime.RUNTIME_PROBE_PREFIX,
+        ):
+            if not text.startswith(prefix):
+                continue
+            payload["prefix"] = prefix
+            raw_details = text[len(prefix) :].strip()
+            if not raw_details:
+                break
+            try:
+                parsed_details = json.loads(raw_details)
+            except json.JSONDecodeError:
+                payload["details_parse_error"] = raw_details
+                break
+            payload["details"] = parsed_details
+            if isinstance(parsed_details, dict):
+                for key in ("tracked", "handleName", "handleKind", "handleLineage", "method", "stage", "error"):
+                    if key in parsed_details:
+                        payload[key] = parsed_details[key]
+            break
+    return payload
 
 
 def _annotated_step_line(result: dict[str, object], step_number: int, action: str) -> str:
