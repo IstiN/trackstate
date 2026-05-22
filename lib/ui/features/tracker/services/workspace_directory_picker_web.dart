@@ -1,0 +1,117 @@
+@JS()
+library;
+
+import 'dart:js_interop';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
+
+typedef BrowserDirectoryAccessRequester =
+    Future<Object?> Function({
+      String? confirmButtonText,
+      String? initialDirectory,
+    });
+
+extension type _DirectoryHandle(JSObject _value) implements JSObject {
+  external String get name;
+}
+
+@JS('window.showDirectoryPicker')
+external JSPromise<JSAny?> _showDirectoryPicker();
+
+@visibleForTesting
+BrowserDirectoryAccessRequester browserDirectoryAccessRequester =
+    _requestBrowserDirectoryAccess;
+
+Future<String?> pickWorkspaceDirectory({
+  String? confirmButtonText,
+  String? initialDirectory,
+}) async {
+  final normalizedInitialDirectory = _normalizeDirectoryPath(initialDirectory);
+  try {
+    final selection = await browserDirectoryAccessRequester(
+      confirmButtonText: confirmButtonText,
+      initialDirectory: normalizedInitialDirectory,
+    );
+    return _normalizeSelection(
+      selection,
+      initialDirectory: normalizedInitialDirectory,
+    );
+  } on Object catch (error) {
+    if (_looksLikePickerCancellation(error)) {
+      return null;
+    }
+    rethrow;
+  }
+}
+
+Future<Object?> _requestBrowserDirectoryAccess({
+  String? confirmButtonText,
+  String? initialDirectory,
+}) async {
+  try {
+    return await _showDirectoryPicker().toDart;
+  } on Object catch (error) {
+    if (_looksLikeMissingBrowserPicker(error)) {
+      return getDirectoryPath(
+        confirmButtonText: confirmButtonText,
+        initialDirectory: initialDirectory,
+      );
+    }
+    rethrow;
+  }
+}
+
+String? _normalizeSelection(
+  Object? selection, {
+  required String? initialDirectory,
+}) {
+  if (selection == null) {
+    return null;
+  }
+  if (selection case final String path) {
+    return _normalizeDirectoryPath(path);
+  }
+  if (initialDirectory != null) {
+    return initialDirectory;
+  }
+  final handleName = _directoryHandleName(selection);
+  if (handleName != null) {
+    return handleName;
+  }
+  return null;
+}
+
+String? _directoryHandleName(Object selection) {
+  try {
+    final name = _DirectoryHandle(selection as JSObject).name.trim();
+    if (name.isEmpty) {
+      return null;
+    }
+    return name;
+  } on Object {
+    return null;
+  }
+}
+
+String? _normalizeDirectoryPath(String? path) {
+  final trimmed = path?.trim();
+  if (trimmed == null || trimmed.isEmpty) {
+    return null;
+  }
+  return trimmed;
+}
+
+bool _looksLikePickerCancellation(Object error) {
+  final message = '$error'.toLowerCase();
+  return message.contains('aborterror') ||
+      message.contains('the user aborted a request');
+}
+
+bool _looksLikeMissingBrowserPicker(Object error) {
+  final message = '$error'.toLowerCase();
+  return message.contains('showdirectorypicker') &&
+      (message.contains('not a function') ||
+          message.contains('is not defined') ||
+          message.contains('undefined'));
+}
