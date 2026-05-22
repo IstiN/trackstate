@@ -13,6 +13,8 @@ const accessibilityGateRules = [
   'link-name',
 ];
 
+const flutterSemanticsInitializationTimeoutMs = 15000;
+
 async function enableFlutterSemantics(page) {
   await page.waitForSelector('flt-semantics-placeholder', { state: 'attached' });
   await page.locator('flt-semantics-placeholder').evaluate((element) => {
@@ -20,22 +22,52 @@ async function enableFlutterSemantics(page) {
   });
   await page.waitForSelector('flt-semantics-host', {
     state: 'attached',
-    timeout: 15000,
+    timeout: flutterSemanticsInitializationTimeoutMs,
   });
-  await page.waitForFunction(
+  try {
+    await page.waitForFunction(
       () => document.querySelectorAll('flt-semantics').length > 0,
-  );
+      undefined,
+      { timeout: flutterSemanticsInitializationTimeoutMs },
+    );
+  } catch {
+    let evidence;
+    try {
+      evidence = await readFlutterSemanticsEvidence(page);
+    } catch {
+      throw new Error(
+        'Flutter engine failed to render semantics nodes during initialization. '
+        + 'The accessibility gate could not inspect the runtime semantics state '
+        + 'after the failure.',
+      );
+    }
+    throw new Error(
+      'Flutter engine failed to render semantics nodes during initialization. '
+      + `Observed runtime state: placeholder-count=${evidence.placeholderCount}; `
+      + `host-count=${evidence.hostCount}; `
+      + `node-count=${evidence.nodeCount}; `
+      + `sample-labels=${JSON.stringify(evidence.sampleLabels)}.`,
+    );
+  }
+  return await readFlutterSemanticsEvidence(page);
+}
+
+async function readFlutterSemanticsEvidence(page) {
   return await page.evaluate(() => {
+    const semanticsPlaceholders = document.querySelectorAll(
+      'flt-semantics-placeholder',
+    );
     const semanticsHosts = document.querySelectorAll('flt-semantics-host');
     const semanticsNodes = Array.from(document.querySelectorAll('flt-semantics'));
     const sampleLabels = semanticsNodes
-        .map((element) =>
-          element.getAttribute('aria-label') ?? element.textContent ?? '',
-        )
-        .map((value) => value.replace(/\s+/g, ' ').trim())
-        .filter((value) => value.length > 0)
-        .slice(0, 5);
+      .map((element) =>
+        element.getAttribute('aria-label') ?? element.textContent ?? '',
+      )
+      .map((value) => value.replace(/\s+/g, ' ').trim())
+      .filter((value) => value.length > 0)
+      .slice(0, 5);
     return {
+      placeholderCount: semanticsPlaceholders.length,
       hostCount: semanticsHosts.length,
       nodeCount: semanticsNodes.length,
       sampleLabels,
