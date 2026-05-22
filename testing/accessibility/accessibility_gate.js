@@ -25,6 +25,22 @@ async function enableFlutterSemantics(page) {
   await page.waitForFunction(
       () => document.querySelectorAll('flt-semantics').length > 0,
   );
+  return await page.evaluate(() => {
+    const semanticsHosts = document.querySelectorAll('flt-semantics-host');
+    const semanticsNodes = Array.from(document.querySelectorAll('flt-semantics'));
+    const sampleLabels = semanticsNodes
+        .map((element) =>
+          element.getAttribute('aria-label') ?? element.textContent ?? '',
+        )
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter((value) => value.length > 0)
+        .slice(0, 5);
+    return {
+      hostCount: semanticsHosts.length,
+      nodeCount: semanticsNodes.length,
+      sampleLabels,
+    };
+  });
 }
 
 async function collectAccessibilityViolations(page) {
@@ -233,9 +249,22 @@ function formatViolations(violations) {
       .join('\n');
 }
 
+function formatFlutterSemanticsEvidence(evidence) {
+  const sampleLabels = Array.isArray(evidence?.sampleLabels)
+    ? evidence.sampleLabels
+    : [];
+  return (
+    'Accessibility runtime surface ready: '
+    + `hosts=${evidence?.hostCount ?? 0}; `
+    + `nodes=${evidence?.nodeCount ?? 0}; `
+    + `sample-labels=${JSON.stringify(sampleLabels)}`
+  );
+}
+
 module.exports = {
   accessibilityGateRules,
   collectAccessibilityViolations,
   enableFlutterSemantics,
+  formatFlutterSemanticsEvidence,
   formatViolations,
 };
