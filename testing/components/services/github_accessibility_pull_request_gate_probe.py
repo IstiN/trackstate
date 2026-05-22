@@ -1093,16 +1093,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
-        if not run_log_text.strip():
-            return ""
-        match = re.search(
-            r"Accessibility runtime surface ready:[^\r\n]*",
+        for line in self._extract_matching_log_lines(
             run_log_text,
-            flags=re.IGNORECASE,
-        )
-        if match is None:
-            return ""
-        return self._snippet(match.group(0), limit=400)
+            markers=["accessibility runtime surface ready"],
+        ):
+            return line
+        return ""
 
     def _extract_flutter_engine_initialization_log_entries(
         self,
@@ -1140,10 +1136,25 @@ class GitHubAccessibilityPullRequestGateProbeService:
             normalized_line = " ".join(raw_line.split()).strip()
             if not normalized_line:
                 continue
-            lowered_line = normalized_line.lower()
-            if any(marker in lowered_line for marker in lowered_markers):
+            if any(
+                self._line_contains_runtime_marker(normalized_line, marker)
+                for marker in lowered_markers
+            ):
                 matches.append(self._snippet(normalized_line, limit=300))
         return self._dedupe(matches)
+
+    @staticmethod
+    def _line_contains_runtime_marker(normalized_line: str, marker: str) -> bool:
+        lowered_line = normalized_line.lower()
+        marker = marker.lower().strip()
+        if not marker:
+            return False
+        return lowered_line.startswith(marker) or bool(
+            re.search(
+                r"\d{4}-\d{2}-\d{2}t[\d:.]+z\s+" + re.escape(marker),
+                lowered_line,
+            )
+        )
 
     def _summarize_log_entries(self, entries: list[str]) -> str:
         if not entries:
