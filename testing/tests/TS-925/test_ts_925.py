@@ -102,7 +102,7 @@ def main() -> None:
         "default_branch": config.base_branch,
         "target_workflow_name": config.target_workflow_name,
         "target_workflow_path": config.target_workflow_path,
-        "browser": "GitHub Actions page verification",
+        "browser": "Chromium (Playwright required)",
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
@@ -135,11 +135,7 @@ def main() -> None:
         result["run_page"] = None if run_page is None else asdict(run_page)
         result["run_page_error"] = run_page_error
         if run_page is not None:
-            result["browser"] = (
-                "Chromium (Playwright)"
-                if run_page.screenshot_path
-                else "GitHub Actions HTML session (urllib fallback)"
-            )
+            result["browser"] = "Chromium (Playwright)"
 
         failures: list[str] = []
         _evaluate_pr_probe(result, observation, failures)
@@ -286,6 +282,19 @@ def _evaluate_actions_ui(
             f"`{run_page.screenshot_path or '<none>'}`."
         ),
     )
+
+    if not run_page.screenshot_path:
+        message = (
+            "Step 3 failed: the GitHub Actions run page opened, but browser-backed UI "
+            "evidence was not captured.\n"
+            f"Run URL: {run_page.url}\n"
+            f"Matched text: {run_page.matched_text}\n"
+            f"Visible body excerpt: {_snippet(run_page.body_text, limit=1200)}\n"
+            "Screenshot: <none>"
+        )
+        failures.append(message)
+        _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
+        return
 
     required_tokens = [observation.target_workflow_name]
     missing = [token for token in required_tokens if token and token not in run_page.body_text]
@@ -673,8 +682,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Fixed the TS-925 rework findings by preserving valid multiline `runApp(...)` probe injection and by requiring explicit axe-core execution evidence before treating Step 4 as a product-gap failure.",
-        "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and records real run-page evidence.",
+        "- Fixed the TS-925 review findings by requiring Playwright-backed GitHub Actions UI evidence for Step 3 and by distinguishing non-verifiable audit runs from real gate-pass regressions in the failure bug output.",
+        "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and records browser-captured run-page evidence.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -775,6 +784,22 @@ def _review_reply_text(
             "addition to the failing accessibility result and contrast evidence. "
             f"{rerun_summary}"
         )
+    if root_comment_id == 3289497756:
+        return (
+            "Fixed: Step 3 once again requires Playwright-backed GitHub Actions UI "
+            "verification. The default run-page factory now errors when the Playwright "
+            "runtime is unavailable, and TS-925 also fails Step 3 if no browser screenshot "
+            "evidence is captured. "
+            f"{rerun_summary}"
+        )
+    if root_comment_id == 3289497864:
+        return (
+            "Fixed: the failed-result bug output now distinguishes a real "
+            "\"accessibility gate passed the low-contrast defect\" regression from "
+            "non-verifiable audit runs where the hosted workflow never produced trustworthy "
+            "failure evidence. "
+            f"{rerun_summary}"
+        )
     return (
         "Fixed: TS-925 now keeps both the workflow contract and live run-job retrieval in "
         "the shared accessibility probe/component layer, preserving the intended test "
@@ -785,33 +810,50 @@ def _review_reply_text(
 
 def _bug_description(result: dict[str, object]) -> str:
     failed_summary = _failed_step_summary(result)
-    step_4_observed = _step_observed(result, 4)
-    title = (
-        f"# {TICKET_KEY} - Accessibility gate passes a low-contrast PR, so deployment is not blocked"
-        if "did not expose a verifiable accessibility audit failure" in step_4_observed
-        else f"# {TICKET_KEY} - Accessibility failure does not block a downstream deployment stage"
-    )
-    actual_result = (
-        "- The disposable PR rendered the low-contrast probe and the accessibility audit ran, "
-        "but `Accessibility checks` concluded success instead of failing for the contrast "
-        "defect, so the downstream deploy/publish stage was not blocked."
-        if "did not expose a verifiable accessibility audit failure" in step_4_observed
-        else (
+    step_4_mode = _step_4_failure_mode(result)
+    if step_4_mode == "audit-passed-defect":
+        title = (
+            f"# {TICKET_KEY} - Accessibility gate passes a low-contrast PR, so deployment is not blocked"
+        )
+        actual_result = (
+            "- The disposable PR rendered the low-contrast probe and the accessibility audit "
+            "ran, but `Accessibility checks` concluded success instead of failing for the "
+            "contrast defect, so the downstream deploy/publish stage was not blocked."
+        )
+        missing_capability = (
+            "- The production accessibility gate does not fail a live pull request that "
+            "renders the low-contrast Flutter probe used by this test case, so the CI "
+            "workflow cannot demonstrate fail-fast blocking on the requested contrast defect."
+        )
+    elif step_4_mode == "audit-not-verifiable":
+        title = (
+            f"# {TICKET_KEY} - Accessibility audit does not expose a verifiable result for the disposable contrast defect"
+        )
+        actual_result = (
+            "- The disposable PR rendered the low-contrast probe, but the workflow run did "
+            "not expose trustworthy accessibility-audit failure evidence for that defect, so "
+            "the downstream deployment behavior could not be verified from the live run."
+        )
+        missing_capability = (
+            "- The production CI workflow does not reliably surface a contributor-verifiable "
+            "accessibility-audit result for the disposable low-contrast probe used by this "
+            "test case."
+        )
+    else:
+        title = (
+            f"# {TICKET_KEY} - Accessibility failure does not block a downstream deployment stage"
+        )
+        actual_result = (
             "- The accessibility failure was observed, but the workflow did not provide a "
-            "downstream deploy/publish stage that was visibly skipped or blocked after "
-            "that failure."
+            "downstream deploy/publish stage that was visibly skipped or blocked after that "
+            "failure."
             if _step_status(result, 4) != "passed"
             else "- The downstream deploy/publish stage was visibly blocked after the accessibility failure."
         )
-    )
-    missing_capability = (
-        "- The production accessibility gate does not fail a live pull request that renders "
-        "the low-contrast Flutter probe used by this test case, so the CI workflow cannot "
-        "demonstrate fail-fast blocking on the requested contrast defect."
-        if "did not expose a verifiable accessibility audit failure" in step_4_observed
-        else "- The production workflow does not expose a downstream deploy/publish stage that "
-        "is visibly blocked after the accessibility audit fails."
-    )
+        missing_capability = (
+            "- The production workflow does not expose a downstream deploy/publish stage that "
+            "is visibly blocked after the accessibility audit fails."
+        )
     return "\n".join(
         [
             title,
@@ -868,7 +910,7 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Pull Request: `{result.get('pull_request_url', '')}`",
             f"- Pull Request checks: `{result.get('pull_request_checks_url', '')}`",
             f"- Workflow run: `{result.get('latest_pull_request_run_url', '')}`",
-            f"- Browser: `Chromium (Playwright)`",
+            f"- Browser: `{result.get('browser', 'Chromium (Playwright required)')}`",
             f"- OS: `{result.get('os', '')}`",
             "",
             "## Screenshots / logs",
@@ -913,6 +955,41 @@ def _record_human_verification(
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
     checks.append({"check": check, "observed": observed})
+
+
+def _step_4_failure_mode(result: dict[str, object]) -> str:
+    step_4_observed = _step_observed(result, 4)
+    if _step_status(result, 4) == "passed":
+        return "passed"
+    if "did not expose a verifiable accessibility audit failure" in step_4_observed:
+        return (
+            "audit-passed-defect"
+            if _audit_ran_but_concluded_success(result)
+            else "audit-not-verifiable"
+        )
+    return "downstream-gate"
+
+
+def _audit_ran_but_concluded_success(result: dict[str, object]) -> bool:
+    observed_steps = result.get("observed_step_names")
+    audit_step_visible = isinstance(observed_steps, list) and (
+        "Run axe-core accessibility checks" in observed_steps
+    )
+    accessibility_markers = result.get("run_log_matched_accessibility_markers")
+    has_accessibility_markers = isinstance(accessibility_markers, list) and bool(
+        accessibility_markers
+    )
+    contrast_markers = result.get("run_log_matched_contrast_markers")
+    has_contrast_markers = isinstance(contrast_markers, list) and bool(contrast_markers)
+    accessibility_conclusion = str(
+        result.get("accessibility_status_check_conclusion", "")
+    ).lower()
+    return (
+        audit_step_visible
+        and has_accessibility_markers
+        and has_contrast_markers
+        and accessibility_conclusion == "success"
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -965,8 +1042,14 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     ]
     if not failed_steps:
         return str(result.get("error", "the automation failed without a failed step summary"))
+    def _summary_line(entry: dict[str, object]) -> str:
+        first_line = str(entry.get("observed", "")).splitlines()[0]
+        prefix = f"Step {entry.get('step')} failed: "
+        if first_line.startswith(prefix):
+            return first_line
+        return prefix + first_line
     summaries = [
-        f"Step {entry.get('step')} failed: {str(entry.get('observed', '')).splitlines()[0]}"
+        _summary_line(entry)
         for entry in failed_steps
     ]
     return " ".join(summaries)
