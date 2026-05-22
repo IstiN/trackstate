@@ -11,26 +11,23 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from testing.components.services.workspace_sync_semantic_label_contract_validator import (  # noqa: E402
+    WorkspaceSyncSemanticLabelContractValidator,
+)
+from testing.core.config.workspace_sync_semantic_label_contract_config import (  # noqa: E402
+    WorkspaceSyncSemanticLabelContractConfig,
+)
 from testing.core.models.cli_command_result import CliCommandResult  # noqa: E402
-from testing.frameworks.python.flutter_analyze_framework import (  # noqa: E402
-    PythonFlutterAnalyzeFramework,
+from testing.core.models.workspace_sync_semantic_label_contract_result import (  # noqa: E402
+    WorkspaceSyncSemanticLabelContractResult,
+)
+from testing.tests.support.flutter_analyze_probe_factory import (  # noqa: E402
+    create_flutter_analyze_probe,
 )
 
 TICKET_KEY = "TS-937"
 TEST_CASE_TITLE = "Sync widget unit test — signature enforces localization contract"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-937/test_ts_937.py"
-FLUTTER_VERSION = "3.35.3"
-TEST_TARGET = Path("test/workspace_sync_semantic_label_contract_test.dart")
-SOURCE_TARGET = Path("lib/ui/features/tracker/views/trackstate_app.dart")
-LOCALIZATION_TARGET = Path("lib/l10n/generated/app_localizations_en.dart")
-EXPECTED_TEST_NAME = (
-    "flutter analyze rejects a raw string passed to the workspace sync semantic label API"
-)
-EXPECTED_RESULT = (
-    "The unit test passes, confirming that the widget's API is programmatically "
-    "constrained to the authorized localization contract, preventing regressions "
-    "to primitive String literals."
-)
 REQUEST_STEPS = [
     "Open the unit test file responsible for validating UI component signatures (e.g., test/ui/features/tracker/sync_widget_test.dart).",
     "Locate the test case that asserts the 'semanticLabel' parameter type.",
@@ -49,53 +46,41 @@ CONFIG_PATH = REPO_ROOT / "testing/tests/TS-937/config.yaml"
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    probe = PythonFlutterAnalyzeFramework(
-        REPO_ROOT,
-        flutter_version=FLUTTER_VERSION,
+    config = WorkspaceSyncSemanticLabelContractConfig.from_env(
         env_prefixes=("TS937", "TRACKSTATE"),
     )
+    probe = create_flutter_analyze_probe(
+        REPO_ROOT,
+        flutter_version=config.flutter_version,
+        env_prefixes=("TS937", "TRACKSTATE"),
+    )
+    validator = WorkspaceSyncSemanticLabelContractValidator(REPO_ROOT, probe)
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "title": TEST_CASE_TITLE,
         "run_command": RUN_COMMAND,
         "config_path": str(CONFIG_PATH),
-        "test_target": TEST_TARGET.as_posix(),
-        "source_target": SOURCE_TARGET.as_posix(),
-        "localization_target": LOCALIZATION_TARGET.as_posix(),
-        "expected_result": EXPECTED_RESULT,
-        "expected_test_name": EXPECTED_TEST_NAME,
+        "test_target": config.test_relative_path.as_posix(),
+        "source_target": config.source_relative_path.as_posix(),
+        "localization_target": config.localization_relative_path.as_posix(),
+        "expected_result": config.expected_result,
+        "expected_test_name": config.expected_test_name,
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
     }
 
     try:
-        flutter_version = probe.flutter_version()
-        pub_get = probe.pub_get(REPO_ROOT)
-        _populate_command_metadata(result, flutter_version=flutter_version, pub_get=pub_get)
-        _assert_flutter_available(flutter_version)
-        _assert_pub_get_succeeded(pub_get)
+        validation = validator.validate(config=config)
+        _populate_command_metadata(result, validation=validation)
+        _assert_flutter_available(validation.flutter_version)
+        _assert_pub_get_succeeded(validation.pub_get)
+        result["test_source_excerpt"] = _test_source_excerpt(validation.test_source)
+        result["source_signature_excerpt"] = _source_signature_excerpt(validation.source)
 
-        test_source = _read_required_file(TEST_TARGET)
-        source = _read_required_file(SOURCE_TARGET)
-        localization = _read_required_file(LOCALIZATION_TARGET)
-        result["test_source_excerpt"] = _test_source_excerpt(test_source)
-        result["source_signature_excerpt"] = _source_signature_excerpt(source)
-
-        _assert_dedicated_unit_test_exists(test_source, result=result)
-        _assert_live_signature_is_wrapped(
-            test_source,
-            source=source,
-            localization=localization,
-            result=result,
-        )
-
-        flutter_test = probe.test(REPO_ROOT, TEST_TARGET, reporter="expanded")
-        result["flutter_test_command"] = flutter_test.command_text
-        result["flutter_test_exit_code"] = flutter_test.exit_code
-        result["flutter_test_output"] = _combined_output(flutter_test)
-
-        _assert_flutter_test_passed(flutter_test, result=result)
+        _assert_dedicated_unit_test_exists(validation, config=config, result=result)
+        _assert_live_signature_is_wrapped(validation, config=config, result=result)
+        _assert_flutter_test_passed(validation, config=config, result=result)
         _record_human_verification(
             result,
             check=(
@@ -105,7 +90,7 @@ def main() -> None:
             observed=(
                 f"The production `_SyncPill` still declares `final _SyncPillSemanticLabel? semanticLabel;`, "
                 "the helper returns `_SyncPillSemanticLabel`, and the dedicated Flutter test "
-                f"`{EXPECTED_TEST_NAME}` mutates the live call site to the raw "
+                f"`{config.expected_test_name}` mutates the live call site to the raw "
                 "`'Attention needed'` string before rerunning `flutter analyze`."
             ),
         )
@@ -117,7 +102,8 @@ def main() -> None:
             ),
             observed=(
                 "The terminal output showed the dedicated test name and a passing Flutter "
-                f"test run for `{TEST_TARGET.as_posix()}`.\n{_combined_output(flutter_test)}"
+                f"test run for `{config.test_relative_path.as_posix()}`.\n"
+                f"{_combined_output(validation.flutter_test)}"
             ),
         )
 
@@ -155,26 +141,19 @@ def _assert_pub_get_succeeded(command: CliCommandResult) -> None:
 
 
 def _assert_dedicated_unit_test_exists(
-    test_source: str,
+    validation: WorkspaceSyncSemanticLabelContractResult,
     *,
+    config: WorkspaceSyncSemanticLabelContractConfig,
     result: dict[str, object],
 ) -> None:
     failures: list[str] = []
-    required_snippets = (
-        "test(",
-        EXPECTED_TEST_NAME,
-        "semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),",
-        "semanticLabel: 'Attention needed',",
-        "lib/ui/features/tracker/views/trackstate_app.dart",
-        "'analyze'",
-    )
-    for snippet in required_snippets:
-        if snippet not in test_source:
+    for snippet in config.required_test_snippets:
+        if snippet not in validation.test_source:
             failures.append(f"missing `{snippet}`")
 
     if failures:
         observed = (
-            f"Opened `{TEST_TARGET.as_posix()}`, but it no longer contains the dedicated "
+            f"Opened `{config.test_relative_path.as_posix()}`, but it no longer contains the dedicated "
             f"sync semantic-label regression logic. Problems: {', '.join(failures)}."
         )
         _record_step(
@@ -192,38 +171,30 @@ def _assert_dedicated_unit_test_exists(
         status="passed",
         action=REQUEST_STEPS[0],
         observed=(
-            f"Opened `{TEST_TARGET.as_posix()}` and confirmed it is the dedicated sync "
+            f"Opened `{config.test_relative_path.as_posix()}` and confirmed it is the dedicated sync "
             "widget contract regression test. The file defines the expected test case "
-            f"`{EXPECTED_TEST_NAME}` and targets the live tracker source file."
+            f"`{config.expected_test_name}` and targets the live tracker source file."
         ),
     )
 
 
 def _assert_live_signature_is_wrapped(
-    test_source: str,
+    validation: WorkspaceSyncSemanticLabelContractResult,
     *,
-    source: str,
-    localization: str,
+    config: WorkspaceSyncSemanticLabelContractConfig,
     result: dict[str, object],
 ) -> None:
     failures: list[str] = []
-    source_requirements = (
-        "final _SyncPillSemanticLabel? semanticLabel;",
-        "_SyncPillSemanticLabel _workspaceSyncSemanticLabel(",
-        "return _StaticSyncPillSemanticLabel(",
-        "return _PrefixedSyncPillSemanticLabel(",
-        "semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),",
-    )
-    for snippet in source_requirements:
-        if snippet not in source:
+    for snippet in config.required_source_snippets:
+        if snippet not in validation.source:
             failures.append(f"live source missing `{snippet}`")
 
-    if "Sync error, attention needed" not in localization:
+    if config.required_localization_snippet not in validation.localization_source:
         failures.append(
-            "generated English localization missing `Sync error, attention needed`"
+            f"generated English localization missing `{config.required_localization_snippet}`"
         )
 
-    if "semanticLabel: 'Attention needed'," not in test_source:
+    if config.mutation_snippet not in validation.test_source:
         failures.append("test no longer mutates the call site to a primitive String")
 
     if failures:
@@ -258,13 +229,15 @@ def _assert_live_signature_is_wrapped(
 
 
 def _assert_flutter_test_passed(
-    command: CliCommandResult,
+    validation: WorkspaceSyncSemanticLabelContractResult,
     *,
+    config: WorkspaceSyncSemanticLabelContractConfig,
     result: dict[str, object],
 ) -> None:
+    command = validation.flutter_test
     output = _combined_output(command)
     normalized_output = output.lower()
-    passed = command.exit_code == 0 and EXPECTED_TEST_NAME.lower() in normalized_output
+    passed = command.exit_code == 0 and config.expected_test_name.lower() in normalized_output
     all_tests_passed = "all tests passed" in normalized_output or "+1:" in normalized_output
 
     if passed and all_tests_passed:
@@ -275,7 +248,7 @@ def _assert_flutter_test_passed(
             action=REQUEST_STEPS[2],
             observed=(
                 f"Ran `{command.command_text}`. Flutter exited with code 0, printed the "
-                f"dedicated test name `{EXPECTED_TEST_NAME}`, and reported a passing test run.\n"
+                f"dedicated test name `{config.expected_test_name}`, and reported a passing test run.\n"
                 f"Terminal output:\n{output}"
             ),
         )
@@ -284,7 +257,7 @@ def _assert_flutter_test_passed(
     observed = (
         f"Ran `{command.command_text}`, but the dedicated contract test did not complete "
         f"as a clear pass. Observed exit_code={command.exit_code}; "
-        f"test_name_seen={EXPECTED_TEST_NAME.lower() in normalized_output}; "
+        f"test_name_seen={config.expected_test_name.lower() in normalized_output}; "
         f"all_tests_passed={all_tests_passed}.\nTerminal output:\n{output}"
     )
     _record_step(
@@ -301,13 +274,6 @@ def _assert_flutter_test_passed(
         f"Observed exit code: {command.exit_code}\n"
         f"Observed output:\n{output}"
     )
-
-
-def _read_required_file(relative_path: Path) -> str:
-    path = REPO_ROOT / relative_path
-    if not path.is_file():
-        raise AssertionError(f"Required file is missing: {relative_path.as_posix()}")
-    return path.read_text(encoding="utf-8")
 
 
 def _test_source_excerpt(source: str) -> str:
@@ -334,13 +300,15 @@ def _snippet_block(source: str, needle: str, *, after: int) -> str:
 def _populate_command_metadata(
     result: dict[str, object],
     *,
-    flutter_version: CliCommandResult,
-    pub_get: CliCommandResult,
+    validation: WorkspaceSyncSemanticLabelContractResult,
 ) -> None:
-    result["flutter_version_command"] = flutter_version.command_text
-    result["flutter_version_output"] = _combined_output(flutter_version)
-    result["pub_get_command"] = pub_get.command_text
-    result["pub_get_output"] = _combined_output(pub_get)
+    result["flutter_version_command"] = validation.flutter_version.command_text
+    result["flutter_version_output"] = _combined_output(validation.flutter_version)
+    result["pub_get_command"] = validation.pub_get.command_text
+    result["pub_get_output"] = _combined_output(validation.pub_get)
+    result["flutter_test_command"] = validation.flutter_test.command_text
+    result["flutter_test_exit_code"] = validation.flutter_test.exit_code
+    result["flutter_test_output"] = _combined_output(validation.flutter_test)
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -489,7 +457,7 @@ def _bug_description(result: dict[str, object]) -> str:
         f"{result.get('traceback', result.get('error', '<missing>'))}"
         "```\n\n"
         "## Actual vs Expected\n"
-        f"- **Expected:** {EXPECTED_RESULT}\n"
+        f"- **Expected:** {result.get('expected_result')}\n"
         "- **Actual:** The dedicated sync semantic-label regression test was missing, no "
         "longer matched the live `_SyncPill` wrapper contract, or `flutter test` did not "
         "complete with a passing result for `test/workspace_sync_semantic_label_contract_test.dart`.\n\n"
@@ -545,8 +513,7 @@ def _record_human_verification(
 
 
 def _combined_output(command: CliCommandResult) -> str:
-    parts = [command.stdout.strip(), command.stderr.strip()]
-    return "\n".join(part for part in parts if part)
+    return WorkspaceSyncSemanticLabelContractResult.combine_output(command)
 
 
 def _jira_inline_code(text: str) -> str:
