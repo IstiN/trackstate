@@ -89,9 +89,14 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       return;
     }
     final enabled = widget.onPressed != null;
-    element.disabled = !enabled;
+    element.disabled = false;
     element.tabIndex = widget.tabIndex ?? (enabled ? 0 : -1);
     element.setAttribute('aria-label', widget.label);
+    _setOptionalAttribute(
+      element,
+      attributeName: 'aria-disabled',
+      value: enabled ? null : 'true',
+    );
     _setOptionalAttribute(
       element,
       attributeName: _browserFocusIdAttribute,
