@@ -1,0 +1,25 @@
+import 'package:flutter/material.dart';
+
+class Ts924ProbeSurface extends StatelessWidget {
+  const Ts924ProbeSurface({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textStyle = Theme.of(context).textTheme.bodyMedium;
+    final accessibleColor = colorScheme.onSurface;
+
+    return Semantics(
+      label: 'Sync status message: accessibility checks passed',
+      child: Container(
+        color: colorScheme.surface,
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          'Accessibility checks ready',
+          style: textStyle?.copyWith(color: accessibleColor) ??
+              TextStyle(color: accessibleColor),
+        ),
+      ),
+    );
+  }
+}
