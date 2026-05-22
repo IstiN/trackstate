@@ -13,17 +13,16 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup has reached the visible recovery window
-5. records any restore-specific overlap diagnostics it can observe before
-  release from tracked File System Access activity on the saved local
-  workspace lineage, a tracked TS-893 runtime failure probe, or a public
-  pre-release non-restored workspace state while the workspace is still
-  blocked, then waits after the busy-state release for the workspace switcher
-  trigger to restore the saved local workspace instead of asserting
-  immediately
-6. opens **Workspace switcher** and verifies the selected active row is the
+5. keeps the handle blocked through the startup retry overlap window and
+  requires restore-specific overlap evidence before release from tracked File
+  System Access activity on the saved local workspace lineage, a tracked
+  TS-893 runtime failure probe, or a public pre-release non-restored state
+6. after the busy-state release, waits for the workspace switcher trigger to
+  restore the saved local workspace instead of asserting immediately
+7. opens **Workspace switcher** and verifies the selected active row is the
   local workspace in the `Local Git` state rather than `Local Unavailable` or
   the hosted fallback
-7. records the pre-release trigger state, any visible restore banner, the final
+8. records the pre-release trigger state, any visible restore banner, the final
   row state, and a screenshot if the live startup flow still lands on the
   hosted fallback or keeps the local row unavailable
 
@@ -52,10 +51,13 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py
 
 ```text
 Pass: after the temporary busy state is released during startup, the prepared
-active local workspace is restored as the selected Local Git row and the app
-does not keep Hosted setup workspace active or show Local Unavailable.
+active local workspace exposes blocked-window overlap evidence before release,
+then restores as the selected Local Git row and does not keep Hosted setup
+workspace active or show Local Unavailable.
 
-Fail: after the temporary busy state is released during startup, the app still
-keeps Hosted setup workspace active, leaves the local row Unavailable, or
-otherwise does not restore the saved local workspace as Local Git.
+Fail: while the handle is still blocked, startup already shows the final Local
+Git state without any restore-specific overlap evidence or public non-restored
+state, or after release it still keeps Hosted setup workspace active, leaves
+the local row Unavailable, or otherwise does not restore the saved local
+workspace as Local Git.
 ```

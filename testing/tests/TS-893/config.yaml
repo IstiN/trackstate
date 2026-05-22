@@ -10,6 +10,6 @@ notes:
   - Preloads an active local workspace plus one hosted workspace in browser storage.
   - Uses the default desktop viewport of 1440x900 for this ticket.
   - Simulates a transiently busy local workspace by revoking filesystem access to the prepared local repository, keeping it blocked until the header trigger is visible, then restoring access so unblock cannot happen before startup reaches the visible recovery window.
-  - Records any restore-specific overlap diagnostics it can observe before release from tracked File System Access activity on the saved local workspace lineage, a tracked TS-893 runtime failure probe, or a public pre-release non-restored workspace state while the workspace remains blocked.
+  - Keeps the handle blocked through the startup retry overlap window and requires restore-specific overlap evidence before release from tracked File System Access activity on the saved local workspace lineage, a tracked TS-893 runtime failure probe, or a public pre-release non-restored workspace state.
   - Waits after the busy-state release for the workspace switcher trigger to restore the local workspace instead of asserting immediately.
   - Covers the deployed fixes linked from TS-882 and TS-896.
