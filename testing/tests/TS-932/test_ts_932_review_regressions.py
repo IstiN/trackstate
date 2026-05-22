@@ -105,6 +105,44 @@ class Ts932ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("flt-semantics-placeholder", failures[0])
 
+    def test_placeholder_extraction_rejects_negative_placeholder_status(self) -> None:
+        log_text = "\n".join(
+            [
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:01Z waiting for flt-semantics-placeholder to be ready",
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:02Z flt-semantics-placeholder not present yet",
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:03Z Verified flt-semantics-placeholder before scan",
+            ]
+        )
+        inspector = GitHubAccessibilityStageLogInspector(
+            _FakeWorkflowRunLogReader(log_text)
+        )
+
+        entries = inspector.read_accessibility_stage_entries(123)
+        placeholder_entries = inspector.extract_placeholder_verification_entries(entries)
+
+        self.assertEqual(
+            placeholder_entries,
+            [
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:03Z Verified flt-semantics-placeholder before scan"
+            ],
+        )
+
+    def test_sequence_failures_rejects_missing_scan_evidence(self) -> None:
+        stage_lines = [
+            "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:01Z Verified flt-semantics-placeholder before scan",
+            "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:03Z Accessibility runtime surface ready: hosts=1; nodes=5",
+        ]
+
+        failures = self.module._sequence_failures(  # type: ignore[attr-defined]
+            stage_log_lines=stage_lines,
+            placeholder_entries=[stage_lines[0]],
+            runtime_entries=[stage_lines[1]],
+            scan_entries=[],
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("full WCAG scan proceeded", failures[0])
+
     def test_runtime_module_keeps_framework_wiring_inside_support_factory(self) -> None:
         module_source = Path(__file__).with_name("test_ts_932.py").read_text(
             encoding="utf-8"

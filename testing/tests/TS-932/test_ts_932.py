@@ -310,7 +310,7 @@ def _evaluate_placeholder_sequence(
         + "Runtime accessibility entries: "
         + f"{runtime_entries}\n"
         + "Scan progress entries: "
-        + f"{scan_entries or ['<none explicitly logged>']}"
+        + f"{scan_entries}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
 
@@ -330,6 +330,10 @@ def _sequence_failures(
     if not runtime_entries:
         failures.append(
             "the hosted accessibility log never recorded that the runtime accessibility surface became ready."
+        )
+    if not scan_entries:
+        failures.append(
+            "the hosted accessibility log never recorded that the full WCAG scan proceeded after placeholder verification."
         )
     if placeholder_entries and runtime_entries:
         placeholder_index = _first_index(stage_log_lines, placeholder_entries[0])

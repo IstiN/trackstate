@@ -7,6 +7,24 @@ from testing.core.interfaces.github_workflow_run_log_reader import (
     GitHubWorkflowRunLogReader,
 )
 
+_PLACEHOLDER_REFERENCE_PATTERN = r"(?:flt-semantics-placeholder|semantics placeholder)"
+_PLACEHOLDER_NEGATION_PATTERNS = (
+    re.compile(r"\bnot\s+(?:present|ready|attached|available|found|detected|identified|verified)\b"),
+    re.compile(r"\bmissing\b"),
+    re.compile(r"\bno\s+(?:flutter\s+)?semantics\b"),
+    re.compile(r"\bwait(?:ing)?\b.*\bflt-semantics-placeholder\b"),
+    re.compile(r"\bfailed\b.*\b(?:verify|detect|identify|find|confirm)\b"),
+    re.compile(r"\b(?:timed out|timeout|unable)\b"),
+)
+_PLACEHOLDER_POSITIVE_PATTERNS = (
+    re.compile(
+        rf"\b(?:verify|verified|verification|detect|detected|identify|identified|find|found|confirm|confirmed)\b.*\b{_PLACEHOLDER_REFERENCE_PATTERN}\b"
+    ),
+    re.compile(
+        rf"\b{_PLACEHOLDER_REFERENCE_PATTERN}\b.*\b(?:verify|verified|verification|detect|detected|identify|identified|find|found|confirm|confirmed)\b"
+    ),
+)
+
 
 @dataclass(frozen=True)
 class GitHubWorkflowStageLogEntry:
@@ -58,26 +76,12 @@ class GitHubAccessibilityStageLogInspector:
     def extract_placeholder_verification_entries(
         entries: list[GitHubWorkflowStageLogEntry],
     ) -> list[str]:
-        verification_markers = (
-            "verify",
-            "verified",
-            "verification",
-            "detect",
-            "detected",
-            "identified",
-            "found",
-            "present",
-            "attached",
-            "available",
-            "ready",
-        )
         matches: list[str] = []
         for entry in entries:
             normalized = entry.message.lower()
-            if (
-                "flt-semantics-placeholder" in normalized
-                or "semantics placeholder" in normalized
-            ) and any(marker in normalized for marker in verification_markers):
+            if GitHubAccessibilityStageLogInspector._is_positive_placeholder_verification(
+                normalized
+            ):
                 matches.append(entry.raw_line)
         return matches
 
@@ -124,6 +128,14 @@ class GitHubAccessibilityStageLogInspector:
         if not entries:
             return ""
         return "\n".join(entry.raw_line for entry in entries[:limit])
+
+    @staticmethod
+    def _is_positive_placeholder_verification(message: str) -> bool:
+        if re.search(_PLACEHOLDER_REFERENCE_PATTERN, message) is None:
+            return False
+        if any(pattern.search(message) for pattern in _PLACEHOLDER_NEGATION_PATTERNS):
+            return False
+        return any(pattern.search(message) for pattern in _PLACEHOLDER_POSITIVE_PATTERNS)
 
     @staticmethod
     def _parse_line(raw_line: str) -> GitHubWorkflowStageLogEntry | None:
