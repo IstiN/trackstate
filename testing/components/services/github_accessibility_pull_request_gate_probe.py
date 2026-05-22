@@ -438,10 +438,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
-                "probe_contrast_technique": (
-                    "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-                    "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
-                ),
+                "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
             }
@@ -870,6 +867,14 @@ class GitHubAccessibilityPullRequestGateProbeService:
         if match is None:
             return None
         return match.group("label")
+
+    @staticmethod
+    def _probe_contrast_technique(probe_source: str) -> str:
+        del probe_source
+        return (
+            "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+        )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         if not run_log_text.strip():
