@@ -1176,23 +1176,14 @@ class Ts908ProbeSurface extends StatelessWidget {
             raise GitHubAccessibilityPullRequestGateError(
                 "TS-908 could not find the TrackStateApp runApp target in lib/main.dart."
             )
-        if original_child.startswith("const TrackStateApp(") or original_child.startswith(
-            "TrackStateApp("
-        ):
-            updated_source = (
-                source[: run_app_match.start()]
-                + f"runApp({rendered_probe_app_class_name}(child: {original_child}));\n"
-                + source[run_app_match.end() :]
+        updated_source = self._replace_run_app_call(
+            source,
+            replacement=f"runApp({rendered_probe_app_class_name}(child: {original_child}));",
+        )
+        if updated_source is None:
+            raise GitHubAccessibilityPullRequestGateError(
+                "TS-908 could not patch lib/main.dart to render the disposable probe."
             )
-        else:
-            updated_source = self._replace_run_app_call(
-                source,
-                replacement=f"runApp(const {rendered_probe_app_class_name}());",
-            )
-            if updated_source is None:
-                raise GitHubAccessibilityPullRequestGateError(
-                    "TS-908 could not patch lib/main.dart to render the disposable probe."
-                )
 
         return (
             updated_source.rstrip()

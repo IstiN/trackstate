@@ -319,13 +319,10 @@ def _evaluate_downstream_gate(
     blocked_job_conclusions: set[str],
     failures: list[str],
 ) -> None:
-    accessibility_failure_visible = (
-        (
-            accessibility_job is not None
-            and (accessibility_job.conclusion or "").lower() in FAILURE_CONCLUSIONS
-        )
-        or observation.latest_pull_request_run_conclusion in FAILURE_CONCLUSIONS
-    ) and bool(observation.run_log_matched_contrast_markers)
+    accessibility_failure_visible = _accessibility_audit_failure_visible(
+        observation,
+        accessibility_job=accessibility_job,
+    )
 
     _record_human_verification(
         result,
@@ -337,7 +334,9 @@ def _evaluate_downstream_gate(
             f"Observed jobs: {_job_list_summary(jobs)}; accessibility job: "
             f"{_single_job_summary(accessibility_job)}; downstream job: "
             f"{_single_job_summary(downstream_job)}; run-log contrast markers: "
-            f"{observation.run_log_matched_contrast_markers}; run-log excerpt: "
+            f"{observation.run_log_matched_contrast_markers}; run-log accessibility markers: "
+            f"{observation.run_log_matched_accessibility_markers}; observed steps: "
+            f"{observation.observed_step_names}; run-log excerpt: "
             f"`{observation.run_log_excerpt or '<none>'}`."
         ),
     )
@@ -347,6 +346,11 @@ def _evaluate_downstream_gate(
             "Step 4 failed: the live workflow did not expose a verifiable accessibility audit "
             "failure for the disposable contrast defect.\n"
             f"Accessibility job: {_single_job_summary(accessibility_job)}\n"
+            "Accessibility check conclusion: "
+            f"{observation.accessibility_status_check_conclusion or '<none>'}\n"
+            f"Observed steps: {observation.observed_step_names}\n"
+            "Run-log accessibility markers: "
+            f"{observation.run_log_matched_accessibility_markers}\n"
             f"Run conclusion: {observation.latest_pull_request_run_conclusion}\n"
             f"Failed status checks: {observation.failed_status_check_names}\n"
             f"Run-log contrast markers: {observation.run_log_matched_contrast_markers}\n"
@@ -458,6 +462,36 @@ def _find_matching_job(
         if any(marker in haystack for marker in normalized_markers):
             return job
     return None
+
+
+def _accessibility_audit_failure_visible(
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    *,
+    accessibility_job: GitHubActionsWorkflowJobObservation | None,
+) -> bool:
+    accessibility_failure_surface_visible = (
+        accessibility_job is not None
+        and (accessibility_job.conclusion or "").lower() in FAILURE_CONCLUSIONS
+    ) or (
+        (observation.accessibility_status_check_conclusion or "").lower() in FAILURE_CONCLUSIONS
+    )
+    audit_step_visible = "Run axe-core accessibility checks" in observation.observed_step_names
+    run_log_excerpt = (observation.run_log_excerpt or "").lower()
+    audit_log_visible = (
+        bool(observation.run_log_matched_accessibility_markers)
+        and (
+            "axe-core"
+            in {marker.lower() for marker in observation.run_log_matched_accessibility_markers}
+            or "run axe-core accessibility checks" in run_log_excerpt
+            or "npm run test:a11y" in run_log_excerpt
+        )
+    )
+    return (
+        accessibility_failure_surface_visible
+        and audit_step_visible
+        and audit_log_visible
+        and bool(observation.run_log_matched_contrast_markers)
+    )
 
 
 def _open_run_page(
@@ -636,7 +670,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Fixed the TS-925 rework findings by sourcing the workflow contract and observed run jobs from the shared accessibility probe.",
+        "- Fixed the TS-925 rework findings by preserving valid multiline `runApp(...)` probe injection and by requiring explicit axe-core execution evidence before treating Step 4 as a product-gap failure.",
         "- The automation creates a disposable PR, inspects the live GitHub Actions jobs/logs, and captures a real run-page screenshot.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
@@ -720,6 +754,22 @@ def _review_reply_text(
             "Fixed: TS-925 no longer reaches for `gh api` in the test layer. The shared "
             "probe now exposes `observation.observed_run_jobs`, and the test consumes that "
             "component-owned run-job observation directly. "
+            f"{rerun_summary}"
+        )
+    if root_comment_id == 3287294164:
+        return (
+            "Fixed: the shared accessibility probe now preserves the original `runApp(...)` "
+            "child expression when patching multiline entrypoints, so the injected "
+            "`_Ts908RenderedProbeApp` still receives a valid `child` and the disposable PR "
+            "build can reach the hosted audit. "
+            f"{rerun_summary}"
+        )
+    if root_comment_id == 3287294301:
+        return (
+            "Fixed: TS-925 now requires explicit accessibility-audit execution evidence "
+            "before Step 4 can classify the result as a downstream-gate product gap. The "
+            "test only proceeds when the hosted run shows the axe-core step/log surface in "
+            "addition to the failing accessibility result and contrast evidence. "
             f"{rerun_summary}"
         )
     return (

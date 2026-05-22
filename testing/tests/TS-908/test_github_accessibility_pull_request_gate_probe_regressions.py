@@ -346,7 +346,10 @@ void main() {
 
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
-        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
+        self.assertIn("runApp(_Ts908RenderedProbeApp(child:", patched)
+        self.assertIn("_useDemoRepositoryForAccessibility", patched)
+        self.assertIn(": const TrackStateApp()", patched)
+        self.assertNotIn("runApp(const _Ts908RenderedProbeApp());", patched)
         self.assertIn("Ts908ProbeSurface()", patched)
 
 
