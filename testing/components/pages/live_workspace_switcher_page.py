@@ -1230,6 +1230,7 @@ class LiveWorkspaceSwitcherPage:
             """
             ({ heading, label }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const isVisible = (element) => {
                 if (!element) {
                   return false;
@@ -1243,7 +1244,6 @@ class LiveWorkspaceSwitcherPage:
               };
               const visibleText = (element) =>
                 normalize(element?.innerText || element?.textContent || '');
-              const displayNameHint = normalize(label.split(',')[0] || '');
               const labelFor = (element) =>
                 normalize(
                   element?.getAttribute?.('aria-label')
@@ -1358,6 +1358,7 @@ class LiveWorkspaceSwitcherPage:
             """
             ({ heading, label }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const displayNameHint = normalize(label.split(',')[0] || '');
               const isVisible = (element) => {
                 if (!element) {
                   return false;
@@ -1417,7 +1418,21 @@ class LiveWorkspaceSwitcherPage:
                 .find((element) => {
                   const elementLabel = labelFor(element);
                   const elementText = visibleText(element);
-                  return elementLabel === label || elementText === label;
+                  const combined = normalize(`${elementLabel} ${elementText}`);
+                  const isActionButton = elementLabel.startsWith('Delete:')
+                    || elementLabel.startsWith('Open:')
+                    || elementText === 'Active';
+                  return elementLabel === label
+                    || elementText === label
+                    || (
+                      displayNameHint.length > 0
+                      && !isActionButton
+                      && (
+                        elementLabel === displayNameHint
+                        || elementText === displayNameHint
+                        || combined.includes(displayNameHint)
+                      )
+                    );
                 });
               if (!candidate) {
                 return null;
@@ -2249,7 +2264,6 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, list):
             return []
         return [item for item in payload if isinstance(item, dict)]
-
 
     def click_switcher_button(
         self,
