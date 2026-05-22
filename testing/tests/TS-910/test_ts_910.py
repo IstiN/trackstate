@@ -92,7 +92,7 @@ def main() -> None:
             "TS-910 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
-    workspace_repository = service.repository.lower()
+    workspace_repository = service.repository
     workspace_state = _workspace_state(workspace_repository)
 
     result: dict[str, object] = {
