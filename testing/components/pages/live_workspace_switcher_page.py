@@ -340,6 +340,19 @@ class WorkspaceSwitcherButtonFocusabilityObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherTabStopObservation:
+    label: str
+    visible_text: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    tab_index_value: int
+    dom_index: int
+    keyboard_focusable: bool
+    outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSemanticsObservation:
     label: str
     role: str | None
@@ -1368,6 +1381,172 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return observation
+
+    def observe_internal_tab_stops(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> tuple[WorkspaceSwitcherTabStopObservation, ...]:
+        payload = self._session.wait_for_function(
+            """
+            ({ heading, panelLeft, panelTop, panelRight, panelBottom }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleText = (element) =>
+                normalize(element?.innerText || element?.textContent || '');
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.getAttribute?.('placeholder')
+                  || element?.getAttribute?.('title')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              const isInsidePanel = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return centerX >= panelLeft
+                  && centerX <= panelRight
+                  && centerY >= panelTop
+                  && centerY <= panelBottom;
+              };
+              let switcher = Array.from(
+                document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+              )
+                .filter(isVisible)
+                .find((element) => visibleText(element).includes(heading)) || null;
+              if (!switcher) {
+                const candidates = Array.from(document.querySelectorAll('*'))
+                  .filter(isVisible)
+                  .filter((element) => {
+                    const text = visibleText(element);
+                    return text.includes(heading)
+                      && (
+                        text.includes('Saved workspaces')
+                        || text.includes('Save and switch')
+                        || text.includes('Hosted Local')
+                      );
+                  })
+                  .sort((left, right) => {
+                    const leftRect = left.getBoundingClientRect();
+                    const rightRect = right.getBoundingClientRect();
+                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                  });
+                switcher = candidates[0] || null;
+              }
+              if (!switcher) {
+                return null;
+              }
+              const interactiveSelector = [
+                'flt-semantics[role="button"]',
+                'button',
+                '[role="button"]',
+                'a[href]',
+                'input',
+                'textarea',
+                'select',
+                '[tabindex]',
+              ].join(',');
+              const candidates = Array.from(switcher.querySelectorAll(interactiveSelector))
+                .map((element, domIndex) => {
+                  const label = labelFor(element);
+                  const text = visibleText(element);
+                  const tabIndexValue = Number.isFinite(element.tabIndex)
+                    ? element.tabIndex
+                    : -1;
+                  return {
+                    domIndex,
+                    element,
+                    label,
+                    text,
+                    tabIndexValue,
+                    tabindex: element.getAttribute('tabindex'),
+                    role: element.getAttribute('role'),
+                    tagName: element.tagName,
+                    keyboardFocusable: tabIndexValue >= 0,
+                    headingMatch: text.includes(heading) || label.startsWith('Workspace switcher:'),
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.keyboardFocusable
+                  && isVisible(candidate.element)
+                  && isInsidePanel(candidate.element)
+                  && !candidate.headingMatch
+                )
+                .sort((left, right) => {
+                  const leftPositive = left.tabIndexValue > 0;
+                  const rightPositive = right.tabIndexValue > 0;
+                  if (leftPositive !== rightPositive) {
+                    return leftPositive ? -1 : 1;
+                  }
+                  if (leftPositive && rightPositive && left.tabIndexValue !== right.tabIndexValue) {
+                    return left.tabIndexValue - right.tabIndexValue;
+                  }
+                  return left.domIndex - right.domIndex;
+                })
+                .map((candidate) => ({
+                  label: candidate.label,
+                  visibleText: candidate.text,
+                  role: candidate.role,
+                  tagName: candidate.tagName,
+                  tabindex: candidate.tabindex,
+                  tabIndexValue: candidate.tabIndexValue,
+                  domIndex: candidate.domIndex,
+                  keyboardFocusable: candidate.keyboardFocusable,
+                  outerHTML: candidate.element.outerHTML?.slice?.(0, 400) || '',
+                }));
+              return candidates.length > 0 ? candidates : null;
+            }
+            """,
+            arg={
+                "heading": self._switcher_heading,
+                "panelLeft": panel.left,
+                "panelTop": panel.top,
+                "panelRight": panel.left + panel.width,
+                "panelBottom": panel.top + panel.height,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "The open workspace switcher did not expose any internal keyboard tab stops.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return tuple(
+            WorkspaceSwitcherTabStopObservation(
+                label=str(item.get("label", "")),
+                visible_text=str(item.get("visibleText", "")),
+                role=str(item.get("role")) if item.get("role") is not None else None,
+                tag_name=str(item.get("tagName", "")),
+                tabindex=(
+                    str(item.get("tabindex"))
+                    if item.get("tabindex") is not None
+                    else None
+                ),
+                tab_index_value=int(item.get("tabIndexValue", -1)),
+                dom_index=int(item.get("domIndex", -1)),
+                keyboard_focusable=bool(item.get("keyboardFocusable")),
+                outer_html=str(item.get("outerHTML", "")),
+            )
+            for item in payload
+            if isinstance(item, dict)
+        )
 
     def click_switcher_button(
         self,
