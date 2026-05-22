@@ -356,9 +356,10 @@ def _focus_first_keyboard_target(
     panel = WorkspaceSwitcherPanelObservation(**_panel_from_state(state))
     before = page.active_element()
     try:
-        page.focus_internal_tab_stop(
-            first_internal_label,
+        _focus_first_internal_target(
+            page=page,
             panel=panel,
+            target=first_internal_target,
             timeout_ms=FOCUS_TIMEOUT_MS,
         )
     except AssertionError as error:
@@ -376,6 +377,36 @@ def _focus_first_keyboard_target(
     )
     _assert_first_keyboard_target(focused_state)
     return focused_state
+
+
+def _focus_first_internal_target(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
+    target: dict[str, object],
+    timeout_ms: int,
+) -> None:
+    label = str(target.get("label") or "")
+    tag_name = str(target.get("tag_name") or "").upper()
+    role = str(target.get("role") or "").lower()
+
+    if tag_name in {"INPUT", "TEXTAREA", "SELECT"}:
+        page.focus_switcher_text_field(label, timeout_ms=timeout_ms)
+        return
+
+    if tag_name in {"BUTTON", "FLT-SEMANTICS"} or role == "button":
+        page.focus_switcher_button(
+            label,
+            panel=panel,
+            timeout_ms=timeout_ms,
+        )
+        return
+
+    page.focus_internal_tab_stop(
+        label,
+        panel=panel,
+        timeout_ms=timeout_ms,
+    )
 
 
 def _capture_current_state(
@@ -1612,10 +1643,12 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         )
     )
     return (
-        "Fixed: TS-911 now derives the first internal target from the live panel order "
-        "instead of assuming the selected saved-workspace row is the starting point, "
-        "focuses that target directly through the page object, and keeps any failure "
-        "report scoped to the derived first target or the reverse-wrap behavior itself. "
+        "Fixed: TS-911 now scopes workspace-switcher tab-stop discovery and direct "
+        "focus to switcher-owned controls only, so the derived first/last targets come "
+        "from the live panel itself instead of background controls. The test still "
+        "derives the first internal target from the live panel order, focuses that "
+        "target directly through the page object, and keeps any failure report scoped "
+        "to the derived first target or the reverse-wrap behavior itself. "
         f"{rerun_summary}"
     )
 

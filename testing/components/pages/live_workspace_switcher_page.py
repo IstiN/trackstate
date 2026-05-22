@@ -1485,14 +1485,18 @@ class LiveWorkspaceSwitcherPage:
                 'select',
                 '[tabindex]',
               ].join(',');
+              const isSwitcherOwnedControl = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                if (panelId === 'trackstate-workspace-switcher') {
+                  return true;
+                }
+                return switcher.contains(element);
+              };
               const panelScopedControls = Array.from(document.querySelectorAll(interactiveSelector))
-                .filter((element) => {
-                  const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
-                  if (panelId === 'trackstate-workspace-switcher') {
-                    return true;
-                  }
-                  return switcher.contains(element) || isInsidePanel(element);
-                });
+                .filter((element) => isSwitcherOwnedControl(element));
               const orderedElements = panelScopedControls
                 .filter((element, index, all) => all.indexOf(element) === index);
               const candidates = orderedElements
@@ -1544,6 +1548,7 @@ class LiveWorkspaceSwitcherPage:
                 .filter((candidate) =>
                   candidate.keyboardFocusable
                   && isVisible(candidate.element)
+                  && isSwitcherOwnedControl(candidate.element)
                   && isInsidePanel(candidate.element)
                   && !candidate.headingMatch
                   && candidate.hasMeaningfulLabel
@@ -1708,17 +1713,25 @@ class LiveWorkspaceSwitcherPage:
                     'select',
                     '[tabindex]',
                   ].join(',');
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return switcher.contains(element);
+                  };
                   const orderedElements = Array.from(document.querySelectorAll(interactiveSelector))
-                    .filter((element) => {
-                      const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
-                      if (panelId === 'trackstate-workspace-switcher') {
-                        return true;
-                      }
-                      return switcher.contains(element) || isInsidePanel(element);
-                    })
+                    .filter((element) => isSwitcherOwnedControl(element))
                     .filter((element, index, all) => all.indexOf(element) === index);
                   const target = orderedElements.find((element) => {
-                    if (!isVisible(element) || !isInsidePanel(element)) {
+                    if (
+                      !isVisible(element)
+                      || !isSwitcherOwnedControl(element)
+                      || !isInsidePanel(element)
+                    ) {
                       return false;
                     }
                     const tabIndexValue = Number.isFinite(element.tabIndex)
