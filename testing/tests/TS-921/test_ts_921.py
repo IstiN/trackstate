@@ -46,12 +46,10 @@ LINKED_BUGS = ["TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
-ASSERTION_FAILURE_KIND = "assertion"
-PRECONDITION_FAILURE_KIND = "precondition"
 REWORK_SUMMARY = (
-    "Resolved the TS-921 merge conflicts, kept shell-startup outages scoped to "
-    "precondition failures, and tightened the wrong-directory rejection checks "
-    "to explicit mismatch messaging."
+    "Kept the wrong-directory rejection checks scoped to explicit mismatch "
+    "messaging and now records the live startup-shell blockage as a real failed "
+    "test/product bug with the required failure outputs."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -163,7 +161,6 @@ def main() -> None:
         "preloaded_workspace_state": workspace_state,
         "steps": [],
         "human_verification": [],
-        "failure_kind": ASSERTION_FAILURE_KIND,
     }
 
     runtime_context = Ts921WrongDirectoryRuntime(
@@ -184,7 +181,7 @@ def main() -> None:
                 try:
                     runtime_observation = tracker_page.open()
                 except AssertionError as error:
-                    _raise_precondition_failure(
+                    _raise_startup_failure(
                         result=result,
                         tracker_page=tracker_page,
                         runtime_context=runtime_context,
@@ -200,7 +197,7 @@ def main() -> None:
                 if runtime_observation.kind != "ready" or not bool(
                     shell_observation.get("shell_ready"),
                 ):
-                    _raise_precondition_failure(
+                    _raise_startup_failure(
                         result=result,
                         tracker_page=tracker_page,
                         runtime_context=runtime_context,
@@ -1087,7 +1084,7 @@ def _observe_startup_surface(tracker_page: TrackStateTrackerPage) -> dict[str, o
     }
 
 
-def _raise_precondition_failure(
+def _raise_startup_failure(
     *,
     result: dict[str, object],
     tracker_page: TrackStateTrackerPage,
@@ -1095,15 +1092,14 @@ def _raise_precondition_failure(
     reason: str,
 ) -> None:
     startup_observation = _observe_startup_surface(tracker_page)
-    result["runtime_state"] = "precondition-failed"
-    result["failure_kind"] = "precondition"
+    result["runtime_state"] = "startup-failed"
     result["startup_observation"] = startup_observation
     result["runtime_body_text"] = startup_observation["body_text"]
     result["console_events"] = list(runtime_context.console_events)
     result["page_errors"] = list(runtime_context.page_errors)
     observed = (
         "The deployed app never exposed the interactive shell or workspace switcher needed "
-        "to establish the TS-921 ticket precondition.\n"
+        "to reach the TS-921 manual re-authentication flow.\n"
         f"Reason: {reason}\n"
         f"Startup observation: {json.dumps(startup_observation, indent=2)}\n"
         f"Console events: {json.dumps(result['console_events'], indent=2)}\n"
@@ -1153,7 +1149,7 @@ def _raise_precondition_failure(
         ),
     )
     raise AssertionError(
-        "Precondition failed: the deployed app did not render the interactive shell, so "
+        "Step 1 failed: the deployed app did not render the interactive shell, so "
         "TS-921 could not reach the Workspace switcher required by the ticket steps.\n"
         f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}\n"
         f"Console events:\n{json.dumps(result['console_events'], indent=2)}\n"
@@ -1184,13 +1180,6 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
-    failure_kind = _failure_kind(result)
-    machine_readable_outcome = _machine_readable_outcome(failure_kind)
-    summary = (
-        "0 passed, 1 failed (precondition failure)"
-        if failure_kind == PRECONDITION_FAILURE_KIND
-        else "0 passed, 1 failed"
-    )
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1198,10 +1187,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
                 "passed": 0,
                 "failed": 1,
                 "skipped": 0,
-                "summary": summary,
+                "summary": "0 passed, 1 failed",
                 "error": error,
-                "failure_kind": failure_kind,
-                "machine_readable_outcome": machine_readable_outcome,
             },
         )
         + "\n",
@@ -1211,20 +1198,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
     REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
-    if failure_kind == PRECONDITION_FAILURE_KIND:
-        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
-    else:
-        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
 def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    precondition_failure = _is_precondition_failure(result, passed=passed)
     status_icon = "✅" if passed else "❌"
-    status_word = (
-        "PASSED"
-        if passed
-        else "PRECONDITION FAILED" if precondition_failure else "FAILED"
-    )
+    status_word = "PASSED" if passed else "FAILED"
     lines = [
         f"h3. {status_icon} Automated test {status_word} — {TICKET_KEY}",
         "",
@@ -1271,15 +1250,8 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
-    precondition_failure = _is_precondition_failure(result, passed=passed)
     lines = [
-        (
-            f"## {TICKET_KEY} passed"
-            if passed
-            else f"## {TICKET_KEY} precondition failed"
-            if precondition_failure
-            else f"## {TICKET_KEY} failed"
-        ),
+        f"## {TICKET_KEY} passed" if passed else f"## {TICKET_KEY} failed",
         "",
         "## Rework summary",
         f"- {REWORK_SUMMARY}",
@@ -1333,16 +1305,10 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
             "The wrong-directory retry stayed visible to the user as a failure and did not "
             "promote the workspace to Local Git.\n"
         )
-    if _is_precondition_failure(result, passed=passed):
-        return (
-            f"{TICKET_KEY} precondition failed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            f"{result.get('error', 'The deployed app never reached the TS-921 scenario preconditions.')}\n"
-        )
     return (
         f"{TICKET_KEY} failed.\n\n"
         f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The wrong-directory retry did not match the expected result.')}\n"
+        f"{result.get('error', 'The deployed app blocked the TS-921 scenario before the wrong-directory retry could run.')}\n"
     )
 
 
@@ -1352,25 +1318,14 @@ def _build_review_replies() -> str:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3290478471,
-                        "threadId": "PRRT_kwDOSU6Gf86EMzAY",
+                        "inReplyToId": 3290577660,
+                        "threadId": "PRRT_kwDOSU6Gf86ENETH",
                         "reply": (
-                            "Fixed: TS-921 now carries precondition failures through the "
-                            "generated result and summary outputs. Startup/shell outages are "
-                            "labeled as precondition failures in `response.md`, `pr_body.md`, "
-                            "`jira_comment.md`, and the test result summary, and the review "
-                            "replies file is emitted for the remaining thread."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3290531672,
-                        "threadId": "PRRT_kwDOSU6Gf86EM8Rg",
-                        "reply": (
-                            "Fixed: the machine-readable failure output now keeps the required "
-                            "`status: failed` field for pipeline compatibility, but it also "
-                            "emits explicit `failure_kind` and `machine_readable_outcome` fields "
-                            "so precondition outages are distinguishable from a validated TS-921 "
-                            "wrong-directory failure."
+                            "Updated: the deployed app still hard-stops on the visible `Sync "
+                            "issue` surface before the Workspace switcher exists, so TS-921 now "
+                            "keeps that as a real failed test/product bug and emits the required "
+                            "failed result payload plus `bug_description.md` for downstream bug "
+                            "handling."
                         ),
                     },
                 ],
@@ -1414,6 +1369,14 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "## Actual result",
         str(result.get("error", "The wrong-directory retry did not match the expected result.")),
         "",
+        "## Missing or broken production capability",
+        (
+            "The deployed web app does not render the interactive shell or Workspace "
+            "switcher needed to start manual re-authentication. After accessibility is "
+            "enabled, the page remains stuck on a single visible `Sync issue` control, "
+            "so the TS-921 retry flow cannot be reached."
+        ),
+        "",
         "## Expected result",
         EXPECTED_RESULT,
         "",
@@ -1440,36 +1403,18 @@ def _build_bug_description(result: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _failure_kind(result: dict[str, object]) -> str:
-    return str(result.get("failure_kind") or ASSERTION_FAILURE_KIND)
-
-
-def _machine_readable_outcome(failure_kind: str) -> str:
-    if failure_kind == PRECONDITION_FAILURE_KIND:
-        return "precondition_failure"
-    return "ticket_failure"
-
-
-def _is_precondition_failure(result: dict[str, object], *, passed: bool) -> bool:
-    return not passed and _failure_kind(result) == PRECONDITION_FAILURE_KIND
-
-
 def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
     if passed:
         return (
             "The wrong-directory retry showed a visible rejection and the local workspace "
             "stayed unavailable."
         )
-    if _is_precondition_failure(result, passed=passed):
-        return str(
-            result.get(
-                "error",
-                "Precondition failed: the deployed app never reached the workspace-switcher "
-                "scenario required by TS-921.",
-            ),
-        )
     return str(
-        result.get("error", "The wrong-directory retry did not match the expected result."),
+        result.get(
+            "error",
+            "The deployed app blocked the TS-921 scenario before the wrong-directory retry "
+            "could run.",
+        ),
     )
 
 
