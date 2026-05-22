@@ -45,10 +45,8 @@ LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 TRIGGER_WAIT_SECONDS = 90
 PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS = 15
-PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS = 12
-PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS = 5
-PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS = 5
 STARTUP_RETRY_OVERLAP_WINDOW_SECONDS = 12
+PRE_RELEASE_RESTORE_MESSAGE_TIMEOUT_MS = 250
 LINKED_BUGS = ["TS-882", "TS-896"]
 RESTORE_MESSAGE_WAIT_SECONDS = 20
 
@@ -180,14 +178,8 @@ def main() -> None:
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
-        "pre_release_public_overlap_timeout_seconds": (
-            PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS
-        ),
-        "pre_release_activity_timeout_seconds": PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
-        "pre_release_runtime_probe_timeout_seconds": (
-            PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS
-        ),
         "startup_retry_overlap_window_seconds": STARTUP_RETRY_OVERLAP_WINDOW_SECONDS,
+        "pre_release_restore_message_timeout_ms": PRE_RELEASE_RESTORE_MESSAGE_TIMEOUT_MS,
         "restore_message_wait_seconds": RESTORE_MESSAGE_WAIT_SECONDS,
         "steps": [],
         "human_verification": [],
@@ -243,80 +235,51 @@ def main() -> None:
                         pre_release_trigger,
                     )
                     pre_release_body_text = page.current_body_text()
-                    activity_captured, activity_events = poll_until(
-                        probe=lambda: runtime.tracked_activity_console_events,
-                        is_satisfied=lambda events: len(events) > 0,
-                        timeout_seconds=PRE_RELEASE_ACTIVITY_TIMEOUT_SECONDS,
-                        interval_seconds=0.5,
-                    )
-                    raw_activity_events = runtime.activity_console_events
-                    runtime_probe_captured, runtime_probe_events = poll_until(
-                        probe=lambda: runtime.tracked_probe_console_events,
-                        is_satisfied=lambda events: len(events) > 0,
-                        timeout_seconds=PRE_RELEASE_RUNTIME_PROBE_TIMEOUT_SECONDS,
-                        interval_seconds=0.5,
-                    )
-                    pre_release_runtime_probe = (
-                        runtime_probe_events[-1] if runtime_probe_events else None
-                    )
-                    result["pre_release_body_text"] = pre_release_body_text
-                    result["pre_release_activity_captured"] = activity_captured
-                    result["pre_release_all_activity_events"] = [
-                        _console_event_payload(event) for event in raw_activity_events
-                    ]
-                    result["pre_release_activity_events"] = [
-                        _console_event_payload(event) for event in activity_events
-                    ]
-                    result["pre_release_activity"] = _console_event_payload(
-                        activity_events[-1] if activity_events else None,
-                    )
-                    result["pre_release_runtime_probe_captured"] = (
-                        runtime_probe_captured
-                    )
-                    result["pre_release_runtime_probe"] = _console_event_payload(
-                        pre_release_runtime_probe,
-                    )
-                    result["pre_release_runtime_probe_events"] = [
-                        _console_event_payload(event) for event in runtime_probe_events
-                    ]
-                    public_overlap_observed, public_overlap_state = poll_until(
-                        probe=lambda: _observe_pre_release_public_overlap(page),
+                    overlap_captured, overlap_state = poll_until(
+                        probe=lambda: _collect_pre_release_overlap_state(
+                            page=page,
+                            tracker_page=tracker_page,
+                            runtime=runtime,
+                        ),
                         is_satisfied=lambda state: bool(
                             isinstance(state, dict)
-                            and state.get("public_overlap_observed") is True
+                            and state.get("overlap_proof_sources")
                         ),
-                        timeout_seconds=PRE_RELEASE_PUBLIC_OVERLAP_TIMEOUT_SECONDS,
-                        interval_seconds=1,
+                        timeout_seconds=STARTUP_RETRY_OVERLAP_WINDOW_SECONDS,
+                        interval_seconds=0.5,
                     )
-                    result["pre_release_public_overlap_observed"] = (
-                        public_overlap_observed
+                    result["pre_release_body_text"] = pre_release_body_text
+                    result["pre_release_overlap_captured"] = overlap_captured
+                    result["pre_release_activity_captured"] = bool(
+                        overlap_state["pre_release_activity_captured"],
                     )
-                    result["pre_release_public_overlap_state"] = (
-                        public_overlap_state
+                    result["pre_release_all_activity_events"] = list(
+                        overlap_state["pre_release_all_activity_events"],
                     )
-                    result["overlap_required_for_pass"] = False
-                    overlap_proof_sources: list[str] = []
-                    if activity_captured:
-                        overlap_proof_sources.append(
-                            "tracked File System Access activity on the saved local workspace lineage",
-                        )
-                    if runtime_probe_captured:
-                        overlap_proof_sources.append(
-                            "tracked TS-893 runtime probe from a blocked saved-workspace handle operation",
-                        )
-                    if public_overlap_observed:
-                        public_overlap_reason = public_overlap_state.get(
-                            "public_overlap_reason",
-                        )
-                        overlap_proof_sources.append(
-                            "public pre-release non-restored state"
-                            + (
-                                f": {public_overlap_reason}"
-                                if isinstance(public_overlap_reason, str)
-                                and public_overlap_reason
-                                else ""
-                            ),
-                        )
+                    result["pre_release_activity_events"] = list(
+                        overlap_state["pre_release_activity_events"],
+                    )
+                    result["pre_release_activity"] = overlap_state["pre_release_activity"]
+                    result["pre_release_runtime_probe_captured"] = bool(
+                        overlap_state["pre_release_runtime_probe_captured"],
+                    )
+                    result["pre_release_runtime_probe"] = overlap_state[
+                        "pre_release_runtime_probe"
+                    ]
+                    result["pre_release_runtime_probe_events"] = list(
+                        overlap_state["pre_release_runtime_probe_events"],
+                    )
+                    result["pre_release_public_overlap_observed"] = bool(
+                        overlap_state["pre_release_public_overlap_observed"],
+                    )
+                    result["pre_release_public_overlap_state"] = overlap_state[
+                        "pre_release_public_overlap_state"
+                    ]
+                    result["pre_release_restore_message"] = overlap_state[
+                        "pre_release_restore_message"
+                    ]
+                    result["overlap_required_for_pass"] = True
+                    overlap_proof_sources = list(overlap_state["overlap_proof_sources"])
                     result["pre_release_overlap_proved"] = bool(overlap_proof_sources)
                     result["pre_release_overlap_proof_sources"] = overlap_proof_sources
                     result["busy_blocker_before_release"] = blocker.snapshot()
@@ -338,8 +301,8 @@ def main() -> None:
                     if overlap_proof_sources:
                         step_2_summary = (
                             "Kept the local workspace blocked until the header workspace "
-                            "trigger was already observable, captured blocked-window "
-                            "diagnostic overlap evidence before release, then restored "
+                            "trigger was already observable, captured restore-specific "
+                            "blocked-window overlap proof before release, then restored "
                             "access during startup recovery."
                         )
                     else:
@@ -347,10 +310,7 @@ def main() -> None:
                             "Kept the local workspace blocked until the header workspace "
                             "trigger was already observable, then restored access during "
                             "startup recovery. No restore-specific blocked-window "
-                            "diagnostic overlap evidence or public non-restored state was "
-                            "observed before release, so the run relies on the ticket's "
-                            "post-release `Local Git` outcome rather than on pre-release "
-                            "observability."
+                            "overlap proof was observed before release."
                         )
                     step_2_observed = (
                         step_2_summary
@@ -359,34 +319,66 @@ def main() -> None:
                         + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
                         + f"pre_release_body_text={pre_release_body_text!r}\n"
                         + "pre_release_public_overlap_state="
-                        + f"{json.dumps(public_overlap_state, indent=2)}\n"
-                        + f"pre_release_public_overlap_observed={public_overlap_observed}\n"
+                        + f"{json.dumps(result['pre_release_public_overlap_state'], indent=2)}\n"
+                        + "pre_release_public_overlap_observed="
+                        + f"{result['pre_release_public_overlap_observed']}\n"
                         + "pre_release_activity="
                         + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
                         + "pre_release_all_activity_events="
                         + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
                         + "pre_release_activity_events="
                         + f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
-                        + f"pre_release_activity_captured={activity_captured}\n"
+                        + "pre_release_activity_captured="
+                        + f"{result['pre_release_activity_captured']}\n"
                         + (
                             "pre_release_runtime_probe="
-                            f"{json.dumps(_console_event_payload(pre_release_runtime_probe), indent=2)}\n"
-                            if pre_release_runtime_probe is not None
+                            f"{json.dumps(result['pre_release_runtime_probe'], indent=2)}\n"
+                            if result["pre_release_runtime_probe"] is not None
                             else "pre_release_runtime_probe=<not observed before release>\n"
                         )
                         + "pre_release_runtime_probe_events="
                         + f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
-                        + f"pre_release_runtime_probe_captured={runtime_probe_captured}\n"
+                        + "pre_release_runtime_probe_captured="
+                        + f"{result['pre_release_runtime_probe_captured']}\n"
+                        + f"pre_release_restore_message={result['pre_release_restore_message']!r}\n"
                         + f"startup_retry_overlap_window_seconds={STARTUP_RETRY_OVERLAP_WINDOW_SECONDS}\n"
                         f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                     )
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed=step_2_observed,
-                    )
+                    if overlap_proof_sources:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="passed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                    else:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                        if failure_message is None:
+                            failure_message = (
+                                "Step 2 failed: startup never exposed restore-specific "
+                                "blocked-window overlap proof before the busy state was "
+                                "released.\n"
+                                f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
+                                f"Observed pre_release_body_text:\n{pre_release_body_text}\n"
+                                "Observed pre_release_overlap_proof_sources="
+                                f"{json.dumps(overlap_proof_sources, indent=2)}\n"
+                                "Observed pre_release_all_activity_events="
+                                f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
+                                "Observed pre_release_activity_events="
+                                f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
+                                "Observed pre_release_runtime_probe_events="
+                                f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}\n"
+                                f"Observed pre_release_restore_message={result['pre_release_restore_message']!r}\n"
+                                "Observed pre_release_public_overlap_state="
+                                f"{json.dumps(result['pre_release_public_overlap_state'], indent=2)}"
+                            )
 
                     restore_message = _observe_restore_message(
                         tracker_page,
@@ -415,11 +407,13 @@ def main() -> None:
                                 "Observed pre_release_overlap_proof_sources="
                                 f"{json.dumps(overlap_proof_sources, ensure_ascii=True)}; "
                                 "Observed pre_release_public_overlap_state="
-                                f"{json.dumps(public_overlap_state, ensure_ascii=True)}; "
+                                f"{json.dumps(result['pre_release_public_overlap_state'], ensure_ascii=True)}; "
                                 "Observed pre_release_activity="
                                 f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
-                                f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
+                                f"{json.dumps(result['pre_release_runtime_probe'], ensure_ascii=True)}; "
+                                "Observed pre_release_restore_message="
+                                f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
                                 f"trigger label={trigger.semantic_label!r}; "
@@ -440,11 +434,13 @@ def main() -> None:
                                 "Observed pre_release_overlap_proof_sources="
                                 f"{json.dumps(overlap_proof_sources, ensure_ascii=True)}; "
                                 "Observed pre_release_public_overlap_state="
-                                f"{json.dumps(public_overlap_state, ensure_ascii=True)}; "
+                                f"{json.dumps(result['pre_release_public_overlap_state'], ensure_ascii=True)}; "
                                 "Observed pre_release_activity="
                                 f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
                                 "Observed pre_release_runtime_probe="
-                                f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
+                                f"{json.dumps(result['pre_release_runtime_probe'], ensure_ascii=True)}; "
+                                "Observed pre_release_restore_message="
+                                f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
                                 f"trigger label={trigger.semantic_label!r}; "
@@ -501,9 +497,11 @@ def main() -> None:
                             "pre_release_overlap_proof_sources="
                             f"{json.dumps(overlap_proof_sources, ensure_ascii=True)}; "
                             "pre_release_runtime_probe="
-                            f"{json.dumps(_console_event_payload(pre_release_runtime_probe), ensure_ascii=True)}; "
+                            f"{json.dumps(result['pre_release_runtime_probe'], ensure_ascii=True)}; "
                             "pre_release_runtime_probe_events="
                             f"{json.dumps(result['pre_release_runtime_probe_events'], ensure_ascii=True)}; "
+                            "pre_release_restore_message="
+                            f"{result['pre_release_restore_message']!r}; "
                             f"pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                             f"restore_message={restore_message!r}; "
                             f"busy_blocker={json.dumps(blocker.snapshot(), ensure_ascii=True)}"
@@ -967,7 +965,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "* Kept access to the prepared local workspace blocked through the startup retry overlap window before releasing access.",
-        "* Recorded any restore-specific blocked-window overlap diagnostics from tracked File System Access activity, TS-893 runtime probe events, or a public pre-release non-restored state while keeping the ticket verdict tied to the post-release workspace result.",
+        "* Required restore-specific blocked-window overlap proof before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -1015,7 +1013,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "- Kept access to the prepared local workspace blocked through the startup retry overlap window before releasing access.",
-        "- Recorded any restore-specific blocked-window overlap diagnostics from tracked File System Access activity, TS-893 runtime probe events, or a public pre-release non-restored state while keeping the ticket verdict tied to the post-release workspace result.",
+        "- Required restore-specific blocked-window overlap proof before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
@@ -1055,18 +1053,18 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     overlap_summary = (
-        "Restore-specific overlap evidence was captured before release."
+        "Restore-specific overlap proof was captured before release."
         if result.get("pre_release_overlap_proved") is True
-        else "No restore-specific blocked-window overlap evidence was observed before release, so the run relied on the post-release workspace outcome."
+        else "No restore-specific blocked-window overlap proof was observed before release."
     )
     outcome = (
-        "startup restored the prepared local workspace as the active `Local Git` "
-        f"selection. {overlap_summary}"
+        "Startup exposed required blocked-window overlap proof and restored the "
+        f"prepared local workspace as the active `Local Git` selection. {overlap_summary}"
         if passed
         else (
-            "the final workspace still restored as `Local Git`, but the app exposed "
-            "no restore-specific blocked-window overlap evidence before release, so "
-            "the transient retry path could not be proven from testing."
+            "The final workspace still restored as `Local Git`, but the app exposed "
+            "no required restore-specific blocked-window overlap proof before "
+            "release, so the transient retry path was not observable."
             if _failed_due_to_missing_overlap_proof(result)
             else _exact_error_summary(result)
         )
@@ -1075,8 +1073,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework Summary",
         "",
         "### Fixed Issues",
-        "- Kept the TS-893 overlap probes for diagnostic confidence, but stopped failing the scenario solely because those diagnostics stay empty.",
-        "- Realigned the TS-893 README/config and reporting so the verdict follows the ticket's post-release `Local Git` contract instead of a test-only observability requirement.",
+        "- Made Step 2 require restore-specific blocked-window overlap proof before the busy handle is released instead of passing on release timing alone.",
+        "- Kept the later trigger and workspace-switcher assertions so failed reruns still report whether the final `Local Git` outcome succeeded.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1304,24 +1302,25 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Updated TS-893 to keep the blocked-window overlap probes as "
-            "diagnostic confidence only and to keep the verdict tied to the "
-            "post-release `Local Git` outcome from the ticket contract. "
+            "Updated TS-893 so Step 2 requires restore-specific blocked-window "
+            "overlap proof before release, then re-checked the final `Local Git` "
+            "state after release. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     if _failed_due_to_missing_overlap_proof(result):
         return (
-            "Updated TS-893 to keep blocked-window overlap probes diagnostic-only "
-            "instead of turning missing diagnostics into the verdict. Re-ran "
+            "Updated TS-893 so Step 2 now requires restore-specific blocked-window "
+            "overlap proof before release and still records the later final-state "
+            "checks. Re-ran "
             f"`{RUN_COMMAND}`: still failing because while the workspace was still "
-            "blocked the app already exposed the final `Local Git` state and "
-            "emitted no restore-specific overlap evidence or public non-restored "
-            "transition, so the transient retry path cannot be proven from "
-            "testing. Recorded the resulting product gap in `outputs/bug_description.md`."
+            "blocked the app emitted no required restore-specific overlap proof "
+            "before release. Recorded the resulting product gap in "
+            "`outputs/bug_description.md`."
         )
     return (
-        "Updated TS-893 to keep blocked-window overlap probes diagnostic-only "
-        "while leaving the verdict on the post-release workspace contract. Re-ran "
+        "Updated TS-893 so Step 2 requires restore-specific blocked-window "
+        "overlap proof before release while still checking the later final-state "
+        "contract. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
@@ -1373,6 +1372,72 @@ def _observe_restore_message(
     except Exception:
         return None
     return observation.message_text
+
+
+def _collect_pre_release_overlap_state(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    tracker_page,
+    runtime: Ts723WorkspaceRestoreRuntime,
+) -> dict[str, object]:
+    raw_activity_events = tuple(runtime.activity_console_events)
+    activity_events = tuple(runtime.tracked_activity_console_events)
+    runtime_probe_events = tuple(runtime.tracked_probe_console_events)
+    public_overlap_state = _observe_pre_release_public_overlap(page)
+    pre_release_restore_message = _observe_restore_message(
+        tracker_page,
+        timeout_ms=PRE_RELEASE_RESTORE_MESSAGE_TIMEOUT_MS,
+    )
+
+    overlap_proof_sources: list[str] = []
+    if activity_events:
+        overlap_proof_sources.append(
+            "tracked File System Access activity on the saved local workspace lineage",
+        )
+    if runtime_probe_events:
+        overlap_proof_sources.append(
+            "tracked TS-893 runtime probe from a blocked saved-workspace handle operation",
+        )
+    if pre_release_restore_message:
+        overlap_proof_sources.append(
+            f"visible restore skip banner while blocked: {pre_release_restore_message}",
+        )
+    if public_overlap_state.get("public_overlap_observed") is True:
+        public_overlap_reason = public_overlap_state.get("public_overlap_reason")
+        overlap_proof_sources.append(
+            "public pre-release non-restored state"
+            + (
+                f": {public_overlap_reason}"
+                if isinstance(public_overlap_reason, str) and public_overlap_reason
+                else ""
+            ),
+        )
+
+    return {
+        "pre_release_activity_captured": bool(activity_events),
+        "pre_release_all_activity_events": [
+            _console_event_payload(event) for event in raw_activity_events
+        ],
+        "pre_release_activity_events": [
+            _console_event_payload(event) for event in activity_events
+        ],
+        "pre_release_activity": _console_event_payload(
+            activity_events[-1] if activity_events else None,
+        ),
+        "pre_release_runtime_probe_captured": bool(runtime_probe_events),
+        "pre_release_runtime_probe": _console_event_payload(
+            runtime_probe_events[-1] if runtime_probe_events else None,
+        ),
+        "pre_release_runtime_probe_events": [
+            _console_event_payload(event) for event in runtime_probe_events
+        ],
+        "pre_release_restore_message": pre_release_restore_message,
+        "pre_release_public_overlap_observed": bool(
+            public_overlap_state.get("public_overlap_observed"),
+        ),
+        "pre_release_public_overlap_state": public_overlap_state,
+        "overlap_proof_sources": overlap_proof_sources,
+    }
 
 
 def _console_event_payload(event: object) -> dict[str, object] | None:
