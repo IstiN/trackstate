@@ -1,0 +1,10 @@
+test_id: TS-927
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app in a 375x844 mobile viewport with preloaded hosted and local saved workspaces.
+  - Verifies keyboard Tab navigation reaches the condensed workspace switcher trigger and exposes a visible focus ring.

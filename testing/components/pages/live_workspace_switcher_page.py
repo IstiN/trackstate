@@ -518,10 +518,10 @@ class WorkspaceTriggerFocusStateObservation:
 class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
-    _top_bar_button_selector = 'flt-semantics[role="button"]'
+    _top_bar_button_selector = 'button, flt-semantics[role="button"], [role="button"]'
     _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
-    _button_selector = 'flt-semantics[role="button"]'
+    _button_selector = 'button, flt-semantics[role="button"], [role="button"]'
     _switcher_heading = "Workspace switcher"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -3385,11 +3385,7 @@ class LiveWorkspaceSwitcherPage:
         )
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
-        self._session.click(
-            self._top_bar_button_selector,
-            has_text="Workspace switcher:",
-            timeout_ms=timeout_ms,
-        )
+        self.open_switcher(timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def observe_surface(
@@ -6438,12 +6434,18 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const trigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
-                isVisible(candidate)
-                && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
-                  .startsWith('Workspace switcher:')
-              );
+                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+              )
+                .filter((candidate) =>
+                  isVisible(candidate)
+                  && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
+                    .startsWith('Workspace switcher:')
+                )
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] ?? null;
               if (!trigger) {
                 return null;
               }
