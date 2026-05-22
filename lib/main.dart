@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'data/repositories/trackstate_repository.dart';
 import 'ui/features/tracker/views/trackstate_app.dart';
-import 'ts908_probe_surface.dart';
+import 'ts936_probe_surface.dart';
 
 const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
   'TRACKSTATE_USE_DEMO_REPOSITORY',
