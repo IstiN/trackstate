@@ -4,10 +4,14 @@ const {
   collectAccessibilityViolations,
   formatViolations,
 } = require('./accessibility_gate');
+const {
+  installTs952MissingPlaceholderSimulation,
+} = require('./ts952_missing_placeholder_simulation');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
+  await installTs952MissingPlaceholderSimulation(page);
   await captureFlutterStartupDiagnostics(page, {
     log: (entry) => console.log(entry),
   });
