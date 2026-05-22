@@ -35,9 +35,6 @@ from testing.tests.support.github_actions_page_factory import (  # noqa: E402
 from testing.tests.support.github_workflow_step_sequence_inspector_factory import (  # noqa: E402
     create_github_workflow_step_sequence_inspector,
 )
-from testing.frameworks.python.urllib_web_app_session import (  # noqa: E402
-    UrllibWebAppRuntime,
-)
 
 TICKET_KEY = "TS-951"
 TEST_CASE_TITLE = "Accessibility audit fails — log-validation step executes regardless"
@@ -45,10 +42,12 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-951/tes
 TEST_FILE_PATH = "testing/tests/TS-951/test_ts_951.py"
 CONFIG_PATH = REPO_ROOT / "testing/tests/TS-951/config.yaml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 RUN_SCREENSHOT_PATH = OUTPUTS_DIR / "ts951_run_page.png"
 WORKFLOW_SCREENSHOT_PATH = OUTPUTS_DIR / "ts951_workflow_page.png"
@@ -95,7 +94,7 @@ def main() -> None:
         "default_branch": config.base_branch,
         "target_workflow_name": config.target_workflow_name,
         "target_workflow_path": config.target_workflow_path,
-        "browser": "GitHub HTML (urllib)",
+        "browser": "Chromium (Playwright)",
         "os": platform.platform(),
         "steps": [],
         "human_verification": [],
@@ -425,7 +424,7 @@ def _open_run_page(
         "log-validation",
     ]
     try:
-        with create_github_actions_page(runtime_factory=UrllibWebAppRuntime) as actions_page:
+        with create_github_actions_page() as actions_page:
             return (
                 actions_page.open_page(
                     url=observation.latest_pull_request_run_url,
@@ -453,7 +452,7 @@ def _open_workflow_page(
         "if:",
     ]
     try:
-        with create_github_actions_page(runtime_factory=UrllibWebAppRuntime) as actions_page:
+        with create_github_actions_page() as actions_page:
             return (
                 actions_page.open_page(
                     url=sequence.workflow_url,
@@ -504,6 +503,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -525,6 +525,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -623,36 +624,31 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error')}`."
+    )
     lines = [
-        "## Test Automation Summary",
+        "h3. PR Rework Result",
         "",
-        "- Added TS-951 as a live GitHub Actions regression test for the accessibility workflow sequence.",
-        "- The test forces a real accessibility failure, inspects the live workflow contract for `always()`, and compares the visible step sequence for `Run axe-core accessibility checks` and `log-validation`.",
-        f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
-        f"- Result: **{status}**",
-        f"- Command: `{RUN_COMMAND}`",
-        (
-            f"- Environment: `{result['repository']}` @ `{result['default_branch']}` "
-            f"using `{result['browser']}` on `{result['os']}`."
-        ),
-        (
-            "- Outcome: the live workflow satisfied the `always()` contract and exposed `log-validation` after a failing axe-core step."
-            if passed
-            else f"- Outcome: {_failed_step_summary(result)}"
-        ),
+        "*Fixed:* Removed the direct `UrllibWebAppRuntime` injection so the GitHub Actions page checks now stay on the standard Playwright-backed factory path, and added `testing/tests/TS-951/README.md`.",
+        f"*Test Run:* `{RUN_COMMAND}`",
+        f"*Result:* {status}",
+        f"*Summary:* {rerun_summary}",
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "## Exact error",
-                "```text",
+                "h4. Exact error",
+                "{code}",
                 str(result.get("traceback", result.get("error", ""))),
-                "```",
+                "{code}",
             ]
         )
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).strip() + "\n"
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -686,7 +682,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "sequence therefore does not prove that `log-validation` runs after a failed axe step.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('pull_request_url', '<missing pull request URL>')}\n"
-        "- **Browser:** GitHub HTML (urllib) for page-text verification; GitHub CLI for API/run data\n"
+        "- **Browser:** Chromium via Playwright for page verification; GitHub CLI for API/run data\n"
         f"- **OS:** {result.get('os')}\n"
         f"- **Repository:** {result.get('repository')}\n"
         f"- **Branch:** {result.get('default_branch')}\n"
@@ -742,6 +738,52 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         lines.append(f"{prefix} {check}")
         lines.append(f"{prefix} Observed: {observed}")
     return lines or (["* <none recorded>"] if jira else ["- <none recorded>"])
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed: removed the direct `UrllibWebAppRuntime` override so the GitHub Actions "
+        "run/workflow checks now use the standard `create_github_actions_page()` "
+        "Playwright-backed factory path, and added `testing/tests/TS-951/README.md` "
+        f"for the ticket folder. {rerun_summary}"
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
