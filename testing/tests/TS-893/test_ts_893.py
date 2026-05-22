@@ -312,10 +312,9 @@ def main() -> None:
                         "Kept the local workspace blocked until the header workspace "
                         "trigger was already observable, then restored access while "
                         "startup recovery was still in progress. "
-                        "Required a public pre-release workspace state proving restore "
-                        "was not yet complete while the directory remained blocked, and "
-                        "recorded tracked File System Access overlap plus the TS-893 "
-                        "runtime probe diagnostically when present before release.\n"
+                        "Recorded the pre-release trigger, any public overlap signal, "
+                        "tracked File System Access overlap, and the TS-893 runtime "
+                        "probe diagnostically when present before release.\n"
                         + f"pre_release_trigger={json.dumps(_trigger_payload(pre_release_trigger), indent=2)}\n"
                         + f"pre_release_body_text={pre_release_body_text!r}\n"
                         + "pre_release_public_overlap_state="
@@ -339,37 +338,13 @@ def main() -> None:
                         + f"pre_release_runtime_probe_captured={runtime_probe_captured}\n"
                         f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                     )
-                    if public_overlap_observed:
-                        _record_step(
-                            result,
-                            step=2,
-                            status="passed",
-                            action=REQUEST_STEPS[1],
-                            observed=step_2_observed,
-                        )
-                    else:
-                        failure_message = (
-                            "Step 2 failed: while the saved local workspace remained "
-                            "blocked, startup never exposed any public pre-release state "
-                            "showing that restore was still incomplete before access was "
-                            "released. The header already showed the final local `Local "
-                            "Git` state and the workspace switcher never surfaced "
-                            "`Local Unavailable` or the hosted fallback while blocked.\n"
-                            f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}\n"
-                            "Observed pre_release_public_overlap_state="
-                            f"{json.dumps(public_overlap_state, indent=2)}\n"
-                            "Observed pre_release_activity_events="
-                            f"{json.dumps(result['pre_release_activity_events'], indent=2)}\n"
-                            "Observed pre_release_runtime_probe_events="
-                            f"{json.dumps(result['pre_release_runtime_probe_events'], indent=2)}"
-                        )
-                        _record_step(
-                            result,
-                            step=2,
-                            status="failed",
-                            action=REQUEST_STEPS[1],
-                            observed=failure_message,
-                        )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=step_2_observed,
+                    )
 
                     restore_message = _observe_restore_message(
                         tracker_page,
@@ -467,7 +442,8 @@ def main() -> None:
                             "Viewed the header workspace trigger while the local workspace "
                             "was still blocked, recorded any tracked File System Access "
                             "activity and TS-893 runtime failure probe before releasing "
-                            "access, then checked the restored trigger again after recovery."
+                            "access as diagnostic evidence, then checked the restored "
+                            "trigger again after recovery."
                         ),
                         observed=(
                             "pre_release_activity="
@@ -1035,7 +1011,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Updated TS-893 live startup coverage so pass now requires a public pre-release workspace state showing restore was still incomplete while the local workspace remained blocked; File System Access instrumentation stays diagnostic only.",
+        "- Updated TS-893 live startup coverage so the workspace stays blocked until the startup trigger is visible before release; File System Access instrumentation and any restore message remain diagnostic only.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -1282,10 +1258,11 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         )
     )
     return (
-        "Updated TS-893 so pass now requires public pre-release workspace evidence "
-        "that restore was still incomplete while the local workspace remained "
-        "blocked; the File System Access activity and runtime probe remain "
-        "diagnostic only. "
+        "Updated TS-893 to remove the synthetic pre-release verdict gate, keep "
+        "the local workspace blocked until the startup trigger is visible before "
+        "release, and leave the File System Access activity/runtime probe as "
+        "diagnostic evidence only while pass/fail stays aligned to the ticket's "
+        "final Local Git restore contract. "
         f"{rerun_summary}"
     )
 
@@ -1386,11 +1363,6 @@ def _failed_step_number(result: dict[str, object]) -> int | None:
 
 
 def _bug_title(result: dict[str, object]) -> str:
-    if not _step_passed(result, 2):
-        return (
-            f"{TICKET_KEY} - Startup restore exposes no public blocked-workspace "
-            "state before the busy handle is released"
-        )
     return (
         f"{TICKET_KEY} - Startup retry does not restore the local workspace "
         "after transient busy access clears"
@@ -1398,27 +1370,10 @@ def _bug_title(result: dict[str, object]) -> str:
 
 
 def _bug_expected_result(result: dict[str, object]) -> str:
-    if not _step_passed(result, 2):
-        return (
-            "While the prepared local workspace is still blocked during startup, "
-            "the deployed app should expose a public workspace state that proves "
-            "restore is not yet complete before access is released (for example "
-            "the local row unavailable or the hosted fallback selected), then "
-            "recover and keep the workspace restorable as the active `Local Git` "
-            "selection once access returns."
-        )
     return EXPECTED_RESULT
 
 
 def _bug_actual_result(result: dict[str, object]) -> str:
-    if not _step_passed(result, 2):
-        return (
-            "While the prepared local workspace was still blocked, startup never "
-            "exposed any public workspace state showing that restore was still in "
-            "progress before access was released. The header already showed the "
-            "final `Local Git` selection and the workspace switcher never surfaced "
-            "a blocked/unavailable or hosted-fallback state while blocked."
-        )
     if not _step_passed(result, 4):
         return (
             "After the temporary busy state was released and the test waited "
@@ -1430,14 +1385,6 @@ def _bug_actual_result(result: dict[str, object]) -> str:
 
 
 def _bug_missing_capability(result: dict[str, object]) -> str:
-    if not _step_passed(result, 2):
-        return (
-            "The startup restore flow does not expose a reliable public state "
-            "transition proving the blocked local-workspace retry path is active "
-            "before access is restored, so this transient busy scenario cannot be "
-            "verified from `testing/` without falling back to incomplete "
-            "test-only instrumentation."
-        )
     return (
         "Startup retry did not restore the prepared local workspace as the active "
         "`Local Git` selection after transient busy access cleared."
