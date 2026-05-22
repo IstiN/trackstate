@@ -13,11 +13,10 @@ The automation:
 4. keeps the local workspace blocked until the header workspace trigger is
   already visible, then restores access so the unblock cannot happen before
   startup has reached the visible recovery window
-5. records any restore-specific blocked-window diagnostics that are observable
-  while the workspace is still blocked, such as tracked File System Access
-  activity on the saved local workspace lineage, a TS-893 runtime probe event,
-  the visible restore skip banner, or another public pre-release non-restored
-  state
+5. requires restore-specific blocked-window overlap evidence while the
+  workspace is still blocked, such as tracked File System Access activity on
+  the saved local workspace lineage, a TS-893 runtime probe event, the visible
+  restore skip banner, or another public pre-release non-restored state
 6. after the busy-state release, waits for the workspace switcher trigger to
   restore the saved local workspace instead of asserting immediately
 7. opens **Workspace switcher** and verifies the selected active row is the
@@ -51,13 +50,14 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py
 ## Expected result
 
 ```text
-Pass: while the local workspace is still blocked, the run captures retry-path
-evidence specific to the blocked restore attempt when it is publicly observable,
-and after the busy-state release the prepared active local workspace restores as
-the selected Local Git row without keeping Hosted setup workspace active or
-showing Local Unavailable.
+Pass: while the local workspace is still blocked, the run captures
+restore-specific overlap evidence before release, and after the busy-state
+release the prepared active local workspace restores as the selected Local Git
+row without keeping Hosted setup workspace active or showing Local Unavailable.
 
-Fail: after release startup still keeps Hosted setup workspace active, leaves
+Fail: while the local workspace is still blocked, startup exposes only the
+already-restored Local Git UI and no restore-specific overlap evidence before
+release, or after release startup keeps Hosted setup workspace active, leaves
 the local row Unavailable, or otherwise does not restore the saved local
 workspace as Local Git.
 ```
