@@ -278,7 +278,7 @@ def main() -> None:
                     result["pre_release_restore_message"] = overlap_state[
                         "pre_release_restore_message"
                     ]
-                    result["overlap_required_for_pass"] = False
+                    result["overlap_required_for_pass"] = True
                     overlap_proof_sources = list(overlap_state["overlap_proof_sources"])
                     result["pre_release_overlap_proved"] = bool(overlap_proof_sources)
                     result["pre_release_overlap_proof_sources"] = overlap_proof_sources
@@ -310,7 +310,9 @@ def main() -> None:
                             "Kept the local workspace blocked until the header workspace "
                             "trigger was already observable, then restored access during "
                             "startup recovery. No restore-specific blocked-window "
-                            "overlap proof was observed before release."
+                            "overlap proof was observed before release, so the scenario "
+                            "still cannot prove startup hit the transient busy-handle "
+                            "retry path."
                         )
                     step_2_observed = (
                         step_2_summary
@@ -344,13 +346,49 @@ def main() -> None:
                         + f"startup_retry_overlap_window_seconds={STARTUP_RETRY_OVERLAP_WINDOW_SECONDS}\n"
                         f"busy_blocker={json.dumps(blocker.snapshot(), indent=2)}"
                     )
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed=step_2_observed,
-                    )
+                    if overlap_proof_sources:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="passed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                    else:
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=REQUEST_STEPS[1],
+                            observed=step_2_observed,
+                        )
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                "Not reached because Step 2 did not produce any "
+                                "restore-specific blocked-window overlap proof."
+                            ),
+                        )
+                        _record_step(
+                            result,
+                            step=4,
+                            status="failed",
+                            action=REQUEST_STEPS[3],
+                            observed=(
+                                "Not reached because Step 2 did not produce any "
+                                "restore-specific blocked-window overlap proof."
+                            ),
+                        )
+                        raise AssertionError(
+                            "Step 2 failed: startup reached the visible pre-release "
+                            "window while the saved local workspace was still blocked, "
+                            "but the app exposed no restore-specific blocked-window "
+                            "overlap proof before access was restored.\n"
+                            f"{step_2_observed}"
+                        )
 
                     restore_message = _observe_restore_message(
                         tracker_page,
@@ -937,7 +975,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was automated",
         "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "* Kept access to the prepared local workspace blocked through the startup retry overlap window before releasing access.",
-        "* Recorded any restore-specific blocked-window overlap diagnostics before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state, but kept the verdict tied to the ticket's public post-release outcome.",
+        "* Required restore-specific blocked-window overlap evidence before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state so the scenario cannot pass on the preloaded final UI alone.",
         f"* Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "* Opened *Workspace switcher* and inspected the selected active row plus the prepared local row.",
         "* Verified the selected row reached {{Local Git}} and did not remain on {{Hosted setup workspace}} or {{Local Unavailable}}.",
@@ -985,7 +1023,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
         "- Kept access to the prepared local workspace blocked through the startup retry overlap window before releasing access.",
-        "- Recorded any restore-specific blocked-window overlap diagnostics before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state, but kept the verdict tied to the ticket's public post-release outcome.",
+        "- Required restore-specific blocked-window overlap evidence before release from tracked File System Access activity, a TS-893 runtime probe event, the visible restore skip banner, or another public pre-release non-restored state so the scenario cannot pass on the preloaded final UI alone.",
         f"- Waited up to {TRIGGER_WAIT_SECONDS} seconds after the busy-state release for the header workspace switcher trigger to restore the local workspace instead of asserting immediately.",
         "- Opened **Workspace switcher** and inspected the selected active row plus the prepared local row.",
         "- Verified the selected row reached `Local Git` and did not remain on `Hosted setup workspace` or `Local Unavailable`.",
@@ -1041,8 +1079,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework Summary",
         "",
         "### Fixed Issues",
-        "- Removed the synthetic Step 2 failure gate on missing overlap diagnostics and kept the overlap/runtime capture as evidence only.",
-        "- Kept the later trigger and workspace-switcher assertions as the ticket-aligned verdict for the final `Local Git` outcome.",
+        "- Made Step 2 require restore-specific blocked-window overlap proof before the scenario can pass.",
+        "- Kept the overlap/runtime/public-state diagnostics in the outputs so the rerun shows exactly what did or did not prove the retry path.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1270,24 +1308,24 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Updated TS-893 so Step 2 records overlap/runtime diagnostics without "
-            "failing solely on missing pre-release proof, then re-checked the "
-            "final `Local Git` state after release. Also realigned the TS-893 "
-            "README/config to the ticket's expected result. "
+            "Updated TS-893 so Step 2 now requires restore-specific blocked-window "
+            "overlap proof before the scenario can pass, and aligned the TS-893 "
+            "README/config with that gate. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     if _failed_due_to_missing_overlap_proof(result):
         return (
-            "Updated TS-893 so Step 2 records overlap/runtime diagnostics and keeps "
-            "the ticket verdict on the public post-release state, then realigned "
-            "the TS-893 README/config to the ticket's expected result. Re-ran "
-            f"`{RUN_COMMAND}`: still failing. Current failure: "
+            "Updated TS-893 so Step 2 now requires restore-specific blocked-window "
+            "overlap proof before the scenario can pass, and aligned the TS-893 "
+            "README/config with that gate. Re-ran "
+            f"`{RUN_COMMAND}`: still failing because no restore-specific overlap "
+            f"proof was observed before release. Current failure: "
             f"{_exact_error_summary(result)}"
         )
     return (
-        "Updated TS-893 so Step 2 records overlap/runtime diagnostics while still "
-        "checking the later final-state contract, and realigned the TS-893 "
-        "README/config to the ticket's expected result. Re-ran "
+        "Updated TS-893 so Step 2 now requires restore-specific blocked-window "
+        "overlap proof before the scenario can pass, and aligned the TS-893 "
+        "README/config with that gate. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
