@@ -143,6 +143,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   ) async => state;
 
   @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async => state;
+
+  @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
     state = state.copyWith(activeWorkspaceId: workspaceId);
     return state;
