@@ -615,7 +615,9 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     if (seen.contains(element)) {
       continue;
     }
-    if (!_isVisible(element) || !_isFocusable(element)) {
+    if (!_isVisible(element) ||
+        !_isFocusable(element) ||
+        !_isMeaningfullyInteractiveFocusTarget(element)) {
       continue;
     }
     seen.add(element);
@@ -633,6 +635,44 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     );
   }
   return targets;
+}
+
+bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
+  final tagName = element.tagName.toLowerCase();
+  if (tagName == 'button' ||
+      tagName == 'input' ||
+      tagName == 'textarea' ||
+      tagName == 'select') {
+    return true;
+  }
+
+  if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusPanelIdAttribute) case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {
+    return true;
+  }
+
+  final role = element.getAttribute('role')?.trim().toLowerCase();
+  switch (role) {
+    case 'button':
+    case 'checkbox':
+    case 'combobox':
+    case 'link':
+    case 'menuitem':
+    case 'option':
+    case 'radio':
+    case 'searchbox':
+    case 'switch':
+    case 'tab':
+    case 'textbox':
+      return true;
+  }
+
+  return false;
 }
 
 int? _focusTargetIndexForActiveElement({
