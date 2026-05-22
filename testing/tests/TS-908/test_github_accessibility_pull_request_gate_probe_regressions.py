@@ -220,8 +220,11 @@ void main() {
 
         self.assertIn("import 'package:flutter/material.dart';", patched)
         self.assertIn("import 'ts908_probe_surface.dart';", patched)
-        self.assertIn("runApp(const _Ts908RenderedProbeApp());", patched)
-        self.assertIn("child: Ts908ProbeSurface()", patched)
+        self.assertIn(
+            "runApp(_Ts908RenderedProbeApp(child: const TrackStateApp()));",
+            patched,
+        )
+        self.assertIn("child: const Ts908ProbeSurface()", patched)
 
 
 if __name__ == "__main__":
