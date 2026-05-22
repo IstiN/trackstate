@@ -178,6 +178,7 @@ def main() -> None:
                         message_fragment=SUMMARY_REQUIRED_FRAGMENT,
                     )
                 except Exception as error:
+                    result["post_step_2_body_text"] = edit_page.current_body_text()
                     _record_step(
                         result,
                         step=2,
@@ -922,9 +923,14 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Evidence",
         f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
         "",
-        "## Observed dialog text",
+        "## Observed body text at failure",
         "```text",
-        str(result.get("edit_dialog_text", result.get("runtime_body_text", ""))),
+        str(
+            result.get(
+                "post_step_2_body_text",
+                result.get("edit_dialog_text", result.get("runtime_body_text", "")),
+            )
+        ),
         "```",
         "",
         "## Observed Summary field payload",
