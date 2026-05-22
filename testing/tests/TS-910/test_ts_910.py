@@ -40,7 +40,7 @@ TEST_CASE_TITLE = (
     "elements"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-910/test_ts_910.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
 FIRST_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
@@ -128,16 +128,63 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime = tracker_page.open()
+                tracker_page.session.set_viewport_size(**DESKTOP_VIEWPORT)
+                try:
+                    runtime = tracker_page.open()
+                except AssertionError as error:
+                    body_text = tracker_page.body_text()
+                    result["runtime_state"] = "startup-failed"
+                    result["runtime_body_text"] = body_text
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=AUTOMATION_STEPS[0],
+                        observed=str(error),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the deployed desktop app and visually checked whether "
+                            "the dashboard and workspace switcher were available before "
+                            "starting the keyboard scenario."
+                        ),
+                        observed=(
+                            f"viewport={DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
+                            f"body_text={body_text!r}"
+                        ),
+                    )
+                    raise
                 result["runtime_state"] = runtime.kind
                 result["runtime_body_text"] = runtime.body_text
                 if runtime.kind != "ready":
-                    raise AssertionError(
+                    startup_error = (
                         "Step 1 failed: the deployed app did not reach an interactive "
                         "desktop state before the workspace-switcher focus-loop scenario began.\n"
                         f"Observed runtime state: {runtime.kind}\n"
-                        f"Observed body text:\n{runtime.body_text}",
+                        f"Observed body text:\n{runtime.body_text}"
                     )
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=AUTOMATION_STEPS[0],
+                        observed=startup_error,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the deployed desktop app and visually checked whether "
+                            "the dashboard and workspace switcher were available before "
+                            "starting the keyboard scenario."
+                        ),
+                        observed=(
+                            f"viewport={DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
+                            f"runtime_state={runtime.kind!r}; "
+                            f"body_text={runtime.body_text!r}"
+                        ),
+                    )
+                    raise AssertionError(startup_error)
 
                 page.dismiss_connection_banner()
                 page.navigate_to_section("Dashboard")
@@ -930,7 +977,22 @@ def _failed_step_label(result: dict[str, object]) -> str:
     return f"Step {failed.get('step')} — {failed.get('action')}"
 
 
+def _runtime_body_text(result: dict[str, object]) -> str:
+    runtime_body_text = result.get("runtime_body_text")
+    if isinstance(runtime_body_text, str) and runtime_body_text.strip():
+        return runtime_body_text.strip()
+    return str(result.get("error", "")).split("Visible body text:", 1)[-1].strip() or ""
+
+
 def _actual_vs_expected_summary(result: dict[str, object]) -> str:
+    failed = _failed_step(result)
+    if failed is not None and failed.get("step") == 1:
+        body_text = _runtime_body_text(result)
+        return (
+            "The deployed app never reached the ticket precondition for the workspace-switcher "
+            "focus-loop scenario. Instead of the desktop tracker shell and workspace switcher, "
+            f"the visible page content was {body_text!r}."
+        )
     wrap_state = result.get("wrap_state_after_footer")
     if isinstance(wrap_state, dict):
         active = _active_from_state(wrap_state)
@@ -951,6 +1013,23 @@ def _actual_vs_expected_summary(result: dict[str, object]) -> str:
 
 
 def _annotated_request_steps(result: dict[str, object]) -> str:
+    failed = _failed_step(result)
+    if failed is not None and failed.get("step") == 1:
+        body_text = _runtime_body_text(result)
+        return "\n".join(
+            [
+                (
+                    f"# ❌ {REQUEST_STEPS[0]} — Could not start the panel traversal because "
+                    "the deployed desktop app never exposed the workspace switcher scenario. "
+                    f"Visible page content: {body_text!r}."
+                ),
+                (
+                    f"# ❌ {REQUEST_STEPS[1]} — The wrap verification could not run because "
+                    "the final interactive panel control was never reachable after the failed "
+                    f"startup state {body_text!r}."
+                ),
+            ],
+        )
     trace = result.get("tab_trace_to_footer")
     wrap_state = result.get("wrap_state_after_footer")
     visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
@@ -1159,7 +1238,9 @@ def _bug_description(result: dict[str, object]) -> str:
     screenshot = result.get("screenshot", "not captured")
     failed_step = _failed_step(result)
     note = (
-        "* The live panel did not reach the ticket's expected saved-workspace traversal state, so the automation reported the earliest product-visible mismatch."
+        "* The live desktop app never reached the workspace-switcher precondition, so the automation reported the earliest product-visible mismatch before any panel traversal could begin."
+        if failed_step is not None and failed_step.get("step") == 1
+        else "* The live panel did not reach the ticket's expected saved-workspace traversal state, so the automation reported the earliest product-visible mismatch."
         if failed_step is not None and failed_step.get("step") != 4
         else "* The regression reproduction stayed within the visible panel; the final Tab press failed because focus did not loop back to the first internal row."
     )

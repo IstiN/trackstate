@@ -1092,6 +1092,16 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         )
 
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
+        )
+
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         for line in self._extract_matching_log_lines(
             run_log_text,
