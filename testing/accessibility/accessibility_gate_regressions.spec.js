@@ -7,6 +7,35 @@ const {
 } = require('./accessibility_gate');
 
 test.describe('accessibility gate regressions', () => {
+  test('flags Flutter runtime contrast probe markers', async ({ page }) => {
+    await page.setContent(`
+      <!doctype html>
+      <html lang="en">
+        <body>
+          <div
+            id="trackstate-accessibility-probe-color-contrast"
+            data-trackstate-accessibility-probe="color-contrast"
+            data-trackstate-contrast-ratio="1.00"
+            data-trackstate-contrast-threshold="4.5"
+            data-trackstate-foreground="#faf8f4"
+            data-trackstate-background="#faf8f4"
+            data-trackstate-text="Sync issue"
+            data-trackstate-semantics-label="button"
+            hidden
+          ></div>
+        </body>
+      </html>
+    `);
+
+    const violations = await collectAccessibilityViolations(page);
+
+    expect(violations, formatViolations(violations)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'color-contrast' }),
+        ]),
+    );
+  });
+
   test('flags WCAG AA contrast regressions', async ({ page }) => {
     await page.setContent(`
       <!doctype html>

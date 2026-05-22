@@ -14,6 +14,9 @@ const accessibilityGateRules = [
 ];
 
 const flutterSemanticsInitializationTimeoutMs = 15000;
+const flutterRuntimeContrastProbeSelector =
+  '#trackstate-accessibility-probe-color-contrast'
+  + '[data-trackstate-accessibility-probe="color-contrast"]';
 
 function isSemanticsInitializationTimeout(error) {
   if (!(error instanceof Error)) {
@@ -108,6 +111,8 @@ async function collectAccessibilityViolations(page) {
       .withRules(accessibilityGateRules)
       .analyze();
   const labelViolations = await collectNonDescriptiveLabelViolations(page);
+  const flutterRuntimeContrastViolations =
+    await collectFlutterRuntimeContrastViolations(page);
 
   return [
     ...axeResults.violations.map((violation) => ({
@@ -118,8 +123,63 @@ async function collectAccessibilityViolations(page) {
         failureSummary: node.failureSummary,
       })),
     })),
+    ...flutterRuntimeContrastViolations,
     ...labelViolations,
   ];
+}
+
+async function collectFlutterRuntimeContrastViolations(page) {
+  return await page.evaluate(
+      ({ selector, defaultThreshold }) => {
+        const probes = Array.from(document.querySelectorAll(selector));
+        const violations = [];
+
+        for (const probe of probes) {
+          const ratio = Number.parseFloat(
+              probe.getAttribute('data-trackstate-contrast-ratio') ?? '',
+          );
+          const threshold = Number.parseFloat(
+              probe.getAttribute('data-trackstate-contrast-threshold') ?? '',
+          );
+          const minimumRatio = Number.isFinite(threshold)
+            ? threshold
+            : defaultThreshold;
+          if (!Number.isFinite(ratio) || ratio >= minimumRatio) {
+            continue;
+          }
+
+          const foreground =
+            probe.getAttribute('data-trackstate-foreground') ?? 'unknown';
+          const background =
+            probe.getAttribute('data-trackstate-background') ?? 'unknown';
+          const text = probe.getAttribute('data-trackstate-text') ?? '';
+          const semanticsLabel =
+            probe.getAttribute('data-trackstate-semantics-label') ?? '';
+          const target = probe.id ? `#${probe.id}` : selector;
+
+          violations.push({
+            id: 'color-contrast',
+            help: 'Elements must meet minimum color contrast ratio thresholds.',
+            nodes: [
+              {
+                target: [target],
+                failureSummary:
+                  `Flutter-rendered probe "${text}" with semantics label `
+                  + `"${semanticsLabel}" reported contrast ratio `
+                  + `${ratio.toFixed(2)}:1 between ${foreground} and `
+                  + `${background}, below ${minimumRatio.toFixed(1)}:1.`,
+              },
+            ],
+          });
+        }
+
+        return violations;
+      },
+      {
+        selector: flutterRuntimeContrastProbeSelector,
+        defaultThreshold: 4.5,
+      },
+  );
 }
 
 async function collectNonDescriptiveLabelViolations(page) {
@@ -409,10 +469,13 @@ module.exports = {
   accessibilityGateRules,
   captureFlutterStartupDiagnostics,
   collectAccessibilityViolations,
+  collectFlutterRuntimeContrastViolations,
   enableFlutterSemantics,
+  isSemanticsInitializationTimeout,
   formatFlutterEngineInitializationEvidence,
   formatPlaceholderVerificationEvidence,
   formatSemanticsTreeDiscoveryStatus,
   formatFlutterSemanticsEvidence,
   formatViolations,
+  readFlutterSemanticsEvidence,
 };
