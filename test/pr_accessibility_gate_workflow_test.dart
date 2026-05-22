@@ -66,4 +66,23 @@ void main() {
       );
     },
   );
+
+  test('pull requests expose a downstream deploy preview gate', () {
+    final workflowFile = repositoryFile('.github/workflows/unit-tests.yml');
+
+    expect(workflowFile.existsSync(), isTrue);
+
+    final workflow = workflowFile.readAsStringSync();
+
+    expect(
+      workflow,
+      contains('deploy-preview:'),
+      reason:
+          'The PR workflow needs a contributor-visible downstream deploy stage '
+          'so accessibility failures visibly block any publish path.',
+    );
+    expect(workflow, contains('name: Deploy preview'));
+    expect(workflow, contains('needs: [flutter-checks, accessibility-checks]'));
+    expect(workflow, contains('name: Publish preview'));
+  });
 }
