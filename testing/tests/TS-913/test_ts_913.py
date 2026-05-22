@@ -82,7 +82,6 @@ class Ts913WorkspaceStateGuardRuntime(Ts723WorkspaceRestoreRuntime):
             workspace_state=workspace_state,
             viewport=DESKTOP_VIEWPORT,
         )
-
     def _build_preload_script(self) -> str:
         serialized_workspace_state = json.dumps(self._workspace_state)
         return "".join(

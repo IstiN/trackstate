@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 
 from testing.core.interfaces.github_accessibility_pull_request_gate_probe import (
+    GitHubAccessibilityWorkflowContractObservation,
     GitHubAccessibilityPullRequestGateObservation,
+)
+from testing.core.interfaces.github_actions_preflight_gate_probe import (
+    GitHubActionsWorkflowJobObservation,
 )
 
 
@@ -42,6 +46,17 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             target_workflow_declares_pull_request_trigger=True,
             target_workflow_job_names=["Flutter checks"],
             target_workflow_step_names=["Build web app"],
+            target_workflow_accessibility_job_names=["Accessibility checks"],
+            target_workflow_downstream_job_names=[],
+            target_workflow_downstream_job_depends_on_accessibility=False,
+            target_workflow=GitHubAccessibilityWorkflowContractObservation(
+                declares_pull_request_trigger=True,
+                job_names=["Flutter checks"],
+                step_names=["Build web app"],
+                accessibility_job_names=["Accessibility checks"],
+                downstream_job_names=[],
+                downstream_job_depends_on_accessibility=False,
+            ),
             pull_request_number=123,
             pull_request_url="https://github.com/IstiN/trackstate/pull/123",
             pull_request_checks_url="https://github.com/IstiN/trackstate/pull/123/checks",
@@ -63,6 +78,17 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             observed_branch_run_urls=["https://github.com/IstiN/trackstate/actions/runs/456"],
             observed_branch_run_statuses=["completed"],
             observed_branch_run_conclusions=[run_conclusion or ""],
+            observed_run_jobs=[
+                GitHubActionsWorkflowJobObservation(
+                    id=4561,
+                    name="Flutter checks",
+                    status="completed",
+                    conclusion=run_conclusion,
+                    html_url="https://github.com/IstiN/trackstate/actions/runs/456/job/4561",
+                    started_at="2026-05-22T07:40:00Z",
+                    completed_at="2026-05-22T07:41:00Z",
+                )
+            ],
             observed_job_names=["Flutter checks"],
             observed_step_names=["Accessibility probe"],
             observed_status_check_names=["Flutter checks"],
@@ -87,6 +113,8 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             run_log_mentions_semantic_issue=bool(run_log_matched_semantic_markers),
             run_log_excerpt="color contrast violation and aria-label defect",
             run_log_error=None,
+            runtime_accessibility_surface_present=False,
+            runtime_accessibility_surface_summary="",
             probe_contains_low_contrast_indicator=True,
             probe_contains_semantic_label_indicator=True,
             probe_semantic_label="button",
