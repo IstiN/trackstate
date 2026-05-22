@@ -27,5 +27,5 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
 ## Coverage notes
 
 - Uses the default desktop viewport of `1440x960`.
-- Opens the live workspace switcher and derives the current first and last internal keyboard targets from the panel's observed order of keyboard-reachable in-panel controls.
-- Establishes the ticket precondition by focusing the derived first internal target directly through the page object, without gating on trigger-to-panel `Tab` behavior, then presses `Shift+Tab` from it.
+- Opens the live workspace switcher from a focused trigger and derives the current last internal keyboard target from the panel's observed in-panel controls.
+- Establishes the ticket precondition from the live initial focus state or a real `Tab` from the focused trigger, then presses `Shift+Tab` from that reached first internal target.
