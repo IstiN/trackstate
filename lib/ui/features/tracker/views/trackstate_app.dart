@@ -1129,6 +1129,73 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
+  Future<void> _retryUnavailableLocalWorkspace(
+    WorkspaceProfile workspace,
+  ) async {
+    if (widget.repository != null || !workspace.isLocal) {
+      return;
+    }
+    final selectedPath = await widget.workspaceDirectoryPicker(
+      initialDirectory: workspace.target,
+    );
+    if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
+      return;
+    }
+
+    final normalizedTarget = normalizeWorkspaceTarget(
+      WorkspaceProfileTargetType.local,
+      selectedPath,
+    );
+    if (normalizedTarget.isEmpty) {
+      return;
+    }
+
+    final nextWorkspace = normalizedTarget == workspace.normalizedTarget
+        ? workspace
+        : await widget.workspaceProfileService.updateProfile(
+            workspace.id,
+            WorkspaceProfileInput(
+              targetType: WorkspaceProfileTargetType.local,
+              target: normalizedTarget,
+              defaultBranch: workspace.defaultBranch,
+              writeBranch: workspace.writeBranch,
+              displayName:
+                  workspace.normalizedCustomDisplayName ??
+                  workspace.displayName,
+            ),
+            select: false,
+          );
+    if (!mounted) {
+      return;
+    }
+
+    final previousViewModel = viewModel;
+    final prepared = await _prepareWorkspaceSwitch(
+      nextWorkspace,
+      previousViewModel: previousViewModel,
+      showFailureMessage: false,
+    );
+    if (prepared != null) {
+      final selectedState = await widget.workspaceProfileService.selectProfile(
+        nextWorkspace.id,
+      );
+      await _commitPreparedWorkspaceSwitch(
+        prepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+      return;
+    }
+
+    final reason = _workspaceValidationFailureReason(nextWorkspace);
+    previousViewModel.showMessage(
+      TrackerMessage.workspaceSwitchFailed(
+        workspaceName: nextWorkspace.displayName,
+        reason: reason,
+      ),
+    );
+  }
+
   Future<void> _deleteWorkspaceProfile(WorkspaceProfile workspace) async {
     final nextState = await widget.workspaceProfileService.deleteProfile(
       workspace.id,
@@ -1552,6 +1619,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                 onSelectWorkspace: (workspace) {
                   closeSwitcher();
                   unawaited(_switchToWorkspace(workspace));
+                },
+                onRetryUnavailableLocalWorkspace: (workspace) {
+                  closeSwitcher();
+                  unawaited(_retryUnavailableLocalWorkspace(workspace));
                 },
                 onDeleteWorkspace: (workspace) {
                   unawaited(
@@ -4309,8 +4380,12 @@ class _TopBar extends StatelessWidget {
                         compact: true,
                         condensed: false,
                         onPressed: openWorkspaceSwitcher,
+                        semanticsSortOrder: workspaceSwitcherOrder,
                         semanticsIdentifier:
                             browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+                        controlsNodes: const {
+                          browserWorkspaceSwitcherSemanticsIdentifier,
+                        },
                         focusNode: workspaceSwitcherTriggerFocusNode,
                       ),
                     ),
@@ -6556,6 +6631,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.requestedFocusedWorkspaceId,
     required this.focusRequestVersion,
     required this.onSelectWorkspace,
+    required this.onRetryUnavailableLocalWorkspace,
     required this.onDeleteWorkspace,
     required this.onAddWorkspace,
     required this.onMoveWorkspaceSelection,
@@ -6573,6 +6649,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final String? requestedFocusedWorkspaceId;
   final int focusRequestVersion;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
+  final ValueChanged<WorkspaceProfile> onRetryUnavailableLocalWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final WorkspaceProfileCreator onAddWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
@@ -6730,6 +6807,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           builder: (context) {
                             final workspace = widget.workspaces.profiles[index];
                             final workspaceId = workspace.id;
+                            final isUnavailableLocal =
+                                workspace.isLocal &&
+                                widget.localWorkspaceAvailability[workspaceId] ==
+                                    false;
+                            final showLocalHostedAccessAction =
+                                workspace.isLocal &&
+                                widget.viewModel.usesLocalPersistence;
                             return _WorkspaceSwitcherRow(
                               key: ValueKey('workspace-$workspaceId'),
                               workspace: workspace,
@@ -6747,25 +6831,34 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                     widget.localWorkspaceAvailability,
                               ),
                               focusOrderBase: index * 3.0 + 1,
-                              primaryActionLabel:
-                                  workspace.isLocal &&
-                                      widget.viewModel.usesLocalPersistence
+                              primaryActionLabel: isUnavailableLocal
+                                  ? l10n.retry
+                                  : showLocalHostedAccessAction
                                   ? (widget
                                             .viewModel
                                             .hasLocalHostedAccessSession
                                         ? l10n.manageGitHubAccess
                                         : l10n.connectGitHub)
                                   : null,
-                              onPrimaryAction:
-                                  workspace.isLocal &&
-                                      widget.viewModel.usesLocalPersistence
+                              primaryActionSemanticLabel: isUnavailableLocal
+                                  ? '${l10n.retry}: ${workspace.displayName}'
+                                  : null,
+                              onPrimaryAction: isUnavailableLocal
+                                  ? () =>
+                                        widget.onRetryUnavailableLocalWorkspace(
+                                          workspace,
+                                        )
+                                  : showLocalHostedAccessAction
                                   ? () => _showRepositoryAccessDialog(
                                       context,
                                       widget.viewModel,
                                       allowLocalGitHubConnection: true,
                                     )
                                   : null,
-                              onSelect: workspaceId == activeWorkspaceId
+                              showOpenAction: !isUnavailableLocal,
+                              onSelect:
+                                  workspaceId == activeWorkspaceId ||
+                                      isUnavailableLocal
                                   ? null
                                   : () => widget.onSelectWorkspace(workspace),
                               onDelete: () =>
@@ -6882,8 +6975,10 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     required this.onSelectLastWorkspace,
     required this.onSummaryFocusRequesterChanged,
     this.primaryActionLabel,
+    this.primaryActionSemanticLabel,
     this.onPrimaryAction,
     this.onSelect,
+    this.showOpenAction = true,
   });
 
   final WorkspaceProfile workspace;
@@ -6896,8 +6991,10 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final VoidCallback onSelectLastWorkspace;
   final ValueChanged<VoidCallback?> onSummaryFocusRequesterChanged;
   final String? primaryActionLabel;
+  final String? primaryActionSemanticLabel;
   final VoidCallback? onPrimaryAction;
   final VoidCallback? onSelect;
+  final bool showOpenAction;
 
   @override
   State<_WorkspaceSwitcherRow> createState() => _WorkspaceSwitcherRowState();
@@ -6956,6 +7053,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final onSelect = widget.onSelect;
     final onDelete = widget.onDelete;
     final primaryActionLabel = widget.primaryActionLabel;
+    final primaryActionSemanticLabel =
+        widget.primaryActionSemanticLabel ?? primaryActionLabel;
     final onPrimaryAction = widget.onPrimaryAction;
     final typeLabel = workspace.isHosted
         ? l10n.workspaceTargetTypeHosted
@@ -7076,38 +7175,50 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     l10n.activeWorkspace,
                     style: Theme.of(context).textTheme.labelMedium,
                   )
-                else
+                else if (widget.showOpenAction)
                   FocusTraversalOrder(
                     order: NumericFocusOrder(focusOrderBase),
                     child: _WorkspaceSwitcherActionButton(
                       buttonKey: ValueKey('workspace-open-${workspace.id}'),
                       label: l10n.openWorkspace,
-                      semanticsLabel: l10n.openWorkspace,
+                      semanticsLabel:
+                          '${l10n.openWorkspace}: ${workspace.displayName}',
                       onPressed: onSelect,
                     ),
                   ),
                 if (primaryActionLabel != null && onPrimaryAction != null)
                   FocusTraversalOrder(
-                    order: NumericFocusOrder(focusOrderBase + 1),
+                    order: NumericFocusOrder(
+                      focusOrderBase + (widget.showOpenAction ? 1 : 0),
+                    ),
                     child: _WorkspaceSwitcherActionButton(
                       buttonKey: ValueKey(
                         'workspace-primary-action-${workspace.id}',
                       ),
                       label: primaryActionLabel,
-                      semanticsLabel: primaryActionLabel,
+                      semanticsLabel: primaryActionSemanticLabel!,
                       onPressed: onPrimaryAction,
                     ),
                   ),
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(focusOrderBase + 2),
-                  child: _WorkspaceSwitcherActionButton(
-                    buttonKey: ValueKey('workspace-delete-${workspace.id}'),
-                    label: l10n.delete,
-                    semanticsLabel: l10n.delete,
-                    onPressed: onDelete,
-                    destructive: true,
+                if (!isActive)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(
+                      focusOrderBase +
+                          (widget.showOpenAction ? 1 : 0) +
+                          ((primaryActionLabel != null &&
+                                  onPrimaryAction != null)
+                              ? 1
+                              : 0),
+                    ),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey('workspace-delete-${workspace.id}'),
+                      label: l10n.delete,
+                      semanticsLabel:
+                          '${l10n.delete}: ${workspace.displayName}',
+                      onPressed: onDelete,
+                      destructive: true,
+                    ),
                   ),
-                ),
               ],
             ),
           ],
@@ -7197,42 +7308,55 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final enabled = onPressed != null;
-    final foregroundColor = destructive ? colors.error : colors.text;
+    final foregroundColor = destructive
+        ? _workspaceSwitcherDestructiveActionColor(context)
+        : colors.text;
+    final labelText = Text(
+      label,
+      semanticsLabel: semanticsLabel,
+      style: Theme.of(
+        context,
+      ).textTheme.labelLarge?.copyWith(color: foregroundColor),
+    );
 
-    final visualChild = kIsWeb
-        ? InkWell(
-            key: buttonKey,
-            borderRadius: BorderRadius.circular(8),
-            excludeFromSemantics: true,
-            onTap: onPressed,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Text(
-                label,
-                style: Theme.of(
-                  context,
-                ).textTheme.labelLarge?.copyWith(color: foregroundColor),
-              ),
-            ),
-          )
-        : destructive
-        ? TextButton(key: buttonKey, onPressed: onPressed, child: Text(label))
-        : OutlinedButton(
-            key: buttonKey,
-            onPressed: onPressed,
-            child: Text(label),
-          );
+    if (destructive) {
+      return TextButton(
+        key: buttonKey,
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          foregroundColor: foregroundColor,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: labelText,
+      );
+    }
 
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      focusable: enabled,
-      label: semanticsLabel,
-      onTap: onPressed,
-      child: ExcludeSemantics(child: visualChild),
+    return OutlinedButton(
+      key: buttonKey,
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: foregroundColor,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        side: BorderSide(color: colors.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      child: labelText,
     );
   }
+}
+
+Color _workspaceSwitcherDestructiveActionColor(BuildContext context) {
+  final theme = Theme.of(context);
+  final colors = context.ts;
+  if (theme.brightness == Brightness.light) {
+    return Color.lerp(colors.error, colors.text, 0.1)!;
+  }
+  return colors.error;
 }
 
 String _workspaceStateLabel(
