@@ -313,8 +313,12 @@ def _evaluate_error_log(
 ) -> None:
     focused_excerpt = observation.run_log_excerpt or _stage_excerpt(stage_log_lines, observation)
     descriptive_message = _extract_missing_placeholder_message(focused_excerpt)
-    generic_timeout_message = _extract_generic_timeout_message(focused_excerpt)
-    unexpected_polling_lines = _unexpected_polling_lines(focused_excerpt.splitlines())
+    full_log_timeout_message = _full_log_generic_timeout_message(observation, focused_excerpt)
+    unexpected_polling_lines = _full_log_unexpected_polling_lines(
+        observation,
+        focused_excerpt=focused_excerpt,
+        stage_log_lines=stage_log_lines,
+    )
 
     step_failures: list[str] = []
     if observation.run_log_error is not None:
@@ -326,10 +330,10 @@ def _evaluate_error_log(
             "the hosted accessibility error did not explicitly identify the missing "
             "`flt-semantics-placeholder` pre-flight condition."
         )
-    if generic_timeout_message is not None:
+    if full_log_timeout_message is not None:
         step_failures.append(
             "the hosted accessibility failure still surfaced a generic Playwright timeout "
-            f"instead of a targeted missing-placeholder message: {generic_timeout_message}."
+            f"instead of a targeted missing-placeholder message: {full_log_timeout_message}."
         )
     if unexpected_polling_lines:
         step_failures.append(
@@ -344,7 +348,9 @@ def _evaluate_error_log(
             + "\n"
             + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
             + f"Missing-placeholder message: {descriptive_message or '<none>'}\n"
-            + f"Generic timeout evidence: {generic_timeout_message or '<none>'}\n"
+            + f"Generic timeout evidence: {full_log_timeout_message or '<none>'}\n"
+            + "Run-log timeout markers: "
+            + f"{observation.run_log_matched_contrast_markers or ['<none>']}\n"
             + "Unexpected polling/runtime evidence: "
             + f"{unexpected_polling_lines or ['<none>']}\n"
             + "Hosted run-log excerpt:\n"
@@ -432,6 +438,37 @@ def _unexpected_polling_lines(log_lines: list[str]) -> list[str]:
         if any(marker in lowered for marker in UNEXPECTED_POLLING_MARKERS):
             matches.append(line)
     return _dedupe_preserving_order(matches)
+
+
+def _full_log_generic_timeout_message(
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    focused_excerpt: str,
+) -> str | None:
+    excerpt_timeout = _extract_generic_timeout_message(focused_excerpt)
+    if excerpt_timeout is not None:
+        return excerpt_timeout
+    if observation.run_log_matched_contrast_markers:
+        return " / ".join(observation.run_log_matched_contrast_markers)
+    if observation.run_log_mentions_contrast_issue:
+        return "run_log_mentions_contrast_issue"
+    return None
+
+
+def _full_log_unexpected_polling_lines(
+    observation: GitHubAccessibilityPullRequestGateObservation,
+    *,
+    focused_excerpt: str,
+    stage_log_lines: list[str],
+) -> list[str]:
+    evidence_lines = [
+        *focused_excerpt.splitlines(),
+        *stage_log_lines,
+        *observation.semantics_tree_discovery_log_entries,
+        *observation.flutter_engine_initialization_log_entries,
+    ]
+    if observation.runtime_accessibility_surface_summary:
+        evidence_lines.append(observation.runtime_accessibility_surface_summary)
+    return _unexpected_polling_lines(evidence_lines)
 
 
 def _stage_excerpt(

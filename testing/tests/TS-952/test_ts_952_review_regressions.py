@@ -33,6 +33,8 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
         *,
         run_log_excerpt: str,
         run_log_error: str | None = None,
+        run_log_matched_contrast_markers: list[str] | None = None,
+        run_log_mentions_contrast_issue: bool | None = None,
         run_conclusion: str = "failure",
         accessibility_check_conclusion: str = "failure",
         run_status: str = "completed",
@@ -41,6 +43,7 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
         semantics_tree_discovery_log_entries: list[str] | None = None,
         flutter_engine_initialization_log_entries: list[str] | None = None,
     ) -> GitHubAccessibilityPullRequestGateObservation:
+        matched_contrast_markers = list(run_log_matched_contrast_markers or [])
         return GitHubAccessibilityPullRequestGateObservation(
             repository="IstiN/trackstate",
             default_branch="main",
@@ -112,10 +115,14 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
             matched_contrast_markers=[],
             matched_semantic_markers=["placeholder", "pre-flight"],
             run_log_matched_accessibility_markers=["accessibility", "placeholder"],
-            run_log_matched_contrast_markers=[],
+            run_log_matched_contrast_markers=matched_contrast_markers,
             run_log_matched_semantic_markers=["placeholder", "pre-flight"],
             run_log_mentions_accessibility=True,
-            run_log_mentions_contrast_issue=False,
+            run_log_mentions_contrast_issue=(
+                bool(matched_contrast_markers)
+                if run_log_mentions_contrast_issue is None
+                else run_log_mentions_contrast_issue
+            ),
             run_log_mentions_semantic_issue=True,
             run_log_excerpt=run_log_excerpt,
             run_log_error=run_log_error,
@@ -177,6 +184,31 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("generic Playwright timeout", failures[0])
 
+    def test_step_3_rejects_full_log_timeout_markers_outside_excerpt(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt=(
+                    "Error: Accessibility pre-flight failed because flt-semantics-placeholder "
+                    "was missing before the scan could begin."
+                ),
+                run_log_matched_contrast_markers=["page.waitForSelector", "timeout"],
+                run_log_mentions_contrast_issue=True,
+            ),
+            failures,
+            stage_log_lines=[
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:01Z Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin."
+            ],
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("generic Playwright timeout", failures[0])
+        self.assertIn("Run-log timeout markers", failures[0])
+
     def test_step_3_rejects_polling_progression_after_missing_placeholder(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
         failures: list[str] = []
@@ -193,6 +225,33 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
             ),
             failures,
             stage_log_lines=stage_lines,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("unexpectedly continued into later polling/runtime evidence", failures[0])
+
+    def test_step_3_rejects_full_log_polling_evidence_outside_excerpt(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+        full_log_polling_line = (
+            "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:03Z "
+            "Semantics tree discovery: verified flt-semantics-placeholder"
+        )
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt=(
+                    "Error: Accessibility pre-flight failed because flt-semantics-placeholder "
+                    "was missing before the scan could begin."
+                ),
+                semantics_tree_discovery_log_entries=[full_log_polling_line],
+            ),
+            failures,
+            stage_log_lines=[
+                "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:01Z Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin."
+            ],
         )
 
         self.assertEqual(len(failures), 1)
