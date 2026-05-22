@@ -976,16 +976,24 @@ def _observe_post_cancel_state(
         ),
     )
     switcher_after = _capture_switcher(tracker_page, page)
-    switcher_labels = _observe_switcher_accessible_labels(tracker_page)
+    switcher_labels = _observe_switcher_accessible_labels(
+        tracker_page,
+        switcher_after,
+    )
     body_text = tracker_page.body_text()
 
-    local_row_unavailable = switcher_labels["local_row_label"] is not None
+    local_row = _find_named_local_row(switcher_after)
+    selected_row = _find_selected_row(switcher_after)
+    local_row_unavailable = bool(
+        local_row is not None and local_row.state_label == "Unavailable",
+    )
     hosted_still_active = bool(
         trigger is not None
         and trigger["display_name"] == HOSTED_DISPLAY_NAME
         and trigger["workspace_type"] == "Hosted"
-        and switcher_labels["selected_row_label"] is not None
-        and HOSTED_DISPLAY_NAME in str(switcher_labels["selected_row_label"])
+        and selected_row is not None
+        and selected_row.display_name == HOSTED_DISPLAY_NAME
+        and selected_row.target_type_label == "Hosted"
     )
     storage_unchanged = bool(
         persisted_workspace_state is not None
@@ -1018,7 +1026,8 @@ def _observe_unavailable_local_precondition(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, object]:
     switcher = _capture_switcher(tracker_page, page)
-    switcher_labels = _observe_switcher_accessible_labels(tracker_page)
+    switcher_labels = _observe_switcher_accessible_labels(tracker_page, switcher)
+    local_row = _find_named_local_row(switcher)
     return {
         "switcher": _switcher_payload(switcher),
         "local_row_label": switcher_labels["local_row_label"],
@@ -1027,7 +1036,9 @@ def _observe_unavailable_local_precondition(
         "local_action_label": switcher_labels["local_action_label"],
         "trigger": _safe_workspace_trigger_payload(tracker_page),
         "visible_aria_labels": switcher_labels["visible_aria_labels"],
-        "local_row_unavailable": switcher_labels["local_row_label"] is not None,
+        "local_row_unavailable": bool(
+            local_row is not None and local_row.state_label == "Unavailable"
+        ),
     }
 
 
@@ -1095,7 +1106,10 @@ def _open_and_observe_switcher(
     return page.observe_open_switcher(timeout_ms=timeout_ms)
 
 
-def _observe_switcher_accessible_labels(tracker_page) -> dict[str, object]:
+def _observe_switcher_accessible_labels(
+    tracker_page,
+    switcher: WorkspaceSwitcherObservation,
+) -> dict[str, object]:
     payload = tracker_page.session.evaluate(
         f"""
         () => {{
@@ -1115,28 +1129,8 @@ def _observe_switcher_accessible_labels(tracker_page) -> dict[str, object]:
             .filter((element) => isVisible(element))
             .map((element) => normalize(element.getAttribute('aria-label') || ''))
             .filter((label) => label.length > 0);
-          const localRowLabel = visibleAriaLabels.find((label) =>
-            label.includes({json.dumps(LOCAL_DISPLAY_NAME)})
-            && label.includes(', Local,')
-            && label.includes('Unavailable')
-          ) ?? null;
-          const hostedRowLabel = visibleAriaLabels.find((label) =>
-            label.includes({json.dumps(HOSTED_DISPLAY_NAME)})
-            && label.includes(', Hosted,')
-          ) ?? null;
-          const selectedRowLabel = visibleAriaLabels.find((label) =>
-            label.startsWith('Workspace switcher:')
-          ) ?? null;
-          const localActionLabel = visibleAriaLabels.find((label) =>
-            (label.startsWith('Retry: ') || label.startsWith('Re-authenticate: ') || label.startsWith('Reauthenticate: '))
-            && label.includes({json.dumps(LOCAL_DISPLAY_NAME)})
-          ) ?? null;
           return {{
             visibleAriaLabels,
-            localRowLabel,
-            hostedRowLabel,
-            selectedRowLabel,
-            localActionLabel,
           }};
         }}
         """,
@@ -1146,12 +1140,27 @@ def _observe_switcher_accessible_labels(tracker_page) -> dict[str, object]:
             "Expected a workspace switcher accessibility payload, "
             f"got: {payload!r}",
         )
+    local_row = _find_named_local_row(switcher)
+    hosted_row = _find_named_hosted_row(switcher)
+    selected_row = _find_selected_row(switcher)
+    local_action_label = (
+        next(
+            (
+                action_label
+                for action_label in local_row.action_labels
+                if action_label and not action_label.startswith("Delete:")
+            ),
+            None,
+        )
+        if local_row is not None
+        else None
+    )
     return {
         "visible_aria_labels": list(payload.get("visibleAriaLabels", [])),
-        "local_row_label": payload.get("localRowLabel"),
-        "hosted_row_label": payload.get("hostedRowLabel"),
-        "selected_row_label": payload.get("selectedRowLabel"),
-        "local_action_label": payload.get("localActionLabel"),
+        "local_row_label": _workspace_row_label(local_row),
+        "hosted_row_label": _workspace_row_label(hosted_row),
+        "selected_row_label": _workspace_row_label(selected_row),
+        "local_action_label": local_action_label,
     }
 
 
@@ -1193,6 +1202,12 @@ def _workspace_trigger_payload(
         "workspace_type": workspace_type,
         "state_label": state_label,
     }
+
+
+def _workspace_row_label(row: WorkspaceSwitcherRowObservation | None) -> str | None:
+    if row is None:
+        return None
+    return row.visible_text or row.semantics_label or row.detail_text or row.display_name
 
 
 def _observe_startup_surface(tracker_page) -> dict[str, object]:
@@ -1597,10 +1612,13 @@ def _build_bug_description(result: dict[str, object]) -> str:
             "Instead, the live deployment stalled before the Workspace switcher was "
             "reachable."
             if isinstance(startup_observation, dict)
-            else "Expected the manual restore action to trigger the browser directory "
-            "picker, then leave the workspace in `Unavailable` with the hosted "
-            "workspace still active after Cancel. Instead, the live state or visible "
-            "error output diverged from that expectation."
+            else "Expected clicking `Retry: Restorable local workspace` to start the "
+            "browser-access recovery flow (`showDirectoryPicker()` or a remembered "
+            "handle `requestPermission()`), after which Cancel would leave the local "
+            "workspace in `Unavailable` with the hosted workspace still active. "
+            "Instead, clicking `Retry` returned the user to the dashboard shell and "
+            "the probe recorded zero `showDirectoryPicker()` calls and zero "
+            "`requestPermission()` calls."
         ),
         "",
         "## Environment details",
