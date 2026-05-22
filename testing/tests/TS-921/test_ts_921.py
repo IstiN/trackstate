@@ -42,14 +42,14 @@ LOCAL_TARGET = "/tmp/trackstate-ts921-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 WRONG_DIRECTORY_NAME = "ts921-wrong-directory"
-LINKED_BUGS = ["TS-942", "TS-915", "TS-914"]
+LINKED_BUGS = ["TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Kept the wrong-directory rejection checks scoped to explicit mismatch "
-    "messaging and now records the live startup-shell blockage as a real failed "
-    "test/product bug with the required failure outputs."
+    "Updated TS-921 to treat the overridden browser picker call as the real "
+    "selection signal and to fail only on the final user-visible wrong-directory "
+    "result."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -336,22 +336,10 @@ def main() -> None:
                 )
                 result["wrong_picker_before"] = _read_wrong_picker_state(tracker_page)
                 page.click_saved_workspace_action_button(action_label, timeout_ms=10_000)
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=(
-                        "Activated the unavailable-workspace retry action while the browser "
-                        "directory picker override returned the wrong directory handle.\n"
-                        f"wrong_picker_before={json.dumps(result['wrong_picker_before'], indent=2)}"
-                    ),
-                )
-
                 callback_observed, callback_observation = poll_until(
                     probe=lambda: _observe_retry_callback(tracker_page),
                     is_satisfied=lambda observation: observation[
-                        "directory_access_callback_observed"
+                        "browser_access_callback_observed"
                     ],
                     timeout_seconds=MANUAL_REAUTH_CALLBACK_WAIT_SECONDS,
                     interval_seconds=1,
@@ -365,20 +353,62 @@ def main() -> None:
                 if not callback_observed:
                     _record_step(
                         result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=(
+                            "The unavailable-workspace retry action never opened the browser "
+                            "directory picker / access flow for the wrong-directory selection.\n"
+                            f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                        ),
+                    )
+                    _record_step(
+                        result,
                         step=4,
                         status="failed",
                         action=REQUEST_STEPS[3],
                         observed=(
-                            "The manual retry action never triggered the browser directory "
-                            "picker callback for the wrong-directory selection.\n"
-                            f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                            "Not reached because step 3 never opened the browser directory "
+                            "picker / access flow."
                         ),
                     )
                     raise AssertionError(
-                        "Step 4 failed: the unavailable-workspace retry action never triggered "
-                        "the browser directory picker callback.\n"
+                        "Step 3 failed: the unavailable-workspace retry action never opened "
+                        "the browser directory picker / access flow.\n"
                         f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
                     )
+                if result["wrong_directory_selected"] is None:
+                    _, callback_observation = poll_until(
+                        probe=lambda: _observe_retry_callback(tracker_page),
+                        is_satisfied=lambda observation: (
+                            observation["wrong_picker"].get("selectedDirectoryName")
+                            is not None
+                        ),
+                        timeout_seconds=5,
+                        interval_seconds=1,
+                    )
+                    result["callback_observation"] = callback_observation
+                    result["manual_reauth_probe_after_click"] = callback_observation[
+                        "probe"
+                    ]
+                    result["wrong_picker_after_click"] = callback_observation[
+                        "wrong_picker"
+                    ]
+                    result["wrong_directory_selected"] = callback_observation[
+                        "wrong_picker"
+                    ].get("selectedDirectoryName")
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=REQUEST_STEPS[2],
+                    observed=(
+                        "The unavailable-workspace retry action opened the overridden browser "
+                        "directory picker flow and selected the wrong directory handle.\n"
+                        f"selected_directory={result['wrong_directory_selected']!r}\n"
+                        f"callback_observation={json.dumps(callback_observation, indent=2)}"
+                    ),
+                )
 
                 post_retry_started_at = time.monotonic()
                 settled, settled_observation = poll_until(
@@ -388,14 +418,12 @@ def main() -> None:
                         expected_local_workspace_id=local_workspace_id,
                         post_retry_started_at=post_retry_started_at,
                     ),
-                    is_satisfied=lambda observation: (
-                        _is_expected_wrong_directory_rejection(
-                            str(observation.get("user_visible_error") or ""),
-                        )
-                        or bool(observation.get("active_workspace_is_local"))
-                        or _local_row_promoted_to_local_git(
-                            observation.get("local_row"),
-                        )
+                    is_satisfied=lambda observation: bool(
+                        observation.get("user_visible_error")
+                    )
+                    or bool(observation.get("active_workspace_is_local"))
+                    or _local_row_promoted_to_local_git(
+                        observation.get("local_row"),
                     ),
                     timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
                     interval_seconds=1,
@@ -649,7 +677,15 @@ def _observe_retry_callback(tracker_page: TrackStateTrackerPage) -> dict[str, ob
         "probe": probe,
         "wrong_picker": wrong_picker,
         "body_text": tracker_page.body_text(),
-        "directory_access_callback_observed": bool(probe["showDirectoryPickerCalls"]),
+        "directory_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"] or wrong_picker["calls"]
+        ),
+        "browser_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"]
+            or probe["requestPermissionCalls"]
+            or wrong_picker["calls"]
+            or wrong_picker.get("selectedDirectoryName")
+        ),
     }
 
 
@@ -774,6 +810,17 @@ def _assert_wrong_directory_rejected(
             f"Observed post-retry state: {json.dumps(observation, indent=2)}"
         )
     user_visible_error = str(observation.get("user_visible_error") or "").strip()
+    body_text = str(observation.get("body_text") or "")
+    if "Unsupported operation: Process.run" in user_visible_error or (
+        "Unsupported operation: Process.run" in body_text
+    ):
+        raise AssertionError(
+            "Step 4 failed: after selecting the wrong directory, the app showed "
+            "`Unsupported operation: Process.run` instead of a directory/workspace "
+            "mismatch error.\n"
+            f"Observed message: {user_visible_error!r}\n"
+            f"Observed post-retry state: {json.dumps(observation, indent=2)}"
+        )
     if not user_visible_error:
         raise AssertionError(
             "Step 4 failed: selecting the wrong directory did not leave any visible user-facing "
@@ -1370,12 +1417,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         str(result.get("error", "The wrong-directory retry did not match the expected result.")),
         "",
         "## Missing or broken production capability",
-        (
-            "The deployed web app does not render the interactive shell or Workspace "
-            "switcher needed to start manual re-authentication. After accessibility is "
-            "enabled, the page remains stuck on a single visible `Sync issue` control, "
-            "so the TS-921 retry flow cannot be reached."
-        ),
+        _missing_or_broken_capability(result),
         "",
         "## Expected result",
         EXPECTED_RESULT,
@@ -1415,6 +1457,33 @@ def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
             "The deployed app blocked the TS-921 scenario before the wrong-directory retry "
             "could run.",
         ),
+    )
+
+
+def _missing_or_broken_capability(result: dict[str, object]) -> str:
+    error = str(result.get("error", ""))
+    if "interactive shell" in error or "Workspace switcher required" in error:
+        return (
+            "The deployed web app never rendered the interactive shell or Workspace "
+            "switcher needed to start manual re-authentication, so the TS-921 flow could "
+            "not be reached."
+        )
+    if "never opened the browser directory picker / access flow" in error:
+        return (
+            "Clicking `Retry` on the unavailable local workspace did not open the browser "
+            "directory picker / access flow, so the user could not continue manual "
+            "re-authentication."
+        )
+    if "Unsupported operation: Process.run" in error:
+        return (
+            "After the user selected a wrong directory for manual re-authentication, the "
+            "deployed web app surfaced `Unsupported operation: Process.run` instead of a "
+            "clear directory/workspace mismatch message while keeping the workspace in "
+            "`Local Unavailable`."
+        )
+    return (
+        "The deployed web app did not produce the expected wrong-directory mismatch "
+        "outcome required by TS-921."
     )
 
 

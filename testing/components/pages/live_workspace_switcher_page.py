@@ -3188,6 +3188,43 @@ class LiveWorkspaceSwitcherPage:
         escaped_action_label = (
             action_label.replace("\\", "\\\\").replace('"', '\\"')
         )
+        payload = self._session.evaluate(
+            """
+            (targetLabel) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const match = Array.from(
+                document.querySelectorAll(
+                  'button[aria-label],flt-semantics[role="button"][aria-label],[role="button"][aria-label]'
+                )
+              )
+                .filter((element) => isVisible(element))
+                .find((element) => normalize(element.getAttribute('aria-label') || '') === targetLabel);
+              if (!match) {
+                return null;
+              }
+              match.click();
+              return {
+                clicked: true,
+                tagName: match.tagName,
+                ariaLabel: normalize(match.getAttribute('aria-label') || ''),
+              };
+            }
+            """,
+            arg=action_label,
+        )
+        if isinstance(payload, dict) and bool(payload.get("clicked")):
+            return
         try:
             self._session.click(
                 'flt-semantics[role="button"],button,[role="button"]',
