@@ -45,7 +45,7 @@ EXPECTED_RESULT = (
     "The accessibility gate stage passes successfully, and the Pull Request is not "
     "blocked by the accessibility status check."
 )
-SUCCESS_CONCLUSIONS = {"success", "neutral", "skipped"}
+SUCCESS_CONCLUSIONS = {"success", "neutral"}
 
 
 def main() -> None:
@@ -180,13 +180,34 @@ def _evaluate_compliant_component(
             observed=message,
         )
         return
+    if not observation.runtime_accessibility_surface_present:
+        message = (
+            "Step 2 failed: the accessibility run never exposed browser-visible runtime "
+            "semantics evidence for the compliant probe, so the descriptive label could "
+            "not be verified on the actual rendered surface.\n"
+            f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
+            f"Runtime accessibility evidence: "
+            f"{observation.runtime_accessibility_surface_summary or '<none>'}\n"
+            f"Run log excerpt: {observation.run_log_excerpt or '<none>'}"
+        )
+        failures.append(message)
+        _record_step(
+            result,
+            step=2,
+            status="failed",
+            action=REQUEST_STEPS[1],
+            observed=message,
+        )
+        return
 
     observed = (
         "The disposable PR renders the compliant probe through "
         f"`{observation.probe_render_host_path}` and keeps the requested user-facing "
-        "accessibility characteristics: no low-contrast indicator and the descriptive "
-        f"semantics label `{observation.probe_semantic_label}`.\n"
-        f"Contrast technique: {observation.probe_contrast_technique}"
+        "accessibility characteristics: no low-contrast indicator, the descriptive "
+        f"semantics label `{observation.probe_semantic_label}`, and browser-visible "
+        "runtime accessibility output.\n"
+        f"Contrast technique: {observation.probe_contrast_technique}\n"
+        f"Runtime accessibility evidence: {observation.runtime_accessibility_surface_summary}"
     )
     _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
 
@@ -248,6 +269,9 @@ def _evaluate_accessibility_gate_result(
     workflow_succeeded = observation.latest_pull_request_run_conclusion in SUCCESS_CONCLUSIONS
     overall_status_succeeded = observation.pull_request_status_state in SUCCESS_CONCLUSIONS
     no_failed_status_checks = not observation.failed_status_check_names
+    accessibility_runtime_step_present = (
+        "Run axe-core accessibility checks" in observation.observed_step_names
+    )
     accessibility_check_passed = (
         observation.accessibility_status_check_conclusion in SUCCESS_CONCLUSIONS
         if observation.accessibility_status_check_name
@@ -257,6 +281,11 @@ def _evaluate_accessibility_gate_result(
         observation.accessibility_status_check_name
         or {"Accessibility checks", "Run axe-core accessibility checks"}
         & set(observation.observed_status_check_names + observation.observed_job_names + observation.observed_step_names)
+    )
+    accessibility_result_passed = (
+        accessibility_check_passed
+        if observation.accessibility_status_check_name
+        else accessibility_runtime_step_present and workflow_succeeded
     )
 
     _record_human_verification(
@@ -276,7 +305,8 @@ def _evaluate_accessibility_gate_result(
             f"`{observation.pull_request_mergeable_state or '<none>'}`; overall PR status: "
             f"`{observation.pull_request_status_state or '<none>'}`; accessibility check: "
             f"`{observation.accessibility_status_check_name or '<none>'}` with conclusion "
-            f"`{observation.accessibility_status_check_conclusion or '<none>'}`."
+            f"`{observation.accessibility_status_check_conclusion or '<none>'}`; runtime "
+            f"accessibility evidence: `{observation.runtime_accessibility_surface_summary or '<none>'}`."
         ),
     )
 
@@ -285,10 +315,7 @@ def _evaluate_accessibility_gate_result(
         and overall_status_succeeded
         and no_failed_status_checks
         and accessibility_surface_present
-        and (
-            accessibility_check_passed
-            or "Run axe-core accessibility checks" in observation.observed_step_names
-        )
+        and accessibility_result_passed
     ):
         observed = (
             "The live PR workflow stayed green and the contributor-visible PR surface was "
@@ -296,6 +323,7 @@ def _evaluate_accessibility_gate_result(
             f"Overall PR status: {observation.pull_request_status_state}\n"
             f"Accessibility check: {observation.accessibility_status_check_name or '<derived from job/step surface>'}\n"
             f"Accessibility check conclusion: {observation.accessibility_status_check_conclusion or '<derived from successful workflow>'}\n"
+            f"Runtime accessibility evidence: {observation.runtime_accessibility_surface_summary or '<none>'}\n"
             f"Observed jobs: {observation.observed_job_names or ['<none>']}\n"
             f"Observed steps: {observation.observed_step_names or ['<none>']}"
         )
@@ -319,6 +347,7 @@ def _evaluate_accessibility_gate_result(
         f"Observed workflow names: {observation.observed_status_check_workflow_names}\n"
         f"Observed jobs: {observation.observed_job_names}\n"
         f"Observed steps: {observation.observed_step_names}\n"
+        f"Runtime accessibility evidence: {observation.runtime_accessibility_surface_summary or '<none>'}\n"
         f"Matched accessibility markers: {observation.matched_accessibility_markers}\n"
         f"Run-log accessibility markers: {observation.run_log_matched_accessibility_markers}\n"
         f"Run log error: {observation.run_log_error or '<none>'}\n"

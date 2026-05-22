@@ -190,6 +190,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             run_log_error=self._optional_string(
                 pull_request_observation.get("run_log_error")
             ),
+            runtime_accessibility_surface_present=bool(
+                pull_request_observation["runtime_accessibility_surface_present"]
+            ),
+            runtime_accessibility_surface_summary=str(
+                pull_request_observation["runtime_accessibility_surface_summary"]
+            ),
             probe_contains_low_contrast_indicator=bool(
                 pull_request_observation["probe_contains_low_contrast_indicator"]
             ),
@@ -349,6 +355,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 evidence_text,
                 self._config.semantic_evidence_markers,
             )
+            probe_semantic_label = self._extract_probe_semantic_label(probe_source)
+            runtime_accessibility_surface_summary = (
+                self._extract_runtime_accessibility_surface_summary(run_log_text)
+            )
 
             observation = {
                 "pull_request_number": pull_request_number,
@@ -417,11 +427,17 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 ),
                 "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
                 "run_log_error": run_log_error,
+                "runtime_accessibility_surface_present": bool(
+                    runtime_accessibility_surface_summary
+                ),
+                "runtime_accessibility_surface_summary": (
+                    runtime_accessibility_surface_summary
+                ),
                 "probe_contains_low_contrast_indicator": (
                     "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
                 ),
-                "probe_contains_semantic_label_indicator": "label: 'button'" in probe_source,
-                "probe_semantic_label": "button",
+                "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
+                "probe_semantic_label": probe_semantic_label or "",
                 "probe_contrast_technique": (
                     "Uses `colorScheme.onSurface.withAlpha(89)` text on "
                     "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
@@ -847,6 +863,25 @@ class GitHubAccessibilityPullRequestGateProbeService:
         normalized = text.lower()
         matches = [marker for marker in markers if marker.lower() in normalized]
         return self._dedupe(matches)
+
+    @staticmethod
+    def _extract_probe_semantic_label(probe_source: str) -> str | None:
+        match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
+        if match is None:
+            return None
+        return match.group("label")
+
+    def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
+        if not run_log_text.strip():
+            return ""
+        match = re.search(
+            r"Accessibility runtime surface ready:[^\r\n]*",
+            run_log_text,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return ""
+        return self._snippet(match.group(0), limit=400)
 
     def _extract_log_excerpt(self, run_log_text: str, fallback_text: str) -> str:
         text = run_log_text or fallback_text

@@ -17,13 +17,12 @@ class GitHubAccessibilityCompliantPullRequestGateProbeService(
     def _create_and_observe_pull_request(self, workflow_id: int) -> dict[str, object]:
         observation = super()._create_and_observe_pull_request(workflow_id)
         probe_source = self._probe_source()
+        probe_semantic_label = self._extract_probe_semantic_label(probe_source)
         observation["probe_contains_low_contrast_indicator"] = (
             "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
         )
-        observation["probe_contains_semantic_label_indicator"] = (
-            f"label: '{self.expected_semantic_label}'" in probe_source
-        )
-        observation["probe_semantic_label"] = self.expected_semantic_label
+        observation["probe_contains_semantic_label_indicator"] = probe_semantic_label is not None
+        observation["probe_semantic_label"] = probe_semantic_label or ""
         observation["probe_contrast_technique"] = self.contrast_technique
         return observation
 
