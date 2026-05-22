@@ -1,0 +1,23 @@
+test_id: TS-926
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Node.js with npm
+  - Playwright Chromium runtime
+  - "@axe-core/playwright from package.json"
+runtime_inputs:
+  exact_contrast_ratio: 4.5
+  contrast_tolerance: 0.01
+  viewport:
+    width: 1440
+    height: 900
+  background_color: "rgb(153, 153, 153)"
+  text_color: "rgb(50, 50, 50)"
+  visible_text: "Boundary contrast sample"
+  accessible_button_label: "Open tracker settings"
+  screenshot_name: "ts926_boundary_probe.png"
+  observation_name: "ts926_boundary_observation.json"
+notes:
+  - Runs the same axe-core accessibility helper used by the CI accessibility workflow.
+  - Uses a local boundary probe page because this ticket verifies the scanner boundary behavior itself and the task forbids disposable branches or pushes.
