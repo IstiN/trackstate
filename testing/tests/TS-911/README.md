@@ -23,3 +23,8 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
   - `TRACKSTATE_LIVE_APP_URL`
   - `TRACKSTATE_LIVE_SETUP_REPOSITORY`
   - `TRACKSTATE_LIVE_SETUP_REF`
+
+## Coverage notes
+
+- Verifies the known final in-panel keyboard target is the visible `Save and switch` control.
+- Focuses the selected first workspace row, presses `Tab` through the in-panel keyboard sequence until `Save and switch`, then requires the next `Tab` press to wrap back to the first row before attempting `Shift+Tab`.

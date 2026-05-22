@@ -7,5 +7,6 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
-  - Opens the desktop workspace switcher from Dashboard and confirms the first saved workspace row owns keyboard focus.
-  - Presses Shift+Tab from that first internal row and verifies focus wraps to the last visible internal control instead of escaping to the app shell.
+  - Opens the desktop workspace switcher from Dashboard and confirms the selected first saved workspace row plus the visible Save and switch footer control are present.
+  - Focuses the selected first workspace row, presses Tab through the visible in-panel sequence until Save and switch, then requires one more Tab press to wrap back to the first row.
+  - Verifies reverse wrap returns to Save and switch instead of escaping to the app shell.
