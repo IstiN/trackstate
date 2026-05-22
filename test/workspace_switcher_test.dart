@@ -233,6 +233,187 @@ void main() {
   );
 
   testWidgets(
+    'refresh preserves the saved local unavailable state and skips auto-restoring local data until a manual workspace action occurs',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/guarded@main';
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/guarded',
+          defaultBranch: 'main',
+        ),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+        ),
+        select: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      var localWorkspaceAvailable = false;
+      final openedLocalRepositories = <String>[];
+      var directoryPickerCalls = 0;
+
+      Future<void> openWorkspaceSwitcher() async {
+        final switcherSheet = find.byKey(
+          const ValueKey('workspace-switcher-sheet'),
+        );
+        if (switcherSheet.evaluate().isNotEmpty) {
+          return;
+        }
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> expectUnavailableLocalWorkspace() async {
+        await openWorkspaceSwitcher();
+        final activeRow = find.byKey(
+          const ValueKey('workspace-local:/tmp/guarded@main'),
+        );
+        expect(activeRow, findsOneWidget);
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Active')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Unavailable')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Local Git')),
+          findsNothing,
+        );
+      }
+
+      Future<void> expectAvailableLocalWorkspace() async {
+        await openWorkspaceSwitcher();
+        final activeRow = find.byKey(
+          const ValueKey('workspace-local:/tmp/guarded@main'),
+        );
+        expect(activeRow, findsOneWidget);
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Active')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Local Git')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: activeRow, matching: find.text('Unavailable')),
+          findsNothing,
+        );
+      }
+
+      Future<void> pumpApp() async {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repositoryFactory: DemoTrackStateRepository.new,
+            workspaceProfileService: service,
+            workspaceDirectoryPicker:
+                ({String? confirmButtonText, String? initialDirectory}) async {
+                  directoryPickerCalls += 1;
+                  expect(initialDirectory, '/tmp/guarded');
+                  return '/tmp/guarded';
+                },
+            openLocalRepository:
+                ({
+                  required String repositoryPath,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async {
+                  openedLocalRepositories.add(repositoryPath);
+                  if (!localWorkspaceAvailable) {
+                    throw StateError('Missing repository $repositoryPath');
+                  }
+                  return DemoTrackStateRepository(
+                    snapshot: await _snapshotForRepository(repositoryPath),
+                  );
+                },
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      await pumpApp();
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      await expectUnavailableLocalWorkspace();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+
+      openedLocalRepositories.clear();
+      localWorkspaceAvailable = true;
+      await pumpApp();
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      expect(openedLocalRepositories, ['/tmp/guarded']);
+      await expectUnavailableLocalWorkspace();
+
+      final hostedRow = find.byKey(
+        const ValueKey('workspace-hosted:stable/repo@main'),
+      );
+      expect(hostedRow, findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-open-hosted:stable/repo@main')),
+      );
+      await tester.pumpAndSettle();
+
+      await openWorkspaceSwitcher();
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/guarded@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('workspace-open-local:/tmp/guarded@main')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-local:/tmp/guarded@main'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(openedLocalRepositories, ['/tmp/guarded', '/tmp/guarded']);
+      expect(directoryPickerCalls, 1);
+      expect(
+        (await service.loadState()).unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+      await expectAvailableLocalWorkspace();
+    },
+  );
+
+  testWidgets(
     'startup restore keeps the saved active local workspace selected when local startup access is unavailable',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -956,6 +1137,290 @@ void main() {
       );
       expect(
         find.descendant(of: hostedRow, matching: find.text('Active')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'workspace switcher restores an unavailable saved local workspace only after a manual retry action',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'demo',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      var directoryPickerCalls = 0;
+      var manualAccessGranted = false;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                manualAccessGranted = true;
+                expect(initialDirectory, '/tmp/demo');
+                return '/tmp/demo';
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                if (!manualAccessGranted) {
+                  throw StateError(
+                    'File system access to the selected directory is no longer available.',
+                  );
+                }
+                return DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repositoryPath),
+                );
+              },
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('stable/repo'), findsWidgets);
+      expect(find.textContaining('/tmp/demo'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final localRow = find.byKey(
+        const ValueKey('workspace-$localWorkspaceId'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Open')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(directoryPickerCalls, 1);
+      expect(service.state.activeWorkspaceId, localWorkspaceId);
+      expect(find.textContaining('/tmp/demo'), findsWidgets);
+      expect(find.textContaining('stable/repo'), findsNothing);
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: demo, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final restoredLocalRow = find.byKey(
+        const ValueKey('workspace-$localWorkspaceId'),
+      );
+      expect(restoredLocalRow, findsOneWidget);
+      expect(
+        find.descendant(of: restoredLocalRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: restoredLocalRow, matching: find.text('Local Git')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: restoredLocalRow,
+          matching: find.text('Unavailable'),
+        ),
+        findsNothing,
+      );
+      expect(find.textContaining('Could not open demo'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'workspace switcher keeps an unavailable saved local workspace unavailable when manual retry still cannot reopen it',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'demo',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      var directoryPickerCalls = 0;
+      var manualAccessGranted = false;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                manualAccessGranted = true;
+                expect(initialDirectory, '/tmp/demo');
+                return '/tmp/demo';
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                if (!manualAccessGranted) {
+                  throw StateError(
+                    'File system access to the selected directory is no longer available.',
+                  );
+                }
+                throw UnsupportedError('Unsupported operation: Process.run');
+              },
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('stable/repo'), findsWidgets);
+      expect(find.textContaining('/tmp/demo'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(directoryPickerCalls, 1);
+      expect(service.state.activeWorkspaceId, hostedWorkspaceId);
+      expect(find.textContaining('stable/repo'), findsWidgets);
+      expect(find.textContaining('/tmp/demo'), findsNothing);
+      expect(find.textContaining('Could not open demo'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final localRow = find.byKey(
+        const ValueKey('workspace-$localWorkspaceId'),
+      );
+      final hostedRow = find.byKey(
+        const ValueKey('workspace-$hostedWorkspaceId'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(hostedRow, findsOneWidget);
+      expect(
+        find.descendant(of: hostedRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Open')),
         findsNothing,
       );
     },
@@ -3077,6 +3542,16 @@ void main() {
           isFocused: () => _focusWithinFinder(tester, triggerFinder),
         );
         expect(reachedCompactTrigger, isTrue);
+        expect(
+          find.descendant(
+            of: triggerFinder,
+            matching: _findActionableSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
 
         await tester.tap(
           find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
@@ -3103,6 +3578,16 @@ void main() {
         );
 
         expect(contrast, greaterThanOrEqualTo(4.5));
+
+        final deleteButton = tester.widget<TextButton>(
+          find.byKey(const ValueKey('workspace-delete-hosted:beta/repo@main')),
+        );
+        final deleteForeground = deleteButton.style!.foregroundColor!.resolve(
+          <WidgetState>{},
+        )!;
+        final deleteContrast = contrastRatio(deleteForeground, colors.surface);
+
+        expect(deleteContrast, greaterThanOrEqualTo(4.5));
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -3464,6 +3949,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       profiles: resolveWorkspaceDisplayNames([...state.profiles, created]),
       activeWorkspaceId: select ? created.id : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     return state.profiles.firstWhere((profile) => profile.id == created.id);
   }
@@ -3481,6 +3967,8 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
                 : nextProfiles.first.id
           : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId}),
     );
     return state;
   }
@@ -3500,6 +3988,20 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
+    );
+    return state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    state = state.copyWith(
+      unavailableLocalWorkspaceIds: isAvailable
+          ? state.unavailableLocalWorkspaceIds.difference({workspaceId})
+          : <String>{...state.unavailableLocalWorkspaceIds, workspaceId},
     );
     return state;
   }
@@ -3535,6 +4037,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: workspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     return state;
   }
@@ -3553,6 +4056,8 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: select ? updated.id : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId, updated.id}),
     );
     return updated;
   }
