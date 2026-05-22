@@ -5,6 +5,7 @@ import platform
 import re
 import shutil
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -46,9 +47,19 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Refreshed TS-921 live coverage so the existing wrong-directory retry test also "
-    "captures the first user-visible production failure when the deployed app does not "
-    "reach the workspace switcher."
+    "Resolved the TS-921 merge conflicts, kept shell-startup outages scoped to "
+    "precondition failures, and tightened the wrong-directory rejection checks "
+    "to explicit mismatch messaging."
+)
+WRONG_DIRECTORY_REJECTION_VARIANTS = (
+    "selected directory does not match the saved workspace configuration",
+    "selected directory does not match the workspace configuration",
+    "selected directory does not contain the expected repository for this workspace",
+    "selected directory does not contain the repository configured for this workspace",
+    "directory does not match the saved workspace configuration",
+    "directory does not match the workspace configuration",
+    "directory does not contain the expected repository for this workspace",
+    "directory does not contain the repository configured for this workspace",
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -169,7 +180,7 @@ def main() -> None:
                 try:
                     runtime_observation = tracker_page.open()
                 except AssertionError as error:
-                    _raise_startup_failure(
+                    _raise_precondition_failure(
                         result=result,
                         tracker_page=tracker_page,
                         runtime_context=runtime_context,
@@ -185,7 +196,7 @@ def main() -> None:
                 if runtime_observation.kind != "ready" or not bool(
                     shell_observation.get("shell_ready"),
                 ):
-                    _raise_startup_failure(
+                    _raise_precondition_failure(
                         result=result,
                         tracker_page=tracker_page,
                         runtime_context=runtime_context,
@@ -347,6 +358,9 @@ def main() -> None:
                 result["callback_observation"] = callback_observation
                 result["manual_reauth_probe_after_click"] = callback_observation["probe"]
                 result["wrong_picker_after_click"] = callback_observation["wrong_picker"]
+                result["wrong_directory_selected"] = callback_observation[
+                    "wrong_picker"
+                ].get("selectedDirectoryName")
                 if not callback_observed:
                     _record_step(
                         result,
@@ -365,16 +379,22 @@ def main() -> None:
                         f"Observed callback state:\n{json.dumps(callback_observation, indent=2)}"
                     )
 
+                post_retry_started_at = time.monotonic()
                 settled, settled_observation = poll_until(
                     probe=lambda: _observe_post_retry_state(
                         tracker_page=tracker_page,
                         page=page,
                         expected_local_workspace_id=local_workspace_id,
+                        post_retry_started_at=post_retry_started_at,
                     ),
-                    is_satisfied=lambda observation: bool(
-                        observation["user_visible_error"]
-                        or observation["local_row"] is not None
-                        or observation["selected_row"] is not None
+                    is_satisfied=lambda observation: (
+                        _is_expected_wrong_directory_rejection(
+                            str(observation.get("user_visible_error") or ""),
+                        )
+                        or bool(observation.get("active_workspace_is_local"))
+                        or _local_row_promoted_to_local_git(
+                            observation.get("local_row"),
+                        )
                     ),
                     timeout_seconds=FAILURE_SETTLE_WAIT_SECONDS,
                     interval_seconds=1,
@@ -637,6 +657,7 @@ def _observe_post_retry_state(
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
     expected_local_workspace_id: str,
+    post_retry_started_at: float,
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
     trigger = _safe_trigger_payload(page)
@@ -668,6 +689,7 @@ def _observe_post_retry_state(
         "selected_row": _row_payload(selected_row) if selected_row is not None else None,
         "persisted_workspace_state": persisted_workspace_state,
         "user_visible_error": user_visible_error,
+        "elapsed_seconds": round(time.monotonic() - post_retry_started_at, 3),
         "active_workspace_id": (
             persisted_workspace_state.get("activeWorkspaceId")
             if persisted_workspace_state is not None
@@ -744,7 +766,12 @@ def _assert_wrong_directory_rejected(
     observation: dict[str, object],
     expected_local_workspace_id: str,
 ) -> None:
-    del settled
+    if not settled:
+        raise AssertionError(
+            "Step 4 failed: the wrong-directory retry never surfaced the expected "
+            "mismatch rejection within the allowed async wait window.\n"
+            f"Observed post-retry state: {json.dumps(observation, indent=2)}"
+        )
     user_visible_error = str(observation.get("user_visible_error") or "").strip()
     if not user_visible_error:
         raise AssertionError(
@@ -752,11 +779,12 @@ def _assert_wrong_directory_rejected(
             "error or restore message explaining the rejection.\n"
             f"Observed post-retry state: {json.dumps(observation, indent=2)}"
         )
-    if not re.search(r"(match|directory|repository|path|workspace)", user_visible_error, re.I):
+    if not _is_expected_wrong_directory_rejection(user_visible_error):
         raise AssertionError(
-            "Step 4 failed: the visible user-facing failure did not explain the directory / "
-            "workspace mismatch clearly enough.\n"
+            "Step 4 failed: the visible user-facing failure did not use an explicit "
+            "wrong-directory / workspace-mismatch message.\n"
             f"Observed message: {user_visible_error!r}\n"
+            f"Accepted mismatch variants: {json.dumps(list(WRONG_DIRECTORY_REJECTION_VARIANTS), indent=2)}\n"
             f"Observed post-retry state: {json.dumps(observation, indent=2)}"
         )
     local_row_payload = observation.get("local_row")
@@ -793,6 +821,26 @@ def _assert_wrong_directory_rejected(
             "local workspace.\n"
             f"Observed persisted state: {json.dumps(persisted_workspace_state, indent=2)}"
         )
+
+
+def _is_expected_wrong_directory_rejection(message: str) -> bool:
+    normalized = " ".join(message.split()).strip().lower()
+    if not normalized:
+        return False
+    expected_prefix = f"could not open {LOCAL_DISPLAY_NAME.lower()}."
+    if not normalized.startswith(expected_prefix):
+        return False
+    return any(
+        variant in normalized for variant in WRONG_DIRECTORY_REJECTION_VARIANTS
+    )
+
+
+def _local_row_promoted_to_local_git(local_row_payload: object) -> bool:
+    if not isinstance(local_row_payload, dict):
+        return False
+    local_state = str(local_row_payload.get("state_label") or "")
+    local_visible_text = str(local_row_payload.get("visible_text") or "")
+    return local_state == "Local Git" or "Local Git" in local_visible_text
 
 
 def _find_named_local_row(
@@ -1035,7 +1083,7 @@ def _observe_startup_surface(tracker_page: TrackStateTrackerPage) -> dict[str, o
     }
 
 
-def _raise_startup_failure(
+def _raise_precondition_failure(
     *,
     result: dict[str, object],
     tracker_page: TrackStateTrackerPage,
@@ -1043,14 +1091,15 @@ def _raise_startup_failure(
     reason: str,
 ) -> None:
     startup_observation = _observe_startup_surface(tracker_page)
-    result["runtime_state"] = "startup-failed"
+    result["runtime_state"] = "precondition-failed"
+    result["failure_kind"] = "precondition"
     result["startup_observation"] = startup_observation
     result["runtime_body_text"] = startup_observation["body_text"]
     result["console_events"] = list(runtime_context.console_events)
     result["page_errors"] = list(runtime_context.page_errors)
     observed = (
         "The deployed app never exposed the interactive shell or workspace switcher needed "
-        "for TS-921. Instead, the live page stayed on an early error surface.\n"
+        "to establish the TS-921 ticket precondition.\n"
         f"Reason: {reason}\n"
         f"Startup observation: {json.dumps(startup_observation, indent=2)}\n"
         f"Console events: {json.dumps(result['console_events'], indent=2)}\n"
@@ -1100,8 +1149,8 @@ def _raise_startup_failure(
         ),
     )
     raise AssertionError(
-        "Step 1 failed: the deployed app did not render the application shell, so the "
-        "Workspace switcher could not be opened for the TS-921 re-authentication scenario.\n"
+        "Precondition failed: the deployed app did not render the interactive shell, so "
+        "TS-921 could not reach the Workspace switcher required by the ticket steps.\n"
         f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}\n"
         f"Console events:\n{json.dumps(result['console_events'], indent=2)}\n"
         f"Page errors:\n{json.dumps(result['page_errors'], indent=2)}",
@@ -1147,7 +1196,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    if result.get("failure_kind") == "precondition":
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    else:
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
 def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -1163,19 +1215,13 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Preloaded a hosted workspace plus the saved local workspace targeted by the ticket.",
-        (
-            "* Opened the deployed app and attempted to reach the Workspace switcher so the "
-            "unavailable local row could be retried through the visible UI."
-        ),
+        "* Opened the deployed Workspace switcher and checked for the unavailable local row a user must retry.",
         (
             f"* When the row is available, the automation forces the browser directory picker to "
             f"return a different directory handle named {{{{code}}}}{WRONG_DIRECTORY_NAME}{{{{code}}}} "
             "and waits for the post-click async effects."
         ),
-        (
-            "* Verifies either the visible rejection/final workspace state or the first "
-            "user-visible product failure that prevents the scenario from being reached."
-        ),
+        "* Verifies the visible mismatch rejection plus final workspace state instead of trusting the callback alone.",
         "",
         "h4. Automation checks",
         *_step_lines(result, jira=True),
@@ -1222,18 +1268,12 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Preloaded the hosted/local workspace state needed for the manual re-authentication scenario.",
-        (
-            "- Opened the live app and attempted to reach the Workspace switcher so the "
-            "unavailable local row could be exercised through the visible UI."
-        ),
+        "- Opened the live Workspace switcher and verified the unavailable local row through the visible UI.",
         (
             f"- When available, forced the browser picker callback to choose the wrong directory "
             f"`{WRONG_DIRECTORY_NAME}` and waited for the async post-click state."
         ),
-        (
-            "- Verified either the visible rejection/final workspace state or the first "
-            "user-visible product failure that blocked the scenario."
-        ),
+        "- Verified the visible mismatch rejection and final workspace state from the user's perspective.",
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
