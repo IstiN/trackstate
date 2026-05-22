@@ -291,7 +291,9 @@ void main() {
             "runApp(_Ts908RenderedProbeApp(child: const TrackStateApp()));",
             patched,
         )
-        self.assertIn("child: const Ts908ProbeSurface()", patched)
+        self.assertIn("return MaterialApp(", patched)
+        self.assertIn("child: const Ts908ProbeSurface(),", patched)
+        self.assertNotIn("return Stack(", patched)
 
     def test_extract_runtime_accessibility_surface_summary_reads_success_log_line(self) -> None:
         probe = _StubProbeService(self.config)
@@ -350,6 +352,7 @@ void main() {
         self.assertIn("_useDemoRepositoryForAccessibility", patched)
         self.assertIn(": const TrackStateApp()", patched)
         self.assertNotIn("runApp(const _Ts908RenderedProbeApp());", patched)
+        self.assertIn("return MaterialApp(", patched)
         self.assertIn("Ts908ProbeSurface()", patched)
 
 

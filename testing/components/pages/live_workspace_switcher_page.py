@@ -1547,7 +1547,6 @@ class LiveWorkspaceSwitcherPage:
             for item in payload
             if isinstance(item, dict)
         )
-
     def click_switcher_button(
         self,
         label: str,
@@ -2350,6 +2349,8 @@ class LiveWorkspaceSwitcherPage:
                         height=float(bounds.get("height", 0.0)),
                     ),
                 )
+        if not rows:
+            rows = list(self._accessible_saved_workspace_rows(timeout_ms=timeout_ms))
         if not rows:
             raise AssertionError(
                 "The open workspace switcher did not expose any readable saved workspace rows.\n"
@@ -4560,6 +4561,24 @@ class LiveWorkspaceSwitcherPage:
         )
         if not rows:
             rows = _rows_from_switcher_text(str(payload.get("switcherText", "")))
+        if not rows:
+            rows = tuple(
+                WorkspaceSwitcherRowObservation(
+                    display_name=row["display_name"],
+                    target_type_label=row["target_type_label"],
+                    state_label=row["state_label"],
+                    detail_text=row["detail_text"],
+                    visible_text=row["visible_text"],
+                    selected=row["selected"],
+                    semantics_label=row["semantics_label"],
+                    icon_accessibility_label=None,
+                    action_labels=row["action_labels"],
+                    button_labels=row["button_labels"],
+                )
+                for row in self._accessible_saved_workspace_row_payloads(
+                    timeout_ms=timeout_ms,
+                )
+            )
         return WorkspaceSwitcherObservation(
             body_text=str(payload.get("bodyText", "")),
             switcher_text=str(payload.get("switcherText", "")),
@@ -6965,10 +6984,37 @@ class LiveWorkspaceSwitcherPage:
     def _is_workspace_trigger_label(label: str | None) -> bool:
         return (label or "").startswith("Workspace switcher:")
 
-    def _click_trigger(self, *, timeout_ms: int) -> None:
-        self._session.wait_for_function(
+    def _accessible_saved_workspace_rows(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
+        return tuple(
+            WorkspaceSwitcherSavedWorkspaceRowObservation(
+                display_name=row["display_name"],
+                target_type_label=row["target_type_label"],
+                state_label=row["state_label"],
+                detail_text=row["detail_text"],
+                selected=row["selected"],
+                action_labels=row["action_labels"],
+                left=row["left"],
+                top=row["top"],
+                width=row["width"],
+                height=row["height"],
+            )
+            for row in self._accessible_saved_workspace_row_payloads(
+                timeout_ms=timeout_ms,
+            )
+        )
+
+    def _accessible_saved_workspace_row_payloads(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> tuple[dict[str, object], ...]:
+        payload = self._session.wait_for_function(
             """
-            (triggerLabelPrefix) => {
+            ({ heading }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
               const isVisible = (element) => {
                 if (!element) {
@@ -6982,26 +7028,184 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const labelFor = (element) =>
-                normalize(element.getAttribute('aria-label') || element.innerText || element.textContent || '');
-              const trigger = Array.from(
-                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
-              )
-                .filter((candidate) => isVisible(candidate) && labelFor(candidate).startsWith(triggerLabelPrefix))
-                .sort((left, right) => {
-                  const leftRect = left.getBoundingClientRect();
-                  const rightRect = right.getBoundingClientRect();
-                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                })[0] ?? null;
-              if (!trigger) {
-                return null;
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              const unique = (values) => {
+                const seen = new Set();
+                const result = [];
+                for (const value of values) {
+                  const normalized = normalize(value);
+                  if (!normalized || seen.has(normalized)) {
+                    continue;
+                  }
+                  seen.add(normalized);
+                  result.push(normalized);
+                }
+                return result;
+              };
+              const switcher = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => ({
+                  element,
+                  label: labelFor(element),
+                  area: element.getBoundingClientRect().width * element.getBoundingClientRect().height,
+                }))
+                .filter((candidate) =>
+                  candidate.label.includes(heading)
+                  && candidate.label.includes('Saved workspaces'),
+                )
+                .sort((left, right) => left.area - right.area)[0]
+                ?.element;
+              if (!switcher) {
+                return [];
               }
-              trigger.click();
-              return labelFor(trigger);
+              const rowPattern = /^(.*?),\\s*(Hosted|Local),\\s*([^,]+),\\s*(.+Branch:\\s*.+)$/;
+              const actionPattern = /^(Active|Open:|Retry:|Re-authenticate:|Reauthenticate:|Delete:)/;
+              const visibleElements = Array.from(switcher.querySelectorAll('*')).filter(isVisible);
+              const rowButtons = visibleElements
+                .filter((element) =>
+                  element.matches?.('flt-semantics[role="button"],button,[role="button"]'),
+                )
+                .map((element) => ({
+                  element,
+                  label: labelFor(element),
+                  rect: element.getBoundingClientRect(),
+                }))
+                .filter((candidate) => rowPattern.test(candidate.label))
+                .sort((left, right) => left.rect.top - right.rect.top);
+              return rowButtons.map((candidate, index) => {
+                const match = candidate.label.match(rowPattern);
+                const nextTop = index + 1 < rowButtons.length
+                  ? rowButtons[index + 1].rect.top - 4
+                  : switcher.getBoundingClientRect().bottom + 4;
+                const scopedElements = visibleElements.filter((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return rect.top >= candidate.rect.top - 4
+                    && rect.top <= nextTop
+                    && rect.left >= candidate.rect.left - 32
+                    && rect.right <= candidate.rect.right + 96;
+                });
+                const actionLabels = unique(
+                  scopedElements
+                    .map((element) => labelFor(element))
+                    .filter((label) => actionPattern.test(label)),
+                );
+                const rects = scopedElements.map((element) => element.getBoundingClientRect());
+                const left = Math.min(...rects.map((rect) => rect.left));
+                const top = Math.min(...rects.map((rect) => rect.top));
+                const right = Math.max(...rects.map((rect) => rect.right));
+                const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                return {
+                  displayName: match?.[1]?.trim() || '',
+                  targetTypeLabel: match?.[2]?.trim() || '',
+                  stateLabel: match?.[3]?.trim() || '',
+                  detailText: match?.[4]?.trim() || '',
+                  visibleText: unique([candidate.label, ...actionLabels]).join(' '),
+                  selected: actionLabels.includes('Active'),
+                  semanticsLabel: candidate.label,
+                  actionLabels,
+                  buttonLabels: actionLabels,
+                  left,
+                  top,
+                  width: Math.max(0, right - left),
+                  height: Math.max(0, bottom - top),
+                };
+              });
             }
             """,
-            arg=self._trigger_label_prefix,
+            arg={"heading": self._switcher_heading},
             timeout_ms=timeout_ms,
         )
+        if not isinstance(payload, list):
+            return ()
+        rows: list[dict[str, object]] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            rows.append(
+                {
+                    "display_name": str(row.get("displayName", "")),
+                    "target_type_label": str(row.get("targetTypeLabel", "")),
+                    "state_label": str(row.get("StateLabel", row.get("stateLabel", ""))),
+                    "detail_text": str(row.get("detailText", "")),
+                    "visible_text": str(row.get("visibleText", "")),
+                    "selected": bool(row.get("selected")),
+                    "semantics_label": (
+                        None
+                        if row.get("semanticsLabel") is None
+                        else str(row.get("semanticsLabel"))
+                    ),
+                    "action_labels": tuple(
+                        str(label) for label in row.get("actionLabels", [])
+                    ),
+                    "button_labels": tuple(
+                        str(label) for label in row.get("buttonLabels", [])
+                    ),
+                    "left": float(row.get("left", 0.0)),
+                    "top": float(row.get("top", 0.0)),
+                    "width": float(row.get("width", 0.0)),
+                    "height": float(row.get("height", 0.0)),
+                },
+            )
+        return tuple(rows)
+
+    def _click_trigger(self, *, timeout_ms: int) -> None:
+        try:
+            clicked = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  const trigger = Array.from(
+                    document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
+                  )
+                    .filter((candidate) => isVisible(candidate) && labelFor(candidate).startsWith(triggerLabelPrefix))
+                    .sort((left, right) => {
+                      const leftRect = left.getBoundingClientRect();
+                      const rightRect = right.getBoundingClientRect();
+                      return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                    })[0] ?? null;
+                  if (!trigger) {
+                    return null;
+                  }
+                  trigger.click();
+                  return labelFor(trigger);
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a clickable workspace switcher trigger.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(clicked, str) or not clicked.startswith(self._trigger_label_prefix):
+            raise AssertionError(
+                "The live app did not expose a clickable workspace switcher trigger.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
     @staticmethod
     def _blur_dismissal_probe_script() -> str:
