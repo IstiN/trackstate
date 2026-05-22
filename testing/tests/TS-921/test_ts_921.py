@@ -46,6 +46,8 @@ LINKED_BUGS = ["TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
+ASSERTION_FAILURE_KIND = "assertion"
+PRECONDITION_FAILURE_KIND = "precondition"
 REWORK_SUMMARY = (
     "Resolved the TS-921 merge conflicts, kept shell-startup outages scoped to "
     "precondition failures, and tightened the wrong-directory rejection checks "
@@ -161,6 +163,7 @@ def main() -> None:
         "preloaded_workspace_state": workspace_state,
         "steps": [],
         "human_verification": [],
+        "failure_kind": ASSERTION_FAILURE_KIND,
     }
 
     runtime_context = Ts921WrongDirectoryRuntime(
@@ -1182,9 +1185,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
     failure_kind = _failure_kind(result)
+    machine_readable_outcome = _machine_readable_outcome(failure_kind)
     summary = (
         "0 passed, 1 failed (precondition failure)"
-        if failure_kind == "precondition"
+        if failure_kind == PRECONDITION_FAILURE_KIND
         else "0 passed, 1 failed"
     )
     RESULT_PATH.write_text(
@@ -1196,6 +1200,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
                 "skipped": 0,
                 "summary": summary,
                 "error": error,
+                "failure_kind": failure_kind,
+                "machine_readable_outcome": machine_readable_outcome,
             },
         )
         + "\n",
@@ -1205,7 +1211,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
     REVIEW_REPLIES_PATH.write_text(_build_review_replies(), encoding="utf-8")
-    if result.get("failure_kind") == "precondition":
+    if failure_kind == PRECONDITION_FAILURE_KIND:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     else:
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
@@ -1356,6 +1362,17 @@ def _build_review_replies() -> str:
                             "replies file is emitted for the remaining thread."
                         ),
                     },
+                    {
+                        "inReplyToId": 3290531672,
+                        "threadId": "PRRT_kwDOSU6Gf86EM8Rg",
+                        "reply": (
+                            "Fixed: the machine-readable failure output now keeps the required "
+                            "`status: failed` field for pipeline compatibility, but it also "
+                            "emits explicit `failure_kind` and `machine_readable_outcome` fields "
+                            "so precondition outages are distinguishable from a validated TS-921 "
+                            "wrong-directory failure."
+                        ),
+                    },
                 ],
             },
         )
@@ -1424,11 +1441,17 @@ def _build_bug_description(result: dict[str, object]) -> str:
 
 
 def _failure_kind(result: dict[str, object]) -> str:
-    return str(result.get("failure_kind") or "assertion")
+    return str(result.get("failure_kind") or ASSERTION_FAILURE_KIND)
+
+
+def _machine_readable_outcome(failure_kind: str) -> str:
+    if failure_kind == PRECONDITION_FAILURE_KIND:
+        return "precondition_failure"
+    return "ticket_failure"
 
 
 def _is_precondition_failure(result: dict[str, object], *, passed: bool) -> bool:
-    return not passed and _failure_kind(result) == "precondition"
+    return not passed and _failure_kind(result) == PRECONDITION_FAILURE_KIND
 
 
 def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
