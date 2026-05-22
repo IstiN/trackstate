@@ -45,10 +45,10 @@ LINKED_BUGS = ["TS-960"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Re-authenticate", "Retry")
 REWORK_SUMMARY = (
-    "Seeded the mismatched local workspace as the active startup target, moved "
-    "startup-surface probing behind `TrackStateTrackerPage`, and removed the "
-    "broad banner-dismiss exception swallow so TS-964 now drives the real "
-    "fail-soft restore path."
+    "Kept the mismatched local workspace as the active startup target but "
+    "stopped pre-marking it unavailable, so startup has to discover the "
+    "restore failure itself before the shell, header, and recovery entry "
+    "points are asserted."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -219,15 +219,44 @@ def main() -> None:
                 )
 
                 switcher = page.open_and_observe(timeout_ms=30_000)
-                local_row = page.observe_saved_workspace_row(
-                    display_name=LOCAL_DISPLAY_NAME,
-                    target_path=LOCAL_TARGET,
-                    target_type_label="Local",
-                    expected_state_label="Unavailable",
-                    accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
-                    timeout_ms=20_000,
-                )
                 result["switcher_observation"] = _switcher_payload(switcher)
+                candidate_local_row = _find_seeded_local_row(switcher)
+                result["local_row"] = _row_payload(candidate_local_row)
+                try:
+                    local_row = page.observe_saved_workspace_row(
+                        display_name=LOCAL_DISPLAY_NAME,
+                        target_path=LOCAL_TARGET,
+                        target_type_label="Local",
+                        expected_state_label="Unavailable",
+                        accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
+                        timeout_ms=20_000,
+                    )
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "Opened Workspace switcher, but the broken saved local workspace "
+                            "did not transition into the unavailable recovery state.\n"
+                            f"switcher={json.dumps(result['switcher_observation'], indent=2)}\n"
+                            f"local_row={json.dumps(result['local_row'], indent=2)}\n"
+                            f"error={error}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher and visually checked whether the broken "
+                            "local workspace exposed a recovery state."
+                        ),
+                        observed=(
+                            f"local_row={json.dumps(result['local_row'], ensure_ascii=True)}; "
+                            f"switcher_text={switcher.switcher_text!r}"
+                        ),
+                    )
+                    raise
                 result["local_row"] = _row_payload(local_row)
                 _assert_switcher_opened(switcher=switcher, local_row=local_row)
                 _record_step(
@@ -286,7 +315,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
     return {
         "activeWorkspaceId": local_id,
         "migrationComplete": True,
-        "unavailableLocalWorkspaceIds": [local_id],
+        "unavailableLocalWorkspaceIds": [],
         "profiles": [
             {
                 "id": local_id,
@@ -666,10 +695,19 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected",
         f"- **Expected:** {EXPECTED_RESULT}",
         (
-            "- **Actual:** Startup did not reach the interactive shell for the broken local "
-            "workspace scenario. Instead of rendering the global shell with a visible header "
-            "and Workspace switcher, the deployed app stayed on the startup surface and "
-            "blocked the manual recovery entry point."
+            "- **Actual:** Startup renders the interactive shell, but the broken active local "
+            "workspace is still surfaced as `Local Git` instead of being marked `Unavailable`. "
+            "The Workspace switcher therefore shows only `Active` and does not expose the "
+            "manual recovery action required by the ticket."
+        ),
+        "",
+        "## Exact missing/broken production capability",
+        (
+            "- During startup restore of a saved active local workspace whose directory no "
+            "longer matches the expected repository, the production app does not transition "
+            "that workspace into the unavailable recovery state. Users cannot start manual "
+            "re-authentication from Workspace switcher because the broken workspace remains "
+            "treated as `Local Git`."
         ),
         "",
         "## Environment details",
@@ -679,6 +717,9 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
         f"- Run command: `{RUN_COMMAND}`",
+        "",
+        "## Failing command",
+        f"- `{RUN_COMMAND}`",
         "",
         "## Observed state",
         f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
@@ -690,6 +731,19 @@ def _build_bug_description(result: dict[str, object]) -> str:
     if result.get("screenshot"):
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{result['screenshot']}`"])
     return "\n".join(lines) + "\n"
+
+
+def _find_seeded_local_row(
+    switcher: WorkspaceSwitcherObservation,
+) -> WorkspaceSwitcherRowObservation | None:
+    for row in switcher.rows:
+        if (
+            row.display_name == LOCAL_DISPLAY_NAME
+            and row.target_type_label == "Local"
+            and LOCAL_TARGET in row.detail_text
+        ):
+            return row
+    return None
 
 
 def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
@@ -823,9 +877,9 @@ def _discussion_threads() -> list[dict[str, object]]:
 
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     prefix = (
-        "Fixed: seeded the mismatched local workspace as the active startup target, "
-        "moved startup-surface probing into `TrackStateTrackerPage.observe_startup_surface()`, "
-        "and removed the broad banner-dismiss exception swallow."
+        "Fixed: kept the mismatched local workspace active but removed the preseeded "
+        "`unavailableLocalWorkspaceIds` shortcut, so startup now discovers the restore "
+        "failure itself before the test asserts the shell and header recovery."
     )
     if passed:
         return f"{prefix} Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."

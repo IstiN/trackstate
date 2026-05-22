@@ -5,7 +5,8 @@ interactive shell when the saved active local workspace cannot be restored.
 
 The automation:
 1. preloads the broken saved local workspace as the active startup target plus
-   one hosted fallback workspace into browser storage
+   one hosted fallback workspace into browser storage, without pre-marking the
+   local workspace unavailable
 2. opens the deployed TrackState app in Chromium at `1440x900`
 3. waits for startup to settle and verifies the app does not remain on the
    terminal `Sync issue` surface
