@@ -1638,7 +1638,7 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         try:
-            target_payload = self._session.wait_for_function(
+            target_payload = self._session.evaluate(
                 """
                 ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
@@ -1775,41 +1775,41 @@ class LiveWorkspaceSwitcherPage:
                   if (!target) {
                     return null;
                   }
-                  const targetKey =
-                    target.getAttribute('data-trackstate-browser-focus-id')
-                    || target.getAttribute('aria-label')
-                    || visibleText(target)
-                    || label;
-                  const focusProbe =
-                    window.__trackstateWorkspaceSwitcherFocusProbe
-                    && typeof window.__trackstateWorkspaceSwitcherFocusProbe === 'object'
-                      ? window.__trackstateWorkspaceSwitcherFocusProbe
-                      : {};
                   target.focus({ preventScroll: true });
                   const active = document.activeElement;
                   const focused = active === target || target.contains(active);
-                  const streak = focused
-                    ? (
-                        focusProbe.key === targetKey
-                          ? (Number(focusProbe.streak) || 0) + 1
-                          : 1
-                      )
-                    : 0;
-                  window.__trackstateWorkspaceSwitcherFocusProbe = {
-                    key: targetKey,
-                    streak,
-                  };
-                  if (!focused || streak < 2) {
-                    return false;
-                  }
+                  const activeRect = active?.getBoundingClientRect?.();
+                  const activeVisible = !!activeRect
+                    && activeRect.width > 0
+                    && activeRect.height > 0
+                    && window.getComputedStyle(active).visibility !== 'hidden'
+                    && window.getComputedStyle(active).display !== 'none';
+                  const activeInViewport = !!activeRect
+                    && activeRect.bottom > 0
+                    && activeRect.right > 0
+                    && activeRect.top < window.innerHeight
+                    && activeRect.left < window.innerWidth;
+                  const activeLabel = labelFor(active);
+                  const activePanelId = active?.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                  const activeWithinSwitcher = (
+                    !!active
+                    && (
+                      activePanelId === 'trackstate-workspace-switcher'
+                      || switcher.contains(active)
+                    )
+                  );
+                  const activeOnTrigger = activeLabel.startsWith('Workspace switcher:');
                   return {
-                    tagName: target.tagName,
-                    role: target.getAttribute('role'),
-                    ariaLabel: target.getAttribute('aria-label'),
-                    placeholder: target.getAttribute('placeholder'),
-                    title: target.getAttribute('title'),
-                    visibleText: visibleText(target),
-                    focusId: target.getAttribute('data-trackstate-browser-focus-id'),
+                    focused,
+                    activeLabel,
+                    activeRole: active?.getAttribute?.('role') || null,
+                    activeTagName: active?.tagName || '',
+                    activeOuterHtml: active?.outerHTML?.slice?.(0, 400) || '',
+                    activeVisible,
+                    activeInViewport,
+                    activeWithinSwitcher,
+                    activeOnTrigger,
+                    focusOwnedBySwitcher: activeWithinSwitcher || activeOnTrigger,
                   };
                 }
                 """,
@@ -1821,7 +1821,6 @@ class LiveWorkspaceSwitcherPage:
                     "panelRight": panel.left + panel.width,
                     "panelBottom": panel.top + panel.height,
                 },
-                timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
@@ -1830,14 +1829,32 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
-        if not isinstance(target_payload, dict):
+        if not isinstance(target_payload, dict) or not bool(target_payload.get("focused")):
             raise AssertionError(
                 f'The open workspace switcher did not expose a focusable internal tab stop '
                 f'matching "{label}".\n'
                 f"Observed internal tab stops: {sorted(observable_labels)!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        observation = self.observe_switcher_focus_target(panel=panel)
+        observation = WorkspaceSwitcherFocusTargetObservation(
+            active_label=(
+                str(target_payload.get("activeLabel"))
+                if target_payload.get("activeLabel") is not None
+                else None
+            ),
+            active_role=(
+                str(target_payload.get("activeRole"))
+                if target_payload.get("activeRole") is not None
+                else None
+            ),
+            active_tag_name=str(target_payload.get("activeTagName", "")),
+            active_outer_html=str(target_payload.get("activeOuterHtml", "")),
+            active_visible=bool(target_payload.get("activeVisible")),
+            active_in_viewport=bool(target_payload.get("activeInViewport")),
+            active_within_switcher=bool(target_payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(target_payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(target_payload.get("focusOwnedBySwitcher")),
+        )
         if (
             not observation.focus_owned_by_switcher
             or not observation.active_within_switcher
