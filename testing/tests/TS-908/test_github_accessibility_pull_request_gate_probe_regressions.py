@@ -350,6 +350,32 @@ void main() {
             ],
         )
 
+    def test_accessibility_stage_log_scoping_ignores_other_job_markers(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        scoped_log = probe._accessibility_stage_run_log_text(  # noqa: SLF001
+            """
+            Flutter checks Run unit and golden tests 2026-05-22T11:02:00Z Flutter engine initialization: bootstrap requested
+            Flutter checks Run unit and golden tests 2026-05-22T11:02:01Z Flutter engine initialization: engine ready
+            Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]
+            """,
+            [
+                {"name": "Flutter checks"},
+                {"name": "Accessibility checks"},
+            ],
+        )
+
+        self.assertEqual(
+            probe._extract_flutter_engine_initialization_log_entries(scoped_log),  # noqa: SLF001
+            [],
+        )
+        self.assertEqual(
+            probe._extract_semantics_tree_discovery_log_entries(scoped_log),  # noqa: SLF001
+            [
+                'Accessibility checks Run axe-core accessibility checks 2026-05-22T11:02:08Z Accessibility runtime surface ready: hosts=1; nodes=5; sample-labels=["Create tracker"]',
+            ],
+        )
+
     def test_extract_log_excerpt_prefers_engine_and_runtime_markers(self) -> None:
         probe = _StubProbeService(self.config)
 
