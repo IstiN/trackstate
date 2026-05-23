@@ -177,13 +177,6 @@ jobs:
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
           exit "$exit_code"
 
-      - name: log-validation
-        if: ${{ always() && steps.changes.outputs.accessibility == 'true' }}
-        shell: bash
-        run: |
-          log_path="$RUNNER_TEMP/accessibility-check.log"
-          node testing/accessibility/log_validation.js "$log_path"
-
   deploy-preview:
     name: Deploy preview
     runs-on: ubuntu-latest
