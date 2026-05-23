@@ -149,8 +149,8 @@ def _assert_live_semantic_contract(
     failures: list[str] = []
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production source no longer used the dedicated sync "
-            f"semantic-label contract `{config.required_source_snippet}`"
+            "the live production source no longer used the dedicated helper-localized "
+            f"sync semantic label `{config.required_source_snippet}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
@@ -170,7 +170,7 @@ def _assert_live_semantic_contract(
     if failures:
         raise AssertionError(
             "Precondition failed: TS-907 could not confirm the live production "
-            "sync-pill semantic-label contract before mutating the temp workspace.\n"
+            "sync-pill helper-localized semantic label before mutating the temp workspace.\n"
             f"Problems: {'; '.join(failures)}\n"
             f"Baseline analyze output:\n{_combined_output(validation.baseline_analyze)}"
         )
