@@ -16,6 +16,7 @@ if str(TEST_DIR) not in sys.path:
 
 from testing.components.pages.live_startup_recovery_page import (  # noqa: E402
     LiveStartupRecoveryPage,
+    StartupRecoverySurfaceObservation,
 )
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
@@ -25,6 +26,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from support.ts983_startup_retry_runtime import (  # noqa: E402
@@ -37,13 +39,11 @@ TEST_CASE_TITLE = (
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-983/test_ts_983.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
-DEFAULT_BRANCH = "main"
 BLOCKED_BOOTSTRAP_PATH = "DEMO/project.json"
 LINKED_BUGS = ["TS-977"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 RECOVERY_ACTION_LABELS = ("Sync issue", "Retry")
 HOSTED_SETUP_WORKSPACE_NAME = "Hosted setup workspace"
-HOSTED_MAIN_WORKSPACE_NAME = "Hosted main workspace"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -79,14 +79,13 @@ def main() -> None:
             "TS-983 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
 
-    workspace_state = _workspace_state(service.repository)
-    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
+    workspace_state = _initial_workspace_state()
+    preloaded_workspace_names = _workspace_names(workspace_state)
     runtime = Ts983StartupRetryRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
         blocked_path=BLOCKED_BOOTSTRAP_PATH,
-        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, object] = {
@@ -121,12 +120,20 @@ def main() -> None:
                 page.set_viewport(**DESKTOP_VIEWPORT)
 
                 recovery_ready, recovery_surface = poll_until(
-                    probe=lambda: _observe_recovery_surface(tracker_page),
-                    is_satisfied=lambda observation: observation["visible_action_label"] is not None,
+                    probe=lambda: startup_page.observe_recovery_surface(
+                        accepted_action_labels=RECOVERY_ACTION_LABELS,
+                    ),
+                    is_satisfied=lambda observation: isinstance(
+                        observation,
+                        StartupRecoverySurfaceObservation,
+                    )
+                    and observation.visible_action_label is not None,
                     timeout_seconds=120,
                     interval_seconds=1,
                 )
-                result["recovery_surface_before_retry"] = recovery_surface
+                result["recovery_surface_before_retry"] = _recovery_surface_payload(
+                    recovery_surface,
+                )
                 result["blocked_requests_before_retry"] = [
                     asdict(request) for request in runtime.blocked_requests
                 ]
@@ -139,23 +146,24 @@ def main() -> None:
                         observed=(
                             "The deployed app never exposed a visible recovery action label "
                             f"matching {RECOVERY_ACTION_LABELS!r}.\n"
-                            f"Observed recovery surface: {json.dumps(recovery_surface, indent=2)}"
+                            "Observed recovery surface: "
+                            f"{json.dumps(_recovery_surface_payload(recovery_surface), indent=2)}"
                         ),
                     )
                     _record_not_reached_steps(result, starting_step=2)
                     raise AssertionError(
                         "Step 1 failed: the deployed app never exposed the recovery action "
                         f"needed for TS-983. Observed recovery surface:\n"
-                        f"{json.dumps(recovery_surface, indent=2)}",
+                        f"{json.dumps(_recovery_surface_payload(recovery_surface), indent=2)}",
                     )
 
-                visible_action_label = str(recovery_surface["visible_action_label"])
+                visible_action_label = str(recovery_surface.visible_action_label)
                 if len(runtime.blocked_requests) == 0:
                     raise AssertionError(
                         "Precondition failed: the synthetic startup fetch block for "
                         f"{BLOCKED_BOOTSTRAP_PATH} was never exercised before the recovery "
                         f"action appeared.\nObserved recovery surface:\n"
-                        f"{json.dumps(recovery_surface, indent=2)}",
+                        f"{json.dumps(_recovery_surface_payload(recovery_surface), indent=2)}",
                     )
 
                 _record_step(
@@ -167,9 +175,9 @@ def main() -> None:
                         "The failed startup surface appeared with the expected recovery action "
                         "after the hosted bootstrap fetch was blocked.\n"
                         f"visible_action_label={visible_action_label!r}; "
-                        f"visible_buttons={recovery_surface['visible_buttons']!r}; "
+                        f"visible_buttons={list(recovery_surface.visible_button_labels)!r}; "
                         f"blocked_request_count={len(runtime.blocked_requests)}; "
-                        f"body_text={recovery_surface['body_text']!r}"
+                        f"surface_text={recovery_surface.surface_text!r}"
                     ),
                 )
                 _record_human_verification(
@@ -181,14 +189,16 @@ def main() -> None:
                     ),
                     observed=(
                         f"visible_action_label={visible_action_label!r}; "
-                        f"visible_buttons={recovery_surface['visible_buttons']!r}; "
-                        f"body_text={recovery_surface['body_text']!r}"
+                        f"visible_buttons={list(recovery_surface.visible_button_labels)!r}; "
+                        f"surface_text={recovery_surface.surface_text!r}"
                     ),
                 )
 
                 successful_requests_before_click = len(runtime.successful_retry_requests)
                 runtime.enable_retry_success()
-                _click_visible_recovery_action(tracker_page)
+                clicked_action_label = startup_page.click_recovery_action(
+                    accepted_action_labels=RECOVERY_ACTION_LABELS,
+                )
 
                 shell_ready, shell_observation = poll_until(
                     probe=lambda: tracker_page.observe_interactive_shell(
@@ -247,6 +257,7 @@ def main() -> None:
                         "Clicked the visible recovery action and captured a successful "
                         "re-request of the blocked startup artifact.\n"
                         f"visible_action_label={visible_action_label!r}; "
+                        f"clicked_action_label={clicked_action_label!r}; "
                         f"successful_retry_request_count={len(runtime.successful_retry_requests)}; "
                         f"shell_ready={shell_observation.get('shell_ready')!r}"
                     ),
@@ -266,11 +277,10 @@ def main() -> None:
 
                 switcher_ready, switcher_observation = poll_until(
                     probe=lambda: _open_workspace_switcher(page),
-                    is_satisfied=lambda observation: isinstance(observation, WorkspaceSwitcherObservation)
-                    and observation.row_count > 0
-                    and "Saved workspaces" in observation.switcher_text
-                    and "Add workspace" in observation.switcher_text
-                    and "Save and switch" in observation.switcher_text,
+                    is_satisfied=lambda observation: _switcher_shows_recovered_workspaces(
+                        observation,
+                        preloaded_workspace_names=preloaded_workspace_names,
+                    ),
                     timeout_seconds=120,
                     interval_seconds=1,
                 )
@@ -294,6 +304,8 @@ def main() -> None:
                         "After the successful retry, the workspace switcher exposed saved "
                         "workspace rows and the visible footer controls.\n"
                         f"row_count={switcher_observation.row_count}; "
+                        "recovered_workspace_names="
+                        f"{_recovered_workspace_names(switcher_observation, preloaded_workspace_names)!r}; "
                         f"switcher_text={switcher_observation.switcher_text!r}"
                     ),
                 )
@@ -333,141 +345,19 @@ def main() -> None:
         raise
 
 
-def _observe_recovery_surface(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        r"""
-        (acceptedLabels) => {
-          const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const visibleButtons = Array.from(
-            document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
-          )
-            .filter(isVisible)
-            .map((element) =>
-              normalize(
-                element.getAttribute('aria-label')
-                || element.innerText
-                || element.textContent
-                || '',
-              ),
-            )
-            .filter((label) => label.length > 0);
-          return {
-            bodyText: normalize(document.body?.innerText || ''),
-            visibleButtons,
-            visibleActionLabel:
-              visibleButtons.find((label) => acceptedLabels.includes(label)) ?? null,
-          };
-        }
-        """,
-        arg=list(RECOVERY_ACTION_LABELS),
-    )
-    if not isinstance(payload, dict):
-        return {
-            "body_text": tracker_page.body_text(),
-            "visible_buttons": [],
-            "visible_action_label": None,
-        }
-    return {
-        "body_text": str(payload.get("bodyText", "")),
-        "visible_buttons": [str(label) for label in payload.get("visibleButtons", [])],
-        "visible_action_label": payload.get("visibleActionLabel"),
-    }
-
-
-def _click_visible_recovery_action(tracker_page) -> None:
-    clicked = tracker_page.session.evaluate(
-        r"""
-        (acceptedLabels) => {
-          const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const buttons = Array.from(
-            document.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
-          ).filter(isVisible);
-          const match =
-            buttons.find((element) =>
-              acceptedLabels.includes(
-                normalize(
-                  element.getAttribute('aria-label')
-                  || element.innerText
-                  || element.textContent
-                  || '',
-                ),
-              ),
-            )
-            ?? null;
-          if (!match) {
-            return null;
-          }
-          match.click();
-          return normalize(
-            match.getAttribute('aria-label') || match.innerText || match.textContent || '',
-          );
-        }
-        """,
-        arg=list(RECOVERY_ACTION_LABELS),
-    )
-    if clicked is None:
-        raise AssertionError(
-            "Step 2 failed: the startup recovery surface did not expose a clickable "
-            f'action matching {RECOVERY_ACTION_LABELS!r}.',
-        )
-
-
 def _open_workspace_switcher(
     page: LiveWorkspaceSwitcherPage,
 ) -> WorkspaceSwitcherObservation:
-    return page.open_and_observe(timeout_ms=30_000)
+    try:
+        return page.observe_open_switcher(timeout_ms=5_000)
+    except (AssertionError, WebAppTimeoutError):
+        return page.open_and_observe(timeout_ms=30_000)
 
 
-def _workspace_state(repository: str) -> dict[str, object]:
-    setup_id = f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
-    main_id = "hosted:istin/trackstate@main"
+def _initial_workspace_state() -> dict[str, object]:
     return {
-        "activeWorkspaceId": setup_id,
         "migrationComplete": True,
-        "profiles": [
-            {
-                "id": setup_id,
-                "displayName": HOSTED_SETUP_WORKSPACE_NAME,
-                "customDisplayName": HOSTED_SETUP_WORKSPACE_NAME,
-                "targetType": "hosted",
-                "target": repository,
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-23T00:00:00.000Z",
-            },
-            {
-                "id": main_id,
-                "displayName": HOSTED_MAIN_WORKSPACE_NAME,
-                "customDisplayName": HOSTED_MAIN_WORKSPACE_NAME,
-                "targetType": "hosted",
-                "target": "IstiN/trackstate",
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-22T23:50:00.000Z",
-            },
-        ],
+        "profiles": [],
     }
 
 
@@ -477,6 +367,54 @@ def _footer_controls(switcher: WorkspaceSwitcherObservation) -> list[str]:
         if label in switcher.switcher_text:
             controls.append(label)
     return controls
+
+
+def _workspace_names(workspace_state: dict[str, object]) -> set[str]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return set()
+    names: set[str] = set()
+    for profile in raw_profiles:
+        if not isinstance(profile, dict):
+            continue
+        for key in ("customDisplayName", "displayName"):
+            value = str(profile.get(key, "")).strip()
+            if value:
+                names.add(value)
+                break
+    return names
+
+
+def _recovered_workspace_names(
+    switcher: WorkspaceSwitcherObservation,
+    preloaded_workspace_names: set[str],
+) -> list[str]:
+    recovered = {
+        row.display_name
+        for row in switcher.rows
+        if row.display_name and row.display_name not in preloaded_workspace_names
+    }
+    return sorted(recovered)
+
+
+def _switcher_shows_recovered_workspaces(
+    observation: object,
+    *,
+    preloaded_workspace_names: set[str],
+) -> bool:
+    if not isinstance(observation, WorkspaceSwitcherObservation):
+        return False
+    recovered_workspace_names = _recovered_workspace_names(
+        observation,
+        preloaded_workspace_names,
+    )
+    return (
+        bool(recovered_workspace_names)
+        and HOSTED_SETUP_WORKSPACE_NAME in recovered_workspace_names
+        and "Saved workspaces" in observation.switcher_text
+        and "Add workspace" in observation.switcher_text
+        and "Save and switch" in observation.switcher_text
+    )
 
 
 def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, object]:
@@ -497,6 +435,20 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
             }
             for row in switcher.rows
         ],
+    }
+
+
+def _recovery_surface_payload(
+    observation: StartupRecoverySurfaceObservation,
+) -> dict[str, object]:
+    return {
+        "body_text": observation.body_text,
+        "surface_text": observation.surface_text,
+        "visible_buttons": list(observation.visible_button_labels),
+        "visible_action_label": observation.visible_action_label,
+        "connect_github_visible": observation.connect_github_visible,
+        "container_tag_name": observation.container_tag_name,
+        "container_role": observation.container_role,
     }
 
 

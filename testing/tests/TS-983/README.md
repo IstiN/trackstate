@@ -28,6 +28,13 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-983/test_ts_983.py
   - `TRACKSTATE_LIVE_SETUP_REPOSITORY`
   - `TRACKSTATE_LIVE_SETUP_REF`
 
+## Test notes
+
+- Uses the startup recovery page object to find and click the recovery action from
+  the recovery surface instead of using document-wide button queries.
+- Starts with an empty stored workspace profile state so any recovered workspace
+  rows must appear because the live retry path completed successfully.
+
 ## Expected result
 
 ```text
