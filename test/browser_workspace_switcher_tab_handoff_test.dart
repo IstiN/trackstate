@@ -156,6 +156,69 @@ void main() {
     );
   });
 
+  test(
+    'Tab from the DOM-last post-row control still wraps to the selected row when the footer is earlier in DOM order',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: true,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 216,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 168,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+          ],
+          currentIndex: 4,
+          backwards: false,
+        ),
+        1,
+      );
+    },
+  );
+
   test('non-boundary tab stops do not trigger a manual handoff', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
@@ -292,6 +355,69 @@ void main() {
           backwards: true,
         ),
         4,
+      );
+    },
+  );
+
+  test(
+    'Shift+Tab from the selected workspace row uses visual order for the last in-panel control when the footer is earlier in DOM order',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: true,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 216,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 168,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+          ],
+          currentIndex: 1,
+          backwards: true,
+        ),
+        2,
       );
     },
   );

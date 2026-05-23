@@ -417,7 +417,7 @@
       }
     }
   },
-  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "repositoryConfigFallback": "TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}",
   "@repositoryConfigFallback": {
     "placeholders": {
       "error": {

@@ -1,4 +1,6 @@
-import 'dart:collection';
+@TestOn('browser')
+library;
+
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -19,7 +21,7 @@ void main() {
   });
 
   testWidgets(
-    'startup waits for delayed auth before exposing the shell in web-style restore flow',
+    'startup exposes the shell with restricted access before delayed auth completes in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -51,6 +53,7 @@ void main() {
       final delayedRepository = _DelayedConnectRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
       );
+      var browserLocalRepositoryChecks = 0;
 
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
@@ -64,18 +67,16 @@ void main() {
           repositoryFactory: () => delayedRepository,
           workspaceProfileService: service,
           authStore: authStore,
-          openLocalRepository:
+          openBrowserLocalRepository:
               ({
                 required String repositoryPath,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => _QueuedLoadTrackStateRepository(
-                loadResults: [
-                  UnsupportedError(
-                    'Unsupported operation: Process.run is not supported on the web.',
-                  ),
-                ],
-              ),
+              }) async {
+                browserLocalRepositoryChecks += 1;
+                expect(repositoryPath, '/tmp/trackstate-demo');
+                return null;
+              },
           openHostedRepository:
               ({
                 required String repository,
@@ -90,15 +91,31 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
-        findsNothing,
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
+      );
+      expect(find.text('Add workspace'), findsNothing);
+      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
+      expect(delayedRepository.connectCalled, isTrue);
+      expect(delayedRepository.connectCompleted, isFalse);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      expect(delayedRepository.session?.canRead, isTrue);
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+      final savedStateBeforeConnect = await service.loadState();
+      expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateBeforeConnect.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
 
       delayedRepository.completeConnect();
@@ -106,15 +123,26 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
+      final savedState = await service.loadState();
+      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
+      expect(
+        savedState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
     },
   );
@@ -162,6 +190,10 @@ class _DelayedConnectRepository extends ProviderBackedTrackStateRepository {
   final TrackerSnapshot _snapshotOverride;
   final _DelayedConnectProvider _provider;
 
+  bool get connectCalled => _provider.connectCalled;
+
+  bool get connectCompleted => _provider.connectCompleted;
+
   void completeConnect() {
     _provider.completeConnect();
   }
@@ -175,7 +207,10 @@ class _DelayedConnectRepository extends ProviderBackedTrackStateRepository {
 
 class _DelayedConnectProvider implements TrackStateProviderAdapter {
   final Completer<void> _connectCompleter = Completer<void>();
+  bool connectCalled = false;
   bool _connected = false;
+
+  bool get connectCompleted => _connectCompleter.isCompleted;
 
   @override
   String get dataRef => 'main';
@@ -188,6 +223,7 @@ class _DelayedConnectProvider implements TrackStateProviderAdapter {
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    connectCalled = true;
     await _connectCompleter.future;
     _connected = true;
     return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
@@ -283,24 +319,5 @@ class _DelayedConnectProvider implements TrackStateProviderAdapter {
       return;
     }
     _connectCompleter.complete();
-  }
-}
-
-class _QueuedLoadTrackStateRepository extends DemoTrackStateRepository {
-  _QueuedLoadTrackStateRepository({required List<Object> loadResults})
-    : _loadResults = Queue<Object>.from(loadResults);
-
-  final Queue<Object> _loadResults;
-
-  @override
-  Future<TrackerSnapshot> loadSnapshot() async {
-    if (_loadResults.isEmpty) {
-      return super.loadSnapshot();
-    }
-    final next = _loadResults.removeFirst();
-    if (next is TrackerSnapshot) {
-      return next;
-    }
-    throw next;
   }
 }
