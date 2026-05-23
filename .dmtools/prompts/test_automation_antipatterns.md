@@ -131,3 +131,45 @@ flowchart TD
 ```
 
 **Rule**: If the test validates config values but the runtime uses a different source (theme tokens, computed values), the assertion proves nothing about actual behavior. Couple the assertion to the runtime artifact.
+
+## 11. bug_description.md only for PRODUCT defects, not setup failures
+
+```mermaid
+flowchart TD
+  Error([Test throws exception]) --> Type{Exception type?}
+  Type -->|"Missing Node/Flutter,\nconfig error, network timeout,\nassertion bug in test"| SETUP["❌ Do NOT write bug_description.md\nThis is a test infrastructure problem"]
+  Type -->|"Product UI doesn't match\nticket expected behavior"| PRODUCT["✅ Write bug_description.md\nThis is a real product defect"]
+```
+
+**Rule**: `bug_description.md` triggers bug creation downstream. Writing it for setup failures creates FALSE bugs that waste the pipeline. Only write it when the product itself is broken.
+
+## 12. Never hardcode expectations that drift with UI changes
+
+```python
+# ❌ WRONG — breaks when panel adds/removes controls
+assert last_element.text == "Save and switch"
+
+# ✅ CORRECT — derive from live state
+all_tabbable = page.query_selector_all('[tabindex="0"], button, input, a')
+last_internal = [e for e in all_tabbable if switcher_panel.contains(e)][-1]
+```
+
+**Rule**: If the ticket is about "wraps to the LAST internal element", discover what that element IS at runtime. Don't hardcode a label that drifts.
+
+## 13. Swallowing exceptions hides regressions
+
+```python
+# ❌ WRONG — hides real failures
+try:
+    dismiss_banner()
+except:
+    pass  # "banner is optional"
+
+# ✅ CORRECT — catch only expected cases
+try:
+    dismiss_banner()
+except TimeoutError:
+    pass  # Banner not shown in this flow, expected
+```
+
+**Rule**: Bare `except` or `except Exception` can mask product regressions. Catch only the specific expected case.
