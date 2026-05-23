@@ -142,6 +142,19 @@ void main() {
         expect(find.text('Saved workspaces'), findsOneWidget);
         expect(find.text(snapshot.project.repository), findsWidgets);
         expect(find.text('No saved workspaces yet.'), findsNothing);
+        final saveAndSwitchSemantics = tester.allWidgets.whereType<Semantics>().where(
+          (widget) =>
+              (widget.properties.label ?? '').trim() == 'Save and switch' &&
+              widget.properties.button == true,
+        );
+        expect(
+          saveAndSwitchSemantics.length,
+          1,
+          reason:
+              'The recovered workspace switcher should keep an explicit Save and '
+              'switch semantics node so Flutter web exports the footer control '
+              'inside the panel.',
+        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
