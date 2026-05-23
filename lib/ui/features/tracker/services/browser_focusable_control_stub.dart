@@ -12,6 +12,7 @@ class BrowserFocusableControl extends StatelessWidget {
     this.controlsId,
     this.expanded,
     this.selectedRow = false,
+    this.focusableWhenDisabled = false,
     this.tabIndex,
   });
 
@@ -24,6 +25,7 @@ class BrowserFocusableControl extends StatelessWidget {
   final String? controlsId;
   final bool? expanded;
   final bool selectedRow;
+  final bool focusableWhenDisabled;
   final int? tabIndex;
 
   @override

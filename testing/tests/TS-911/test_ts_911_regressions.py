@@ -17,7 +17,6 @@ if _LIVE_TEST_SPEC is None or _LIVE_TEST_SPEC.loader is None:
 _LIVE_TEST_MODULE = module_from_spec(_LIVE_TEST_SPEC)
 _LIVE_TEST_SPEC.loader.exec_module(_LIVE_TEST_MODULE)
 
-
 class Ts911RegressionsTest(unittest.TestCase):
     def test_prefers_selected_row_when_panel_already_opens_on_first_internal_focus(self) -> None:
         target = _LIVE_TEST_MODULE._resolve_first_internal_focus_target(

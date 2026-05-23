@@ -2281,6 +2281,7 @@ class LiveWorkspaceSwitcherPage:
             return []
         return [item for item in payload if isinstance(item, dict)]
 
+
     def click_switcher_button(
         self,
         label: str,
@@ -2525,6 +2526,7 @@ class LiveWorkspaceSwitcherPage:
         state_labels = (
             "Attachments limited",
             "Saved hosted workspace",
+            "Sync issue",
             "Needs sign-in",
             "Read-only",
             "Connected",
@@ -3124,6 +3126,7 @@ class LiveWorkspaceSwitcherPage:
                 );
               const stateLabels = [
                 'Local Git',
+                'Sync issue',
                 'Needs sign-in',
                 'Connected',
                 'Read-only',
@@ -5183,6 +5186,7 @@ class LiveWorkspaceSwitcherPage:
               ];
               const stateLabels = [
                 'Local Git',
+                'Sync issue',
                 'Needs sign-in',
                 'Connected',
                 'Read-only',
@@ -8565,6 +8569,7 @@ def _rows_from_structured_switcher_text(
     states = (
         "Attachments limited",
         "Saved hosted workspace",
+        "Sync issue",
         "Needs sign-in",
         "Read-only",
         "Connected",
@@ -8653,6 +8658,7 @@ def _rows_from_linear_switcher_text(
     states = (
         "Attachments limited",
         "Saved hosted workspace",
+        "Sync issue",
         "Needs sign-in",
         "Read-only",
         "Connected",

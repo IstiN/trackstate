@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
 import re
@@ -28,36 +29,27 @@ from testing.core.config.live_setup_test_config import load_live_setup_test_conf
 from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    StoredWorkspaceProfilesRuntime,
+from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
+    Ts980RestorePersistenceRuntime,
+    install_restorable_directory_picker,
+    read_manual_reauth_probe,
+    read_restorable_directory_picker_state,
 )
 
-TICKET_KEY = "TS-912"
+TICKET_KEY = "TS-980"
 TEST_CASE_TITLE = (
-    "Manual re-authentication for unavailable workspace restores Local Git state"
+    "Refresh application after manual restoration keeps the workspace in Local Git"
 )
-INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-912/test_ts_912.py"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-980/test_ts_980.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
-LOCAL_TARGET = "/tmp/trackstate-ts912-workspace"
+LOCAL_TARGET = "/tmp/trackstate-ts980-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = [
-    "TS-894",
-    "TS-914",
-    "TS-915",
-    "TS-942",
-    "TS-947",
-    "TS-960",
-    "TS-974",
-    "TS-976",
-]
+LINKED_BUGS = ["TS-976"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_TRIGGER_WAIT_SECONDS = 60
-RESTORED_DIRECTORY_NAME = Path(LOCAL_TARGET).name
-RESTORED_PROJECT_KEY = "TRACK"
-RESTORED_STARTER_ISSUE_KEY = f"{RESTORED_PROJECT_KEY}-1"
+POST_RELOAD_RESTORE_WAIT_SECONDS = 45
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -66,69 +58,28 @@ RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts912_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts912_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts980_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts980_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
+    "Refresh the browser tab or perform a hard reload of the application.",
     "Open the Workspace switcher from the application header.",
-    "Locate the 'Local Unavailable' workspace entry.",
-    "Click the 'Re-authenticate' or 'Retry' action associated with the unavailable workspace.",
-    "Follow the browser prompt to grant file system access to the directory.",
+    "Observe the status label and branch information for the previously restored workspace.",
 ]
 EXPECTED_RESULT = (
-    "The workspace status is updated to 'Local Git'. The workspace becomes "
-    "active and its contents are successfully loaded/indexed."
+    "The workspace status remains 'Local Git'. The application does not revert "
+    "the workspace to 'Local Unavailable', confirming that the file system "
+    "handle permissions were successfully persisted."
 )
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Resolved the TS-912 merge conflict, replaced the synthetic "
-    "`showDirectoryPicker()` stub with an OPFS-backed real directory handle, and "
-    "generate review replies from the current unresolved PR thread metadata."
+    "Extracted the TS-980 runtime and repo-backed directory handle shim into "
+    "`testing/tests/support/ts980_restore_persistence_runtime.py`, updated the "
+    "test to consume the shared helper, then reran the live restore-plus-reload "
+    "regression and refreshed the PR review reply artifact."
 )
-
-
-class Ts912ManualReauthRuntime(StoredWorkspaceProfilesRuntime):
-    def __init__(
-        self,
-        *,
-        repository: str,
-        token: str,
-        workspace_state: dict[str, object],
-        workspace_token_profile_ids: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(
-            repository=repository,
-            token=token,
-            workspace_state=workspace_state,
-            workspace_token_profile_ids=workspace_token_profile_ids,
-        )
-        self.console_events: list[dict[str, str]] = []
-        self.page_errors: list[str] = []
-
-    def __enter__(self):
-        session = super().__enter__()
-        if self._context is None or self._page is None:
-            raise RuntimeError(
-                "TS-912 manual re-auth runtime expected a browser context and page.",
-            )
-        self._context.add_init_script(script=_manual_reauth_probe_script())
-        self._context.add_init_script(script=_granted_directory_picker_script())
-        self._page.on("console", self._record_console_event)
-        self._page.on("pageerror", self._record_page_error)
-        return session
-
-    def _record_console_event(self, message) -> None:
-        self.console_events.append(
-            {
-                "level": str(message.type),
-                "text": str(message.text),
-            },
-        )
-
-    def _record_page_error(self, error: object) -> None:
-        self.page_errors.append(str(error))
 
 
 def main() -> None:
@@ -142,7 +93,7 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-912 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+            "TS-980 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
 
     workspace_state = _workspace_state(service.repository)
@@ -161,16 +112,16 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "linked_bugs": LINKED_BUGS,
         "preloaded_workspace_state": workspace_state,
-        "ticket_boundary_reached": False,
+        "precondition_established": False,
         "steps": [],
         "human_verification": [],
     }
 
     page: LiveWorkspaceSwitcherPage | None = None
-    runtime_context: Ts912ManualReauthRuntime | None = None
+    runtime_context: Ts980RestorePersistenceRuntime | None = None
 
     try:
-        runtime_context = Ts912ManualReauthRuntime(
+        runtime_context = Ts980RestorePersistenceRuntime(
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
@@ -203,8 +154,8 @@ def main() -> None:
                         runtime_context=runtime_context,
                         reason=(
                             "The deployed app never exposed the visible Workspace switcher "
-                            "trigger required to start the TS-912 manual re-authentication "
-                            "flow."
+                            "trigger required to establish the restored-workspace precondition "
+                            "for TS-980."
                         ),
                     )
 
@@ -223,8 +174,8 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the live shell before opening the switcher to confirm the "
-                        "hosted workspace was the currently active visible state."
+                        "Viewed the live shell before restoring the local workspace to confirm "
+                        "the hosted workspace was currently active."
                     ),
                     observed=(
                         f"trigger_label={initial_trigger.semantic_label!r}; "
@@ -241,18 +192,6 @@ def main() -> None:
                     if saved_local_row_before is not None
                     else None
                 )
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action=REQUEST_STEPS[0],
-                    observed=(
-                        "Opened the Workspace switcher from the application header.\n"
-                        f"row_count={switcher_before.row_count}; "
-                        f"switcher_text={switcher_before.switcher_text!r}"
-                    ),
-                )
-
                 local_row_before = _find_named_local_row(switcher_before)
                 hosted_row_before = _find_named_hosted_row(switcher_before)
                 selected_row_before = _find_selected_row(switcher_before)
@@ -278,46 +217,18 @@ def main() -> None:
                         switcher=switcher_before,
                     )
                 except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="failed",
-                        action=REQUEST_STEPS[1],
-                        observed=str(error),
-                    )
-                    _record_step(
-                        result,
-                        step=3,
-                        status="failed",
-                        action=REQUEST_STEPS[2],
-                        observed="Not reached because the unavailable local workspace row was not exposed in step 2.",
-                    )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed="Not reached because the unavailable local workspace row was not exposed in step 2.",
-                    )
-                    raise
+                    _record_request_steps_precondition_failure(result, str(error))
+                    raise AssertionError(
+                        "Precondition failed: the saved local workspace did not render as the "
+                        "expected `Unavailable` row before the reload scenario could begin.\n"
+                        f"{error}"
+                    ) from error
 
-                _record_step(
-                    result,
-                    step=2,
-                    status="passed",
-                    action=REQUEST_STEPS[1],
-                    observed=(
-                        "Located the saved local workspace row in the visible `Unavailable` state "
-                        "before the manual restore action.\n"
-                        f"local_row={json.dumps(_row_payload(local_row_before), indent=2)}"
-                    ),
-                )
-                result["ticket_boundary_reached"] = True
                 _record_human_verification(
                     result,
                     check=(
                         "Opened the switcher and visually confirmed the saved local workspace "
-                        "row still showed the unavailable state before any manual action."
+                        "row still showed the unavailable state before the manual restore action."
                     ),
                     observed=(
                         f"local_row={json.dumps(_row_payload(local_row_before), ensure_ascii=True)}; "
@@ -327,11 +238,21 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
-                result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
+                workspace_directory_snapshot = _workspace_directory_snapshot(
+                    Path(restored_local_workspace["path"]),
+                )
+                install_restorable_directory_picker(
+                    tracker_page=tracker_page,
+                    directory_snapshot=workspace_directory_snapshot,
+                )
+                result["manual_directory_picker_fixture"] = _workspace_directory_snapshot_summary(
+                    workspace_directory_snapshot,
+                )
+                result["manual_reauth_probe_before_action"] = read_manual_reauth_probe(
                     tracker_page,
                 )
-                result["simulated_directory_grant_before_action"] = _read_granted_directory_picker_state(
-                    tracker_page,
+                result["manual_directory_picker_state_before_action"] = (
+                    read_restorable_directory_picker_state(tracker_page)
                 )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
                 result["manual_restore_action_label"] = exact_action_label
@@ -342,40 +263,14 @@ def main() -> None:
                         timeout_ms=10_000,
                     )
                 except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=3,
-                        status="failed",
-                        action=REQUEST_STEPS[2],
-                        observed=(
-                            "The saved local workspace directory was recreated before the "
-                            "manual restore attempt, but activating the unavailable row failed.\n"
-                            f"restored_local_workspace={json.dumps(restored_local_workspace, indent=2)}\n"
-                            f"{error}"
-                        ),
+                    message = (
+                        "The saved local workspace directory was recreated before the manual "
+                        "restore attempt, but activating the unavailable row failed.\n"
+                        f"restored_local_workspace={json.dumps(restored_local_workspace, indent=2)}\n"
+                        f"{error}"
                     )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed="Not reached because the manual restore action in step 3 did not activate the local workspace.",
-                    )
-                    raise
-
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=(
-                        "Activated the visible saved-workspace action exposed for the "
-                        "unavailable workspace entry instead of using the generic workspace "
-                        "switch helper.\n"
-                        f"observed_saved_row={json.dumps(_saved_row_payload(saved_local_row_before), indent=2)}\n"
-                        f"clicked_action_label={exact_action_label!r}"
-                    ),
-                )
+                    _record_request_steps_precondition_failure(result, message)
+                    raise AssertionError(f"Precondition failed: {message}") from error
 
                 callback_observed, restore_attempt_observation = poll_until(
                     probe=lambda: _observe_manual_restore_attempt(
@@ -393,85 +288,35 @@ def main() -> None:
                 result["manual_reauth_probe_after_action"] = restore_attempt_observation[
                     "probe"
                 ]
-                result["simulated_directory_grant_after_action"] = _read_granted_directory_picker_state(
-                    tracker_page,
+                result["manual_directory_picker_state_after_action"] = (
+                    restore_attempt_observation["directory_picker_state"]
                 )
                 if not callback_observed:
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "After pressing the visible Retry action, watched the live shell "
-                            "for a browser directory prompt or any switch to the local workspace."
-                        ),
-                        observed=(
-                            f"trigger_after_click={json.dumps(restore_attempt_observation['trigger'], ensure_ascii=True)}; "
-                            f"body_text={restore_attempt_observation['body_text']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"granted_picker={json.dumps(restore_attempt_observation['granted_picker'], ensure_ascii=True)}"
-                        ),
-                    )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed=(
-                            "The manual unavailable-workspace action never triggered a "
-                            "directory-access callback and never restored the workspace.\n"
-                            f"action_label={exact_action_label!r}\n"
-                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                            f"granted_picker_state={json.dumps(restore_attempt_observation['granted_picker'], indent=2)}"
-                        ),
-                    )
-                    raise AssertionError(
-                        "Step 4 failed: the manual unavailable-workspace action never triggered "
-                        "a directory-access callback and never restored the workspace.\n"
+                    message = (
+                        "The manual unavailable-workspace action never triggered a "
+                        "directory-access callback and never restored the workspace.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(restore_attempt_observation['granted_picker'], indent=2)}\n"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
+                    _record_request_steps_precondition_failure(result, message)
+                    raise AssertionError(f"Precondition failed: {message}")
                 if restore_attempt_observation["failure_message"] is not None:
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "After pressing the visible Retry action, checked the page for the "
-                            "user-visible restore failure surfaced instead of a directory prompt."
-                        ),
-                        observed=(
-                            f"failure_message={restore_attempt_observation['failure_message']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"granted_picker={json.dumps(restore_attempt_observation['granted_picker'], ensure_ascii=True)}"
-                        ),
-                    )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed=(
-                            "The closest production-visible manual restore action did not open "
-                            "a directory-access prompt and instead failed in the deployed app.\n"
-                            f"action_label={exact_action_label!r}\n"
-                            f"failure_message={restore_attempt_observation['failure_message']!r}\n"
-                            f"granted_picker_state={json.dumps(restore_attempt_observation['granted_picker'], indent=2)}"
-                        ),
-                    )
-                    raise AssertionError(
-                        "Step 4 failed: the closest production-visible manual restore action "
+                    message = (
+                        "The closest production-visible manual restore action "
                         "did not open a directory-access prompt and instead failed in the "
                         "deployed app.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
-                        "Missing production capability: the Workspace switcher does not expose "
-                        "a working manual re-authentication / access-grant flow for the saved "
-                        "unavailable local workspace in the deployed web build, even when the "
-                        "test returns a real OPFS-backed `FileSystemDirectoryHandle` from the "
-                        "browser picker boundary.\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(restore_attempt_observation['granted_picker'], indent=2)}\n"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
+                    _record_request_steps_precondition_failure(result, message)
+                    raise AssertionError(f"Precondition failed: {message}")
 
                 restored, restored_observation = poll_until(
                     probe=lambda: _observe_restored_local_workspace(
@@ -485,24 +330,15 @@ def main() -> None:
                 )
                 result["restored_workspace_observation"] = restored_observation
                 if not restored:
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed=(
-                            "A directory-access callback was observed, but the workspace never "
-                            "completed the Local Git restore flow.\n"
-                            f"restore_observation={json.dumps(restored_observation, indent=2)}\n"
-                            f"granted_picker_state={json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
-                        ),
-                    )
-                    raise AssertionError(
-                        "Step 4 failed: the directory-access callback was observed, but the "
-                        "workspace never completed the Local Git restore flow.\n"
+                    message = (
+                        "The directory-access callback was observed, but the workspace never "
+                        "completed the Local Git restore flow.\n"
                         f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(read_restorable_directory_picker_state(tracker_page), indent=2)}"
                     )
+                    _record_request_steps_precondition_failure(result, message)
+                    raise AssertionError(f"Precondition failed: {message}")
 
                 trigger_after_restore = restored_observation["trigger"]
                 shell_after_restore = restored_observation["shell_observation"]
@@ -530,40 +366,168 @@ def main() -> None:
                         expected_local_workspace_id=local_workspace_id,
                     )
                 except AssertionError as error:
+                    _record_request_steps_precondition_failure(result, str(error))
+                    raise AssertionError(
+                        "Precondition failed: the manual restore action never produced the "
+                        "required active `Local Git` workspace before the reload scenario.\n"
+                        f"{error}"
+                    ) from error
+
+                result["precondition_established"] = True
+
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the header trigger and reopened the switcher after the manual "
+                        "restore action to confirm the same workspace was active as `Local Git` "
+                        "before the reload."
+                    ),
+                    observed=(
+                        f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
+                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                    ),
+                )
+
+                tracker_page.open_entrypoint()
+                page.set_viewport(**DESKTOP_VIEWPORT)
+                reloaded_ready, reloaded_state = poll_until(
+                    probe=lambda: _observe_reloaded_workspace_state(
+                        tracker_page=tracker_page,
+                        page=page,
+                        expected_local_workspace_id=local_workspace_id,
+                    ),
+                    is_satisfied=lambda observation: bool(observation["ready"]),
+                    timeout_seconds=POST_RELOAD_RESTORE_WAIT_SECONDS,
+                    interval_seconds=2,
+                )
+                result["post_reload_state"] = reloaded_state
+                if not reloaded_ready:
                     _record_step(
                         result,
-                        step=4,
+                        step=1,
                         status="failed",
-                        action=REQUEST_STEPS[3],
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "After the hard reload, the app never settled back to the restored "
+                            "local workspace as the active `Local Git` state.\n"
+                            f"post_reload_state={json.dumps(reloaded_state, indent=2)}"
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Not reached because the application did not return to the restored "
+                            "local workspace state after the hard reload."
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=(
+                            "Not reached because the application did not return to the restored "
+                            "local workspace state after the hard reload."
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 1 failed: after the hard reload, the app never settled back to "
+                        "the restored local workspace as the active `Local Git` state.\n"
+                        f"Observed post-reload state:\n{json.dumps(reloaded_state, indent=2)}"
+                    )
+
+                result["trigger_after_reload"] = reloaded_state["trigger"]
+                result["shell_observation_after_reload"] = reloaded_state["shell_observation"]
+                result["persisted_workspace_state_after_reload"] = reloaded_state[
+                    "persisted_workspace_state"
+                ]
+                _record_step(
+                    result,
+                    step=1,
+                    status="passed",
+                    action=REQUEST_STEPS[0],
+                    observed=(
+                        "Reloaded the deployed app and waited for the restored local workspace "
+                        "to become active again instead of asserting immediately.\n"
+                        f"trigger_after_reload={json.dumps(reloaded_state['trigger'], indent=2)}\n"
+                        f"persisted_workspace_state_after_reload={json.dumps(reloaded_state['persisted_workspace_state'], indent=2)}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the header workspace trigger immediately after the reload wait "
+                        "window to confirm the restored local workspace was still active."
+                    ),
+                    observed=(
+                        f"trigger_after_reload={json.dumps(reloaded_state['trigger'], ensure_ascii=True)}"
+                    ),
+                )
+
+                switcher_after_reload = page.open_and_observe(timeout_ms=20_000)
+                local_row_after_reload = _find_named_local_row(switcher_after_reload)
+                hosted_row_after_reload = _find_named_hosted_row(switcher_after_reload)
+                selected_row_after_reload = _find_selected_row(switcher_after_reload)
+                result["switcher_after_reload"] = _switcher_payload(switcher_after_reload)
+                result["local_row_after_reload"] = _row_payload(local_row_after_reload)
+                result["hosted_row_after_reload"] = _row_payload(hosted_row_after_reload)
+                result["selected_row_after_reload"] = _row_payload(selected_row_after_reload)
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action=REQUEST_STEPS[1],
+                    observed=(
+                        "Opened the Workspace switcher after the hard reload.\n"
+                        f"row_count={switcher_after_reload.row_count}; "
+                        f"switcher_text={switcher_after_reload.switcher_text!r}"
+                    ),
+                )
+
+                try:
+                    _assert_reloaded_local_workspace(
+                        trigger=_trigger_from_payload(reloaded_state["trigger"]),
+                        switcher=switcher_after_reload,
+                        local_row=local_row_after_reload,
+                        selected_row=selected_row_after_reload,
+                        shell_observation=reloaded_state["shell_observation"],
+                        persisted_workspace_state=reloaded_state["persisted_workspace_state"],
+                        expected_local_workspace_id=local_workspace_id,
+                    )
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
                         observed=str(error),
                     )
                     raise
 
                 _record_step(
                     result,
-                    step=4,
+                    step=3,
                     status="passed",
-                    action=REQUEST_STEPS[3],
+                    action=REQUEST_STEPS[2],
                     observed=(
-                        "After the manual restore action, the workspace was visible as the "
-                        "active `Local Git` workspace and the interactive shell remained loaded "
-                        "after the test supplied a real OPFS-backed directory handle through "
-                        "the browser picker boundary.\n"
-                        f"selected_row={json.dumps(_row_payload(selected_row_after), indent=2)}\n"
-                        f"shell_after_restore={json.dumps(shell_after_restore, indent=2)}\n"
-                        f"granted_picker={json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
+                        "After the hard reload, the same workspace still rendered as `Local Git` "
+                        "with the expected branch information.\n"
+                        f"local_row_after_reload={json.dumps(_row_payload(local_row_after_reload), indent=2)}\n"
+                        f"selected_row_after_reload={json.dumps(_row_payload(selected_row_after_reload), indent=2)}"
                     ),
                 )
-
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the header trigger and reopened the switcher after the manual "
-                        "restore action to confirm the same workspace was now active as Local Git."
+                        "Opened the Workspace switcher after the reload and visually checked "
+                        "the restored local workspace row, status label, and branch details."
                     ),
                     observed=(
-                        f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
-                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                        f"local_row_after_reload={json.dumps(_row_payload(local_row_after_reload), ensure_ascii=True)}; "
+                        f"selected_row_after_reload={json.dumps(_row_payload(selected_row_after_reload), ensure_ascii=True)}"
                     ),
                 )
 
@@ -645,14 +609,21 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
             text=True,
         )
 
-    marker_path = local_path / ".trackstate-ts912-precondition.txt"
+    marker_path = local_path / ".trackstate-ts980-precondition.txt"
     marker_path.write_text(
-        "Prepared for TS-912 unavailable local workspace manual restore validation.\n",
+        "Prepared for TS-980 unavailable local workspace manual restore validation.\n",
         encoding="utf-8",
     )
 
+    seeded_paths = [marker_path.name]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        destination = local_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        seeded_paths.append(relative_path)
+
     subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
+        ["git", "-C", str(local_path), "add", "."],
         check=True,
         capture_output=True,
         text=True,
@@ -677,13 +648,13 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
                 "-C",
                 str(local_path),
                 "-c",
-                "user.name=TS-912 Automation",
+                "user.name=TS-980 Automation",
                 "-c",
-                "user.email=ts912@example.com",
+                "user.email=ts980@example.com",
                 "commit",
                 "--allow-empty",
                 "-m",
-                "Prepare TS-912 local workspace",
+                "Prepare TS-980 local workspace",
             ],
             check=True,
             capture_output=True,
@@ -714,11 +685,146 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "seeded_paths": seeded_paths,
     }
 
 
 def _remove_local_workspace_repository() -> None:
     shutil.rmtree(LOCAL_TARGET, ignore_errors=True)
+
+
+def _restorable_workspace_fixture_files() -> dict[str, str]:
+    return {
+        "DEMO/config/statuses.json": json.dumps(
+            [
+                {"id": "todo", "name": "To Do", "category": "new"},
+                {
+                    "id": "in-progress",
+                    "name": "In Progress",
+                    "category": "indeterminate",
+                },
+                {"id": "done", "name": "Done", "category": "done"},
+            ],
+        )
+        + "\n",
+        "DEMO/config/workflows.json": json.dumps(
+            {
+                "default": {
+                    "name": "Default Workflow",
+                    "statuses": ["todo", "in-progress", "done"],
+                    "transitions": [
+                        {
+                            "id": "start-progress",
+                            "name": "Start progress",
+                            "from": "todo",
+                            "to": "in-progress",
+                        },
+                        {
+                            "id": "finish-work",
+                            "name": "Finish work",
+                            "from": "in-progress",
+                            "to": "done",
+                        },
+                    ],
+                },
+            },
+        )
+        + "\n",
+        "DEMO/config/issue-types.json": json.dumps(
+            [
+                {
+                    "id": "story",
+                    "name": "Story",
+                    "workflowId": "default",
+                    "hierarchyLevel": 0,
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/config/fields.json": json.dumps(
+            [
+                {"id": "summary", "name": "Summary", "type": "string", "required": True},
+                {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "markdown",
+                    "required": False,
+                },
+                {
+                    "id": "priority",
+                    "name": "Priority",
+                    "type": "option",
+                    "required": False,
+                    "options": [
+                        {"id": "high", "name": "High"},
+                        {"id": "medium", "name": "Medium"},
+                    ],
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/DEMO-1/main.md": "\n".join(
+            [
+                "---",
+                "key: DEMO-1",
+                "project: DEMO",
+                "issueType: story",
+                "status: in-progress",
+                "priority: high",
+                "summary: TS-980 seeded local workspace issue",
+                "assignee: ts980-user",
+                "reporter: ts980-user",
+                "updated: 2026-05-22T00:00:00Z",
+                "---",
+                "",
+                "# Description",
+                "",
+                "Seeded local workspace content for TS-980 restore validation.",
+                "",
+            ],
+        ),
+    }
+
+
+def _workspace_directory_snapshot(local_path: Path) -> dict[str, object]:
+    relative_paths = [
+        ".git/HEAD",
+        ".git/config",
+        ".trackstate-ts980-precondition.txt",
+        *sorted(_restorable_workspace_fixture_files()),
+    ]
+    files: list[dict[str, str]] = []
+    for relative_path in relative_paths:
+        absolute_path = local_path / relative_path
+        if not absolute_path.is_file():
+            continue
+        files.append(
+            {
+                "path": relative_path,
+                "base64": base64.b64encode(absolute_path.read_bytes()).decode("ascii"),
+            },
+        )
+    return {
+        "rootName": local_path.name,
+        "rootPath": str(local_path),
+        "files": files,
+    }
+
+
+def _workspace_directory_snapshot_summary(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    files = snapshot.get("files", [])
+    return {
+        "rootName": snapshot.get("rootName"),
+        "rootPath": snapshot.get("rootPath"),
+        "fileCount": len(files) if isinstance(files, list) else 0,
+        "paths": [
+            entry.get("path")
+            for entry in files
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        ],
+    }
 
 
 def _find_named_local_row(
@@ -852,6 +958,75 @@ def _assert_restored_local_workspace(
         raise AssertionError(
             "Step 4 failed: the persisted active workspace did not update to the restored "
             "local workspace.\n"
+            f"Observed persisted state:\n{json.dumps(persisted_workspace_state, indent=2)}"
+        )
+
+
+def _assert_reloaded_local_workspace(
+    *,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    switcher: WorkspaceSwitcherObservation,
+    local_row: WorkspaceSwitcherRowObservation | None,
+    selected_row: WorkspaceSwitcherRowObservation | None,
+    shell_observation: dict[str, object],
+    persisted_workspace_state: dict[str, object] | None,
+    expected_local_workspace_id: str,
+) -> None:
+    if trigger.display_name != LOCAL_DISPLAY_NAME:
+        raise AssertionError(
+            "Step 3 failed: the header trigger did not return to the restored local workspace "
+            "after the hard reload.\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
+        )
+    if trigger.workspace_type != "Local" or trigger.state_label != "Local Git":
+        raise AssertionError(
+            "Step 3 failed: the header trigger did not report the restored workspace as "
+            "`Local Git` after the hard reload.\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
+        )
+    if local_row is None:
+        raise AssertionError(
+            "Step 3 failed: reopening the Workspace switcher after the hard reload no longer "
+            "showed the restored local workspace row.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}"
+        )
+    if local_row.state_label != "Local Git":
+        raise AssertionError(
+            "Step 3 failed: the restored local workspace row reverted away from `Local Git` "
+            "after the hard reload.\n"
+            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
+        )
+    if LOCAL_TARGET not in local_row.detail_text or "Branch: main" not in local_row.detail_text:
+        raise AssertionError(
+            "Step 3 failed: the restored local workspace row did not keep the expected branch "
+            "information after the hard reload.\n"
+            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
+        )
+    if selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME:
+        raise AssertionError(
+            "Step 3 failed: the restored local workspace row did not remain the active "
+            "selection after the hard reload.\n"
+            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2) if selected_row else 'null'}"
+        )
+    if not bool(shell_observation.get("shell_ready")):
+        raise AssertionError(
+            "Step 3 failed: the app shell was not interactive after the hard reload.\n"
+            f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
+        )
+    if bool(shell_observation.get("fatal_banner_visible")):
+        raise AssertionError(
+            "Step 3 failed: the app showed a fatal tracker load banner after the hard reload.\n"
+            f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
+        )
+    if persisted_workspace_state is None:
+        raise AssertionError(
+            "Step 3 failed: the workspace profile state could not be read from local storage "
+            "after the hard reload.",
+        )
+    if persisted_workspace_state.get("activeWorkspaceId") != expected_local_workspace_id:
+        raise AssertionError(
+            "Step 3 failed: the persisted active workspace reverted away from the restored "
+            "local workspace after the hard reload.\n"
             f"Observed persisted state:\n{json.dumps(persisted_workspace_state, indent=2)}"
         )
 
@@ -1070,7 +1245,7 @@ def _raise_startup_failure(
     *,
     result: dict[str, object],
     tracker_page: TrackStateTrackerPage,
-    runtime_context: Ts912ManualReauthRuntime,
+    runtime_context: Ts980RestorePersistenceRuntime,
     reason: str,
 ) -> None:
     startup_observation = _observe_startup_surface(tracker_page)
@@ -1081,8 +1256,7 @@ def _raise_startup_failure(
     result["page_errors"] = list(runtime_context.page_errors)
     observed = (
         "The deployed app never exposed the Workspace switcher entry point needed to begin "
-        "the TS-912 manual re-authentication flow, so this run did not reach the ticket "
-        "boundary.\n"
+        "the TS-980 reload-persistence scenario.\n"
         f"Reason: {reason}\n"
         f"Startup observation: {json.dumps(startup_observation, indent=2)}\n"
         f"Console events: {json.dumps(result['console_events'], indent=2)}\n"
@@ -1095,7 +1269,7 @@ def _raise_startup_failure(
         action=REQUEST_STEPS[0],
         observed=observed,
     )
-    for step_number in (2, 3, 4):
+    for step_number in (2, 3):
         _record_step(
             result,
             step=step_number,
@@ -1103,14 +1277,14 @@ def _raise_startup_failure(
             action=REQUEST_STEPS[step_number - 1],
             observed=(
                 "Not reached because the deployed app never exposed the Workspace switcher "
-                "trigger required to enter the unavailable-workspace restore flow."
+                "trigger required to establish the restored workspace precondition."
             ),
         )
     _record_human_verification(
         result,
         check=(
             "Loaded the deployed app at the ticket viewport and waited for the header "
-            "Workspace switcher trigger to appear before attempting TS-912."
+            "Workspace switcher trigger to appear before attempting TS-980."
         ),
         observed=(
             f"title={startup_observation['title']!r}; "
@@ -1121,211 +1295,11 @@ def _raise_startup_failure(
     )
     raise AssertionError(
         "Step 1 failed: the deployed app never exposed the Workspace switcher trigger, so "
-        "this run did not reach the TS-912 manual re-authentication boundary.\n"
+        "this run never reached the TS-980 reload-persistence scenario.\n"
         f"Observed startup surface:\n{json.dumps(startup_observation, indent=2)}\n"
         f"Console events:\n{json.dumps(result['console_events'], indent=2)}\n"
         f"Page errors:\n{json.dumps(result['page_errors'], indent=2)}",
     )
-
-
-def _manual_reauth_probe_script() -> str:
-    return """
-    (() => {
-      const state = window.__ts912ManualReauthProbe = {
-        showDirectoryPickerCalls: [],
-        requestPermissionCalls: [],
-        queryPermissionCalls: [],
-        wrapErrors: [],
-      };
-      const serialize = (value) => {
-        try {
-          return JSON.parse(JSON.stringify(value));
-        } catch (error) {
-          state.wrapErrors.push(String(error));
-          return String(value);
-        }
-      };
-      const wrap = (target, key, bucket) => {
-        if (!target || typeof target[key] !== 'function') {
-          return;
-        }
-        const original = target[key];
-        target[key] = async function(...args) {
-          state[bucket].push({
-            callNumber: state[bucket].length + 1,
-            args: serialize(args),
-          });
-          return await original.apply(this, args);
-        };
-      };
-      wrap(window, 'showDirectoryPicker', 'showDirectoryPickerCalls');
-      const fileSystemHandleProto = window.FileSystemHandle && window.FileSystemHandle.prototype;
-      wrap(fileSystemHandleProto, 'requestPermission', 'requestPermissionCalls');
-      wrap(fileSystemHandleProto, 'queryPermission', 'queryPermissionCalls');
-    })();
-    """
-
-
-def _opfs_restore_scaffold_files() -> dict[str, str]:
-    workspace_name = LOCAL_DISPLAY_NAME
-    updated_at = "2026-05-17T00:00:00Z"
-    issue_path = f"{RESTORED_PROJECT_KEY}/{RESTORED_STARTER_ISSUE_KEY}/main.md"
-    project_json = {
-        "key": RESTORED_PROJECT_KEY,
-        "name": workspace_name,
-        "defaultLocale": "en",
-        "supportedLocales": ["en"],
-    }
-    config_entries = {
-        "issue-types.json": [
-            {
-                "id": "story",
-                "name": "Story",
-                "description": "Work item tracked in the restored local workspace.",
-                "icon": "book",
-            },
-        ],
-        "statuses.json": [
-            {
-                "id": "todo",
-                "name": "To Do",
-                "category": "todo",
-                "description": "Open work that has not started yet.",
-            },
-        ],
-        "fields.json": [],
-        "workflows.json": [],
-        "priorities.json": [],
-        "components.json": [],
-        "versions.json": [],
-        "resolutions.json": [],
-    }
-    files: dict[str, str] = {
-        f"{RESTORED_PROJECT_KEY}/project.json": json.dumps(project_json) + "\n",
-        f"{RESTORED_PROJECT_KEY}/config/i18n/en.json": "{}\n",
-        f"{RESTORED_PROJECT_KEY}/.trackstate/index/issues.json": json.dumps(
-            [
-                {
-                    "key": RESTORED_STARTER_ISSUE_KEY,
-                    "path": issue_path,
-                    "summary": f"Welcome to {workspace_name}",
-                    "issueType": "story",
-                    "status": "todo",
-                    "updated": updated_at,
-                    "children": [],
-                    "archived": False,
-                },
-            ],
-        )
-        + "\n",
-        f"{RESTORED_PROJECT_KEY}/.trackstate/index/tombstones.json": "[]\n",
-        issue_path: (
-            f"---\n"
-            f"key: {RESTORED_STARTER_ISSUE_KEY}\n"
-            f"project: {RESTORED_PROJECT_KEY}\n"
-            f"issueType: story\n"
-            f"status: todo\n"
-            f"summary: Welcome to {workspace_name}\n"
-            f"updated: {updated_at}\n"
-            f"---\n\n"
-            f"# Description\n\n"
-            f"TrackState initialized this workspace successfully. "
-            f"TS-912 uses this OPFS-backed handle to validate the manual "
-            f"re-authentication browser boundary.\n"
-        ),
-    }
-    for file_name, payload in config_entries.items():
-        files[f"{RESTORED_PROJECT_KEY}/config/{file_name}"] = json.dumps(payload) + "\n"
-    return files
-
-
-def _granted_directory_picker_script() -> str:
-    return f"""
-    (() => {{
-      const state = window.__ts912GrantedDirectoryPickerState = {{
-        installed: false,
-        calls: [],
-        selectedDirectoryName: null,
-        fallbackDirectoryName: {json.dumps(RESTORED_DIRECTORY_NAME)},
-        projectKey: {json.dumps(RESTORED_PROJECT_KEY)},
-        starterIssueKey: {json.dumps(RESTORED_STARTER_ISSUE_KEY)},
-      }};
-      const normalizeArgs = (args) => {{
-        try {{
-          return JSON.parse(JSON.stringify(args));
-        }} catch (_) {{
-          return Array.from(args, (value) => String(value));
-        }}
-      }};
-      const writeTextFile = async (directory, relativePath, contents) => {{
-        const segments = relativePath.split('/').filter(Boolean);
-        let current = directory;
-        for (const segment of segments.slice(0, -1)) {{
-          current = await current.getDirectoryHandle(segment, {{ create: true }});
-        }}
-        const fileHandle = await current.getFileHandle(segments.at(-1), {{ create: true }});
-        const writable = await fileHandle.createWritable();
-        await writable.write(contents);
-        await writable.close();
-      }};
-      const createRestoredDirectory = async () => {{
-        const root = await navigator.storage.getDirectory();
-        const restored = await root.getDirectoryHandle(state.fallbackDirectoryName, {{ create: true }});
-        const scaffoldFiles = {json.dumps(_opfs_restore_scaffold_files())};
-        for (const [relativePath, contents] of Object.entries(scaffoldFiles)) {{
-          await writeTextFile(restored, relativePath, contents);
-        }}
-        state.selectedDirectoryName = restored.name || state.fallbackDirectoryName;
-        return restored;
-      }};
-      const originalShowDirectoryPicker = globalThis.showDirectoryPicker?.bind(globalThis);
-      if (typeof originalShowDirectoryPicker === 'function') {{
-        globalThis.showDirectoryPicker = async (...args) => {{
-          state.calls.push({{
-            callNumber: state.calls.length + 1,
-            args: normalizeArgs(args),
-            returnedHandleKind: 'directory',
-            returnedBy: 'opfs',
-          }});
-          return await createRestoredDirectory();
-        }};
-      }};
-      state.installed = true;
-    }})();
-    """
-
-
-def _read_granted_directory_picker_state(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => window.__ts912GrantedDirectoryPickerState || {}
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "installed": False,
-            "calls": [],
-            "selectedDirectoryName": None,
-            "fallbackDirectoryName": RESTORED_DIRECTORY_NAME,
-            "projectKey": RESTORED_PROJECT_KEY,
-            "starterIssueKey": RESTORED_STARTER_ISSUE_KEY,
-        }
-    return {
-        "installed": bool(payload.get("installed")),
-        "calls": list(payload.get("calls", [])),
-        "selectedDirectoryName": (
-            None
-            if payload.get("selectedDirectoryName") is None
-            else str(payload.get("selectedDirectoryName"))
-        ),
-        "fallbackDirectoryName": str(
-            payload.get("fallbackDirectoryName", RESTORED_DIRECTORY_NAME),
-        ),
-        "projectKey": str(payload.get("projectKey", RESTORED_PROJECT_KEY)),
-        "starterIssueKey": str(
-            payload.get("starterIssueKey", RESTORED_STARTER_ISSUE_KEY),
-        ),
-    }
 
 
 def _saved_workspace_action_label(
@@ -1353,61 +1327,26 @@ def _saved_workspace_action_label(
     return action_label
 
 
-def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const probe = window.__ts912ManualReauthProbe || {};
-          return {
-            showDirectoryPickerCalls: Array.isArray(probe.showDirectoryPickerCalls)
-              ? probe.showDirectoryPickerCalls
-              : [],
-            requestPermissionCalls: Array.isArray(probe.requestPermissionCalls)
-              ? probe.requestPermissionCalls
-              : [],
-            queryPermissionCalls: Array.isArray(probe.queryPermissionCalls)
-              ? probe.queryPermissionCalls
-              : [],
-            wrapErrors: Array.isArray(probe.wrapErrors) ? probe.wrapErrors : [],
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "showDirectoryPickerCalls": [],
-            "requestPermissionCalls": [],
-            "queryPermissionCalls": [],
-            "wrapErrors": [],
-        }
-    return {
-        "showDirectoryPickerCalls": list(payload.get("showDirectoryPickerCalls", [])),
-        "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
-        "queryPermissionCalls": list(payload.get("queryPermissionCalls", [])),
-        "wrapErrors": list(payload.get("wrapErrors", [])),
-    }
-
-
 def _observe_manual_restore_attempt(
     *,
     tracker_page,
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
-    probe = _read_manual_reauth_probe(tracker_page)
-    granted_picker = _read_granted_directory_picker_state(tracker_page)
+    probe = read_manual_reauth_probe(tracker_page)
+    directory_picker_state = read_restorable_directory_picker_state(tracker_page)
     trigger = _safe_trigger_payload(page)
     return {
         "probe": probe,
-        "granted_picker": granted_picker,
+        "directory_picker_state": directory_picker_state,
         "body_text": body_text,
         "trigger": trigger,
         "failure_message": _extract_workspace_open_failure_message(body_text),
         "directory_access_callback_observed": bool(
             probe["showDirectoryPickerCalls"]
             or probe["requestPermissionCalls"]
-            or granted_picker["calls"]
-            or granted_picker["selectedDirectoryName"]
+            or directory_picker_state["calls"]
+            or directory_picker_state.get("selectedDirectoryName")
         ),
     }
 
@@ -1517,6 +1456,73 @@ def _record_human_verification(
     verifications.append({"check": check, "observed": observed})
 
 
+def _record_request_steps_precondition_failure(
+    result: dict[str, object],
+    message: str,
+) -> None:
+    if result.get("steps"):
+        return
+    _record_step(
+        result,
+        step=1,
+        status="failed",
+        action=REQUEST_STEPS[0],
+        observed=(
+            "Not reached because the required precondition could not be established: the "
+            "manual restore to `Local Git` failed before the reload could be performed.\n"
+            f"{message}"
+        ),
+    )
+    for step_number in (2, 3):
+        _record_step(
+            result,
+            step=step_number,
+            status="failed",
+            action=REQUEST_STEPS[step_number - 1],
+            observed=(
+                "Not reached because the workspace never completed the required manual "
+                "restore to `Local Git` before the reload scenario."
+            ),
+        )
+
+
+def _observe_reloaded_workspace_state(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+    expected_local_workspace_id: str,
+) -> dict[str, object]:
+    trigger = _safe_trigger_payload(page)
+    shell_observation = tracker_page.observe_interactive_shell(
+        SHELL_NAVIGATION_LABELS,
+        timeout_ms=10_000,
+    )
+    persisted_workspace_state = _decode_workspace_state(
+        tracker_page.snapshot_local_storage(
+            [
+                "trackstate.workspaceProfiles.state",
+                "flutter.trackstate.workspaceProfiles.state",
+            ],
+        ),
+    )
+    ready = (
+        trigger is not None
+        and trigger.get("display_name") == LOCAL_DISPLAY_NAME
+        and trigger.get("workspace_type") == "Local"
+        and trigger.get("state_label") == "Local Git"
+        and bool(shell_observation.get("shell_ready"))
+        and persisted_workspace_state is not None
+        and persisted_workspace_state.get("activeWorkspaceId") == expected_local_workspace_id
+    )
+    return {
+        "ready": ready,
+        "trigger": trigger,
+        "shell_observation": shell_observation,
+        "persisted_workspace_state": persisted_workspace_state,
+        "body_text": tracker_page.body_text(),
+    }
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -1543,9 +1549,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
-    if not error.startswith(("AssertionError:", "RuntimeError:", "TypeError:", "ValueError:")):
-        error = f"AssertionError: {error}"
+    error = _exact_error_summary(result)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1607,10 +1611,16 @@ def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. Actual result",
         (
-            "The unavailable saved local workspace was manually restored and became the "
-            "active Local Git workspace while the shell remained interactive."
+            "The workspace was manually restored to `Local Git`, the app was reloaded, and "
+            "the same workspace remained active as `Local Git` with the expected branch "
+            "details visible in the Workspace switcher."
             if passed
-            else str(result.get("error", "The restore flow did not reach the expected Local Git state."))
+            else str(
+                result.get(
+                    "error",
+                    "The reloaded app did not preserve the restored local workspace as `Local Git`.",
+                ),
+            )
         ),
     ]
     if result.get("screenshot"):
@@ -1664,10 +1674,16 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
             "",
             "## Actual result",
             (
-                "The saved unavailable local workspace restored to `Local Git`, became "
-                "the active workspace, and the visible shell stayed interactive."
+                "The restored local workspace remained the active `Local Git` workspace after "
+                "the hard reload, and the Workspace switcher still showed the expected branch "
+                "details."
                 if passed
-                else str(result.get("error", "The restore flow did not reach the expected Local Git state."))
+                else str(
+                    result.get(
+                        "error",
+                        "The reloaded app did not preserve the restored local workspace as `Local Git`.",
+                    ),
+                )
             ),
         ],
     )
@@ -1687,31 +1703,27 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "The saved unavailable local workspace was restored manually from a real "
-            "OPFS-backed browser directory handle and became the active Local Git "
-            "workspace while the shell stayed interactive.\n"
-        )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The restore flow did not reach the expected Local Git state.')}\n"
-    )
-
-
-def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
-    replies = [
-        {
-            "inReplyToId": thread["rootCommentId"],
-            "threadId": thread["threadId"],
-            "reply": _review_reply_text(result, passed=passed),
-        }
-        for thread in _discussion_threads()
+    lines = [
+        "## Issues/Notes",
+        (
+            "- Rerun passed after the manual restore used the prepared workspace snapshot."
+            if passed
+            else "- Rerun still failed with a product-visible gap after the repo-backed restore shim: "
+            f"{_exact_error_summary(result)}"
+        ),
+        "",
+        "## Approach",
+        f"- {REWORK_SUMMARY}",
+        "",
+        "## Files Modified",
+        "- `testing/tests/TS-980/test_ts_980.py`",
+        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
+        "",
+        "## Test Coverage",
+        "- Manual Retry/Re-authenticate restore of the unavailable saved workspace using the prepared local repo shape.",
+        "- Post-restore reload persistence for the same workspace label, `Local Git` status, and branch details.",
     ]
-    return json.dumps({"replies": replies}, indent=2) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
@@ -1736,97 +1748,96 @@ def _build_bug_description(result: dict[str, object]) -> str:
             f"{index}. {icon} {action} Observed: {matching.get('observed', '')}"
         )
 
-    actual_result = str(result.get("error", "The restore flow did not reach the expected Local Git state."))
+    actual_result = str(
+        result.get(
+            "error",
+            "The reloaded app did not preserve the restored local workspace as `Local Git`.",
+        ),
+    )
     trigger_before = result.get("trigger_before_restore")
     trigger_after = result.get("trigger_after_restore")
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
+    trigger_after_reload = result.get("trigger_after_reload")
+    local_after_reload = result.get("local_row_after_reload")
+    selected_after_reload = result.get("selected_row_after_reload")
+    post_reload_state = result.get("post_reload_state")
     probe_after_action = result.get("manual_reauth_probe_after_action")
-    simulated_grant_after_action = result.get("simulated_directory_grant_after_action")
     manual_action_label = result.get("manual_restore_action_label")
     startup_observation = result.get("startup_observation")
-    boundary_reached = bool(result.get("ticket_boundary_reached"))
-    callback_observed = bool(
-        isinstance(probe_after_action, dict)
-        and (
-            probe_after_action.get("showDirectoryPickerCalls")
-            or probe_after_action.get("requestPermissionCalls")
-        ),
-    ) or bool(
-        isinstance(simulated_grant_after_action, dict)
-        and (
-            simulated_grant_after_action.get("calls")
-            or simulated_grant_after_action.get("selectedDirectoryName")
-        ),
-    )
+    precondition_established = bool(result.get("precondition_established"))
     missing_capability = (
         "The deployed web build never exposed the Workspace switcher trigger needed to start "
-        "the TS-912 manual re-authentication flow during this run. This failure happened "
-        "before the unavailable-workspace restore path was visible, so it should be treated "
-        "as a separate startup/app-shell issue rather than evidence that the TS-912 manual "
-        "re-authentication capability itself is broken."
-        if not boundary_reached
+        "the TS-980 reload-persistence scenario during this run. This failure happened before "
+        "the workspace restore precondition was visible."
+        if startup_observation and not precondition_established
         else (
-            (
-                "The deployed web build reaches the browser directory-access boundary for the "
-                "saved unavailable local workspace, but it does not complete the restore to "
-                "`Local Git` or switch the active workspace after the callback returns a real "
-                "OPFS-backed `FileSystemDirectoryHandle`."
-                if callback_observed
-                else (
-                    "The deployed web build does not expose a working manual re-authentication / "
-                    "directory-access grant flow for the saved unavailable local workspace from the "
-                    "Workspace switcher. The closest visible saved-workspace action remains "
-                    f"`{manual_action_label}` and it fails before any browser directory-access "
-                    "callback is triggered."
-                )
-            )
-            if manual_action_label
-            else "The Workspace switcher opened, but it did not expose the saved unavailable "
-            "local workspace row/action required to continue the TS-912 manual restore flow."
+            "The deployed web build did not complete the required manual restore to `Local Git`, "
+            "so the reload scenario could not start."
+            if not precondition_established
+            else "The deployed web build restored the workspace once, but after the hard reload "
+            "it no longer preserved the restored local workspace as the active `Local Git` state."
         )
     )
     lines = [
-        f"# {TICKET_KEY} bug report",
+        f"h3. {TICKET_KEY}: Refresh application after manual restoration leaves the workspace outside Local Git",
         "",
-        "## Steps to reproduce",
-        *annotated_steps,
-        "",
-        "## Exact error message or assertion failure",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
-        "",
-        "## Actual result",
-        actual_result,
-        "",
-        "## Expected result",
-        EXPECTED_RESULT,
-        "",
-        "## Missing or broken production capability",
-        missing_capability,
-        "",
-        "## Environment details",
+        "h4. Environment",
         f"- URL: {result.get('app_url')}",
         f"- Browser: {result.get('browser')}",
         f"- OS: {result.get('os')}",
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Local workspace target: {LOCAL_TARGET}",
-        f"- Run command: `{RUN_COMMAND}`",
         "",
-        "## Observed state",
+        "h4. Steps to Reproduce",
+        *annotated_steps,
+        "",
+        "h4. Expected Result",
+        EXPECTED_RESULT,
+        "",
+        "h4. Actual Result",
+        actual_result,
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
+        str(result.get("traceback", result.get("error", ""))),
+        "{code}",
+        "",
+        "h4. Notes",
+        (
+            "Automation used the visible Retry/Re-authenticate action and returned a "
+            "repo-backed directory handle built from the prepared `/tmp/trackstate-ts980-workspace` "
+            "contents, so this rerun exercised the same saved workspace identity and file tree "
+            "instead of an unrelated OPFS-only mirror."
+        ),
+        f"- Missing or broken production capability: {missing_capability}",
         f"- Startup observation: `{json.dumps(startup_observation, ensure_ascii=True)}`",
         f"- Trigger before restore: `{json.dumps(trigger_before, ensure_ascii=True)}`",
         f"- Local row before restore: `{json.dumps(local_before, ensure_ascii=True)}`",
         f"- Trigger after restore: `{json.dumps(trigger_after, ensure_ascii=True)}`",
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
+        f"- Trigger after reload: `{json.dumps(trigger_after_reload, ensure_ascii=True)}`",
+        f"- Local row after reload: `{json.dumps(local_after_reload, ensure_ascii=True)}`",
+        f"- Selected row after reload: `{json.dumps(selected_after_reload, ensure_ascii=True)}`",
+        f"- Post reload state: `{json.dumps(post_reload_state, ensure_ascii=True)}`",
         f"- Manual action label: `{manual_action_label}`",
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
-        f"- Simulated directory grant state after action: `{json.dumps(simulated_grant_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
-        lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
+        lines.append(f"- Screenshot: `{screenshot}`")
     return "\n".join(lines) + "\n"
+
+
+def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
 
 
 def _discussion_threads() -> list[dict[str, object]]:
@@ -1841,7 +1852,7 @@ def _discussion_threads() -> list[dict[str, object]]:
         if not isinstance(thread, dict) or thread.get("resolved") is not False:
             continue
         root_comment_id = thread.get("rootCommentId")
-        thread_id = thread.get("threadId") or thread.get("id")
+        thread_id = thread.get("threadId")
         if root_comment_id is None or thread_id is None:
             continue
         normalized_threads.append(
@@ -1855,46 +1866,38 @@ def _discussion_threads() -> list[dict[str, object]]:
 
 def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
     rerun_summary = (
-        "Re-ran the current TS-912 test and it passed (`1 passed, 0 failed`)."
+        "Re-ran the current TS-980 test and it passed (`1 passed, 0 failed`)."
         if passed
-        else (
-            "Re-ran the current TS-912 test and it still failed: "
-            f"{_snippet(_current_failure_summary(result), limit=260)}"
-        )
+        else "Re-ran the current TS-980 test and it still failed: "
+        f"{_exact_error_summary(result)}"
     )
     return (
-        "Fixed: TS-912 no longer returns a synthetic `{name}` picker stub. The "
-        "test now drives the retry action through a real OPFS-backed "
-        "`FileSystemDirectoryHandle`, records that explicit browser-boundary "
-        "state in the assertions, and generates `review_replies.json` from the "
-        f"unresolved threads in `{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
+        "Fixed: the TS-980-specific runtime and repo-backed directory-handle shim were "
+        "moved out of `testing/tests/TS-980/test_ts_980.py` into "
+        "`testing/tests/support/ts980_restore_persistence_runtime.py`, so the test "
+        "now stays focused on the ticket flow while the shared helper still prepares "
+        "the real `/tmp/trackstate-ts980-workspace` repo snapshot and injects the "
+        "manual Retry/Re-authenticate picker handle for that saved workspace. "
         f"{rerun_summary}"
     )
 
 
-def _current_failure_summary(result: dict[str, object]) -> str:
+def _exact_error_summary(result: dict[str, object]) -> str:
+    traceback_text = str(result.get("traceback", "")).strip()
+    if traceback_text:
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate.startswith("AssertionError:"):
+                return candidate
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate:
+                return candidate
     error = str(result.get("error", "")).strip()
     if error:
-        return error.splitlines()[0]
-    failed_steps = [
-        step
-        for step in result.get("steps", [])
-        if isinstance(step, dict) and step.get("status") == "failed"
-    ]
-    if not failed_steps:
-        return "The test failed before step details were recorded."
-    first_failed_step = failed_steps[0]
-    return (
-        f"Step {first_failed_step.get('step')} failed. "
-        f"{first_failed_step.get('observed', '')}"
-    )
-
-
-def _snippet(text: str, *, limit: int) -> str:
-    normalized = " ".join(text.split())
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[: limit - 3] + "..."
+        first_line = error.splitlines()[0].strip()
+        return first_line if ":" in first_line else f"AssertionError: {first_line}"
+    return f"AssertionError: {TICKET_KEY} failed"
 
 
 if __name__ == "__main__":
