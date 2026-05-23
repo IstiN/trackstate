@@ -143,6 +143,110 @@ void main() {
   );
 
   testWidgets(
+    'shared-preferences startup restore exposes the local workspace switcher before delayed auth completes',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'stable/repo',
+        ),
+        select: false,
+      );
+      await authStore.saveToken(
+        'github-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final delayedRepository = _DelayedConnectTrackStateRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: service,
+          authStore: authStore,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => _QueuedLoadTrackStateRepository(
+                loadResults: [
+                  UnsupportedError(
+                    'Unsupported operation: Process.run is not supported on the web.',
+                  ),
+                ],
+              ),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      expect(
+        (await authStore.readToken(workspaceId: activeLocalWorkspaceId)),
+        'github-token',
+      );
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: Active local workspace, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+
+      delayedRepository.completeConnect();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        (await service.loadState()).activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+      expect(
+        (await authStore.readToken(workspaceId: hostedWorkspaceId)),
+        isNull,
+      );
+    },
+  );
+
+  testWidgets(
     'startup restore keeps the saved active local workspace selected when the local repository is missing',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/missing@main';
