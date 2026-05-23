@@ -49,6 +49,7 @@ TEST_CASE_TITLE = (
     "Application startup with successful probe — UI shell becomes interactive "
     "without waiting for timeout"
 )
+TEST_FILE_PATH = "testing/tests/TS-985/test_ts_985.py"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-985/test_ts_985.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
@@ -64,10 +65,12 @@ MAX_READY_AFTER_RELEASE_SECONDS = 3.5
 AUTH_PROBE_START_WAIT_SECONDS = 30
 SHELL_READY_WAIT_SECONDS = FULL_SYNC_TIMEOUT_SECONDS + 8
 POLL_INTERVAL_SECONDS = 0.25
+LINKED_BUG_KEYS = ("TS-996", "TS-992", "TS-973", "TS-971")
 LINKED_BUG_NOTES = (
-    "Reviewed input/TS-985/linked_bugs.md and found TS-973, which targets the "
-    "workspace-switcher footer focus loop rather than startup timing; it added "
-    "no extra async wait requirement beyond the 2-second startup probe used here."
+    "Reviewed TS-996, TS-992, TS-973, and TS-971. The startup-related fixes "
+    "require observing the delayed live GitHub `/user` probe and waiting until "
+    "it finishes before asserting the shell-ready success path; TS-973 is "
+    "workspace-switcher specific and adds no extra startup wait requirement."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -148,39 +151,51 @@ def main() -> None:
                     tracker_page,
                 )
 
-                trigger_visible, initial_trigger = poll_until(
-                    probe=lambda: _try_observe_trigger(page),
-                    is_satisfied=lambda candidate: candidate is not None,
-                    timeout_seconds=120,
+                transition_tracker = ShellReadyTransitionTracker()
+                shell_ready, shell_window = poll_until(
+                    probe=lambda: observe_live_startup_shell_window(
+                        tracker_page=tracker_page,
+                        page=page,
+                        runtime=runtime,
+                        startup_started_at_monotonic=startup_started_at_monotonic,
+                        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
+                        branding_texts=(BRANDING_TEXT, "TrackState.AI"),
+                        transition_tracker=transition_tracker,
+                    ),
+                    is_satisfied=lambda observation: (
+                        observation["auth_probe_started_after_start_seconds"] is not None
+                        and
+                        observation["auth_probe_released_after_start_seconds"] is not None
+                        and observation["shell_ready_after_start_seconds"] is not None
+                        and not bool(observation["auth_pending"])
+                    ),
+                    timeout_seconds=SHELL_READY_WAIT_SECONDS,
                     interval_seconds=POLL_INTERVAL_SECONDS,
                 )
-                if not trigger_visible or initial_trigger is None:
-                    _record_step(
-                        result,
-                        step=1,
-                        status="failed",
-                        action=REQUEST_STEPS[0],
-                        observed=(
-                            "The deployed app never exposed the header workspace trigger "
-                            "needed to observe the startup shell timing.\n"
-                            f"Observed body text:\n{tracker_page.body_text()}"
-                        ),
-                    )
-                    _record_not_reached_steps(result, starting_step=2)
-                    raise AssertionError(
-                        "Step 1 failed: the deployed app never exposed the header "
-                        "workspace trigger needed to observe the startup shell timing.\n"
-                        f"Observed body text:\n{tracker_page.body_text()}",
-                    )
-                result["initial_trigger_observation"] = _trigger_payload(initial_trigger)
-                result["trigger_observed_after_start_seconds"] = round(
-                    time.monotonic() - startup_started_at_monotonic,
-                    2,
+                result["shell_window_observation"] = shell_window
+                auth_probe_started_after_start_seconds = shell_window[
+                    "auth_probe_started_after_start_seconds"
+                ]
+                result["auth_probe_started_after_start_seconds"] = (
+                    auth_probe_started_after_start_seconds
                 )
+                auth_probe_released_after_start_seconds = shell_window[
+                    "auth_probe_released_after_start_seconds"
+                ]
+                result["auth_probe_released_after_start_seconds"] = (
+                    auth_probe_released_after_start_seconds
+                )
+                result["github_request_urls"] = list(runtime.github_request_urls)
+                result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+                initial_trigger = _try_observe_trigger(page)
+                if initial_trigger is not None:
+                    result["initial_trigger_observation"] = _trigger_payload(initial_trigger)
+                    result["trigger_observed_after_start_seconds"] = round(
+                        time.monotonic() - startup_started_at_monotonic,
+                        2,
+                    )
 
-                if not runtime.wait_for_auth_probe_start(
-                    timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
-                ):
+                if auth_probe_started_after_start_seconds is None:
                     _record_step(
                         result,
                         step=1,
@@ -200,41 +215,24 @@ def main() -> None:
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
 
-                auth_probe_started_after_start_seconds = relative_startup_event_seconds(
-                    startup_started_at_monotonic,
-                    runtime.auth_probe_started_at_monotonic,
-                )
-                result["auth_probe_started_after_start_seconds"] = (
-                    auth_probe_started_after_start_seconds
-                )
-                transition_tracker = ShellReadyTransitionTracker()
-                shell_ready, shell_window = poll_until(
-                    probe=lambda: observe_live_startup_shell_window(
-                        tracker_page=tracker_page,
-                        page=page,
-                        runtime=runtime,
-                        startup_started_at_monotonic=startup_started_at_monotonic,
-                        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
-                        branding_texts=(BRANDING_TEXT, "TrackState.AI"),
-                        transition_tracker=transition_tracker,
-                    ),
-                    is_satisfied=lambda observation: (
-                        observation["auth_probe_released_after_start_seconds"] is not None
-                        and observation["shell_ready_after_start_seconds"] is not None
-                        and not bool(observation["auth_pending"])
-                    ),
-                    timeout_seconds=SHELL_READY_WAIT_SECONDS,
-                    interval_seconds=POLL_INTERVAL_SECONDS,
-                )
-                result["shell_window_observation"] = shell_window
-                auth_probe_released_after_start_seconds = shell_window[
-                    "auth_probe_released_after_start_seconds"
-                ]
-                result["auth_probe_released_after_start_seconds"] = (
-                    auth_probe_released_after_start_seconds
-                )
-                result["github_request_urls"] = list(runtime.github_request_urls)
-                result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+                if initial_trigger is None:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "The deployed app never exposed the header workspace trigger "
+                            "needed to observe the startup shell timing.\n"
+                            f"Observed body text:\n{tracker_page.body_text()}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=2)
+                    raise AssertionError(
+                        "Step 1 failed: the deployed app never exposed the header "
+                        "workspace trigger needed to observe the startup shell timing.\n"
+                        f"Observed body text:\n{tracker_page.body_text()}",
+                    )
 
                 if auth_probe_released_after_start_seconds is None:
                     _record_step(
@@ -310,11 +308,20 @@ def main() -> None:
                     timing_failures.append(
                         "The shell_ready transition time could not be measured.",
                     )
-                pending_shell_samples = shell_window["observed_pending_shell_samples"]
-                if pending_shell_samples in (None, 0):
+                auth_probe_release_after_auth_start_seconds = shell_window[
+                    "auth_probe_release_after_auth_start_seconds"
+                ]
+                if (
+                    auth_probe_release_after_auth_start_seconds is None
+                    or auth_probe_release_after_auth_start_seconds
+                    < SIMULATED_PROBE_DELAY_SECONDS - 0.5
+                ):
                     timing_failures.append(
-                        "The test did not capture any shell observations while the "
-                        "delayed startup probe was still pending.",
+                        "The delayed startup probe did not stay pending long enough to "
+                        "prove the successful-probe timing path.\n"
+                        f"Observed auth_probe_release_after_auth_start_seconds="
+                        f"{auth_probe_release_after_auth_start_seconds!r}; expected about "
+                        f"{SIMULATED_PROBE_DELAY_SECONDS} seconds.",
                     )
                 if (
                     auth_probe_released_after_start_seconds is not None
@@ -369,7 +376,8 @@ def main() -> None:
                         f"{auth_probe_released_after_start_seconds!r}; "
                         f"shell_ready_after_probe_release_seconds="
                         f"{shell_ready_after_probe_release_seconds!r}; "
-                        f"observed_pending_shell_samples={pending_shell_samples!r}; "
+                        f"auth_probe_release_after_auth_start_seconds="
+                        f"{auth_probe_release_after_auth_start_seconds!r}; "
                         f"visible_navigation_labels="
                         f"{shell_window['shell_observation']['visible_navigation_labels']!r}; "
                         f"trigger={(shell_window['trigger'] or {}).get('semantic_label')!r}; "
@@ -398,7 +406,8 @@ def main() -> None:
                         f"{auth_probe_released_after_start_seconds!r}; "
                         f"shell_ready_after_probe_release_seconds="
                         f"{shell_ready_after_probe_release_seconds!r}; "
-                        f"observed_pending_shell_samples={pending_shell_samples!r}; "
+                        f"auth_probe_release_after_auth_start_seconds="
+                        f"{auth_probe_release_after_auth_start_seconds!r}; "
                         f"visible_navigation_labels="
                         f"{shell_window['shell_observation']['visible_navigation_labels']!r}; "
                         f"trigger={(shell_window['trigger'] or {}).get('semantic_label')!r}; "
@@ -453,12 +462,12 @@ def main() -> None:
     except AssertionError as error:
         result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_failure_outputs(result)
+        _write_failure_outputs(result, product_bug=True)
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_failure_outputs(result)
+        _write_failure_outputs(result, product_bug=False)
         raise
 
 
@@ -611,33 +620,42 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
 
 
-def _write_failure_outputs(result: dict[str, Any]) -> None:
+def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
     write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    if product_bug:
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
     status_icon = "✅" if passed else "❌"
     status_word = "PASSED" if passed else "FAILED"
     lines = [
-        f"h3. {status_icon} Automated test {status_word} — {TICKET_KEY}",
+        "h3. Test Automation Result",
         "",
-        f"*Test case*: {TEST_CASE_TITLE}",
-        f"*Environment*: URL={result.get('app_url')} | Browser={result.get('browser')} | OS={result.get('os')}",
-        f"*Viewport*: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"*Startup probe setup*: delayed successful GitHub {{/user}} probe by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
-        f"*Timeout target checked*: shell becomes interactive before the full {FULL_SYNC_TIMEOUT_SECONDS}-second window",
-        f"*Linked bug review*: {LINKED_BUG_NOTES}",
+        f"*Status:* {status_icon} {status_word}",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
         "",
-        "h4. What was automated",
+        "h4. What was tested",
+        f"* Live deployed app at {{ {result.get('app_url')} }} in {result.get('browser')} on {result.get('os')}",
+        f"* Desktop viewport {{ {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']} }}",
+        f"* Successful startup probe path with a synthetic {SIMULATED_PROBE_DELAY_SECONDS}-second delay on GitHub {{/user}}",
+        f"* Linked bug review: {LINKED_BUG_NOTES}",
+        "",
+        "h4. Result",
         "* Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
         "* Delayed the live GitHub {/user} startup probe by 2 seconds, then waited for the real deployed shell to report {shell_ready} instead of asserting immediately.",
         "* Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed.",
         "* Confirmed the live page exposed shell navigation, the top-bar workspace trigger, and TrackState branding from the user's perspective.",
+        "",
+        "* Expected result matched."
+        if passed
+        else f"* Failed while checking the requested startup behavior. Actual issue: {_actual_result_summary(result, passed=False)}",
         "",
         "h4. Automation checks",
         *_step_lines(result, jira=True),
@@ -653,6 +671,20 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
     ]
     if result.get("screenshot"):
         lines.extend(["", f"*Screenshot*: {result['screenshot']}"])
+    lines.extend(
+        [
+            "",
+            "h4. Test file",
+            "{code}",
+            TEST_FILE_PATH,
+            "{code}",
+            "",
+            "h4. Run command",
+            "{code:bash}",
+            RUN_COMMAND,
+            "{code}",
+        ],
+    )
     if not passed:
         lines.extend(
             [
@@ -668,23 +700,23 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
 
 def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
-        f"## {TICKET_KEY} passed" if passed else f"## {TICKET_KEY} failed",
+        "## Test Automation Result",
         "",
-        "## Rework summary",
-        "- Added a live Playwright startup regression that delays the initial GitHub `/user` probe by 2 seconds and proves the deployed shell becomes interactive shortly after the probe succeeds instead of waiting for the full timeout window.",
-        "",
-        f"**Test case:** {TEST_CASE_TITLE}",
-        f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
-        f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
-        f"**Startup probe setup:** delayed successful GitHub `/user` probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds",
-        f"**Timeout target checked:** interactive shell before the full `{FULL_SYNC_TIMEOUT_SECONDS}`-second window",
-        f"**Linked bug review:** {LINKED_BUG_NOTES}",
+        f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"**Test Case:** {TICKET_KEY} — {TEST_CASE_TITLE}",
         "",
         "## What was automated",
+        f"- Ran the live deployed app at `{result.get('app_url')}` in {result.get('browser')} on {result.get('os')}.",
+        f"- Used the required desktop viewport `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`.",
+        f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and waited for the real `shell_ready` transition instead of asserting immediately.",
+        f"- Considered linked bugs {', '.join(LINKED_BUG_KEYS)} and kept the startup timing assertions coupled to the delayed probe completion.",
+        "- Checked the user-visible shell navigation, top-bar workspace trigger, and TrackState branding after startup.",
+        "",
+        "## Result",
         "- Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
-        "- Delayed the live GitHub `/user` startup probe by 2 seconds, then waited for the real deployed shell to report `shell_ready` instead of asserting immediately.",
-        "- Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed.",
-        "- Confirmed the live page exposed shell navigation, the top-bar workspace trigger, and TrackState branding from the user's perspective.",
+        "- Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed."
+        if passed
+        else f"- Failed while verifying the requested startup behavior: {_actual_result_summary(result, passed=False)}",
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
@@ -700,6 +732,20 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
     ]
     if result.get("screenshot"):
         lines.extend(["", f"**Screenshot:** `{result['screenshot']}`"])
+    lines.extend(
+        [
+            "",
+            "## Test file",
+            "```text",
+            TEST_FILE_PATH,
+            "```",
+            "",
+            "## How to run",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+        ],
+    )
     if not passed:
         lines.extend(
             [
@@ -737,37 +783,39 @@ def _build_bug_description(result: dict[str, Any]) -> str:
     annotated_steps = build_annotated_steps(result, request_steps=REQUEST_STEPS)
     shell_window = json.dumps(result.get("shell_window_observation"), ensure_ascii=True)
     lines = [
-        f"# {TICKET_KEY} bug report",
+        f"h3. Bug report — {TICKET_KEY}",
         "",
-        "## Steps to reproduce",
+        "h4. Environment",
+        f"* URL: {result.get('app_url')}",
+        f"* Browser: {result.get('browser')}",
+        f"* OS: {result.get('os')}",
+        f"* Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+        f"* Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+        f"* Run command: {{code:bash}}{RUN_COMMAND}{{code}}",
+        f"* Delayed startup probe: GitHub {{/user}} delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
+        f"* Full timeout window checked: {FULL_SYNC_TIMEOUT_SECONDS} seconds",
+        "",
+        "h4. Steps to Reproduce",
         *annotated_steps,
         "",
-        "## Exact error message or assertion failure",
-        "```text",
+        "h4. Expected Result",
+        EXPECTED_RESULT,
+        "",
+        "h4. Actual Result",
+        _actual_result_summary(result, passed=False),
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
         str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "{code}",
         "",
-        "## Actual vs Expected",
-        f"- **Expected:** {EXPECTED_RESULT}",
-        f"- **Actual:** {_actual_result_summary(result, passed=False)}",
-        "",
-        "## Environment details",
-        f"- URL: {result.get('app_url')}",
-        f"- Browser: {result.get('browser')}",
-        f"- OS: {result.get('os')}",
-        f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
-        f"- Run command: `{RUN_COMMAND}`",
-        f"- Delayed startup probe: GitHub `/user` delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
-        f"- Full timeout window checked: {FULL_SYNC_TIMEOUT_SECONDS} seconds",
-        "",
-        "## Screenshots or logs",
-        f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
-        f"- Delayed requests seen: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
-        f"- Shell observation: `{shell_window}`",
+        "h4. Notes",
+        f"* GitHub requests seen: {{code}}{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}{{code}}",
+        f"* Delayed requests seen: {{code}}{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}{{code}}",
+        f"* Shell observation: {{code}}{shell_window}{{code}}",
     ]
     if result.get("screenshot"):
-        lines.append(f"- Screenshot: `{result['screenshot']}`")
+        lines.append(f"* Screenshot: {{code}}{result['screenshot']}{{code}}")
     return "\n".join(lines) + "\n"
 
 
