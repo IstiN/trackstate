@@ -24,6 +24,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
     DelayedAuthWorkspaceProfilesRuntime,
 )
@@ -133,12 +134,10 @@ def main() -> None:
             try:
                 startup_started_at_monotonic = time.monotonic()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                tracker_page.session.goto(
-                    config.app_url,
+                page.open_startup_entrypoint(
                     wait_until="commit",
                     timeout_ms=120_000,
                 )
-                tracker_page.session.activate_accessibility()
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
@@ -688,9 +687,10 @@ def _capture_timeout_window_observation(
     startup_started_at_monotonic: float,
     on_observation: Callable[[dict[str, Any]], None],
 ) -> tuple[bool, dict[str, Any]]:
-    deadline = time.monotonic() + TIMEOUT_ASSERTION_SECONDS + AUTH_PROBE_RELEASE_WAIT_SECONDS
     last_observation: dict[str, Any] | None = None
-    while True:
+
+    def probe() -> dict[str, Any]:
+        nonlocal last_observation
         observation = _observe_shell_window(
             tracker_page=tracker_page,
             page=page,
@@ -699,19 +699,21 @@ def _capture_timeout_window_observation(
         )
         on_observation(observation)
         last_observation = observation
-        elapsed_since_start_seconds = observation["elapsed_since_start_seconds"]
-        if (
-            elapsed_since_start_seconds is not None
-            and float(elapsed_since_start_seconds) >= TIMEOUT_ASSERTION_SECONDS
-        ):
-            return True, observation
+        return observation
 
-        if time.monotonic() >= deadline:
-            if last_observation is None:
-                raise RuntimeError("TS-967 did not capture any startup observations.")
-            return False, last_observation
-
-        time.sleep(TIMELINE_SAMPLE_INTERVAL_SECONDS)
+    timeout_elapsed, observation = poll_until(
+        probe=probe,
+        is_satisfied=lambda candidate: (
+            candidate["elapsed_since_start_seconds"] is not None
+            and float(candidate["elapsed_since_start_seconds"])
+            >= TIMEOUT_ASSERTION_SECONDS
+        ),
+        timeout_seconds=TIMEOUT_ASSERTION_SECONDS + AUTH_PROBE_RELEASE_WAIT_SECONDS,
+        interval_seconds=TIMELINE_SAMPLE_INTERVAL_SECONDS,
+    )
+    if last_observation is None:
+        raise RuntimeError("TS-967 did not capture any startup observations.")
+    return timeout_elapsed, observation
 
 
 def _elapsed_since(event_monotonic: float | None) -> float | None:

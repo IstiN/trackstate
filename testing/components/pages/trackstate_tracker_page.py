@@ -75,19 +75,34 @@ class TrackStateTrackerPage:
         self.app_url = app_url
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
-    def open_entrypoint(self) -> None:
-        self.open_url(self.app_url)
+    def open_entrypoint(
+        self,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        self.open_url(
+            self.app_url,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
+        )
 
     def open_route(self, route: str) -> str:
         route_url = self.build_route_url(route)
         self.open_url(route_url)
         return route_url
 
-    def open_url(self, url: str) -> None:
+    def open_url(
+        self,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
         self.session.goto(
             url,
-            wait_until="domcontentloaded",
-            timeout_ms=120_000,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
         )
         self.session.activate_accessibility()
 
