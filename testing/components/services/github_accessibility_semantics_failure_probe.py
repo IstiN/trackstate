@@ -135,16 +135,20 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 surface_observation["status_checks"]
             )
             run_log_text, run_log_error = self._try_read_run_log(run_id)
-            run_log_matched_accessibility_markers = self._matched_markers(
+            accessibility_stage_run_log_text = self._accessibility_stage_run_log_text(
                 run_log_text,
+                jobs,
+            )
+            run_log_matched_accessibility_markers = self._matched_markers(
+                accessibility_stage_run_log_text,
                 self._config.expected_accessibility_markers,
             )
             run_log_matched_contrast_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.contrast_evidence_markers,
             )
             run_log_matched_semantic_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.semantic_evidence_markers,
             )
             evidence_text = "\n".join(
@@ -153,7 +157,7 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                     *surface_observation["status_check_workflow_names"],
                     *self._job_names(jobs),
                     *self._step_names(jobs),
-                    run_log_text,
+                    accessibility_stage_run_log_text,
                 ]
             )
             matched_accessibility_markers = self._matched_markers(
@@ -169,7 +173,9 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 self._config.semantic_evidence_markers,
             )
             runtime_accessibility_surface_summary = (
-                self._extract_runtime_accessibility_surface_summary(run_log_text)
+                self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
             )
 
             observation = {
@@ -238,7 +244,10 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 "run_log_mentions_semantic_issue": bool(
                     run_log_matched_semantic_markers
                 ),
-                "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
+                "run_log_excerpt": self._extract_log_excerpt(
+                    accessibility_stage_run_log_text,
+                    evidence_text,
+                ),
                 "run_log_error": run_log_error,
                 "runtime_accessibility_surface_present": bool(
                     runtime_accessibility_surface_summary

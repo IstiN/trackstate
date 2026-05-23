@@ -25,7 +25,6 @@ runtime_inputs:
     - timeout
     - page.waitForSelector
     - page.waitForFunction
-    - waiting for nodes
   semantic_evidence_markers:
     - placeholder
     - flt-semantics-placeholder
