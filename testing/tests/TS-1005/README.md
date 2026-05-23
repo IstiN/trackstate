@@ -13,6 +13,8 @@ The automation:
 4. opens **Workspace switcher** and verifies the broken local workspace is shown
    as `Unavailable` without still being selected or labeled `Active`
 
+Linked regression context covered by this automation: `TS-1011`, `TS-995`.
+
 ## Install dependencies
 
 ```bash
