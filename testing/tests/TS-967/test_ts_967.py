@@ -49,7 +49,7 @@ AUTH_PROBE_START_WAIT_SECONDS = 45
 AUTH_PROBE_RELEASE_WAIT_SECONDS = SIMULATED_SYNC_DELAY_SECONDS + 45
 TIMELINE_SAMPLE_INTERVAL_SECONDS = 0.25
 TIMING_TOLERANCE_SECONDS = 0.25
-LINKED_BUGS = ["TS-977", "TS-971", "TS-958"]
+LINKED_BUGS = ["TS-996", "TS-977", "TS-971", "TS-958"]
 REWORK_SUMMARY = (
     "Reworked the live startup regression to capture the timeout boundary from the "
     "same startup snapshot that proves visible shell navigation, and to require that "
@@ -425,8 +425,10 @@ def main() -> None:
                     and step_four_error is None
                 ):
                     step_four_error = (
-                        "Step 4 failed: at the timeout-window snapshot, the interactive "
-                        "shell components were not all visible.\n"
+                        "Step 4 failed: the timeout-window shell components only became "
+                        "observable at or after the delayed `/user` probe released, so "
+                        "the test could not prove the top bar and branding were visible "
+                        "within the required startup-timeout window.\n"
                         f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
                     )
                 if step_four_error is None:
