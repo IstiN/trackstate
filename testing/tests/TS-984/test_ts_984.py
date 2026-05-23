@@ -24,8 +24,8 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
-from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
-    DelayedAuthWorkspaceProfilesRuntime,
+from testing.tests.support.ts984_delayed_auth_probe_runtime import (  # noqa: E402
+    Ts984DelayedAuthProbeRuntime,
 )
 
 TICKET_KEY = "TS-984"
@@ -44,7 +44,7 @@ BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 11
 SIMULATED_SYNC_DELAY_SECONDS = 31
 TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
-LINKED_BUGS = ["TS-973"]
+LINKED_BUGS = ["TS-996", "TS-973", "TS-971"]
 REWORK_SUMMARY = (
     "Added a live startup regression for TS-984 that delays the initial GitHub "
     "`/user` probe beyond 30 seconds and verifies the deployed app still reaches "
@@ -90,7 +90,7 @@ def main() -> None:
 
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
-    runtime = DelayedAuthWorkspaceProfilesRuntime(
+    runtime = Ts984DelayedAuthProbeRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
@@ -175,10 +175,7 @@ def main() -> None:
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
 
-                if (
-                    runtime.auth_probe_started_at_monotonic is None
-                    and not runtime.wait_for_auth_probe_start(timeout_seconds=30)
-                ):
+                if not runtime.wait_for_auth_probe_start(timeout_seconds=30):
                     _record_step(
                         result,
                         step=2,
@@ -189,6 +186,7 @@ def main() -> None:
                             "`/user` startup probe never began, so the timeout-driven "
                             "synchronization scenario was not exercised.\n"
                             f"Observed trigger: {json.dumps(_trigger_payload(initial_trigger), indent=2)}\n"
+                            f"Observed shell probe state: {json.dumps(runtime.read_shell_probe_state(), indent=2)}\n"
                             f"Observed body text:\n{tracker_page.body_text()}"
                         ),
                     )
@@ -198,67 +196,41 @@ def main() -> None:
                         "GitHub `/user` startup probe never began, so the synchronization-"
                         "timeout scenario was not exercised.\n"
                         f"Observed trigger: {json.dumps(_trigger_payload(initial_trigger), indent=2)}\n"
+                        f"Observed shell probe state: {json.dumps(runtime.read_shell_probe_state(), indent=2)}\n"
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
 
-                timeout_elapsed, timeout_window = poll_until(
-                    probe=lambda: _observe_shell_window(
-                        tracker_page=tracker_page,
-                        page=page,
-                        runtime=runtime,
-                        startup_started_at_monotonic=startup_started_at_monotonic,
-                    ),
-                    is_satisfied=lambda observation: (
-                        observation["elapsed_since_auth_start_seconds"] is not None
-                        and float(observation["elapsed_since_auth_start_seconds"])
-                        >= TIMEOUT_ASSERTION_SECONDS
-                    ),
-                    timeout_seconds=SIMULATED_SYNC_DELAY_SECONDS + 5,
-                    interval_seconds=0.5,
+                auth_released = runtime.wait_for_auth_probe_release(
+                    timeout_seconds=SIMULATED_SYNC_DELAY_SECONDS + 20,
                 )
-                result["timeout_window_observation"] = timeout_window
+                shell_ready_observed = runtime.wait_for_shell_ready_observation(
+                    timeout_seconds=5,
+                )
+                final_shell_window = _observe_shell_window(
+                    tracker_page=tracker_page,
+                    page=page,
+                    runtime=runtime,
+                    startup_started_at_monotonic=startup_started_at_monotonic,
+                )
+                result["timeout_window_observation"] = final_shell_window
                 result["github_request_urls"] = list(runtime.github_request_urls)
                 result["delayed_request_urls"] = list(runtime.delayed_request_urls)
 
-                eventual_shell_ready, shell_ready_observation = poll_until(
-                    probe=lambda: _observe_shell_window(
-                        tracker_page=tracker_page,
-                        page=page,
-                        runtime=runtime,
-                        startup_started_at_monotonic=startup_started_at_monotonic,
-                    ),
-                    is_satisfied=lambda observation: bool(
-                        observation["shell_observation"]["shell_ready"]
-                    ),
-                    timeout_seconds=SIMULATED_SYNC_DELAY_SECONDS + 60,
-                    interval_seconds=0.5,
-                )
-                result["shell_ready_observation"] = shell_ready_observation
-
                 failures: list[str] = []
-                if eventual_shell_ready:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed=(
-                            "The deployed app eventually transitioned into shell_ready "
-                            "after the delayed `/user` startup probe sequence.\n"
-                            f"initial_trigger={json.dumps(_trigger_payload(initial_trigger), ensure_ascii=True)}; "
-                            f"shell_ready_after_start_seconds="
-                            f"{shell_ready_observation['shell_ready_after_start_seconds']!r}; "
-                            f"auth_probe_started_after_start_seconds="
-                            f"{shell_ready_observation['auth_probe_started_after_start_seconds']!r}; "
-                            f"auth_probe_released_after_start_seconds="
-                            f"{shell_ready_observation['auth_probe_released_after_start_seconds']!r}"
-                        ),
-                    )
-                else:
+                first_shell_ready_after_start_seconds = final_shell_window[
+                    "first_shell_ready_after_start_seconds"
+                ]
+                auth_probe_released_after_start_seconds = final_shell_window[
+                    "auth_probe_released_after_start_seconds"
+                ]
+                auth_probe_release_after_auth_start_seconds = final_shell_window[
+                    "auth_probe_release_after_auth_start_seconds"
+                ]
+                if not shell_ready_observed or first_shell_ready_after_start_seconds is None:
                     step_two_error = (
-                        "Step 2 failed: the deployed app never transitioned into "
-                        "shell_ready during the delayed startup-probe scenario.\n"
-                        f"Observed shell window:\n{json.dumps(shell_ready_observation, indent=2)}"
+                        "Step 2 failed: the deployed app never reached shell_ready during "
+                        "the delayed startup-probe scenario.\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
                     failures.append(step_two_error)
                     _record_step(
@@ -268,43 +240,87 @@ def main() -> None:
                         action=REQUEST_STEPS[1],
                         observed=step_two_error,
                     )
+                elif (
+                    first_shell_ready_after_start_seconds is not None
+                    and first_shell_ready_after_start_seconds > TIMEOUT_ASSERTION_SECONDS
+                ):
+                    step_two_error = (
+                        "Step 2 failed: the deployed app first exposed shell_ready only "
+                        f"after {first_shell_ready_after_start_seconds!r} seconds from launch, "
+                        f"which exceeds the {TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
+                    )
+                    failures.append(step_two_error)
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=step_two_error,
+                    )
+                else:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "The deployed app exposed shell_ready during the delayed `/user` "
+                            "startup probe sequence and did so before the 11-second timeout "
+                            "window expired.\n"
+                            f"initial_trigger={json.dumps(_trigger_payload(initial_trigger), ensure_ascii=True)}; "
+                            f"first_shell_ready_after_start_seconds="
+                            f"{first_shell_ready_after_start_seconds!r}; "
+                            f"auth_probe_started_after_start_seconds="
+                            f"{final_shell_window['auth_probe_started_after_start_seconds']!r}; "
+                            f"auth_probe_released_after_start_seconds="
+                            f"{auth_probe_released_after_start_seconds!r}"
+                        ),
+                    )
 
                 step_three_error: str | None = None
-                if not timeout_elapsed:
+                if not auth_released or auth_probe_released_after_start_seconds is None:
                     step_three_error = (
-                        "Step 3 failed: the test never reached the explicit "
-                        "11-second synchronization timeout window while observing the delayed "
-                        "startup probe.\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
+                        "Step 3 failed: the delayed `/user` startup probe never completed, "
+                        "so the test could not compare the shell-ready timestamp against the "
+                        "delayed probe release.\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
+                    )
+                elif auth_probe_released_after_start_seconds <= TIMEOUT_ASSERTION_SECONDS:
+                    step_three_error = (
+                        "Step 3 failed: the delayed `/user` probe did not remain hanging "
+                        "past the explicit 11-second timeout window.\n"
+                        f"Observed auth_probe_released_after_start_seconds="
+                        f"{auth_probe_released_after_start_seconds!r}; "
+                        f"first_shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
+                    )
+                elif first_shell_ready_after_start_seconds > TIMEOUT_ASSERTION_SECONDS:
+                    step_three_error = (
+                        "Step 3 failed: shell_ready was first observed only after the "
+                        f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
+                        f"Observed first_shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"auth_probe_started_after_start_seconds="
+                        f"{final_shell_window['auth_probe_started_after_start_seconds']!r}\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
                 elif (
-                    not bool(timeout_window["auth_pending"])
-                    and timeout_window["auth_probe_release_after_auth_start_seconds"] is not None
-                    and float(timeout_window["auth_probe_release_after_auth_start_seconds"])
-                    > TIMEOUT_ASSERTION_SECONDS
+                    auth_probe_released_after_start_seconds is not None
+                    and first_shell_ready_after_start_seconds >= auth_probe_released_after_start_seconds
                 ):
                     step_three_error = (
-                        "Step 3 failed: the page only became observable after the delayed "
-                        "startup probe released, so the shell was not available by the "
-                        f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
-                        f"Observed auth_probe_release_after_auth_start_seconds="
-                        f"{timeout_window['auth_probe_release_after_auth_start_seconds']!r}; "
-                        f"shell_ready_after_start_seconds="
-                        f"{timeout_window['shell_ready_after_start_seconds']!r}\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
-                    )
-                elif not bool(timeout_window["auth_pending"]):
-                    step_three_error = (
-                        "Step 3 failed: the delayed startup probe was no longer pending by "
-                        "the time the timeout assertion ran, so the test did not prove the "
-                        "non-blocking timeout behavior.\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
-                    )
-                elif not bool(timeout_window["shell_observation"]["shell_ready"]):
-                    step_three_error = (
-                        "Step 3 failed: after waiting past the explicit synchronization "
-                        "timeout, the page still had not reached shell_ready.\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
+                        "Step 3 failed: the shell became observable only after the delayed "
+                        "`/user` probe released, so the timeout fallback path did not prove "
+                        "the shell was available during the hanging startup request.\n"
+                        f"Observed first_shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"auth_probe_released_after_start_seconds="
+                        f"{auth_probe_released_after_start_seconds!r}; "
+                        f"auth_probe_release_after_auth_start_seconds="
+                        f"{auth_probe_release_after_auth_start_seconds!r}\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
 
                 if step_three_error is None:
@@ -314,10 +330,14 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[2],
                         observed=(
-                            f"Waited {timeout_window['elapsed_since_auth_start_seconds']!r} "
-                            "seconds from the delayed `/user` probe start, which reaches the "
-                            f"{SYNC_TIMEOUT_SECONDS}-second startup timeout window. The probe "
-                            f"was still pending and shell_ready was {timeout_window['shell_observation']['shell_ready']!r}."
+                            f"Recorded first_shell_ready_after_start_seconds="
+                            f"{first_shell_ready_after_start_seconds!r}; "
+                            f"auth_probe_released_after_start_seconds="
+                            f"{auth_probe_released_after_start_seconds!r}; "
+                            f"auth_probe_release_after_auth_start_seconds="
+                            f"{auth_probe_release_after_auth_start_seconds!r}. "
+                            "This shows the shell became available within 11 seconds from "
+                            "launch while the delayed `/user` probe remained unresolved."
                         ),
                     )
                 else:
@@ -332,32 +352,31 @@ def main() -> None:
 
                 step_four_error: str | None = None
                 try:
-                    _assert_shell_components(timeout_window)
+                    _assert_shell_components(final_shell_window)
                 except AssertionError as error:
                     step_four_error = str(error)
                 if (
                     step_three_error is not None
                     and step_four_error is None
-                    and timeout_window["auth_probe_release_after_auth_start_seconds"] is not None
-                    and float(timeout_window["auth_probe_release_after_auth_start_seconds"])
-                    > TIMEOUT_ASSERTION_SECONDS
+                    and first_shell_ready_after_start_seconds is not None
+                    and float(first_shell_ready_after_start_seconds) > TIMEOUT_ASSERTION_SECONDS
                 ):
                     step_four_error = (
                         "Step 4 failed: the top bar and branding were only observable after "
-                        "the delayed startup probe released, not by the expected "
+                        "the expected "
                         f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
-                        f"Observed auth_probe_release_after_auth_start_seconds="
-                        f"{timeout_window['auth_probe_release_after_auth_start_seconds']!r}; "
-                        f"shell_ready_after_start_seconds="
-                        f"{timeout_window['shell_ready_after_start_seconds']!r}\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
+                        f"Observed first_shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"auth_probe_released_after_start_seconds="
+                        f"{auth_probe_released_after_start_seconds!r}\n"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
                 elif step_three_error is not None and step_four_error is None:
                     step_four_error = (
                         "Step 4 failed: at the timeout-window snapshot, the interactive "
                         "shell components were not all visible because the page had not "
                         "reached shell_ready.\n"
-                        f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
+                        f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
                 if step_four_error is None:
                     _record_step(
@@ -366,13 +385,13 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[3],
                         observed=(
-                            "The timeout-window snapshot exposed the interactive shell rather "
-                            "than the startup loading surface.\n"
-                            f"title={timeout_window['startup_observation']['title']!r}; "
-                            f"trigger={json.dumps(timeout_window['trigger'], ensure_ascii=True)}; "
-                            f"branding_visible={timeout_window['branding_visible']!r}; "
+                            "The final live page exposed the interactive shell with the "
+                            "expected navigation, TopBar workspace trigger, and branding.\n"
+                            f"title={final_shell_window['startup_observation']['title']!r}; "
+                            f"trigger={json.dumps(final_shell_window['trigger'], ensure_ascii=True)}; "
+                            f"branding_visible={final_shell_window['branding_visible']!r}; "
                             f"visible_navigation_labels="
-                            f"{json.dumps(timeout_window['shell_observation']['visible_navigation_labels'], ensure_ascii=True)}"
+                            f"{json.dumps(final_shell_window['shell_observation']['visible_navigation_labels'], ensure_ascii=True)}"
                         ),
                     )
                 else:
@@ -388,32 +407,34 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the live app after waiting through the explicit 11-second "
-                        "timeout and checked the page the way a user would: visible shell "
-                        "navigation, a TopBar workspace trigger, and branding text instead "
-                        "of a stalled startup surface."
+                        "Viewed the live app after the delayed `/user` probe completed and "
+                        "checked the page the way a user would: visible shell navigation, a "
+                        "TopBar workspace trigger, and branding text instead of a stalled "
+                        "startup surface."
                     ),
                     observed=(
-                        f"body_text_snippet={_snippet(timeout_window['shell_observation']['body_text'])!r}; "
-                        f"branding_text_visible={timeout_window['branding_visible']!r}; "
+                        f"body_text_snippet={_snippet(final_shell_window['shell_observation']['body_text'])!r}; "
+                        f"branding_text_visible={final_shell_window['branding_visible']!r}; "
                         f"trigger_label="
-                        f"{(timeout_window['trigger'] or {}).get('semantic_label')!r}; "
+                        f"{(final_shell_window['trigger'] or {}).get('semantic_label')!r}; "
                         f"visible_buttons="
-                        f"{json.dumps(timeout_window['startup_observation']['button_labels'], ensure_ascii=True)}"
+                        f"{json.dumps(final_shell_window['startup_observation']['button_labels'], ensure_ascii=True)}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Kept watching the live page after the 11-second timeout checkpoint "
-                        "to see whether the app ever recovered into the shell later."
+                        "Compared the recorded shell-ready timestamp against the delayed "
+                        "GitHub `/user` release timing to confirm the shell became visible "
+                        "before the hanging startup probe finished."
                     ),
                     observed=(
-                        f"eventual_shell_ready={eventual_shell_ready!r}; "
-                        f"shell_ready_after_start_seconds="
-                        f"{shell_ready_observation['shell_ready_after_start_seconds']!r}; "
+                        f"auth_released={auth_released!r}; "
+                        f"first_shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
-                        f"{shell_ready_observation['auth_probe_released_after_start_seconds']!r}"
+                        f"{auth_probe_released_after_start_seconds!r}; "
+                        f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
                     ),
                 )
 
@@ -564,9 +585,10 @@ def _observe_shell_window(
     *,
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
-    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    runtime: Ts984DelayedAuthProbeRuntime,
     startup_started_at_monotonic: float,
 ) -> dict[str, Any]:
+    shell_probe_state = runtime.read_shell_probe_state()
     shell_observation = tracker_page.observe_interactive_shell(
         SHELL_NAVIGATION_LABELS,
         timeout_ms=1_000,
@@ -582,11 +604,11 @@ def _observe_shell_window(
         )
         if text
     )
-    shell_ready_after_start_seconds = _relative_startup_event_seconds(
-        startup_started_at_monotonic,
-        time.monotonic() if bool(shell_observation.get("shell_ready")) else None,
-    )
+    first_shell_ready_after_start_seconds = shell_probe_state[
+        "first_shell_ready_after_launch_seconds"
+    ]
     return {
+        "shell_probe_state": shell_probe_state,
         "shell_observation": shell_observation,
         "startup_observation": startup_observation,
         "trigger": trigger,
@@ -607,15 +629,8 @@ def _observe_shell_window(
             runtime.auth_probe_started_at_monotonic,
             runtime.auth_probe_released_at_monotonic,
         ),
-        "elapsed_since_auth_start_seconds": _elapsed_since(runtime.auth_probe_started_at_monotonic),
-        "shell_ready_after_start_seconds": shell_ready_after_start_seconds,
+        "first_shell_ready_after_start_seconds": first_shell_ready_after_start_seconds,
     }
-
-
-def _elapsed_since(event_monotonic: float | None) -> float | None:
-    if event_monotonic is None:
-        return None
-    return round(time.monotonic() - event_monotonic, 2)
 
 
 def _relative_startup_event_seconds(
