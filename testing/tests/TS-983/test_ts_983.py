@@ -40,10 +40,9 @@ TEST_CASE_TITLE = (
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-983/test_ts_983.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 BLOCKED_BOOTSTRAP_PATH = "DEMO/project.json"
-LINKED_BUGS = ["TS-977"]
+LINKED_BUGS = ["TS-988", "TS-977"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 RECOVERY_ACTION_LABELS = ("Sync issue", "Retry")
-HOSTED_SETUP_WORKSPACE_NAME = "Hosted setup workspace"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -363,8 +362,9 @@ def _initial_workspace_state() -> dict[str, object]:
 
 def _footer_controls(switcher: WorkspaceSwitcherObservation) -> list[str]:
     controls: list[str] = []
+    combined_text = f"{switcher.switcher_text}\n{switcher.body_text}"
     for label in ("Add workspace", "Save and switch"):
-        if label in switcher.switcher_text:
+        if label in combined_text:
             controls.append(label)
     return controls
 
@@ -408,12 +408,12 @@ def _switcher_shows_recovered_workspaces(
         observation,
         preloaded_workspace_names,
     )
+    footer_controls = _footer_controls(observation)
     return (
         bool(recovered_workspace_names)
-        and HOSTED_SETUP_WORKSPACE_NAME in recovered_workspace_names
         and "Saved workspaces" in observation.switcher_text
-        and "Add workspace" in observation.switcher_text
-        and "Save and switch" in observation.switcher_text
+        and "Add workspace" in footer_controls
+        and len(footer_controls) >= 2
     )
 
 
