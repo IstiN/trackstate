@@ -91,6 +91,8 @@ class GitHubAccessibilityPullRequestGateObservation:
     flutter_engine_initialization_summary: str = ""
     semantics_tree_discovery_log_entries: list[str] = field(default_factory=list)
     semantics_tree_discovery_summary: str = ""
+    runtime_accessibility_sample_labels: list[str] = field(default_factory=list)
+    probe_visible_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
