@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import platform
-import subprocess
 import sys
 import time
 import traceback
@@ -15,17 +14,35 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
-    WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
     DelayedAuthWorkspaceProfilesRuntime,
+)
+from testing.tests.support.live_startup_case_support import (  # noqa: E402
+    build_annotated_steps,
+    build_workspace_state,
+    elapsed_since,
+    format_human_lines,
+    format_step_lines,
+    observe_live_startup_shell_window,
+    prepare_local_workspace_repository,
+    record_human_verification,
+    record_not_reached_steps,
+    record_step,
+    relative_event_seconds,
+    relative_startup_event_seconds,
+    safe_trigger_payload,
+    snippet,
+    startup_surface_payload,
+    trigger_payload,
+    try_observe_trigger,
+    write_test_automation_result,
 )
 
 TICKET_KEY = "TS-984"
@@ -447,117 +464,25 @@ def main() -> None:
 
 
 def _workspace_state(repository: str) -> dict[str, object]:
-    local_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
-    hosted_id = f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
-    return {
-        "activeWorkspaceId": local_id,
-        "migrationComplete": True,
-        "profiles": [
-            {
-                "id": local_id,
-                "displayName": LOCAL_DISPLAY_NAME,
-                "customDisplayName": LOCAL_DISPLAY_NAME,
-                "targetType": "local",
-                "target": LOCAL_TARGET,
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-23T00:00:00.000Z",
-            },
-            {
-                "id": hosted_id,
-                "displayName": HOSTED_DISPLAY_NAME,
-                "customDisplayName": HOSTED_DISPLAY_NAME,
-                "targetType": "hosted",
-                "target": repository,
-                "defaultBranch": DEFAULT_BRANCH,
-                "writeBranch": DEFAULT_BRANCH,
-                "lastOpenedAt": "2026-05-23T00:00:00.000Z",
-            },
-        ],
-    }
+    return build_workspace_state(
+        repository,
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        local_display_name=LOCAL_DISPLAY_NAME,
+        hosted_display_name=HOSTED_DISPLAY_NAME,
+    )
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
-    local_path = Path(LOCAL_TARGET)
-    local_path.mkdir(parents=True, exist_ok=True)
-
-    git_dir = local_path / ".git"
-    if not git_dir.exists():
-        subprocess.run(
-            ["git", "init", "--initial-branch", DEFAULT_BRANCH, str(local_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    marker_path = local_path / ".trackstate-ts984-precondition.txt"
-    marker_path.write_text(
-        "Prepared for TS-984 startup synchronization timeout validation.\n",
-        encoding="utf-8",
+    return prepare_local_workspace_repository(
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        marker_filename=".trackstate-ts984-precondition.txt",
+        marker_contents="Prepared for TS-984 startup synchronization timeout validation.\n",
+        commit_author_name="TS-984 Automation",
+        commit_author_email="ts984@example.com",
+        commit_message="Prepare TS-984 local workspace",
     )
-    subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "-C", str(local_path), "status", "--short"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    head = subprocess.run(
-        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if status.stdout.strip() or head.returncode != 0:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(local_path),
-                "-c",
-                "user.name=TS-984 Automation",
-                "-c",
-                "user.email=ts984@example.com",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "Prepare TS-984 local workspace",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    branch = subprocess.run(
-        ["git", "-C", str(local_path), "branch", "--show-current"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    head = subprocess.run(
-        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "-C", str(local_path), "status", "--short"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return {
-        "path": str(local_path),
-        "branch": branch.stdout.strip(),
-        "head": head.stdout.strip(),
-        "status": status.stdout.strip(),
-        "marker_path": str(marker_path),
-    }
 
 
 def _observe_shell_window(
@@ -567,115 +492,52 @@ def _observe_shell_window(
     runtime: DelayedAuthWorkspaceProfilesRuntime,
     startup_started_at_monotonic: float,
 ) -> dict[str, Any]:
-    shell_observation = tracker_page.observe_interactive_shell(
-        SHELL_NAVIGATION_LABELS,
-        timeout_ms=1_000,
+    return observe_live_startup_shell_window(
+        tracker_page=tracker_page,
+        page=page,
+        runtime=runtime,
+        startup_started_at_monotonic=startup_started_at_monotonic,
+        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
+        branding_texts=(BRANDING_TEXT, "TrackState.AI"),
     )
-    startup_observation = _startup_surface_payload(tracker_page)
-    trigger = _safe_trigger_payload(page)
-    body_text = str(shell_observation.get("body_text", ""))
-    visible_shell_text = "\n".join(
-        text
-        for text in (
-            body_text,
-            str(startup_observation.get("body_text", "")),
-        )
-        if text
-    )
-    shell_ready_after_start_seconds = _relative_startup_event_seconds(
-        startup_started_at_monotonic,
-        time.monotonic() if bool(shell_observation.get("shell_ready")) else None,
-    )
-    return {
-        "shell_observation": shell_observation,
-        "startup_observation": startup_observation,
-        "trigger": trigger,
-        "branding_visible": any(
-            branding_text in visible_shell_text
-            for branding_text in (BRANDING_TEXT, "TrackState.AI")
-        ),
-        "auth_pending": runtime.auth_probe_pending,
-        "auth_probe_started_after_start_seconds": _relative_startup_event_seconds(
-            startup_started_at_monotonic,
-            runtime.auth_probe_started_at_monotonic,
-        ),
-        "auth_probe_released_after_start_seconds": _relative_startup_event_seconds(
-            startup_started_at_monotonic,
-            runtime.auth_probe_released_at_monotonic,
-        ),
-        "auth_probe_release_after_auth_start_seconds": _relative_event_seconds(
-            runtime.auth_probe_started_at_monotonic,
-            runtime.auth_probe_released_at_monotonic,
-        ),
-        "elapsed_since_auth_start_seconds": _elapsed_since(runtime.auth_probe_started_at_monotonic),
-        "shell_ready_after_start_seconds": shell_ready_after_start_seconds,
-    }
 
 
 def _elapsed_since(event_monotonic: float | None) -> float | None:
-    if event_monotonic is None:
-        return None
-    return round(time.monotonic() - event_monotonic, 2)
+    return elapsed_since(event_monotonic)
 
 
 def _relative_startup_event_seconds(
     startup_started_at_monotonic: float,
     event_monotonic: float | None,
 ) -> float | None:
-    if event_monotonic is None:
-        return None
-    return round(event_monotonic - startup_started_at_monotonic, 2)
+    return relative_startup_event_seconds(startup_started_at_monotonic, event_monotonic)
 
 
 def _relative_event_seconds(
     started_at_monotonic: float | None,
     event_monotonic: float | None,
 ) -> float | None:
-    if started_at_monotonic is None or event_monotonic is None:
-        return None
-    return round(event_monotonic - started_at_monotonic, 2)
+    return relative_event_seconds(started_at_monotonic, event_monotonic)
 
 
 def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
-    observation = tracker_page.observe_startup_surface()
-    return {
-        "title": observation.title,
-        "location_href": observation.location_href,
-        "location_hash": observation.location_hash,
-        "location_pathname": observation.location_pathname,
-        "body_text": observation.body_text,
-        "button_labels": list(observation.button_labels),
-    }
+    return startup_surface_payload(tracker_page)
 
 
 def _safe_trigger_payload(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, Any] | None:
-    try:
-        trigger = page.observe_trigger(timeout_ms=1_000)
-    except (AssertionError, WebAppTimeoutError):
-        return None
-    return _trigger_payload(trigger)
+    return safe_trigger_payload(page)
 
 
 def _try_observe_trigger(
     page: LiveWorkspaceSwitcherPage,
-) -> WorkspaceSwitcherTriggerObservation | None:
-    try:
-        return page.observe_trigger(timeout_ms=1_000)
-    except (AssertionError, WebAppTimeoutError):
-        return None
+) -> Any | None:
+    return try_observe_trigger(page)
 
 
-def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, Any]:
-    return {
-        "semantic_label": trigger.semantic_label,
-        "visible_text": trigger.visible_text,
-        "display_name": trigger.display_name,
-        "workspace_type": trigger.workspace_type,
-        "state_label": trigger.state_label,
-        "top_button_labels": list(trigger.top_button_labels),
-    }
+def _trigger_payload(trigger: Any) -> dict[str, Any]:
+    return trigger_payload(trigger)
 
 
 def _assert_shell_components(observation: dict[str, Any]) -> None:
@@ -715,10 +577,7 @@ def _assert_shell_components(observation: dict[str, Any]) -> None:
 
 
 def _snippet(text: str, *, limit: int = 240) -> str:
-    normalized = " ".join(text.split())
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[:limit].rstrip()}..."
+    return snippet(text, limit=limit)
 
 
 def _record_step(
@@ -729,16 +588,7 @@ def _record_step(
     action: str,
     observed: str,
 ) -> None:
-    steps = result.setdefault("steps", [])
-    assert isinstance(steps, list)
-    steps.append(
-        {
-            "step": step,
-            "status": status,
-            "action": action,
-            "observed": observed,
-        },
-    )
+    record_step(result, step=step, status=status, action=action, observed=observed)
 
 
 def _record_human_verification(
@@ -747,9 +597,7 @@ def _record_human_verification(
     check: str,
     observed: str,
 ) -> None:
-    checks = result.setdefault("human_verification", [])
-    assert isinstance(checks, list)
-    checks.append({"check": check, "observed": observed})
+    record_human_verification(result, check=check, observed=observed)
 
 
 def _record_not_reached_steps(
@@ -757,38 +605,12 @@ def _record_not_reached_steps(
     *,
     starting_step: int,
 ) -> None:
-    recorded = {
-        int(step["step"])
-        for step in result.get("steps", [])
-        if isinstance(step, dict) and isinstance(step.get("step"), int)
-    }
-    for step_number in range(starting_step, len(REQUEST_STEPS) + 1):
-        if step_number in recorded:
-            continue
-        _record_step(
-            result,
-            step=step_number,
-            status="failed",
-            action=REQUEST_STEPS[step_number - 1],
-            observed=f"Not reached because step {starting_step - 1} failed.",
-        )
+    record_not_reached_steps(result, starting_step=starting_step, request_steps=REQUEST_STEPS)
 
 
 def _write_pass_outputs(result: dict[str, Any]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
-    RESULT_PATH.write_text(
-        json.dumps(
-            {
-                "status": "passed",
-                "passed": 1,
-                "failed": 0,
-                "skipped": 0,
-                "summary": "1 passed, 0 failed",
-            },
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    write_test_automation_result(RESULT_PATH, passed=True)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
@@ -796,20 +618,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
-    RESULT_PATH.write_text(
-        json.dumps(
-            {
-                "status": "failed",
-                "passed": 0,
-                "failed": 1,
-                "skipped": 0,
-                "summary": "0 passed, 1 failed",
-                "error": error,
-            },
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
@@ -924,25 +733,7 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_bug_description(result: dict[str, Any]) -> str:
-    annotated_steps: list[str] = []
-    steps = result.get("steps", [])
-    for index, action in enumerate(REQUEST_STEPS, start=1):
-        matching = next(
-            (
-                step
-                for step in steps
-                if isinstance(step, dict) and int(step.get("step", -1)) == index
-            ),
-            None,
-        )
-        if matching is None:
-            annotated_steps.append(f"{index}. ⏭️ {action} Not reached.")
-            continue
-        icon = "✅" if str(matching.get("status")) == "passed" else "❌"
-        annotated_steps.append(
-            f"{index}. {icon} {action} Observed: {matching.get('observed', '')}"
-        )
-
+    annotated_steps = build_annotated_steps(result, request_steps=REQUEST_STEPS)
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -995,35 +786,11 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
-    lines: list[str] = []
-    for step in result.get("steps", []):
-        if not isinstance(step, dict):
-            continue
-        if jira:
-            lines.append(
-                f"# Step {step['step']} *{str(step['status']).upper()}*: {step['action']}\n"
-                f"Observed: {{{{code}}}}{step['observed']}{{{{code}}}}",
-            )
-        else:
-            lines.append(
-                f"- Step {step['step']} **{step['status']}** — {step['action']}  \n"
-                f"  Observed: `{step['observed']}`",
-            )
-    return lines
+    return format_step_lines(result, jira=jira)
 
 
 def _human_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
-    lines: list[str] = []
-    for entry in result.get("human_verification", []):
-        if not isinstance(entry, dict):
-            continue
-        if jira:
-            lines.append(
-                f"* {entry['check']} Observed: {{{{code}}}}{entry['observed']}{{{{code}}}}",
-            )
-        else:
-            lines.append(f"- **{entry['check']}** Observed: `{entry['observed']}`")
-    return lines
+    return format_human_lines(result, jira=jira)
 
 
 if __name__ == "__main__":
