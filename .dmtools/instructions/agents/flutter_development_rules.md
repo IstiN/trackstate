@@ -127,22 +127,78 @@ When fixing a rendering/display bug (e.g. locale label fallback), check **all** 
 
 Add a test for each surface you fix.
 
-### 8 — Web (kIsWeb) capability gating for browser-incompatible upload paths
+### 8 — Web (kIsWeb) capability gating for browser-incompatible paths
 
-Some external APIs (e.g. `uploads.github.com`) do not expose browser-safe CORS headers. Any capability that requires a CORS-incompatible host **must** be gated on `!kIsWeb`:
+Any code path that uses `Process.run`, `dart:io` File/Directory, or CORS-incompatible hosts **must** be gated on `!kIsWeb` or have a web-specific fallback:
 
 ```mermaid
 flowchart TD
-  Impl([Implementing upload / network feature]) --> Host{Upload target\nCORS-safe for browsers?}
-  Host -->|api.github.com etc.| Both[Enable on all platforms]
-  Host -->|uploads.github.com\nor other non-CORS hosts| Gate["supportsFeature = canWrite && !kIsWeb"]
-  Gate --> UI[UI falls to restricted/unavailable\nstate on web]
-  UI --> Msg[Update callout message\nto explain the limitation clearly]
+  Impl([Implementing feature]) --> Check{Uses Process.run,\ndart:io File,\nor non-CORS host?}
+  Check -->|Yes| Web{Has web fallback?}
+  Web -->|No| MUST["MUST add:\n1. kIsWeb gate\n2. Web-specific alternative\n   (browser File API, etc.)\n3. Graceful error if impossible"]
+  Web -->|Yes| OK([✅ Both paths covered])
+  Check -->|No| OK
+```
+
+Common web-incompatible patterns:
+- `Process.run(...)` → throws `Unsupported operation` on web
+- `File(path).readAsString()` → dart:io unavailable on web
+- `LocalTrackStateRepository` → uses filesystem, needs `openBrowserLocalRepository` on web
+- `uploads.github.com` → no CORS headers, needs `!kIsWeb` gate
+
+```dart
+// ❌ WRONG — crashes on web
+final result = await Process.run('git', ['status']);
+
+// ✅ CORRECT — web-aware with fallback
+if (kIsWeb) {
+  return _browserLocalFallback();
+} else {
+  final result = await Process.run('git', ['status']);
+}
 ```
 
 - Import: `import 'package:flutter/foundation.dart' show kIsWeb;`
-- **Never** advertise a write capability on web that routes through a non-CORS endpoint — the upload appears to work (controls enabled) but silently fails.
-- Update the UI callout message to explain the limitation (not just "not supported yet").
+- **Never** let a web execution path reach `Process.run` or `dart:io` — it crashes, not just fails silently.
+- When adding workspace retry/restore logic, ALWAYS check if the existing `openBrowserLocalRepository` path handles the case.
+
+### 9 — Async startup: always notify listeners after deferred operations
+
+When deferring a probe/restore to avoid blocking startup:
+
+```mermaid
+sequenceDiagram
+  participant Load as load()
+  participant Deferred as deferredRestore()
+  participant UI as Listeners/UI
+  
+  Load->>Deferred: unawaited(restore())
+  Load->>UI: notifyListeners() → shell_ready
+  Note over Deferred: restore completes later...
+  Deferred->>UI: ❌ WRONG if no notifyListeners()
+  Deferred->>UI: ✅ MUST notifyListeners() when done
+```
+
+**Rules:**
+- Every `unawaited()` async operation that changes state MUST call `notifyListeners()` on completion
+- Early-return branches in deferred callbacks MUST still notify if the state is meaningful (e.g. `githubAuthorizationCodeReturned`)
+- Test both: (a) startup completes without blocking, AND (b) deferred result eventually surfaces
+
+### 10 — Workspace state: test ALL state transitions, not just happy path
+
+When implementing workspace state changes (retry, restore, switch):
+
+```mermaid
+flowchart TD
+  Change([State change logic]) --> Paths{All paths\ncovered?}
+  Paths -->|"Only success path"| BAD["❌ Missing:\n- What if reopen fails on web?\n- What if directory doesn't match?\n- What if token expired?"]
+  Paths -->|"Success + all error branches"| GOOD["✅ Each branch either:\n1. Transitions to correct state\n2. Shows error UI\n3. Notifies listeners"]
+```
+
+**Rules:**
+- Never reuse `previousViewModel.repository` for a "restored" workspace — create fresh state
+- If `_prepareWorkspaceSwitch()` can fail on web, add `try/catch` with browser-specific fallback
+- Regression test must verify the VISIBLE repository changed, not just workspace metadata
 
 
 
@@ -158,12 +214,19 @@ flowchart TD
 | 8 | Do not touch `testing/` unless ticket requires it; justify in `outputs/response.md` |
 | 9 | `flutter analyze` → 0 issues; `flutter test` → all pass before finishing |
 | 10 | Null safety: no `dynamic`, no unjustified `!` |
+| 11 | Every code path that uses `Process.run` or `dart:io` MUST have a `kIsWeb` gate or web fallback |
+| 12 | Every `unawaited()` deferred operation that changes state MUST call `notifyListeners()` on completion |
+| 13 | Workspace state changes must cover ALL branches (success, web failure, directory mismatch, token expired) |
 
 ## Bug-fix additional rules
 
 - Ticket returned to dev → read prior Jira comments + previous PR diffs before changing anything
 - CLI bug → test both happy path and exact error path from ticket
 - Check `git log --oneline lib/ | head -20` before fixing to see recent changes to the same files
+- **Web platform**: before fixing any workspace/startup bug, check if the failing path uses `Process.run` or native file access → add web fallback via `openBrowserLocalRepository`
+- **Startup bugs**: check whether the fix blocks `shell_ready` — users must see the interactive shell quickly even if background probes are still running
+- **State bugs**: verify the fix handles the case where the previous workspace was hosted but the target is local (never reuse `previousViewModel.repository`)
+- **Scope**: fix ONLY the bug described in the ticket. Do not add unrelated JQL/locale/settings changes — they will be BLOCKING rejected
 
 ## Output (`outputs/response.md`)
 

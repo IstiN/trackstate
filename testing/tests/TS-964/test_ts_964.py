@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import shutil
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -45,10 +46,10 @@ LINKED_BUGS = ["TS-977", "TS-974", "TS-972", "TS-960", "TS-958"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Re-authenticate", "Retry")
 REWORK_SUMMARY = (
-    "Kept the mismatched local workspace as the active startup target but "
-    "stopped pre-marking it unavailable, so startup has to discover the "
-    "restore failure itself before the shell, header, and recovery entry "
-    "points are asserted."
+    "Resolved the merge conflict and replaced the delete-only fixture with a "
+    "real mismatched local Git workspace, so startup has to discover the "
+    "directory/repository mismatch itself before the shell, header, and "
+    "recovery entry points are asserted."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -80,7 +81,7 @@ def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
     FAILURE_SCREENSHOT_PATH.unlink(missing_ok=True)
-    _cleanup_local_workspace()
+    mismatch_fixture = _prepare_mismatched_local_workspace()
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -91,6 +92,7 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "linked_bugs": LINKED_BUGS,
+        "mismatched_workspace_fixture": mismatch_fixture,
         "steps": [],
         "human_verification": [],
     }
@@ -343,6 +345,32 @@ def _workspace_state(repository: str) -> dict[str, object]:
 
 def _cleanup_local_workspace() -> None:
     shutil.rmtree(LOCAL_TARGET, ignore_errors=True)
+
+
+def _prepare_mismatched_local_workspace() -> dict[str, object]:
+    _cleanup_local_workspace()
+    workspace_dir = Path(LOCAL_TARGET)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", "--initial-branch", DEFAULT_BRANCH, LOCAL_TARGET],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    (workspace_dir / "README.md").write_text(
+        "# TS-964 mismatched workspace fixture\n",
+        encoding="utf-8",
+    )
+    (workspace_dir / "unrelated.txt").write_text(
+        "This directory intentionally does not contain the expected TrackState setup repository.\n",
+        encoding="utf-8",
+    )
+    return {
+        "target_path": LOCAL_TARGET,
+        "git_directory_present": (workspace_dir / ".git").is_dir(),
+        "entries": sorted(path.name for path in workspace_dir.iterdir()),
+        "fixture_type": "different-git-repository",
+    }
 
 
 def _assert_header_trigger(
@@ -877,9 +905,10 @@ def _discussion_threads() -> list[dict[str, object]]:
 
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     prefix = (
-        "Fixed: kept the mismatched local workspace active but removed the preseeded "
-        "`unavailableLocalWorkspaceIds` shortcut, so startup now discovers the restore "
-        "failure itself before the test asserts the shell and header recovery."
+        "Fixed: resolved the merge conflict and prepared a real mismatched Git "
+        "workspace at `LOCAL_TARGET` instead of deleting the path, so startup now "
+        "has to discover the directory/repository mismatch itself before the test "
+        "asserts the shell and header recovery."
     )
     if passed:
         return f"{prefix} Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
