@@ -5144,7 +5144,7 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
     WorkspaceSyncHealth.synced => l10n.syncStatus,
     WorkspaceSyncHealth.checking => l10n.workspaceSyncChecking,
     WorkspaceSyncHealth.attentionNeeded =>
-      l10n.workspaceSyncAttentionNeededVisibleLabel,
+      _workspaceSyncAttentionNeededVisibleLabel(l10n),
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
 }
@@ -5157,11 +5157,22 @@ _SyncPillSemanticLabel _workspaceSyncSemanticLabel(
   if (status.health == WorkspaceSyncHealth.attentionNeeded &&
       !status.hasPendingRefresh) {
     return _StaticSyncPillSemanticLabel(
-      l10n.workspaceSyncAttentionNeededSemanticLabel,
+      _workspaceSyncAttentionNeededSemanticLabel(l10n),
     );
   }
   return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
 }
+
+String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededVisibleLabel.value;
+
+_WorkspaceSyncAttentionNeededSemanticText
+_workspaceSyncAttentionNeededSemanticLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededSemanticLabel;
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
   final l10n = AppLocalizations.of(context)!;
@@ -13985,10 +13996,10 @@ sealed class _SyncPillSemanticLabel {
 final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
   const _StaticSyncPillSemanticLabel(this.value);
 
-  final String value;
+  final _WorkspaceSyncAttentionNeededSemanticText value;
 
   @override
-  String resolve(String visibleLabel) => value;
+  String resolve(String visibleLabel) => value.value;
 }
 
 final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
@@ -13998,6 +14009,34 @@ final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
 
   @override
   String resolve(String visibleLabel) => '$prefix, $visibleLabel';
+}
+
+final class _WorkspaceSyncAttentionNeededSemanticText {
+  const _WorkspaceSyncAttentionNeededSemanticText(this.value);
+
+  final String value;
+}
+
+final class _WorkspaceSyncAttentionNeededVisibleText {
+  const _WorkspaceSyncAttentionNeededVisibleText(this.value);
+
+  final String value;
+}
+
+extension type const _WorkspaceSyncAttentionNeededLocalizations(
+  AppLocalizations _l10n
+) {
+  _WorkspaceSyncAttentionNeededVisibleText
+  get workspaceSyncAttentionNeededVisibleLabel =>
+      _WorkspaceSyncAttentionNeededVisibleText(
+        _l10n.workspaceSyncAttentionNeededVisibleLabel,
+      );
+
+  _WorkspaceSyncAttentionNeededSemanticText
+  get workspaceSyncAttentionNeededSemanticLabel =>
+      _WorkspaceSyncAttentionNeededSemanticText(
+        _l10n.workspaceSyncAttentionNeededSemanticLabel,
+      );
 }
 
 class _InlineInfoBanner extends StatelessWidget {
