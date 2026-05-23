@@ -575,7 +575,7 @@ class TrackerViewModel extends ChangeNotifier {
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
         if (deferAccessRestore) {
-          await startDeferredAccessRestoreIfNeeded(waitForCompletion: false);
+          await startDeferredAccessRestoreIfNeeded(waitForCompletion: true);
         }
       }
       await _loadSnapshotAndSearch();

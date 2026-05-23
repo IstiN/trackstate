@@ -178,6 +178,7 @@ void main() {
         findsNothing,
       );
       expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Add workspace'), findsNothing);
       expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
       expect(delayedRepository.connectCalled, isTrue);
       expect(delayedRepository.connectCompleted, isFalse);
@@ -202,6 +203,7 @@ void main() {
         findsWidgets,
       );
       expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
       final savedStateAfterConnect = await workspaceProfiles.loadState();
       expect(savedStateAfterConnect.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
