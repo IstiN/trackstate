@@ -530,14 +530,16 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
+      final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
+          kIsWeb &&
+          workspace.id == activeWorkspaceId &&
+          workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
-            allowFallbackFromActive &&
-            workspace.id == activeWorkspaceId &&
-            workspace.isLocal,
+            preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId &&
             workspace.isLocal,
@@ -986,6 +988,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       return true;
     } on Object catch (error) {
       if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
         return true;
       }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
