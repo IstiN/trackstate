@@ -1639,7 +1639,7 @@ abstract class AppLocalizations {
   /// No description provided for @repositoryConfigFallback.
   ///
   /// In en, this message translates to:
-  /// **'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}'**
+  /// **'TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}'**
   String repositoryConfigFallback(String error);
 
   /// No description provided for @workspaceSwitchFailed.

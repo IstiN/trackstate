@@ -1082,6 +1082,82 @@ updated: 2026-05-05T00:00:00Z
   );
 
   test(
+    'setup repository returns hosted shell bootstrap before delayed project metadata completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Indexed markdown issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Indexed markdown issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/project.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode({
+              'key': 'DEMO',
+              'name': 'Demo Project',
+              'defaultLocale': 'en',
+            }),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(snapshot.project.key, 'DEMO');
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(
@@ -3170,6 +3246,8 @@ Nested release-backed attachment issue.
 SetupTrackStateRepository _mockSetupRepository({
   required Map<String, String> files,
   Map<String, http.Response> responseOverrides = const {},
+  Duration hostedStartupProbeTimeout = const Duration(seconds: 11),
+  Future<http.Response?> Function(String filePath)? asyncResponseOverride,
 }) {
   return SetupTrackStateRepository(
     client: MockClient((request) async {
@@ -3184,6 +3262,13 @@ SetupTrackStateRepository _mockSetupRepository({
           '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
       if (path.startsWith(contentsPrefix)) {
         final filePath = path.substring(contentsPrefix.length);
+        final asyncOverride = asyncResponseOverride;
+        if (asyncOverride != null) {
+          final response = await asyncOverride(filePath);
+          if (response != null) {
+            return response;
+          }
+        }
         final override = responseOverrides[filePath];
         if (override != null) {
           return override;
@@ -3195,6 +3280,7 @@ SetupTrackStateRepository _mockSetupRepository({
       }
       return http.Response('', 404);
     }),
+    hostedStartupProbeTimeout: hostedStartupProbeTimeout,
   );
 }
 

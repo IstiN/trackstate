@@ -42,6 +42,9 @@ void main() {
       expect(viewModel.snapshot, isNotNull);
       expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.providerSession?.canWrite, isTrue);
+      expect(viewModel.providerSession?.canCreateBranch, isTrue);
     },
   );
 

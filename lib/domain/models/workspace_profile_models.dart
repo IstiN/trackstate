@@ -193,17 +193,21 @@ class WorkspaceProfilesState {
 
   bool get hasProfiles => profiles.isNotEmpty;
 
-  WorkspaceProfile? get activeWorkspace {
+  WorkspaceProfile? get selectedWorkspace {
     final activeWorkspaceId = this.activeWorkspaceId;
     if (activeWorkspaceId == null || activeWorkspaceId.isEmpty) {
-      return mostRecentlyOpenedWorkspace;
+      return null;
     }
     for (final profile in profiles) {
       if (profile.id == activeWorkspaceId) {
         return profile;
       }
     }
-    return mostRecentlyOpenedWorkspace;
+    return null;
+  }
+
+  WorkspaceProfile? get activeWorkspace {
+    return selectedWorkspace ?? mostRecentlyOpenedWorkspace;
   }
 
   WorkspaceProfile? get mostRecentlyOpenedWorkspace {

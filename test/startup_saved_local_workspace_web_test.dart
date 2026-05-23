@@ -23,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup issues the provider-backed /user probe and waits for it before exposing the shell when the saved local workspace needs browser reselection',
+    'web startup waits for the delayed /user probe before exposing the shell when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -98,6 +98,7 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
+      expect(find.text('Add workspace'), findsNothing);
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
       expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
@@ -110,16 +111,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
       );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
       final savedStateAfterProbe = await workspaceProfiles.loadState();
       expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(

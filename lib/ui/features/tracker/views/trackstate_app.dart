@@ -76,6 +76,14 @@ const _workspaceSwitcherTargetTypeLocalFocusId =
     'trackstate-workspace-switcher-target-type-local';
 const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
 
+@visibleForTesting
+bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
+  required bool compact,
+  required bool isWeb,
+}) {
+  return !compact && !isWeb;
+}
+
 String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
     'trackstate-workspace-switcher-$action-$workspaceId';
 
@@ -406,7 +414,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfilesState? state,
   ]) async {
     var workspaceState = state ?? _workspaceState;
-    final activeWorkspace = workspaceState.activeWorkspace;
+    final activeWorkspace = workspaceState.selectedWorkspace;
     if (activeWorkspace != null &&
         activeWorkspace.isHosted &&
         activeWorkspace.id == viewModel.workspaceId) {
@@ -501,13 +509,16 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   Future<bool> _restoreWorkspaceFromSavedState(
-    WorkspaceProfilesState state,
+    WorkspaceProfilesState state, {
+    bool allowFallbackFromActive = true,
+  }
   ) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
       if (activeWorkspaceId != null)
         ...state.profiles.where((profile) => profile.id == activeWorkspaceId),
-      ...state.profiles.where((profile) => profile.id != activeWorkspaceId),
+      if (allowFallbackFromActive || activeWorkspaceId == null)
+        ...state.profiles.where((profile) => profile.id != activeWorkspaceId),
     ];
     final previousViewModel = viewModel;
     _WorkspaceRestoreFailure? lastFailure;
@@ -519,14 +530,19 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
+      final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
+          kIsWeb &&
+          workspace.id == activeWorkspaceId &&
+          workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
-            workspace.id == activeWorkspaceId && workspace.isLocal,
+            preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
-            workspace.id == activeWorkspaceId && workspace.isLocal,
+            workspace.id == activeWorkspaceId &&
+            workspace.isLocal,
         deferAccessRestore: true,
       );
       if (prepared == null) {
@@ -803,7 +819,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     await _awaitActiveLocalWorkspaceRevalidation(loadedState);
     await _refreshWorkspaceSwitcherState(loadedState);
     if (widget.repository != null) {
-      if (loadedState.activeWorkspace case final activeWorkspace?) {
+      if (loadedState.selectedWorkspace case final activeWorkspace?) {
         viewModel.updateWorkspaceScope(activeWorkspace.id);
       }
       setState(() {
@@ -814,7 +830,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     if (loadedState.hasProfiles) {
       if (kIsWeb) {
-        if (loadedState.activeWorkspace case final activeWorkspace?) {
+        if (loadedState.selectedWorkspace case final activeWorkspace?) {
           viewModel.updateWorkspaceScope(activeWorkspace.id);
         }
         final initialLoad = viewModel.load(deferAccessRestore: true);
@@ -827,14 +843,12 @@ class _TrackStateAppState extends State<TrackStateApp>
         unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
         return;
       }
-      final restored = await _restoreWorkspaceFromSavedState(loadedState);
+      final restored = await _restoreWorkspaceFromSavedState(
+        loadedState,
+        allowFallbackFromActive: false,
+      );
       if (!restored) {
-        if (mounted) {
-          setState(() {
-            _showsWorkspaceOnboarding = true;
-            _workspaceProfilesReady = true;
-          });
-        }
+        await _handleStartupWorkspaceRestoreFailure(loadedState);
       }
       return;
     }
@@ -869,13 +883,34 @@ class _TrackStateAppState extends State<TrackStateApp>
     Future<void> initialLoad,
   ) async {
     await initialLoad;
-    final restored = await _restoreWorkspaceFromSavedState(loadedState);
+    final restored = await _restoreWorkspaceFromSavedState(
+      loadedState,
+      allowFallbackFromActive: false,
+    );
     _scheduleWebStartupRefresh();
     if (restored || !mounted) {
       return;
     }
+    await _handleStartupWorkspaceRestoreFailure(loadedState);
+  }
+
+  Future<void> _handleStartupWorkspaceRestoreFailure(
+    WorkspaceProfilesState state,
+  ) async {
+    var nextState = state;
+    if (state.activeWorkspaceId != null) {
+      nextState = await widget.workspaceProfileService
+          .clearActiveWorkspaceSelection();
+      viewModel.updateWorkspaceScope(null);
+      await _refreshWorkspaceSwitcherState(nextState);
+    }
+    if (!mounted) {
+      return;
+    }
     setState(() {
+      _workspaceState = nextState;
       _showsWorkspaceOnboarding = true;
+      _workspaceProfilesReady = true;
     });
   }
 
@@ -903,7 +938,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (widget.repository != null) {
       return;
     }
-    final activeWorkspace = state.activeWorkspace;
+    final activeWorkspace = state.selectedWorkspace;
     if (activeWorkspace == null || !activeWorkspace.isLocal) {
       return;
     }
@@ -953,6 +988,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       return true;
     } on Object catch (error) {
       if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
         return true;
       }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
@@ -1918,14 +1954,18 @@ class _TrackStateAppState extends State<TrackStateApp>
           explicitChildNodes: true,
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           label: AppLocalizations.of(sheetContext)!.workspaceSwitcher,
-          onDidLoseAccessibilityFocus: compact
-              ? null
-              : () {
+          onDidLoseAccessibilityFocus:
+              shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss(
+                compact: compact,
+                isWeb: kIsWeb,
+              )
+              ? () {
                   if (!desktopVisible) {
                     return;
                   }
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
-                },
+                }
+              : null,
           child: SizedBox(
             width: desktopVisible || compact ? null : 1,
             height: desktopVisible || compact ? null : 1,
@@ -4906,7 +4946,7 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
   WorkspaceProfilesState workspaces,
   Map<String, bool> localWorkspaceAvailability,
 ) {
-  final activeWorkspace = workspaces.activeWorkspace;
+  final activeWorkspace = workspaces.selectedWorkspace;
   final displayName = activeWorkspace?.displayName.isNotEmpty == true
       ? activeWorkspace!.displayName
       : viewModel.project?.repository ?? l10n.appTitle;
@@ -6562,7 +6602,7 @@ class _SettingsState extends State<_Settings> {
     if (_repositoryPathFocusNode.hasFocus || _writeBranchFocusNode.hasFocus) {
       return;
     }
-    final activeWorkspace = widget.workspaces.activeWorkspace;
+    final activeWorkspace = widget.workspaces.selectedWorkspace;
     if (activeWorkspace?.isLocal != true) {
       return;
     }
@@ -6841,7 +6881,7 @@ class _SavedWorkspaceList extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final activeWorkspaceId = workspaces.activeWorkspace?.id;
+    final activeWorkspaceId = workspaces.activeWorkspaceId;
     return Column(
       children: [
         for (final workspace in workspaces.profiles) ...[
@@ -7125,7 +7165,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final activeWorkspaceId = widget.workspaces.activeWorkspace?.id;
+    final activeWorkspaceId = widget.workspaces.activeWorkspaceId;
     final activeSummary = _activeWorkspaceSummary(
       l10n,
       widget.viewModel,

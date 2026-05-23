@@ -182,6 +182,41 @@ void main() {
   );
 
   test(
+    'clearActiveWorkspaceSelection removes the persisted active workspace without dropping saved availability state',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+      await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: false,
+      );
+
+      final clearedState = await service.clearActiveWorkspaceSelection();
+
+      expect(clearedState.activeWorkspaceId, isNull);
+      expect(
+        clearedState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+      final persistedState = await service.loadState();
+      expect(persistedState.activeWorkspaceId, isNull);
+      expect(
+        persistedState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+    },
+  );
+
+  test(
     'deleteProfile clears scoped credentials and falls back to the most recently opened workspace',
     () async {
       final authStore = _MemoryAuthStore()
