@@ -7266,24 +7266,18 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child: kIsWeb && !_canSaveWorkspace
-                    ? _WorkspaceSwitcherDisabledFooterButton(
-                        buttonKey: const ValueKey('workspace-add-button'),
-                        label: l10n.workspaceSaveAndSwitch,
-                        semanticsIdentifier: _workspaceSwitcherSaveFocusId,
-                      )
-                    : browser_focusable_control.BrowserFocusableControl(
-                        label: l10n.workspaceSaveAndSwitch,
-                        onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                        focusTargetId: _workspaceSwitcherSaveFocusId,
-                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                        focusableWhenDisabled: true,
-                        child: FilledButton(
-                          key: const ValueKey('workspace-add-button'),
-                          onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                          child: Text(l10n.workspaceSaveAndSwitch),
-                        ),
-                      ),
+                child: browser_focusable_control.BrowserFocusableControl(
+                  label: l10n.workspaceSaveAndSwitch,
+                  onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                  focusTargetId: _workspaceSwitcherSaveFocusId,
+                  panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                  focusableWhenDisabled: true,
+                  child: FilledButton(
+                    key: const ValueKey('workspace-add-button'),
+                    onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                    child: Text(l10n.workspaceSaveAndSwitch),
+                  ),
+                ),
               ),
             ),
           ],
@@ -7708,71 +7702,6 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
       focusTargetId: focusTargetId,
       panelId: browserWorkspaceSwitcherSemanticsIdentifier,
       child: buttonChild,
-    );
-  }
-}
-
-class _WorkspaceSwitcherDisabledFooterButton extends StatelessWidget {
-  const _WorkspaceSwitcherDisabledFooterButton({
-    required this.buttonKey,
-    required this.label,
-    required this.semanticsIdentifier,
-  });
-
-  final Key buttonKey;
-  final String label;
-  final String semanticsIdentifier;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final disabledStates = <WidgetState>{WidgetState.disabled};
-    final style = theme.filledButtonTheme.style;
-    final backgroundColor =
-        style?.backgroundColor?.resolve(disabledStates) ??
-        theme.colorScheme.onSurface.withValues(alpha: 0.12);
-    final foregroundColor =
-        style?.foregroundColor?.resolve(disabledStates) ??
-        theme.colorScheme.onSurface.withValues(alpha: 0.38);
-    final padding =
-        style?.padding?.resolve(disabledStates) ??
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 10);
-    final minimumSize =
-        style?.minimumSize?.resolve(disabledStates) ?? const Size(64, 40);
-    final shape =
-        style?.shape?.resolve(disabledStates) ??
-        const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(20)),
-        );
-
-    return Semantics(
-      container: true,
-      button: true,
-      enabled: false,
-      focusable: true,
-      identifier: semanticsIdentifier,
-      label: label,
-      child: ExcludeSemantics(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minWidth: minimumSize.width,
-            minHeight: minimumSize.height,
-          ),
-          child: DecoratedBox(
-            key: buttonKey,
-            decoration: ShapeDecoration(color: backgroundColor, shape: shape),
-            child: Padding(
-              padding: padding,
-              child: Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: foregroundColor,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
