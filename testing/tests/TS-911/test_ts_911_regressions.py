@@ -126,74 +126,45 @@ class Ts911RegressionsTest(unittest.TestCase):
         ):
             _LIVE_TEST_MODULE._assert_reverse_wrap(state)
 
-    def test_expected_reverse_target_uses_footer_reached_by_forward_tab_trace(self) -> None:
-        target = _LIVE_TEST_MODULE._expected_reverse_target_from_forward_trace(
-            [
-                {
-                    "active": {
-                        "accessible_name": "Repository",
-                        "text": "",
-                        "role": None,
-                        "tag_name": "INPUT",
-                        "tabindex": None,
-                        "outer_html": "<input aria-label='Repository'>",
-                    },
-                    "focus": {
-                        "focus_owned_by_switcher": True,
-                        "active_within_switcher": True,
-                        "active_on_trigger": False,
-                    },
-                    "monitor": {
-                        "ever_hidden_after_visible": False,
-                    },
-                },
-                {
-                    "active": {
-                        "accessible_name": "Save and switch",
-                        "text": "",
-                        "role": "button",
-                        "tag_name": "FLT-SEMANTICS",
-                        "tabindex": "0",
-                        "outer_html": "<flt-semantics>Save and switch</flt-semantics>",
-                    },
-                    "focus": {
-                        "focus_owned_by_switcher": True,
-                        "active_within_switcher": True,
-                        "active_on_trigger": False,
-                    },
-                    "monitor": {
-                        "ever_hidden_after_visible": False,
-                    },
-                },
-            ],
+    def test_visible_footer_target_prefers_live_save_and_switch_control(self) -> None:
+        target = _LIVE_TEST_MODULE._visible_footer_target(
+            button_focusability={
+                "label": "Save and switch",
+                "visible_text": "Save and switch",
+                "role": "button",
+                "tag_name": "FLT-SEMANTICS",
+                "tabindex": "0",
+                "keyboard_focusable": True,
+                "outer_html": "<flt-semantics>Save and switch</flt-semantics>",
+            },
+            fallback_target={
+                "label": "Branch",
+                "visible_text": "",
+                "role": None,
+                "tag_name": "INPUT",
+                "tabindex": None,
+                "tab_index_value": 0,
+                "dom_index": 19,
+                "keyboard_focusable": True,
+                "disabled": False,
+                "outer_html": "<input aria-label='Branch'>",
+            },
         )
 
         self.assertEqual(target["label"], "Save and switch")
         self.assertEqual(target["tag_name"], "FLT-SEMANTICS")
 
-    def test_expected_reverse_target_requires_footer_to_be_reached(self) -> None:
-        with self.assertRaisesRegex(
-            AssertionError,
-            "never reached the visible 'Save and switch' footer control",
-        ):
-            _LIVE_TEST_MODULE._expected_reverse_target_from_forward_trace(
-                [
-                    {
-                        "active": {
-                            "accessible_name": "Repository",
-                            "text": "",
-                        },
-                        "focus": {
-                            "focus_owned_by_switcher": True,
-                            "active_within_switcher": True,
-                            "active_on_trigger": False,
-                        },
-                        "monitor": {
-                            "ever_hidden_after_visible": False,
-                        },
-                    },
-                ],
-            )
+    def test_supporting_wrap_target_context_marks_non_footer_target_as_fallback(self) -> None:
+        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+            {
+                "expected_target": {
+                    "label": "Branch",
+                },
+            },
+        )
+
+        self.assertEqual(context["status"], "fallback")
+        self.assertIn("best available reverse-wrap target", context["note"])
 
 
 if __name__ == "__main__":

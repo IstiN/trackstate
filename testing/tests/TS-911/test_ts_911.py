@@ -27,13 +27,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.interfaces.web_app_session import FocusedElementObservation  # noqa: E402
-from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
-    create_live_tracker_app,
-)
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    StoredWorkspaceProfilesRuntime,
-)
-
 TICKET_KEY = "TS-911"
 TEST_CASE_TITLE = (
     "Press Shift+Tab from the first element in workspace switcher — "
@@ -98,6 +91,13 @@ WORKSPACE_NAMES = (
 
 
 def main() -> None:
+    from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
+        create_live_tracker_app,
+    )
+    from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
+        StoredWorkspaceProfilesRuntime,
+    )
+
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
     FAILURE_SCREENSHOT_PATH.unlink(missing_ok=True)
