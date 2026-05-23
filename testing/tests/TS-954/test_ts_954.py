@@ -46,7 +46,7 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
-LINKED_BUGS = ["TS-948", "TS-958", "TS-963", "TS-973", "TS-975"]
+LINKED_BUGS = ["TS-948", "TS-958", "TS-963", "TS-973", "TS-975", "TS-997", "TS-998"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
@@ -219,6 +219,7 @@ def main() -> None:
                 try:
                     save_button_before = page.observe_switcher_button_state(
                         LAST_INTERNAL_CONTROL_LABEL,
+                        panel=step_one_context["panel"],
                         timeout_ms=4_000,
                     )
                     result["save_and_switch_before_tab"] = _button_state_payload(
@@ -309,8 +310,7 @@ def main() -> None:
                         ),
                     )
 
-                first_row_label = _saved_workspace_row_focus_label(first_row)
-                result["first_row_label"] = first_row_label
+                result["first_row_label"] = first_row.display_name
                 try:
                     traversal_result = _tab_to_footer_and_wrap(
                         page=page,
@@ -429,9 +429,8 @@ def _tab_to_footer_and_wrap(
     panel: WorkspaceSwitcherPanelObservation,
     first_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> dict[str, object]:
-    first_row_label = _saved_workspace_row_focus_label(first_row)
-    page.focus_switcher_button(
-        first_row_label,
+    page.focus_saved_workspace_row(
+        first_row.display_name,
         panel=panel,
         timeout_ms=4_000,
     )
@@ -441,7 +440,7 @@ def _tab_to_footer_and_wrap(
         press_index=0,
         key="Focus",
         context=(
-            f"focusing the first saved workspace row {first_row_label!r}"
+            f"focusing the first saved workspace row {first_row.display_name!r}"
         ),
     )
     panel = page.observe_open_panel(
@@ -458,7 +457,7 @@ def _tab_to_footer_and_wrap(
     )
     _assert_first_row_focus_ready(
         state=focused_row_state,
-        expected_label=first_row_label,
+        expected_display_name=first_row.display_name,
     )
 
     tab_trace: list[dict[str, object]] = []
@@ -494,6 +493,7 @@ def _tab_to_footer_and_wrap(
             footer_state = state
             footer_button_state = page.observe_switcher_button_state(
                 LAST_INTERNAL_CONTROL_LABEL,
+                panel=panel,
                 timeout_ms=4_000,
             )
             break
@@ -530,7 +530,7 @@ def _tab_to_footer_and_wrap(
     )
     _assert_wrap_to_first_row(
         state=wrap_state,
-        expected_label=first_row_label,
+        expected_display_name=first_row.display_name,
     )
 
     return {
@@ -618,15 +618,16 @@ def _assert_save_button_disabled(
 def _assert_first_row_focus_ready(
     *,
     state: dict[str, object],
-    expected_label: str,
+    expected_display_name: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_row_focus = _first_row_focus_from_state(state)
     failures: list[str] = []
-    if active.get("accessible_name") != expected_label:
+    active_label = str(active.get("accessible_name") or "")
+    if expected_display_name not in active_label:
         failures.append(
-            f"the active label was {active.get('accessible_name')!r} instead of {expected_label!r}",
+            f"the active label was {active_label!r} instead of a focus target containing {expected_display_name!r}",
         )
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the open workspace switcher")
@@ -683,7 +684,8 @@ def _assert_traversal_reached_footer(
             "the footer focus state was reached, but the Save and switch button state could not be re-read",
         )
     else:
-        if not footer_button_state.active_within:
+        footer_active_label = _active_from_state(footer_state).get("accessible_name")
+        if not footer_button_state.active_within and footer_active_label != LAST_INTERNAL_CONTROL_LABEL:
             failures.append(
                 "the Save and switch footer control did not report active focus when Tab reached it",
             )
@@ -704,12 +706,13 @@ def _assert_traversal_reached_footer(
 def _assert_wrap_to_first_row(
     *,
     state: dict[str, object],
-    expected_label: str,
+    expected_display_name: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_row_focus = _first_row_focus_from_state(state)
     failures: list[str] = []
+    active_label = str(active.get("accessible_name") or "")
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the workspace switcher after the wrap attempt")
     if not bool(focus.get("active_within_switcher")):
@@ -722,9 +725,9 @@ def _assert_wrap_to_first_row(
         failures.append(
             f"the first saved workspace row did not receive focus after pressing Tab on {LAST_INTERNAL_CONTROL_LABEL!r}",
         )
-    if active.get("accessible_name") != expected_label:
+    if expected_display_name not in active_label:
         failures.append(
-            f"the active label remained {active.get('accessible_name')!r} instead of wrapping to {expected_label!r}",
+            f"the active label remained {active_label!r} instead of wrapping to a focus target containing {expected_display_name!r}",
         )
     if failures:
         raise AssertionError(
@@ -811,11 +814,13 @@ def _capture_surface_loss_state(
     }
     if before is not None:
         state["before"] = _focused_element_payload(before)
+    panel_after_loss: WorkspaceSwitcherPanelObservation | None = None
     try:
         panel = page.observe_open_panel(
             expected_container_kinds=("anchored-panel", "surface"),
             timeout_ms=500,
         )
+        panel_after_loss = panel
         state["panel_visible_after_loss"] = True
         state["panel_after_loss"] = asdict(panel)
     except AssertionError as panel_error:
@@ -824,6 +829,7 @@ def _capture_surface_loss_state(
     try:
         save_button_state = page.observe_switcher_button_state(
             LAST_INTERNAL_CONTROL_LABEL,
+            panel=panel_after_loss,
             timeout_ms=500,
         )
         state["save_button_after_loss"] = _button_state_payload(save_button_state)

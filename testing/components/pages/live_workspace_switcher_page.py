@@ -1362,14 +1362,19 @@ class LiveWorkspaceSwitcherPage:
         self,
         label: str,
         *,
+        panel: WorkspaceSwitcherPanelObservation | None = None,
         timeout_ms: int = 30_000,
     ) -> WorkspaceSwitcherButtonStateObservation:
         try:
             payload = self._session.wait_for_function(
                 """
-                ({ heading, label }) => {
+                ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const displayNameHint = normalize(label.split(',')[0] || '');
+                  const hasPanelBounds =
+                    [panelLeft, panelTop, panelRight, panelBottom].every((value) =>
+                      typeof value === 'number' && Number.isFinite(value),
+                    );
                   const isVisible = (element) => {
                     if (!element) {
                       return false;
@@ -1380,6 +1385,18 @@ class LiveWorkspaceSwitcherPage:
                       && rect.height > 0
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
+                  };
+                  const isInsidePanel = (element) => {
+                    if (!hasPanelBounds || !element) {
+                      return true;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const centerX = rect.left + (rect.width / 2);
+                    const centerY = rect.top + (rect.height / 2);
+                    return centerX >= panelLeft - 1
+                      && centerX <= panelRight + 1
+                      && centerY >= panelTop - 1
+                      && centerY <= panelBottom + 1;
                   };
                   const visibleText = (element) =>
                     normalize(element?.innerText || element?.textContent || '');
@@ -1392,59 +1409,64 @@ class LiveWorkspaceSwitcherPage:
                       || element?.textContent
                       || '',
                     );
-                  let switcher = Array.from(
-                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-                  )
-                    .filter(isVisible)
-                    .find((element) => visibleText(element).includes(heading)) || null;
-                  if (!switcher) {
-                    const candidates = Array.from(document.querySelectorAll('*'))
-                      .filter(isVisible)
-                      .filter((element) => {
-                        const text = visibleText(element);
-                        return text.includes(heading)
-                          && (
-                            text.includes('Saved workspaces')
-                            || text.includes('Save and switch')
-                            || text.includes('Hosted Local')
-                          );
-                      })
-                      .sort((left, right) => {
-                        const leftRect = left.getBoundingClientRect();
-                        const rightRect = right.getBoundingClientRect();
-                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                      });
-                    switcher = candidates[0] || null;
-                  }
-                  if (!switcher) {
-                    return null;
-                  }
                   const buttonSelector = [
                     'flt-semantics[role="button"]',
                     'button',
                     '[role="button"]',
                   ].join(',');
-                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
-                    .filter(isVisible)
-                    .find((element) => {
-                      const elementLabel = labelFor(element);
-                      const elementText = visibleText(element);
-                      const combined = normalize(`${elementLabel} ${elementText}`);
-                      const isActionButton = elementLabel.startsWith('Delete:')
-                        || elementLabel.startsWith('Open:')
-                        || elementText === 'Active';
-                      return elementLabel === label
-                        || elementText === label
-                        || (
-                          displayNameHint.length > 0
-                          && !isActionButton
-                          && (
-                            elementLabel === displayNameHint
-                            || elementText === displayNameHint
-                            || combined.includes(displayNameHint)
-                          )
-                        );
-                    });
+                  const matchesButton = (element) => {
+                    const elementLabel = labelFor(element);
+                    const elementText = visibleText(element);
+                    const combined = normalize(`${elementLabel} ${elementText}`);
+                    const isActionButton = elementLabel.startsWith('Delete:')
+                      || elementLabel.startsWith('Open:')
+                      || elementText === 'Active';
+                    return elementLabel === label
+                      || elementText === label
+                      || (
+                        displayNameHint.length > 0
+                        && !isActionButton
+                        && (
+                          elementLabel === displayNameHint
+                          || elementText === displayNameHint
+                          || combined.includes(displayNameHint)
+                        )
+                      );
+                  };
+                  let candidate = Array.from(document.querySelectorAll(buttonSelector))
+                    .filter((element) => isVisible(element) && isInsidePanel(element))
+                    .find(matchesButton) || null;
+                  if (!candidate) {
+                    let switcher = Array.from(
+                      document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                    )
+                      .filter((element) => isVisible(element) && isInsidePanel(element))
+                      .find((element) => visibleText(element).includes(heading)) || null;
+                    if (!switcher) {
+                      const candidates = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element) && isInsidePanel(element))
+                        .filter((element) => {
+                          const text = visibleText(element);
+                          return text.includes(heading)
+                            && (
+                              text.includes('Saved workspaces')
+                              || text.includes('Save and switch')
+                              || text.includes('Hosted Local')
+                            );
+                        })
+                        .sort((left, right) => {
+                          const leftRect = left.getBoundingClientRect();
+                          const rightRect = right.getBoundingClientRect();
+                          return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                        });
+                      switcher = candidates[0] || null;
+                    }
+                    if (switcher) {
+                      candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                        .filter((element) => isVisible(element) && isInsidePanel(element))
+                        .find(matchesButton) || null;
+                    }
+                  }
                   if (!candidate) {
                     return null;
                   }
@@ -1475,7 +1497,14 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
-                arg={"heading": self._switcher_heading, "label": label},
+                arg={
+                    "heading": self._switcher_heading,
+                    "label": label,
+                    "panelLeft": panel.left if panel is not None else None,
+                    "panelTop": panel.top if panel is not None else None,
+                    "panelRight": (panel.left + panel.width) if panel is not None else None,
+                    "panelBottom": (panel.top + panel.height) if panel is not None else None,
+                },
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
