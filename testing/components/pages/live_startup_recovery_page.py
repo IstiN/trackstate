@@ -24,6 +24,17 @@ class StartupRecoveryShellObservation:
         return "Settings" in self.selected_button_labels
 
 
+@dataclass(frozen=True)
+class StartupRecoverySurfaceObservation:
+    body_text: str
+    surface_text: str
+    visible_button_labels: tuple[str, ...]
+    visible_action_label: str | None
+    connect_github_visible: bool
+    container_tag_name: str | None
+    container_role: str | None
+
+
 class LiveStartupRecoveryPage:
     _required_navigation_labels = (
         "Dashboard",
@@ -174,6 +185,228 @@ class LiveStartupRecoveryPage:
             topbar_title_visible=bool(payload["topbarTitleVisible"]),
             settings_heading_visible=bool(payload["settingsHeadingVisible"]),
         )
+
+    def observe_recovery_surface(
+        self,
+        *,
+        accepted_action_labels: tuple[str, ...] = ("Retry",),
+    ) -> StartupRecoverySurfaceObservation:
+        payload = self._session.evaluate(
+            r"""
+            (acceptedActionLabels) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isButton = (element) =>
+                !!element?.matches?.('flt-semantics[role="button"],button,[role="button"]');
+              const labeledButtons = (root) => {
+                const nodes = [];
+                if (isButton(root)) {
+                  nodes.push(root);
+                }
+                nodes.push(
+                  ...Array.from(
+                    root.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
+                  ),
+                );
+                return nodes
+                  .filter(isVisible)
+                  .map((element) => ({
+                    element,
+                    label: normalize(
+                      element.getAttribute?.('aria-label')
+                        || element.innerText
+                        || element.textContent
+                        || '',
+                    ),
+                  }))
+                  .filter((candidate) => candidate.label.length > 0);
+              };
+              const bodyText = normalize(document.body?.innerText ?? '');
+              const visibleElements = [document.body, ...Array.from(document.body?.querySelectorAll('*') ?? [])]
+                .filter((element) => !!element && isVisible(element));
+              const candidates = visibleElements
+                .map((element) => {
+                  const text = normalize(element.innerText || element.textContent || '');
+                  const buttons = labeledButtons(element);
+                  const visibleButtonLabels = buttons.map((candidate) => candidate.label);
+                  const visibleActionLabel =
+                    acceptedActionLabels.find((label) => visibleButtonLabels.includes(label)) ?? null;
+                  const connectGitHubVisible =
+                    visibleButtonLabels.includes('Connect GitHub') || text.includes('Connect GitHub');
+                  if (!visibleActionLabel || !connectGitHubVisible) {
+                    return null;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    text,
+                    visibleButtonLabels,
+                    visibleActionLabel,
+                    connectGitHubVisible,
+                    containerTagName: element.tagName?.toLowerCase?.() ?? null,
+                    containerRole: element.getAttribute?.('role') ?? null,
+                    area: rect.width * rect.height,
+                    bodyPenalty: element === document.body ? 1 : 0,
+                  };
+                })
+                .filter((candidate) => candidate !== null)
+                .sort((left, right) => {
+                  if (left.bodyPenalty !== right.bodyPenalty) {
+                    return left.bodyPenalty - right.bodyPenalty;
+                  }
+                  if (left.area !== right.area) {
+                    return left.area - right.area;
+                  }
+                  return left.text.length - right.text.length;
+                });
+              const best = candidates[0] ?? null;
+              return {
+                bodyText,
+                surfaceText: best?.text ?? '',
+                visibleButtonLabels: best?.visibleButtonLabels ?? [],
+                visibleActionLabel: best?.visibleActionLabel ?? null,
+                connectGitHubVisible: best?.connectGitHubVisible ?? false,
+                containerTagName: best?.containerTagName ?? null,
+                containerRole: best?.containerRole ?? null,
+              };
+            }
+            """,
+            arg=list(accepted_action_labels),
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The startup recovery page did not expose a readable recovery surface.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return StartupRecoverySurfaceObservation(
+            body_text=str(payload.get("bodyText", "")),
+            surface_text=str(payload.get("surfaceText", "")),
+            visible_button_labels=tuple(
+                str(item) for item in payload.get("visibleButtonLabels", [])
+            ),
+            visible_action_label=(
+                str(payload["visibleActionLabel"])
+                if payload.get("visibleActionLabel") is not None
+                else None
+            ),
+            connect_github_visible=bool(payload.get("connectGitHubVisible")),
+            container_tag_name=(
+                str(payload["containerTagName"])
+                if payload.get("containerTagName") is not None
+                else None
+            ),
+            container_role=(
+                str(payload["containerRole"]) if payload.get("containerRole") is not None else None
+            ),
+        )
+
+    def click_recovery_action(
+        self,
+        *,
+        accepted_action_labels: tuple[str, ...] = ("Retry",),
+    ) -> str:
+        clicked_label = self._session.evaluate(
+            r"""
+            (acceptedActionLabels) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isButton = (element) =>
+                !!element?.matches?.('flt-semantics[role="button"],button,[role="button"]');
+              const labeledButtons = (root) => {
+                const nodes = [];
+                if (isButton(root)) {
+                  nodes.push(root);
+                }
+                nodes.push(
+                  ...Array.from(
+                    root.querySelectorAll('flt-semantics[role="button"],button,[role="button"]'),
+                  ),
+                );
+                return nodes
+                  .filter(isVisible)
+                  .map((element) => ({
+                    element,
+                    label: normalize(
+                      element.getAttribute?.('aria-label')
+                        || element.innerText
+                        || element.textContent
+                        || '',
+                    ),
+                  }))
+                  .filter((candidate) => candidate.label.length > 0);
+              };
+              const visibleElements = [document.body, ...Array.from(document.body?.querySelectorAll('*') ?? [])]
+                .filter((element) => !!element && isVisible(element));
+              const candidates = visibleElements
+                .map((element) => {
+                  const text = normalize(element.innerText || element.textContent || '');
+                  const buttons = labeledButtons(element);
+                  const visibleButtonLabels = buttons.map((candidate) => candidate.label);
+                  const visibleActionLabel =
+                    acceptedActionLabels.find((label) => visibleButtonLabels.includes(label)) ?? null;
+                  const connectGitHubVisible =
+                    visibleButtonLabels.includes('Connect GitHub') || text.includes('Connect GitHub');
+                  if (!visibleActionLabel || !connectGitHubVisible) {
+                    return null;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    buttons,
+                    area: rect.width * rect.height,
+                    textLength: text.length,
+                    bodyPenalty: element === document.body ? 1 : 0,
+                  };
+                })
+                .filter((candidate) => candidate !== null)
+                .sort((left, right) => {
+                  if (left.bodyPenalty !== right.bodyPenalty) {
+                    return left.bodyPenalty - right.bodyPenalty;
+                  }
+                  if (left.area !== right.area) {
+                    return left.area - right.area;
+                  }
+                  return left.textLength - right.textLength;
+                });
+              const best = candidates[0] ?? null;
+              if (!best) {
+                return null;
+              }
+              const button =
+                best.buttons.find((candidate) => acceptedActionLabels.includes(candidate.label)) ?? null;
+              if (!button) {
+                return null;
+              }
+              button.element.click();
+              return button.label;
+            }
+            """,
+            arg=list(accepted_action_labels),
+        )
+        if clicked_label is None:
+            raise AssertionError(
+                "The startup recovery surface did not expose a clickable recovery action.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return str(clicked_label)
 
     def click_retry(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(

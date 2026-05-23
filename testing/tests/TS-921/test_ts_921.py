@@ -48,9 +48,9 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Updated TS-921 to account for the latest linked bugs and to report the live "
-    "wrong-directory outcome more precisely when the workspace stays unavailable "
-    "but no mismatch message appears."
+    "Resolved the TS-921 rework conflict, kept the wrong-directory assertion "
+    "mismatch-specific, treated startup-shell outages as setup failures instead "
+    "of TS-921 bug outcomes, and kept review replies driven by live thread metadata."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -1307,7 +1307,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         _build_review_replies(result, passed=False),
         encoding="utf-8",
     )
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    if _is_startup_precondition_failure(result):
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    else:
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
 def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -1410,10 +1413,16 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "passed" if passed else "failed"
     lines = [f"# {TICKET_KEY} {status}", ""]
     if not passed:
+        failure_note = (
+            "Re-run hit a setup/precondition failure before the TS-921 workspace-switcher "
+            "steps could execute."
+            if _is_startup_precondition_failure(result)
+            else f"Re-run failed: {_failed_step_summary(result)}"
+        )
         lines.extend(
             [
                 "## Issues/Notes",
-                f"- Re-run failed: {_failed_step_summary(result)}",
+                f"- {failure_note}",
                 "",
             ],
         )
@@ -1540,6 +1549,12 @@ def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
             "The wrong-directory retry showed a visible rejection and the local workspace "
             "stayed unavailable."
         )
+    if _is_startup_precondition_failure(result):
+        return (
+            "The rerun failed before the ticket scenario started because the deployed app "
+            "never rendered the interactive shell and Workspace switcher needed for the "
+            "TS-921 precondition."
+        )
     return str(
         result.get(
             "error",
@@ -1574,6 +1589,10 @@ def _missing_or_broken_capability(result: dict[str, object]) -> str:
         "The deployed web app did not produce the expected wrong-directory mismatch "
         "outcome required by TS-921."
     )
+
+
+def _is_startup_precondition_failure(result: dict[str, object]) -> bool:
+    return str(result.get("runtime_state", "")).strip() == "startup-failed"
 
 
 def _discussion_threads() -> list[dict[str, object]]:

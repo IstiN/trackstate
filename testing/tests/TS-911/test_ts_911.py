@@ -659,6 +659,7 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
     expected_target = _expected_target_from_state(state)
     row_focus = {name: _row_focus_from_state(state, name) for name in WORKSPACE_NAMES}
     monitor = _monitor_from_state(state)
+    active_label = str(active.get("accessible_name") or "")
     failures: list[str] = []
 
     if _before_label_for_summary(state) != _first_internal_label(state):
@@ -669,7 +670,7 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
         failures.append("keyboard focus was not owned by the workspace switcher after Shift+Tab")
     if not bool(focus.get("active_within_switcher")):
         failures.append("focus escaped the workspace switcher after Shift+Tab")
-    if bool(focus.get("active_on_trigger")):
+    if bool(focus.get("active_on_trigger")) or active_label.startswith("Workspace switcher:"):
         failures.append("focus moved to the workspace-switcher trigger instead of wrapping inside the panel")
     if bool(monitor.get("ever_hidden_after_visible")):
         failures.append("the workspace switcher panel became hidden during the reverse-wrap attempt")
@@ -1851,10 +1852,9 @@ def _review_reply_text(
         )
     return (
         "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
-        "source of truth, establishes that exact label directly through the page "
-        "object before Shift+Tab runs, and keeps the reverse-wrap expectation tied "
-        "to the live last internal switcher control. Failure reporting no longer "
-        "rewrites setup issues into a separate public-keyboard-path product bug. "
+        "source of truth and only proves the precondition by focusing that exact "
+        "live in-panel target before `Shift+Tab` runs, so the test no longer "
+        "treats the selected saved-workspace row as the start point by default. "
         f"{rerun_summary}"
     )
 
