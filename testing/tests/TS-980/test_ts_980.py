@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
 import re
@@ -55,9 +56,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts980_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts980_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Refresh the browser tab or perform a hard reload of the application.",
@@ -72,10 +75,10 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Added a live Playwright regression that first restores the unavailable "
-    "saved workspace through the visible Retry/Re-authenticate action, then "
-    "hard reloads the app and verifies the same workspace still renders as the "
-    "active `Local Git` workspace with the expected branch details."
+    "Replaced the OPFS-only manual restore stub with a repo-backed directory "
+    "handle shim sourced from the prepared `/tmp/trackstate-ts980-workspace`, "
+    "then reran the live restore-plus-reload regression and refreshed the PR "
+    "review reply artifact."
 )
 
 
@@ -111,7 +114,6 @@ class Ts980RestorePersistenceRuntime(PlaywrightStoredTokenWebAppRuntime):
                 workspace_token_profile_ids=self._workspace_token_profile_ids,
             ),
         )
-        self._context.add_init_script(script=_restorable_directory_picker_script())
         self._context.add_init_script(script=_manual_reauth_probe_script())
         self._page.on("console", self._record_console_event)
         self._page.on("pageerror", self._record_page_error)
@@ -322,6 +324,16 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
+                workspace_directory_snapshot = _workspace_directory_snapshot(
+                    Path(restored_local_workspace["path"]),
+                )
+                _install_restorable_directory_picker(
+                    tracker_page=tracker_page,
+                    directory_snapshot=workspace_directory_snapshot,
+                )
+                result["manual_directory_picker_fixture"] = _workspace_directory_snapshot_summary(
+                    workspace_directory_snapshot,
+                )
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
@@ -689,8 +701,15 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         encoding="utf-8",
     )
 
+    seeded_paths = [marker_path.name]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        destination = local_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        seeded_paths.append(relative_path)
+
     subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
+        ["git", "-C", str(local_path), "add", "."],
         check=True,
         capture_output=True,
         text=True,
@@ -752,11 +771,460 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "seeded_paths": seeded_paths,
     }
 
 
 def _remove_local_workspace_repository() -> None:
     shutil.rmtree(LOCAL_TARGET, ignore_errors=True)
+
+
+def _restorable_workspace_fixture_files() -> dict[str, str]:
+    return {
+        "DEMO/config/statuses.json": json.dumps(
+            [
+                {"id": "todo", "name": "To Do", "category": "new"},
+                {
+                    "id": "in-progress",
+                    "name": "In Progress",
+                    "category": "indeterminate",
+                },
+                {"id": "done", "name": "Done", "category": "done"},
+            ],
+        )
+        + "\n",
+        "DEMO/config/workflows.json": json.dumps(
+            {
+                "default": {
+                    "name": "Default Workflow",
+                    "statuses": ["todo", "in-progress", "done"],
+                    "transitions": [
+                        {
+                            "id": "start-progress",
+                            "name": "Start progress",
+                            "from": "todo",
+                            "to": "in-progress",
+                        },
+                        {
+                            "id": "finish-work",
+                            "name": "Finish work",
+                            "from": "in-progress",
+                            "to": "done",
+                        },
+                    ],
+                },
+            },
+        )
+        + "\n",
+        "DEMO/config/issue-types.json": json.dumps(
+            [
+                {
+                    "id": "story",
+                    "name": "Story",
+                    "workflowId": "default",
+                    "hierarchyLevel": 0,
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/config/fields.json": json.dumps(
+            [
+                {"id": "summary", "name": "Summary", "type": "string", "required": True},
+                {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "markdown",
+                    "required": False,
+                },
+                {
+                    "id": "priority",
+                    "name": "Priority",
+                    "type": "option",
+                    "required": False,
+                    "options": [
+                        {"id": "high", "name": "High"},
+                        {"id": "medium", "name": "Medium"},
+                    ],
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/DEMO-1/main.md": "\n".join(
+            [
+                "---",
+                "key: DEMO-1",
+                "project: DEMO",
+                "issueType: story",
+                "status: in-progress",
+                "priority: high",
+                "summary: TS-980 seeded local workspace issue",
+                "assignee: ts980-user",
+                "reporter: ts980-user",
+                "updated: 2026-05-22T00:00:00Z",
+                "---",
+                "",
+                "# Description",
+                "",
+                "Seeded local workspace content for TS-980 restore validation.",
+                "",
+            ],
+        ),
+    }
+
+
+def _workspace_directory_snapshot(local_path: Path) -> dict[str, object]:
+    relative_paths = [
+        ".git/HEAD",
+        ".git/config",
+        ".trackstate-ts980-precondition.txt",
+        *sorted(_restorable_workspace_fixture_files()),
+    ]
+    files: list[dict[str, str]] = []
+    for relative_path in relative_paths:
+        absolute_path = local_path / relative_path
+        if not absolute_path.is_file():
+            continue
+        files.append(
+            {
+                "path": relative_path,
+                "base64": base64.b64encode(absolute_path.read_bytes()).decode("ascii"),
+            },
+        )
+    return {
+        "rootName": local_path.name,
+        "rootPath": str(local_path),
+        "files": files,
+    }
+
+
+def _workspace_directory_snapshot_summary(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    files = snapshot.get("files", [])
+    return {
+        "rootName": snapshot.get("rootName"),
+        "rootPath": snapshot.get("rootPath"),
+        "fileCount": len(files) if isinstance(files, list) else 0,
+        "paths": [
+            entry.get("path")
+            for entry in files
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        ],
+    }
+
+
+def _install_restorable_directory_picker(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    directory_snapshot: dict[str, object],
+) -> None:
+    tracker_page.session.evaluate(
+        """
+        (snapshot) => {
+          const normalizeArgs = (args) => {
+            try {
+              return JSON.parse(JSON.stringify(args));
+            } catch (_) {
+              return Array.from(args, (value) => String(value));
+            }
+          };
+          const manualProbe = window.__ts980ManualReauthProbe || null;
+          const recordProbe = (bucket, args) => {
+            if (!manualProbe || !Array.isArray(manualProbe[bucket])) {
+              return;
+            }
+            manualProbe[bucket].push({
+              callNumber: manualProbe[bucket].length + 1,
+              args: normalizeArgs(args),
+            });
+          };
+          const state = window.__ts980RestorableDirectoryPickerState = {
+            calls: [],
+            selectedDirectoryName: null,
+            snapshotRootPath:
+              typeof snapshot?.rootPath === 'string' ? snapshot.rootPath : null,
+            seededPaths: Array.isArray(snapshot?.files)
+              ? snapshot.files
+                  .map((entry) => (entry && typeof entry.path === 'string' ? entry.path : null))
+                  .filter((entry) => entry !== null)
+              : [],
+            errors: [],
+            source: 'real-workspace-snapshot',
+          };
+          const textEncoder = new TextEncoder();
+          const decodeBase64 = (value) => {
+            const raw = atob(typeof value === 'string' ? value : '');
+            const bytes = new Uint8Array(raw.length);
+            for (let index = 0; index < raw.length; index += 1) {
+              bytes[index] = raw.charCodeAt(index);
+            }
+            return bytes;
+          };
+          const cloneBytes = (value) => new Uint8Array(value);
+          const cloneArrayBuffer = (value) => {
+            const view = value instanceof Uint8Array
+              ? value
+              : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+            return view.slice().buffer;
+          };
+          const createDirectoryNode = (name) => ({
+            kind: 'directory',
+            name,
+            children: new Map(),
+          });
+          const createFileNode = (name, bytes) => ({
+            kind: 'file',
+            name,
+            bytes: cloneBytes(bytes),
+          });
+          const rootName = typeof snapshot?.rootName === 'string' && snapshot.rootName.trim()
+            ? snapshot.rootName.trim()
+            : 'trackstate-ts980-workspace';
+          const rootNode = createDirectoryNode(rootName);
+          for (const entry of Array.isArray(snapshot?.files) ? snapshot.files : []) {
+            if (!entry || typeof entry.path !== 'string' || typeof entry.base64 !== 'string') {
+              continue;
+            }
+            const segments = entry.path
+              .split('/')
+              .map((segment) => segment.trim())
+              .filter((segment) => segment.length > 0);
+            if (segments.length === 0) {
+              continue;
+            }
+            let current = rootNode;
+            for (const segment of segments.slice(0, -1)) {
+              const existing = current.children.get(segment);
+              if (existing && existing.kind !== 'directory') {
+                throw new DOMException(
+                  `Could not create directory ${segment}. A file already exists at that path.`,
+                  'TypeMismatchError',
+                );
+              }
+              if (existing) {
+                current = existing;
+                continue;
+              }
+              const created = createDirectoryNode(segment);
+              current.children.set(segment, created);
+              current = created;
+            }
+            current.children.set(
+              segments.at(-1),
+              createFileNode(segments.at(-1), decodeBase64(entry.base64)),
+            );
+          }
+          const notFoundError = (message) => new DOMException(message, 'NotFoundError');
+          const typeMismatchError = (message) =>
+            new DOMException(message, 'TypeMismatchError');
+          const sameEntry = (left, right) => {
+            const leftPath = Array.isArray(left?.__ts980Path) ? left.__ts980Path : null;
+            const rightPath = Array.isArray(right?.__ts980Path) ? right.__ts980Path : null;
+            return (
+              Array.isArray(leftPath)
+              && Array.isArray(rightPath)
+              && leftPath.length === rightPath.length
+              && leftPath.every((segment, index) => segment === rightPath[index])
+            );
+          };
+          const attachMetadata = (handle, node, pathSegments) => {
+            Object.defineProperty(handle, '__ts980Node', {
+              configurable: true,
+              enumerable: false,
+              value: node,
+            });
+            Object.defineProperty(handle, '__ts980Path', {
+              configurable: true,
+              enumerable: false,
+              value: [...pathSegments],
+            });
+            return handle;
+          };
+          const createWritable = (node) => {
+            let nextBytes = cloneBytes(node.bytes);
+            const writeChunk = (value) => {
+              if (typeof value === 'string') {
+                nextBytes = textEncoder.encode(value);
+                return;
+              }
+              if (value instanceof Uint8Array) {
+                nextBytes = cloneBytes(value);
+                return;
+              }
+              if (value instanceof ArrayBuffer) {
+                nextBytes = new Uint8Array(value.slice(0));
+                return;
+              }
+              if (ArrayBuffer.isView(value)) {
+                nextBytes = new Uint8Array(
+                  value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+                );
+                return;
+              }
+              nextBytes = textEncoder.encode(String(value ?? ''));
+            };
+            return {
+              async write(chunk) {
+                if (chunk && typeof chunk === 'object' && 'type' in chunk) {
+                  if (chunk.type === 'truncate') {
+                    nextBytes = nextBytes.slice(0, Number(chunk.size) || 0);
+                    return;
+                  }
+                  if (chunk.type === 'write') {
+                    writeChunk(chunk.data);
+                    return;
+                  }
+                }
+                writeChunk(chunk);
+              },
+              async close() {
+                node.bytes = cloneBytes(nextBytes);
+              },
+            };
+          };
+          const createFileHandle = (node, pathSegments) =>
+            attachMetadata(
+              {
+                kind: 'file',
+                name: node.name,
+                async queryPermission(...args) {
+                  recordProbe('queryPermissionCalls', args);
+                  return 'granted';
+                },
+                async requestPermission(...args) {
+                  recordProbe('requestPermissionCalls', args);
+                  return 'granted';
+                },
+                async isSameEntry(other) {
+                  return sameEntry(this, other);
+                },
+                async getFile() {
+                  return new File([cloneArrayBuffer(node.bytes)], node.name, {
+                    type: 'application/octet-stream',
+                  });
+                },
+                async createWritable() {
+                  return createWritable(node);
+                },
+              },
+              node,
+              pathSegments,
+            );
+          const createHandle = (node, pathSegments) =>
+            node.kind === 'directory'
+              ? createDirectoryHandle(node, pathSegments)
+              : createFileHandle(node, pathSegments);
+          const createDirectoryHandle = (node, pathSegments) =>
+            attachMetadata(
+              {
+                kind: 'directory',
+                name: node.name,
+                async queryPermission(...args) {
+                  recordProbe('queryPermissionCalls', args);
+                  return 'granted';
+                },
+                async requestPermission(...args) {
+                  recordProbe('requestPermissionCalls', args);
+                  return 'granted';
+                },
+                async isSameEntry(other) {
+                  return sameEntry(this, other);
+                },
+                async *values() {
+                  for (const child of node.children.values()) {
+                    yield createHandle(child, [...pathSegments, child.name]);
+                  }
+                },
+                async *keys() {
+                  for (const childName of node.children.keys()) {
+                    yield childName;
+                  }
+                },
+                async *entries() {
+                  for (const [childName, child] of node.children.entries()) {
+                    yield [childName, createHandle(child, [...pathSegments, childName])];
+                  }
+                },
+                async getDirectoryHandle(name, options = {}) {
+                  const normalized = String(name ?? '').trim();
+                  if (!normalized) {
+                    throw notFoundError('Directory name must not be empty.');
+                  }
+                  let child = node.children.get(normalized);
+                  if (!child) {
+                    if (options && options.create) {
+                      child = createDirectoryNode(normalized);
+                      node.children.set(normalized, child);
+                    } else {
+                      throw notFoundError(`Directory ${normalized} does not exist.`);
+                    }
+                  }
+                  if (child.kind !== 'directory') {
+                    throw typeMismatchError(
+                      `Expected ${normalized} to be a directory but found a file.`,
+                    );
+                  }
+                  return createDirectoryHandle(child, [...pathSegments, normalized]);
+                },
+                async getFileHandle(name, options = {}) {
+                  const normalized = String(name ?? '').trim();
+                  if (!normalized) {
+                    throw notFoundError('File name must not be empty.');
+                  }
+                  let child = node.children.get(normalized);
+                  if (!child) {
+                    if (options && options.create) {
+                      child = createFileNode(normalized, new Uint8Array());
+                      node.children.set(normalized, child);
+                    } else {
+                      throw notFoundError(`File ${normalized} does not exist.`);
+                    }
+                  }
+                  if (child.kind !== 'file') {
+                    throw typeMismatchError(
+                      `Expected ${normalized} to be a file but found a directory.`,
+                    );
+                  }
+                  return createFileHandle(child, [...pathSegments, normalized]);
+                },
+                async removeEntry(name) {
+                  const normalized = String(name ?? '').trim();
+                  if (!node.children.delete(normalized)) {
+                    throw notFoundError(`${normalized} does not exist.`);
+                  }
+                },
+                async resolve(handle) {
+                  const descendant = Array.isArray(handle?.__ts980Path)
+                    ? handle.__ts980Path
+                    : null;
+                  if (!Array.isArray(descendant) || descendant.length < pathSegments.length) {
+                    return null;
+                  }
+                  for (let index = 0; index < pathSegments.length; index += 1) {
+                    if (descendant[index] !== pathSegments[index]) {
+                      return null;
+                    }
+                  }
+                  return descendant.slice(pathSegments.length);
+                },
+              },
+              node,
+              pathSegments,
+            );
+          const rootHandle = createDirectoryHandle(rootNode, [rootName]);
+          globalThis.showDirectoryPicker = async (...args) => {
+            state.calls.push({
+              callNumber: state.calls.length + 1,
+              args: normalizeArgs(args),
+            });
+            recordProbe('showDirectoryPickerCalls', args);
+            state.selectedDirectoryName = rootHandle.name;
+            return rootHandle;
+          };
+        }
+        """,
+        arg=directory_snapshot,
+    )
 
 
 def _find_named_local_row(
@@ -1272,156 +1740,6 @@ def _manual_reauth_probe_script() -> str:
     """
 
 
-def _restorable_directory_picker_script() -> str:
-    expected_directory_name = Path(LOCAL_TARGET).name
-    statuses_json = json.dumps(
-        [
-            {"id": "todo", "name": "To Do", "category": "new"},
-            {
-                "id": "in-progress",
-                "name": "In Progress",
-                "category": "indeterminate",
-            },
-            {"id": "done", "name": "Done", "category": "done"},
-        ],
-    )
-    workflows_json = json.dumps(
-        {
-            "default": {
-                "name": "Default Workflow",
-                "statuses": ["todo", "in-progress", "done"],
-                "transitions": [
-                    {
-                        "id": "start-progress",
-                        "name": "Start progress",
-                        "from": "todo",
-                        "to": "in-progress",
-                    },
-                    {
-                        "id": "finish-work",
-                        "name": "Finish work",
-                        "from": "in-progress",
-                        "to": "done",
-                    },
-                ],
-            },
-        },
-    )
-    issue_types_json = json.dumps(
-        [
-            {
-                "id": "story",
-                "name": "Story",
-                "workflowId": "default",
-                "hierarchyLevel": 0,
-            },
-        ],
-    )
-    fields_json = json.dumps(
-        [
-            {"id": "summary", "name": "Summary", "type": "string", "required": True},
-            {
-                "id": "description",
-                "name": "Description",
-                "type": "markdown",
-                "required": False,
-            },
-            {
-                "id": "priority",
-                "name": "Priority",
-                "type": "option",
-                "required": False,
-                "options": [
-                    {"id": "high", "name": "High"},
-                    {"id": "medium", "name": "Medium"},
-                ],
-            },
-        ],
-    )
-    issue_markdown = "\n".join(
-        [
-            "---",
-            "key: DEMO-1",
-            "project: DEMO",
-            "issueType: story",
-            "status: in-progress",
-            "priority: high",
-            "summary: TS-980 seeded local workspace issue",
-            "assignee: ts980-user",
-            "reporter: ts980-user",
-            "updated: 2026-05-22T00:00:00Z",
-            "---",
-            "",
-            "# Description",
-            "",
-            "Seeded local workspace content for TS-980 restore validation.",
-            "",
-        ],
-    )
-    return f"""
-    (() => {{
-      const state = window.__ts980RestorableDirectoryPickerState = {{
-        calls: [],
-        selectedDirectoryName: null,
-        seededPaths: [],
-        errors: [],
-      }};
-      const expectedDirectoryName = {json.dumps(expected_directory_name)};
-      const normalizeArgs = (args) => {{
-        try {{
-          return JSON.parse(JSON.stringify(args));
-        }} catch (_) {{
-          return Array.from(args, (value) => String(value));
-        }}
-      }};
-      const seedFile = async (directory, relativePath, content) => {{
-        const parts = relativePath.split('/').filter((segment) => segment.length > 0);
-        if (parts.length === 0) {{
-          return;
-        }}
-        let current = directory;
-        for (const segment of parts.slice(0, -1)) {{
-          current = await current.getDirectoryHandle(segment, {{ create: true }});
-        }}
-        const fileHandle = await current.getFileHandle(parts.at(-1), {{ create: true }});
-        const writable = await fileHandle.createWritable();
-        await writable.write(content);
-        await writable.close();
-        state.seededPaths.push(relativePath);
-      }};
-      const ensureRestorableDirectory = async () => {{
-        const root = await navigator.storage.getDirectory();
-        const directory = await root.getDirectoryHandle(expectedDirectoryName, {{ create: true }});
-        await seedFile(directory, '.git/HEAD', 'ref: refs/heads/main\\n');
-        await seedFile(
-          directory,
-          '.git/config',
-          '[core]\\n  repositoryformatversion = 0\\n  filemode = true\\n  bare = false\\n',
-        );
-        await seedFile(directory, 'DEMO/config/statuses.json', {json.dumps(statuses_json + chr(10))});
-        await seedFile(directory, 'DEMO/config/workflows.json', {json.dumps(workflows_json + chr(10))});
-        await seedFile(directory, 'DEMO/config/issue-types.json', {json.dumps(issue_types_json + chr(10))});
-        await seedFile(directory, 'DEMO/config/fields.json', {json.dumps(fields_json + chr(10))});
-        await seedFile(directory, 'DEMO/DEMO-1/main.md', {json.dumps(issue_markdown)});
-        state.selectedDirectoryName = directory.name || null;
-        return directory;
-      }};
-      globalThis.showDirectoryPicker = async (...args) => {{
-        state.calls.push({{
-          callNumber: state.calls.length + 1,
-          args: normalizeArgs(args),
-        }});
-        try {{
-          return await ensureRestorableDirectory();
-        }} catch (error) {{
-          state.errors.push(String(error));
-          throw error;
-        }}
-      }};
-    }})();
-    """
-
-
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
@@ -1493,8 +1811,13 @@ def _read_restorable_directory_picker_state(tracker_page) -> dict[str, object]:
               typeof state.selectedDirectoryName === 'string'
                 ? state.selectedDirectoryName
                 : null,
+            snapshotRootPath:
+              typeof state.snapshotRootPath === 'string'
+                ? state.snapshotRootPath
+                : null,
             seededPaths: Array.isArray(state.seededPaths) ? state.seededPaths : [],
             errors: Array.isArray(state.errors) ? state.errors : [],
+            source: typeof state.source === 'string' ? state.source : null,
           };
         }
         """,
@@ -1503,14 +1826,18 @@ def _read_restorable_directory_picker_state(tracker_page) -> dict[str, object]:
         return {
             "calls": [],
             "selectedDirectoryName": None,
+            "snapshotRootPath": None,
             "seededPaths": [],
             "errors": [],
+            "source": None,
         }
     return {
         "calls": list(payload.get("calls", [])),
         "selectedDirectoryName": payload.get("selectedDirectoryName"),
+        "snapshotRootPath": payload.get("snapshotRootPath"),
         "seededPaths": list(payload.get("seededPaths", [])),
         "errors": list(payload.get("errors", [])),
+        "source": payload.get("source"),
     }
 
 
@@ -1728,13 +2055,15 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     jira_comment = _build_jira_comment(result, passed=True)
     pr_body = _build_pr_body(result, passed=True)
     response = _build_response_summary(result, passed=True)
+    review_replies = _build_review_replies(result, passed=True)
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
     RESPONSE_PATH.write_text(response, encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(review_replies, encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
+    error = _exact_error_summary(result)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1752,10 +2081,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     jira_comment = _build_jira_comment(result, passed=False)
     pr_body = _build_pr_body(result, passed=False)
     response = _build_response_summary(result, passed=False)
+    review_replies = _build_review_replies(result, passed=False)
     bug_description = _build_bug_description(result)
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
     RESPONSE_PATH.write_text(response, encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(review_replies, encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(bug_description, encoding="utf-8")
 
 
@@ -1886,17 +2217,26 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "The restored local workspace remained active as `Local Git` after the hard reload.\n"
-        )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The reloaded app did not preserve the restored local workspace as `Local Git`.')}\n"
-    )
+    lines = [
+        "## Issues/Notes",
+        (
+            "- Rerun passed after the manual restore used the prepared workspace snapshot."
+            if passed
+            else "- Rerun still failed with a product-visible gap after the repo-backed restore shim: "
+            f"{_exact_error_summary(result)}"
+        ),
+        "",
+        "## Approach",
+        f"- {REWORK_SUMMARY}",
+        "",
+        "## Files Modified",
+        "- `testing/tests/TS-980/test_ts_980.py`",
+        "",
+        "## Test Coverage",
+        "- Manual Retry/Re-authenticate restore of the unavailable saved workspace using the prepared local repo shape.",
+        "- Post-restore reload persistence for the same workspace label, `Local Git` status, and branch details.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
@@ -1953,41 +2293,37 @@ def _build_bug_description(result: dict[str, object]) -> str:
         )
     )
     lines = [
-        f"# {TICKET_KEY} bug report",
+        f"h3. {TICKET_KEY}: Refresh application after manual restoration leaves the workspace outside Local Git",
         "",
-        "## Precondition setup",
-        (
-            "Automation first reproduced the linked restore flow by opening the Workspace "
-            "switcher, clicking the visible Retry/Re-authenticate action, and waiting for a "
-            "real browser directory-access callback plus the restored `Local Git` state."
-        ),
-        "",
-        "## Steps to reproduce",
-        *annotated_steps,
-        "",
-        "## Exact error message or assertion failure",
-        "```text",
-        str(result.get("traceback", result.get("error", ""))),
-        "```",
-        "",
-        "## Actual result",
-        actual_result,
-        "",
-        "## Expected result",
-        EXPECTED_RESULT,
-        "",
-        "## Missing or broken production capability",
-        missing_capability,
-        "",
-        "## Environment details",
+        "h4. Environment",
         f"- URL: {result.get('app_url')}",
         f"- Browser: {result.get('browser')}",
         f"- OS: {result.get('os')}",
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Local workspace target: {LOCAL_TARGET}",
-        f"- Run command: `{RUN_COMMAND}`",
         "",
-        "## Observed state",
+        "h4. Steps to Reproduce",
+        *annotated_steps,
+        "",
+        "h4. Expected Result",
+        EXPECTED_RESULT,
+        "",
+        "h4. Actual Result",
+        actual_result,
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
+        str(result.get("traceback", result.get("error", ""))),
+        "{code}",
+        "",
+        "h4. Notes",
+        (
+            "Automation used the visible Retry/Re-authenticate action and returned a "
+            "repo-backed directory handle built from the prepared `/tmp/trackstate-ts980-workspace` "
+            "contents, so this rerun exercised the same saved workspace identity and file tree "
+            "instead of an unrelated OPFS-only mirror."
+        ),
+        f"- Missing or broken production capability: {missing_capability}",
         f"- Startup observation: `{json.dumps(startup_observation, ensure_ascii=True)}`",
         f"- Trigger before restore: `{json.dumps(trigger_before, ensure_ascii=True)}`",
         f"- Local row before restore: `{json.dumps(local_before, ensure_ascii=True)}`",
@@ -2001,8 +2337,80 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
-        lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
+        lines.append(f"- Screenshot: `{screenshot}`")
     return "\n".join(lines) + "\n"
+
+
+def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+            },
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-980 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran the current TS-980 test and it still failed: "
+        f"{_exact_error_summary(result)}"
+    )
+    return (
+        "Fixed: the manual restore harness no longer returns an unrelated "
+        "`navigator.storage.getDirectory()` workspace. TS-980 now prepares the real "
+        "`/tmp/trackstate-ts980-workspace` repo content on disk, snapshots that exact "
+        "saved workspace, and injects a repo-backed directory handle shim so the "
+        "Retry/Re-authenticate flow restores against the intended workspace identity and "
+        "file tree. "
+        f"{rerun_summary}"
+    )
+
+
+def _exact_error_summary(result: dict[str, object]) -> str:
+    traceback_text = str(result.get("traceback", "")).strip()
+    if traceback_text:
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate.startswith("AssertionError:"):
+                return candidate
+        for line in reversed(traceback_text.splitlines()):
+            candidate = line.strip()
+            if candidate:
+                return candidate
+    error = str(result.get("error", "")).strip()
+    if error:
+        first_line = error.splitlines()[0].strip()
+        return first_line if ":" in first_line else f"AssertionError: {first_line}"
+    return f"AssertionError: {TICKET_KEY} failed"
 
 
 if __name__ == "__main__":
