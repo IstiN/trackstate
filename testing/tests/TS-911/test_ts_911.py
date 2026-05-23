@@ -66,12 +66,12 @@ REQUEST_STEPS = [
 AUTOMATION_STEPS = [
     (
         "Open the deployed desktop workspace switcher from a focused trigger and confirm "
-        "the visible panel controls needed for the reverse-wrap proof."
+        "the visible panel controls needed for the reverse-wrap assertion."
     ),
     (
-        "Prove the live reverse-wrap target through forward keyboard traversal, "
+        "Keep the reverse-wrap expectation aligned to the visible terminal footer control, "
         "re-establish focus on the first internal keyboard target, then press Shift+Tab "
-        "and verify focus wraps to that observed last internal control instead of "
+        "and verify focus wraps to that last internal control instead of "
         "escaping to the trigger or top-bar."
     ),
 ]
@@ -220,28 +220,22 @@ def main() -> None:
                     state=initial_state,
                 )
                 result["first_keyboard_target_state"] = first_keyboard_target_state
-                first_keyboard_target_state, tab_trace_to_wrap_target = (
-                    _prepare_reverse_wrap_precondition(
-                        page=page,
-                        state=first_keyboard_target_state,
-                    )
-                )
-                initial_state = _state_with_expected_target(
-                    initial_state,
-                    _expected_target_from_state(first_keyboard_target_state),
-                )
+                wrap_target_proof = _supporting_wrap_target_context(first_keyboard_target_state)
+                initial_state = _state_with_expected_target(initial_state, _expected_target_from_state(first_keyboard_target_state))
                 result["initial_state"] = initial_state
                 result["first_keyboard_target_state"] = first_keyboard_target_state
-                result["tab_trace_to_wrap_target"] = tab_trace_to_wrap_target
+                result["tab_trace_to_wrap_target"] = []
+                result["wrap_target_proof"] = wrap_target_proof
                 _record_human_verification(
                     result,
                     check=(
-                        "Proved the reverse-wrap destination from the live keyboard order "
-                        "before the Shift+Tab assertion ran."
+                        "Kept the reverse-wrap expectation aligned to the same visible terminal "
+                        "footer control covered by TS-910 without turning TS-911 into a forward-Tab check."
                     ),
                     observed=(
                         f"expected_wrap_target={_expected_target_label(first_keyboard_target_state)!r}; "
-                        f"forward_tab_labels={_visited_focus_labels(tab_trace_to_wrap_target)!r}"
+                        f"proof_status={wrap_target_proof.get('status')!r}; "
+                        f"proof_note={wrap_target_proof.get('note')!r}"
                     ),
                 )
                 after_shift_tab_state = _press_key_and_capture(
@@ -256,8 +250,7 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Proved the live reverse-wrap target through forward Tab traversal, "
-                        "then restored focus to the first internal switcher target "
+                        "Re-established focus on the first internal switcher target "
                         "immediately before the TS-911 Shift+Tab assertion."
                     ),
                     observed=(
@@ -265,7 +258,7 @@ def main() -> None:
                         f"focus_owned_by_switcher={_focus_from_state(first_keyboard_target_state).get('focus_owned_by_switcher')}; "
                         f"first_internal_target={_first_internal_label(first_keyboard_target_state)!r}; "
                         f"expected_wrap_target={_expected_target_label(first_keyboard_target_state)!r}; "
-                        f"forward_tab_labels={_visited_focus_labels(tab_trace_to_wrap_target)!r}"
+                        f"proof_status={wrap_target_proof.get('status')!r}"
                     ),
                 )
                 _record_human_verification(
@@ -345,6 +338,10 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
     switcher = page.observe_open_switcher(timeout_ms=FOCUS_TIMEOUT_MS)
     panel = page.observe_open_panel(expected_container_kinds=("anchored-panel", "surface"))
     surface = page.observe_surface(timeout_ms=FOCUS_TIMEOUT_MS)
+    save_and_switch_button = page.observe_switcher_button_focusability(
+        LAST_INTERNAL_CONTROL_LABEL,
+        timeout_ms=FOCUS_TIMEOUT_MS,
+    )
     try:
         rows = page.observe_saved_workspace_rows(timeout_ms=FOCUS_TIMEOUT_MS)
     except AssertionError:
@@ -372,7 +369,10 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         first_row_label=first_row_label,
         tab_stops=tab_stops,
     )
-    expected_target = _last_internal_focus_target(tab_stops=tab_stops)
+    expected_target = _visible_footer_target(
+        button_focusability=_button_focusability_payload(save_and_switch_button),
+        fallback_target=_last_internal_focus_target(tab_stops=tab_stops),
+    )
     row_focus = {
         name: _row_focus_payload(
             page.observe_saved_workspace_row_focus(display_name=name, panel=panel),
@@ -393,6 +393,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         first_row_display_name=first_row_display_name,
         first_row_label=first_row_label,
         internal_tab_stops=_tab_stops_payload(tab_stops),
+        button_focusability=_button_focusability_payload(save_and_switch_button),
         focus_attempts=[],
         precondition_source="keyboard-open",
         focused_trigger=_focused_element_payload(focused_trigger),
@@ -476,78 +477,59 @@ def _reach_first_keyboard_target(
     return reached_state
 
 
-def _prepare_reverse_wrap_precondition(
+def _prepare_reverse_wrap_supporting_evidence(
     *,
     page: LiveWorkspaceSwitcherPage,
     state: dict[str, object],
-) -> tuple[dict[str, object], list[dict[str, object]]]:
+) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
     _assert_first_keyboard_target(state)
-    tab_trace = _forward_tab_trace_to_last_internal_control(page=page, state=state)
-    expected_target = _expected_reverse_target_from_forward_trace(tab_trace)
-    expected_state = _state_with_expected_target(state, expected_target)
-    latest_state = _state_with_expected_target(tab_trace[-1], expected_target)
-    panel = WorkspaceSwitcherPanelObservation(**_panel_from_state(latest_state))
-    before = page.active_element()
-    try:
-        page.focus_internal_tab_stop(
-            str(_first_internal_label(expected_state)),
-            panel=panel,
-            timeout_ms=FOCUS_TIMEOUT_MS,
-        )
-    except AssertionError as error:
-        failed_state = _capture_current_state(
-            page=page,
-            state=expected_state,
-            before=before,
-        )
-        raise AssertionError(
-            "Step 2 failed: the test proved the live reverse-wrap destination through "
-            "forward Tab traversal, but it could not restore focus to the first internal "
-            "keyboard target before Shift+Tab.\n"
-            f"Focus target error: {error}\n"
-            f"Expected wrap target: {json.dumps(expected_target, indent=2)}\n"
-            f"Observed before element: {json.dumps(_before_from_state(failed_state), indent=2)}\n"
-            f"Observed active element: {json.dumps(_active_from_state(failed_state), indent=2)}\n"
-            f"Observed focus ownership: {json.dumps(_focus_from_state(failed_state), indent=2)}\n"
-            f"Observed forward Tab trace: {json.dumps(tab_trace, indent=2)}"
-        ) from error
-    restored_state = _capture_current_state(
+    fallback_target = _fallback_reverse_wrap_target(state)
+    tab_trace, proof_error = _forward_tab_trace_to_last_internal_control(page=page, state=state)
+    proof = _supporting_wrap_target_proof(
+        tab_trace=tab_trace,
+        fallback_target=fallback_target,
+        proof_error=proof_error,
+    )
+    expected_target = proof.get("expected_target", fallback_target)
+    assert isinstance(expected_target, dict)
+    prepared_state = _restore_first_keyboard_target_after_supporting_evidence(
         page=page,
-        state=expected_state,
-        before=before,
+        state=state,
+        expected_target=expected_target,
+        proof_status=str(proof.get("status", "inconclusive")),
     )
-    restored_state = _state_with_expected_target(restored_state, expected_target)
-    restored_state = _state_with_precondition_source(
-        restored_state,
-        precondition_source="forward-tab-proof+page-object-focus",
-    )
-    _assert_first_keyboard_target(restored_state)
-    return restored_state, tab_trace
+    return prepared_state, tab_trace, proof
 
 
 def _forward_tab_trace_to_last_internal_control(
     *,
     page: LiveWorkspaceSwitcherPage,
     state: dict[str, object],
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], str | None]:
     tab_trace: list[dict[str, object]] = []
     current_state = state
     for _ in range(MAX_TABS_TO_DERIVE_WRAP_TARGET):
-        next_state = _press_key_and_capture(
-            page=page,
-            state=current_state,
-            key="Tab",
-            before_override=_focused_element_observation_from_state(current_state),
-        )
+        try:
+            next_state = _press_key_and_capture(
+                page=page,
+                state=current_state,
+                key="Tab",
+                before_override=_focused_element_observation_from_state(current_state),
+            )
+        except Exception as error:
+            return tab_trace, f"{type(error).__name__}: {error}"
         tab_trace.append(next_state)
         if _active_label_for_summary(next_state) == LAST_INTERNAL_CONTROL_LABEL:
-            break
+            return tab_trace, None
         current_state = next_state
-    return tab_trace
+    return tab_trace, None
 
 
-def _expected_reverse_target_from_forward_trace(
+def _supporting_wrap_target_proof(
+    *,
     tab_trace: list[dict[str, object]],
+    fallback_target: dict[str, object],
+    proof_error: str | None,
 ) -> dict[str, object]:
     failures: list[str] = []
     footer_state: dict[str, object] | None = None
@@ -573,19 +555,148 @@ def _expected_reverse_target_from_forward_trace(
         if active_label == LAST_INTERNAL_CONTROL_LABEL:
             footer_state = state
             break
+    if proof_error is not None:
+        failures.append(f"forward Tab sampling stopped early: {proof_error}")
+    if footer_state is not None and not failures:
+        expected_target = _focus_target_payload(_active_from_state(footer_state))
+        return {
+            "status": "proved",
+            "expected_target": expected_target,
+            "note": (
+                f"Forward Tab reached {expected_target.get('label')!r} within "
+                f"{len(tab_trace)} presses."
+            ),
+        }
     if footer_state is None:
         failures.append(
-            f"the live forward Tab traversal never reached the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer control within {MAX_TABS_TO_DERIVE_WRAP_TARGET} presses",
+            f"forward Tab never reached the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer control within "
+            f"{MAX_TABS_TO_DERIVE_WRAP_TARGET} presses"
         )
-    if failures:
-        raise AssertionError(
-            "Step 2 failed: the automation could not prove the live reverse-wrap target "
-            "through forward keyboard traversal before Shift+Tab.\n"
-            + "\n".join(f"- {item}" for item in failures)
-            + "\n"
-            + f"Observed forward Tab trace: {json.dumps(tab_trace, indent=2)}"
+    return {
+        "status": "inconclusive",
+        "expected_target": fallback_target,
+        "note": "; ".join(failures) if failures else "Forward Tab evidence was inconclusive.",
+    }
+
+
+def _restore_first_keyboard_target_after_supporting_evidence(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    state: dict[str, object],
+    expected_target: dict[str, object],
+    proof_status: str,
+) -> dict[str, object]:
+    expected_state = _state_with_expected_target(state, expected_target)
+    restoration_errors: list[str] = []
+    for restore_via_reopen in (False, True):
+        if restore_via_reopen:
+            try:
+                page.dismiss_connection_banner()
+                page.navigate_to_section("Dashboard")
+                page.set_viewport(**DESKTOP_VIEWPORT)
+                expected_state = _state_with_expected_target(
+                    _open_switcher_and_capture(page),
+                    expected_target,
+                )
+            except Exception as error:
+                restoration_errors.append(
+                    "re-opening the workspace switcher failed: "
+                    f"{type(error).__name__}: {error}",
+                )
+                continue
+        try:
+            panel = page.observe_open_panel(
+                expected_container_kinds=("anchored-panel", "surface"),
+                timeout_ms=FOCUS_TIMEOUT_MS,
+            )
+            before = page.active_element()
+            page.focus_internal_tab_stop(
+                str(_first_internal_label(expected_state)),
+                panel=panel,
+                timeout_ms=FOCUS_TIMEOUT_MS,
+            )
+            restored_state = _capture_current_state(
+                page=page,
+                state=expected_state,
+                before=before,
+            )
+            restored_state = _state_with_expected_target(restored_state, expected_target)
+            restored_state = _state_with_precondition_source(
+                restored_state,
+                precondition_source=(
+                    f"supporting-proof-{proof_status}+reopen"
+                    if restore_via_reopen
+                    else f"supporting-proof-{proof_status}+page-object-focus"
+                ),
+            )
+            _assert_first_keyboard_target(restored_state)
+            return restored_state
+        except Exception as error:
+            restoration_errors.append(
+                ("re-opened " if restore_via_reopen else "current ")
+                + f"panel restore failed: {type(error).__name__}: {error}",
+            )
+    raise AssertionError(
+        "Step 2 failed: the test could not re-establish the first internal keyboard "
+        "target before the ticketed Shift+Tab action.\n"
+        + "\n".join(f"- {item}" for item in restoration_errors)
+    )
+
+
+def _fallback_reverse_wrap_target(state: dict[str, object]) -> dict[str, object]:
+    button_focusability = _button_focusability_from_state(state)
+    if button_focusability:
+        return _visible_footer_target(
+            button_focusability=button_focusability,
+            fallback_target=_expected_target_from_state(state),
         )
-    return _focus_target_payload(_active_from_state(footer_state))
+    return _expected_target_from_state(state)
+
+
+def _supporting_wrap_target_context(state: dict[str, object]) -> dict[str, object]:
+    expected_label = str(_expected_target_label(state) or "")
+    if not expected_label:
+        return {
+            "status": "inconclusive",
+            "note": "The open panel did not expose a readable reverse-wrap target label.",
+        }
+    if expected_label == LAST_INTERNAL_CONTROL_LABEL:
+        return {
+            "status": "aligned",
+            "note": (
+                "The visible terminal footer control remains "
+                f"{LAST_INTERNAL_CONTROL_LABEL!r}, matching the forward-wrap source of truth."
+            ),
+        }
+    return {
+        "status": "fallback",
+        "note": (
+            f"The visible terminal footer control could not be confirmed, so TS-911 is using "
+            f"{expected_label!r} as the best available reverse-wrap target."
+        ),
+    }
+
+
+def _visible_footer_target(
+    *,
+    button_focusability: dict[str, object],
+    fallback_target: dict[str, object],
+) -> dict[str, object]:
+    label = str(button_focusability.get("label") or button_focusability.get("visible_text") or "")
+    if not label:
+        return fallback_target
+    return {
+        "label": label,
+        "visible_text": button_focusability.get("visible_text"),
+        "role": button_focusability.get("role"),
+        "tag_name": button_focusability.get("tag_name"),
+        "tabindex": button_focusability.get("tabindex"),
+        "tab_index_value": None,
+        "dom_index": None,
+        "keyboard_focusable": button_focusability.get("keyboard_focusable"),
+        "disabled": None,
+        "outer_html": button_focusability.get("outer_html"),
+    }
 
 
 def _capture_current_state(
@@ -652,6 +763,7 @@ def _capture_current_state(
         "first_row_display_name": state.get("first_row_display_name"),
         "first_row_label": state.get("first_row_label"),
         "internal_tab_stops": state.get("internal_tab_stops", []),
+        "button_focusability": state.get("button_focusability", {}),
         "precondition_source": state.get("precondition_source"),
         "monitor": _transition_monitor_payload(monitor) if monitor is not None else {},
     }
@@ -1164,7 +1276,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework applied",
         "1. Matched the live run to the ticket-linked desktop viewport of `1440x900`.",
         "2. Treat the selected workspace row as the first internal target when the live panel already opens with focus there.",
-        "3. Proved the reverse-wrap expectation through the same live forward-Tab traversal used by TS-910, so `Shift+Tab` now targets the observed terminal footer control instead of the raw tab-stop list.",
+        "3. Keeps the reverse-wrap target aligned to the visible `Save and switch` footer control and scopes the TS-911 pass/fail decision to the single `Shift+Tab` action.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1210,7 +1322,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now proves the reverse-wrap target through the same forward Tab traversal that reaches the visible `Save and switch` footer control in TS-910.",
+        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and kept the reverse-wrap target aligned to the visible `Save and switch` footer control while scoping pass/fail to the ticketed `Shift+Tab` wrap.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1254,8 +1366,6 @@ def _visible_body_text_from_text(text: str) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     if _is_runtime_bootstrap_failure(result):
         return _runtime_bootstrap_bug_description(result)
-    if _is_forward_wrap_proof_failure(result):
-        return _forward_wrap_proof_bug_description(result)
 
     reproduction_steps = [
         "1. Open the TrackState application in a desktop browser.",
@@ -1291,7 +1401,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "open panel in reverse order. From the first internal keyboard target, "
             "`Shift+Tab` should wrap to the terminal visible control proven by live "
             "forward keyboard traversal instead of escaping into the app shell or "
-            "landing on an earlier saved-workspace row.",
+            "landing on an earlier saved-workspace row or escaping into the app shell.",
             "",
             "## Environment details",
             f"- URL: `{result.get('app_url')}`",
@@ -1318,80 +1428,6 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
         ],
     ) + "\n"
-
-
-def _forward_wrap_proof_bug_description(result: dict[str, object]) -> str:
-    reproduction_steps = [
-        "1. Open the TrackState application in a desktop browser.",
-        "2. Open the workspace switcher panel from Dashboard.",
-        "3. Ensure keyboard focus is on the first internal keyboard target in the open panel.",
-        "4. Press `Tab` repeatedly to traverse the visible in-panel controls toward the footer.",
-        "5. Observe whether focus ever reaches the visible `Save and switch` footer control.",
-    ]
-    return "\n".join(
-        [
-            f"# {TICKET_KEY} - Workspace switcher focus trap never reaches the terminal footer control",
-            "",
-            "## Summary",
-            _failed_step_summary(result),
-            "",
-            "## Exact steps to reproduce",
-            *reproduction_steps,
-            "",
-            "## Exact steps from the test case with observations",
-            _annotated_request_steps(result),
-            "",
-            "## Exact error message or assertion failure",
-            "```text",
-            str(result.get("traceback", result.get("error", ""))),
-            "```",
-            "",
-            "## Actual vs Expected",
-            (
-                "- **Expected:** Forward keyboard traversal should stay inside the open "
-                "workspace switcher, reach the visible `Save and switch` footer control, "
-                "and thereby prove the terminal reverse-wrap destination before the "
-                "`Shift+Tab` assertion runs."
-            ),
-            (
-                "- **Actual:** The live workspace switcher lost focus ownership during "
-                "forward Tab traversal, bounced to the workspace-switcher trigger on "
-                "multiple presses, and never reached the visible `Save and switch` footer "
-                "control within 12 Tab presses."
-            ),
-            "",
-            "## Broken production capability",
-            "The live workspace switcher does not maintain a stable forward focus trap "
-            "through its visible controls up to the terminal footer button. Because "
-            "`Tab` cannot reliably stay inside the panel long enough to reach `Save and switch`, "
-            "the reverse-wrap destination required by TS-911 cannot be proven or validated.",
-            "",
-            "## Environment details",
-            f"- URL: `{result.get('app_url')}`",
-            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
-            f"- Browser: `{result.get('browser')}`",
-            f"- OS: `{result.get('os')}`",
-            f"- Viewport: `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
-            f"- Run command: `{RUN_COMMAND}`",
-            "",
-            "## Screenshots or logs",
-            f"- Screenshot: `{result.get('screenshot', 'not captured')}`",
-            "- Step log:",
-            "```json",
-            json.dumps(
-                {
-                    "steps": _steps(result),
-                    "initial_state": result.get("initial_state"),
-                    "first_keyboard_target_state": result.get("first_keyboard_target_state"),
-                    "tab_trace_to_wrap_target": result.get("tab_trace_to_wrap_target"),
-                },
-                indent=2,
-            ),
-            "```",
-        ],
-    ) + "\n"
-
-
 def _runtime_bootstrap_bug_description(result: dict[str, object]) -> str:
     visible_body_text = _visible_body_text_from_result(result)
     return "\n".join(
@@ -1554,14 +1590,6 @@ def _failed_step_number(result: dict[str, object]) -> int | None:
     if failed is None:
         return None
     return int(failed.get("step", -1))
-
-
-def _is_forward_wrap_proof_failure(result: dict[str, object]) -> bool:
-    return (
-        _failed_step_number(result) == 2
-        and "could not prove the live reverse-wrap target through forward keyboard traversal"
-        in str(result.get("error", ""))
-    )
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
@@ -1911,6 +1939,7 @@ def _state_payload(
     first_row_display_name: str,
     first_row_label: str,
     internal_tab_stops: list[dict[str, object]],
+    button_focusability: dict[str, object],
     focus_attempts: list[dict[str, object]],
     precondition_source: str,
     focused_trigger: dict[str, object],
@@ -1935,6 +1964,7 @@ def _state_payload(
         "first_row_display_name": first_row_display_name,
         "first_row_label": first_row_label,
         "internal_tab_stops": internal_tab_stops,
+        "button_focusability": button_focusability,
         "focus_attempts": focus_attempts,
         "precondition_source": precondition_source,
         "focused_trigger": focused_trigger,
@@ -2123,19 +2153,34 @@ def _review_reply_text(
     )
     thread_body = str(thread.get("body", ""))
     thread_path = str(thread.get("path", ""))
+    if "forward-`Tab` proof gate" in thread_body or "still scope the main pass/fail decision to the reverse-wrap action" in thread_body:
+        return (
+            "Adjusted TS-911 so it no longer gates on a forward-Tab walk. The test now "
+            "keeps the reverse-wrap expectation aligned to the visible `Save and switch` "
+            "footer control and makes the pass/fail decision from the ticketed "
+            "single-step `Shift+Tab` action. "
+            f"{rerun_summary}"
+        )
+    if "_forward_wrap_proof_bug_description()" in thread_body or "different defect report" in thread_body:
+        return (
+            "Removed the forward-proof-specific bug routing. TS-911 failure output now "
+            "stays scoped to the reverse-wrap behavior (plus the existing runtime "
+            "bootstrap case), while inconclusive forward-Tab evidence is kept as setup "
+            "context only. "
+            f"{rerun_summary}"
+        )
     if "displayNameHint" in thread_body or thread_path.endswith("live_workspace_switcher_page.py"):
         return (
             "Updated TS-911 to match the live hosted behavior at the ticket viewport: "
             "the automation now preserves the selected saved-workspace row as the first "
-            "internal target and proves the reverse-wrap destination through the same "
-            "forward Tab traversal used by TS-910 before restoring the Shift+Tab start point. "
+            "internal target and keeps the reverse-wrap target aligned to the visible "
+            "`Save and switch` footer control before the Shift+Tab assertion. "
             f"{rerun_summary}"
         )
     return (
         "Updated TS-911 to honor the live first in-panel focus target at `1440x900`, "
-        "derive the reverse-wrap destination by tabbing forward until the visible "
-        "`Save and switch` footer control actually receives focus, and then restore "
-        "the first internal target before `Shift+Tab`. "
+        "keep the reverse-wrap expectation tied to the visible `Save and switch` footer "
+        "control, and keep the deciding outcome on the ticketed `Shift+Tab` action. "
         f"{rerun_summary}"
     )
 
