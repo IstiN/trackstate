@@ -25,7 +25,10 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import FocusedElementObservation  # noqa: E402
+from testing.core.interfaces.web_app_session import (  # noqa: E402
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
     build_annotated_steps,
     format_human_lines,
@@ -51,6 +54,10 @@ DEFAULT_BRANCH = "main"
 ACTIVE_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
+NONFOCUSABLE_WORKSPACE_DISPLAY_NAMES = (
+    SECOND_WORKSPACE_DISPLAY_NAME,
+    THIRD_WORKSPACE_DISPLAY_NAME,
+)
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-1015-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-1015-third"
 POST_CLICK_STABILITY_MS = 1_000
@@ -59,22 +66,26 @@ LINKED_BUGS = ["TS-1010"]
 
 PRECONDITIONS = [
     "The workspace switcher is open.",
-    "At least one workspace entry in the list is in a disabled state (for this live scenario, the current active workspace entry).",
+    (
+        "At least one workspace entry in the list is rendered as a disabled or otherwise "
+        "non-focusable item (for this live scenario, an unauthorized saved workspace row "
+        'with tabindex="-1").'
+    ),
 ]
 REQUEST_STEPS = [
-    "Locate the disabled workspace entry within the switcher panel.",
-    "Click directly on the disabled workspace entry using a pointer interaction.",
+    "Locate a disabled or otherwise non-focusable workspace entry within the switcher panel.",
+    "Click directly on that disabled or otherwise non-focusable workspace entry using a pointer interaction.",
 ]
 AUTOMATION_STEPS = [
     "Launch the deployed desktop app and open the workspace switcher.",
-    "Verify the current active workspace row is present as the inert current-workspace entry before clicking it.",
-    "Click the current active workspace row with a real pointer click on the row surface.",
+    "Verify a saved unauthorized workspace row is exposed as a disabled or otherwise non-focusable row surface before clicking it.",
+    "Click the disabled or otherwise non-focusable workspace row with a real pointer click on the row surface.",
     "Observe the workspace switcher after the click and verify it remains visibly open for the required stability window.",
 ]
 EXPECTED_RESULT = (
     "The workspace switcher remains open. The blur event handler correctly "
     "identifies the interaction target as a descendant of the switcher container, "
-    "even though the row does not create a workspace switch action."
+    "even though the row is disabled or otherwise non-focusable and does not receive focus."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -183,7 +194,7 @@ def main() -> None:
                     result,
                     check=(
                         "Opened the live desktop workspace switcher and visually confirmed "
-                        "the Workspace switcher title plus the current workspace row were visible."
+                        "the Workspace switcher title plus the saved workspace rows were visible."
                     ),
                     observed=(
                         f"selected_workspace={_selected_workspace_name(rows_before)!r}; "
@@ -191,15 +202,15 @@ def main() -> None:
                     ),
                 )
 
-                active_row = _find_active_workspace_row(rows_before)
+                target_row = _find_nonfocusable_workspace_row(rows_before)
                 row_candidates = page.debug_saved_workspace_row_candidates(
-                    ACTIVE_WORKSPACE_DISPLAY_NAME,
+                    target_row.display_name,
                 )
-                result["active_row_before_click"] = asdict(active_row)
-                result["active_row_candidates_before_click"] = row_candidates
-                resolved_candidate = _find_row_candidate(row_candidates)
-                _assert_current_workspace_inert_row(
-                    active_row=active_row,
+                result["target_row_before_click"] = asdict(target_row)
+                result["target_row_candidates_before_click"] = row_candidates
+                resolved_candidate = _find_nonfocusable_row_candidate(row_candidates)
+                _assert_nonfocusable_workspace_row(
+                    target_row=target_row,
                     row_candidate=resolved_candidate,
                     all_candidates=row_candidates,
                 )
@@ -209,32 +220,36 @@ def main() -> None:
                     status="passed",
                     action=AUTOMATION_STEPS[1],
                     observed=(
-                        f"selected={active_row.selected}; "
-                        f"action_labels={list(active_row.action_labels)!r}; "
-                        f"state_label={active_row.state_label!r}; "
+                        f"display_name={target_row.display_name!r}; "
+                        f"selected={target_row.selected}; "
+                        f"action_labels={list(target_row.action_labels)!r}; "
+                        f"state_label={target_row.state_label!r}; "
                         f"resolved_candidate={json.dumps(resolved_candidate, ensure_ascii=True)}"
                     ),
                 )
                 record_human_verification(
                     result,
                     check=(
-                        "Verified the visible current workspace entry was the highlighted inert row "
-                        "showing Active rather than an Open action before clicking it."
+                        "Verified the visible target workspace entry was an unauthorized saved row "
+                        'whose row surface stayed non-focusable with tabindex="-1" before clicking it.'
                     ),
                     observed=(
-                        f"display_name={active_row.display_name!r}; "
-                        f"action_labels={list(active_row.action_labels)!r}; "
-                        f"detail_text={active_row.detail_text!r}"
+                        f"display_name={target_row.display_name!r}; "
+                        f"action_labels={list(target_row.action_labels)!r}; "
+                        f"detail_text={target_row.detail_text!r}"
                     ),
                 )
 
                 page.start_transition_monitor()
                 click_observation = page.click_saved_workspace_row_surface(
-                    ACTIVE_WORKSPACE_DISPLAY_NAME,
+                    target_row.display_name,
                     timeout_ms=SURFACE_TIMEOUT_MS,
                 )
                 result["click_observation"] = _row_click_payload(click_observation)
-                _assert_click_target(click_observation)
+                _assert_click_target(
+                    click_observation,
+                    expected_display_name=target_row.display_name,
+                )
                 record_step(
                     result,
                     step=3,
@@ -244,7 +259,8 @@ def main() -> None:
                         f"clicked_point=({click_observation.click_x:.1f}, {click_observation.click_y:.1f}); "
                         f"target_label={click_observation.target_label!r}; "
                         f"target_identifier={click_observation.target_identifier!r}; "
-                        f"target_aria_current={click_observation.target_aria_current!r}."
+                        f"target_tabindex={click_observation.target_tabindex!r}; "
+                        f"target_disabled={click_observation.target_disabled!r}."
                     ),
                 )
 
@@ -287,26 +303,37 @@ def main() -> None:
                         focus_ownership_after_click,
                     )
 
-                if step4_error is not None:
-                    raise AssertionError(
-                        "Step 4 failed: clicking the current disabled workspace row did not "
-                        "leave the workspace switcher visibly open for the required stability window.\n"
-                        f"Original error: {step4_error}\n"
-                        f"Observed transition monitor: {json.dumps(result.get('monitor_after_click', {}), indent=2)}\n"
-                        f"Observed body text after click:\n{result['body_text_after_click']}",
-                    ) from step4_error
+                try:
+                    if step4_error is not None:
+                        raise AssertionError(
+                            "Step 4 failed: clicking the disabled or otherwise non-focusable workspace row did not "
+                            "leave the workspace switcher visibly open for the required stability window.\n"
+                            f"Original error: {step4_error}\n"
+                            f"Observed transition monitor: {json.dumps(result.get('monitor_after_click', {}), indent=2)}\n"
+                            f"Observed body text after click:\n{result['body_text_after_click']}",
+                        ) from step4_error
 
-                _assert_switcher_remains_open_after_click(
-                    before_panel=panel_before,
-                    before_switcher=switcher_before,
-                    before_rows=rows_before,
-                    after_panel=panel_after_click,
-                    after_switcher=switcher_after_click,
-                    after_rows=rows_after_click,
-                    monitor=monitor_after_click,
-                    focus_after=focus_after_click,
-                    focus_ownership_after=focus_ownership_after_click,
-                )
+                    _assert_switcher_remains_open_after_click(
+                        before_panel=panel_before,
+                        before_switcher=switcher_before,
+                        before_rows=rows_before,
+                        after_panel=panel_after_click,
+                        after_switcher=switcher_after_click,
+                        after_rows=rows_after_click,
+                        monitor=monitor_after_click,
+                        focus_after=focus_after_click,
+                        focus_ownership_after=focus_ownership_after_click,
+                    )
+                except AssertionError as error:
+                    record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=AUTOMATION_STEPS[3],
+                        observed=str(error),
+                    )
+                    raise
+
                 record_step(
                     result,
                     step=4,
@@ -322,7 +349,7 @@ def main() -> None:
                 record_human_verification(
                     result,
                     check=(
-                        "Clicked the current workspace row like a user and watched whether the "
+                        "Clicked the non-focusable workspace row like a user and watched whether the "
                         "workspace switcher stayed on screen instead of collapsing."
                     ),
                     observed=(
@@ -434,87 +461,106 @@ def _assert_switcher_open_state(
         )
 
 
-def _find_active_workspace_row(
+def _find_nonfocusable_workspace_row(
     rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation:
-    row = next((candidate for candidate in rows if candidate.display_name == ACTIVE_WORKSPACE_DISPLAY_NAME), None)
+    row = next(
+        (
+            candidate
+            for candidate in rows
+            if candidate.display_name in NONFOCUSABLE_WORKSPACE_DISPLAY_NAMES
+        ),
+        None,
+    )
     if row is None:
         raise AssertionError(
-            "Step 2 failed: the workspace switcher did not expose the expected current "
-            f'workspace row "{ACTIVE_WORKSPACE_DISPLAY_NAME}".\n'
+            "Step 2 failed: the workspace switcher did not expose the expected saved "
+            "unauthorized workspace row.\n"
             f"Observed rows: {json.dumps(_rows_payload(rows), indent=2)}",
         )
     return row
 
 
-def _assert_current_workspace_inert_row(
+def _assert_nonfocusable_workspace_row(
     *,
-    active_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
+    target_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
     row_candidate: dict[str, object],
     all_candidates: list[dict[str, object]],
 ) -> None:
     failures: list[str] = []
-    if not active_row.selected:
-        failures.append("the current workspace row was not marked selected")
-    if "Active" not in active_row.action_labels:
+    if target_row.selected:
         failures.append(
-            f"the current workspace row exposed {list(active_row.action_labels)!r} instead of an Active marker",
+            "the target workspace row was selected instead of remaining an unauthorized saved row",
         )
-    if str(row_candidate.get("aria_current")) != "true":
+    if not any(label.startswith("Open: ") for label in target_row.action_labels):
         failures.append(
-            f"the resolved row candidate did not expose aria-current=true (observed {row_candidate.get('aria_current')!r})",
+            f"the target workspace row exposed {list(target_row.action_labels)!r} instead of an Open action",
         )
-    identifier = str(row_candidate.get("identifier", ""))
-    if "trackstate-workspace-switcher-row-" not in identifier:
+    if target_row.state_label != "Needs sign-in":
+        failures.append(
+            f"the target workspace row state was {target_row.state_label!r} instead of 'Needs sign-in'",
+        )
+    if not _candidate_is_disabled_or_nonfocusable(row_candidate):
+        failures.append(
+            "the resolved row candidate was neither disabled nor non-focusable",
+        )
+    identifier = _row_candidate_identifier(row_candidate)
+    if not identifier.startswith("trackstate-workspace-switcher-row-"):
         failures.append(
             f"the resolved row candidate did not look like a switcher row surface (identifier={identifier!r})",
         )
     if failures:
         raise AssertionError(
-            "Step 2 failed: the live switcher did not expose the expected inert current-workspace "
-            "entry before the pointer click.\n"
+            "Step 2 failed: the live switcher did not expose the expected disabled or otherwise "
+            "non-focusable saved workspace row before the pointer click.\n"
             + "\n".join(f"- {failure}" for failure in failures)
             + "\n"
-            + f"Observed current row: {json.dumps(asdict(active_row), indent=2)}\n"
+            + f"Observed target row: {json.dumps(asdict(target_row), indent=2)}\n"
             + f"Observed row candidates: {json.dumps(all_candidates, indent=2)}"
         )
 
 
-def _find_row_candidate(candidates: list[dict[str, object]]) -> dict[str, object]:
+def _find_nonfocusable_row_candidate(candidates: list[dict[str, object]]) -> dict[str, object]:
     row_candidate = next(
         (
             candidate
             for candidate in candidates
-            if (
-                str(candidate.get("identifier", "")).startswith("trackstate-workspace-switcher-row-")
-                or str(candidate.get("aria_current")) == "true"
-            )
+            if _row_candidate_identifier(candidate).startswith("trackstate-workspace-switcher-row-")
+            and _candidate_is_disabled_or_nonfocusable(candidate)
         ),
         None,
     )
     if row_candidate is None:
         raise AssertionError(
-            "Step 2 failed: no row-like DOM candidate was available for the current workspace entry.\n"
+            "Step 2 failed: no disabled or otherwise non-focusable row-like DOM candidate was "
+            "available for the saved workspace entry.\n"
             f"Observed candidates: {json.dumps(candidates, indent=2)}",
         )
     return row_candidate
 
 
-def _assert_click_target(observation: WorkspaceSwitcherRowClickObservation) -> None:
+def _assert_click_target(
+    observation: WorkspaceSwitcherRowClickObservation,
+    *,
+    expected_display_name: str,
+) -> None:
     failures: list[str] = []
     if observation.click_x <= 0 or observation.click_y <= 0:
         failures.append("the resolved pointer click coordinates were invalid")
-    if ACTIVE_WORKSPACE_DISPLAY_NAME not in {
+    if expected_display_name not in {
         observation.display_name,
         observation.target_label,
         observation.target_text,
     }:
-        failures.append("the pointer click did not target the current workspace row")
+        failures.append("the pointer click did not target the expected saved workspace row")
     if observation.target_identifier and "trigger" in observation.target_identifier:
         failures.append("the pointer click targeted the workspace-switcher trigger instead of the row")
+    if not _click_target_is_disabled_or_nonfocusable(observation):
+        failures.append("the pointer click landed on a focusable target instead of the disabled/non-focusable row surface")
     if failures:
         raise AssertionError(
-            "Step 3 failed: the test could not click the current workspace row with a real "
+            "Step 3 failed: the test could not click the disabled or otherwise non-focusable "
+            "workspace row with a real "
             "pointer target.\n"
             + "\n".join(f"- {failure}" for failure in failures)
             + "\n"
@@ -568,7 +614,7 @@ def _assert_switcher_remains_open_after_click(
         failures.append("keyboard focus was no longer owned by the switcher after the click")
     if failures:
         raise AssertionError(
-            "Step 4 failed: clicking the current disabled workspace row did not leave the "
+            "Step 4 failed: clicking the disabled or otherwise non-focusable workspace row did not leave the "
             "workspace switcher visibly open.\n"
             + "\n".join(f"- {failure}" for failure in failures)
             + "\n"
@@ -693,7 +739,7 @@ def _safe_observe_panel(
             expected_container_kinds=("anchored-panel", "surface"),
             timeout_ms=SURFACE_TIMEOUT_MS,
         )
-    except AssertionError:
+    except (AssertionError, WebAppTimeoutError):
         return None
 
 
@@ -702,7 +748,7 @@ def _safe_observe_switcher(
 ) -> WorkspaceSwitcherObservation | None:
     try:
         return page.observe_open_switcher(timeout_ms=SURFACE_TIMEOUT_MS)
-    except AssertionError:
+    except (AssertionError, WebAppTimeoutError):
         return None
 
 
@@ -711,7 +757,7 @@ def _safe_observe_rows(
 ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...] | None:
     try:
         return page.observe_saved_workspace_rows(timeout_ms=SURFACE_TIMEOUT_MS)
-    except AssertionError:
+    except (AssertionError, WebAppTimeoutError):
         return None
 
 
@@ -720,7 +766,7 @@ def _try_read_transition_monitor(
 ) -> WorkspaceSwitcherTransitionMonitorObservation | None:
     try:
         return page.read_transition_monitor(clear=True)
-    except AssertionError:
+    except (AssertionError, WebAppTimeoutError):
         return None
 
 
@@ -729,7 +775,7 @@ def _try_stop_transition_monitor(page: LiveWorkspaceSwitcherPage | None) -> None
         return
     try:
         page.stop_transition_monitor()
-    except AssertionError:
+    except (AssertionError, WebAppTimeoutError):
         return
 
 
@@ -845,9 +891,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _result_summary(result: dict[str, object], *, passed: bool) -> str:
     if passed:
         return (
-            "Clicked the inert current workspace row in the live switcher and the panel "
-            "stayed visibly open: the heading, workspace rows, and selected Active row all "
-            "remained on screen, and the transition monitor never observed the panel hide."
+            "Clicked a non-focusable unauthorized workspace row in the live switcher and the "
+            "panel stayed visibly open: the heading, workspace rows, and selected workspace "
+            "all remained on screen, and the transition monitor never observed the panel hide."
         )
     return str(result.get("error", "TS-1015 failed."))
 
@@ -872,8 +918,8 @@ def _bug_description(result: dict[str, object]) -> str:
                     "status": "passed",
                     "action": REQUEST_STEPS[0],
                     "observed": (
-                        f'Located the current workspace row {ACTIVE_WORKSPACE_DISPLAY_NAME!r} in the open '
-                        "switcher; it was selected and showed the Active marker."
+                        "Located a saved unauthorized workspace row in the open switcher; "
+                        'its row surface stayed non-focusable with tabindex="-1".'
                     ),
                 },
                 {
@@ -889,7 +935,7 @@ def _bug_description(result: dict[str, object]) -> str:
     screenshot = result.get("screenshot", "No screenshot captured.")
     return "\n".join(
         [
-            f"# {TICKET_KEY}: Clicking the current disabled workspace row collapses the workspace switcher",
+            f"# {TICKET_KEY}: Clicking a non-focusable workspace row destabilizes the workspace switcher",
             "",
             "## Preconditions",
             *[f"- {item}" for item in PRECONDITIONS],
@@ -914,8 +960,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Evidence",
             f"- Screenshot: {screenshot}",
             f"- Click observation: {json.dumps(result.get('click_observation', {}), indent=2)}",
-            f"- Active row before click: {json.dumps(result.get('active_row_before_click', {}), indent=2)}",
-            f"- Active row candidates before click: {json.dumps(result.get('active_row_candidates_before_click', []), indent=2)}",
+            f"- Target row before click: {json.dumps(result.get('target_row_before_click', {}), indent=2)}",
+            f"- Target row candidates before click: {json.dumps(result.get('target_row_candidates_before_click', []), indent=2)}",
             f"- Transition monitor after click: {json.dumps(result.get('monitor_after_click', {}), indent=2)}",
             f"- Focus after click: {json.dumps(result.get('focused_after_click', {}), indent=2)}",
             f"- Body text after click:\n{result.get('body_text_after_click', '')}",
@@ -925,16 +971,53 @@ def _bug_description(result: dict[str, object]) -> str:
 
 def _actual_failure_details(result: dict[str, object]) -> str:
     return (
-        "After clicking the current workspace row in the live workspace switcher, the panel "
-        "did not stay open for the required 1000 ms stability window. The visible "
-        "`Workspace switcher` surface disappeared and the page returned to the dashboard "
-        "shell instead of keeping the switcher open.\n\n"
+        "After clicking a saved non-focusable workspace row in the live workspace switcher, "
+        "the switcher did not preserve its readable list state for the required 1000 ms "
+        "stability window. The visible `Workspace switcher` surface stopped exposing its "
+        "saved workspace rows instead of keeping the switcher open and stable.\n\n"
         f"Observed error:\n{result.get('error', '')}\n\n"
         "Observed transition monitor:\n"
         + json.dumps(result.get("monitor_after_click", {}), indent=2)
         + "\n\nObserved focus after click:\n"
         + json.dumps(result.get("focused_after_click", {}), indent=2)
     )
+
+
+def _row_candidate_identifier(candidate: dict[str, object]) -> str:
+    return str(
+        candidate.get("identifier")
+        or candidate.get("row_id")
+        or candidate.get("focus_id")
+        or "",
+    )
+
+
+def _candidate_is_disabled_or_nonfocusable(candidate: dict[str, object]) -> bool:
+    if bool(candidate.get("disabled")):
+        return True
+    tab_index_value = candidate.get("tab_index_value")
+    if isinstance(tab_index_value, (int, float)) and int(tab_index_value) < 0:
+        return True
+    tabindex = candidate.get("tabindex")
+    if tabindex is None:
+        return False
+    try:
+        return int(str(tabindex)) < 0
+    except ValueError:
+        return False
+
+
+def _click_target_is_disabled_or_nonfocusable(
+    observation: WorkspaceSwitcherRowClickObservation,
+) -> bool:
+    if observation.target_disabled:
+        return True
+    if observation.target_tabindex is None:
+        return False
+    try:
+        return int(observation.target_tabindex) < 0
+    except ValueError:
+        return False
 
 
 if __name__ == "__main__":
