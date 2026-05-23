@@ -43,14 +43,14 @@ LOCAL_TARGET = "/tmp/trackstate-ts921-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 WRONG_DIRECTORY_NAME = "ts921-wrong-directory"
-LINKED_BUGS = ["TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
+LINKED_BUGS = ["TS-976", "TS-974", "TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Resolved the TS-921 rework conflict, kept the live wrong-directory outcome "
-    "driven by the current rerun, and now builds review replies from the actual "
-    "unresolved PR thread metadata instead of stale hardcoded IDs."
+    "Updated TS-921 to account for the latest linked bugs and to report the live "
+    "wrong-directory outcome more precisely when the workspace stays unavailable "
+    "but no mismatch message appears."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -835,6 +835,31 @@ def _assert_wrong_directory_rejected(
     expected_local_workspace_id: str,
 ) -> None:
     if not settled:
+        local_row_payload = observation.get("local_row")
+        local_state = (
+            str(local_row_payload.get("state_label") or "")
+            if isinstance(local_row_payload, dict)
+            else ""
+        )
+        local_visible_text = (
+            str(local_row_payload.get("visible_text") or "")
+            if isinstance(local_row_payload, dict)
+            else ""
+        )
+        active_workspace_is_local = bool(observation.get("active_workspace_is_local"))
+        if (
+            isinstance(local_row_payload, dict)
+            and not active_workspace_is_local
+            and local_state != "Local Git"
+            and "Local Git" not in local_visible_text
+        ):
+            raise AssertionError(
+                "Step 4 failed: after selecting the wrong directory, the workspace stayed "
+                "`Local Unavailable` and the hosted workspace remained active, but no "
+                "visible directory/workspace mismatch error appeared within the allowed "
+                "async wait window.\n"
+                f"Observed post-retry state: {json.dumps(observation, indent=2)}"
+            )
         raise AssertionError(
             "Step 4 failed: the wrong-directory retry never surfaced the expected "
             "mismatch rejection within the allowed async wait window.\n"
