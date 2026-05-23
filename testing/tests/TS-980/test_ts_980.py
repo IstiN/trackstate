@@ -26,14 +26,14 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.frameworks.python.playwright_web_app_session import (  # noqa: E402
-    PlaywrightStoredTokenWebAppRuntime,
-)
 from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    _workspace_token_storage_keys,
+from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
+    Ts980RestorePersistenceRuntime,
+    install_restorable_directory_picker,
+    read_manual_reauth_probe,
+    read_restorable_directory_picker_state,
 )
 
 TICKET_KEY = "TS-980"
@@ -75,97 +75,11 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Replaced the OPFS-only manual restore stub with a repo-backed directory "
-    "handle shim sourced from the prepared `/tmp/trackstate-ts980-workspace`, "
-    "then reran the live restore-plus-reload regression and refreshed the PR "
-    "review reply artifact."
+    "Extracted the TS-980 runtime and repo-backed directory handle shim into "
+    "`testing/tests/support/ts980_restore_persistence_runtime.py`, updated the "
+    "test to consume the shared helper, then reran the live restore-plus-reload "
+    "regression and refreshed the PR review reply artifact."
 )
-
-
-class Ts980RestorePersistenceRuntime(PlaywrightStoredTokenWebAppRuntime):
-    def __init__(
-        self,
-        *,
-        repository: str,
-        token: str,
-        workspace_state: dict[str, object],
-        workspace_token_profile_ids: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(
-            repository=repository,
-            token=token,
-        )
-        self._workspace_state = workspace_state
-        self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
-        self.console_events: list[dict[str, str]] = []
-        self.page_errors: list[str] = []
-
-    def __enter__(self):
-        session = super().__enter__()
-        if self._context is None or self._page is None:
-            raise RuntimeError(
-                "TS-980 restore persistence runtime expected a browser context and page.",
-            )
-        self._context.add_init_script(
-            script=_build_one_time_workspace_preload_script(
-                self._workspace_state,
-                repository=self._repository,
-                token=self._token,
-                workspace_token_profile_ids=self._workspace_token_profile_ids,
-            ),
-        )
-        self._context.add_init_script(script=_manual_reauth_probe_script())
-        self._page.on("console", self._record_console_event)
-        self._page.on("pageerror", self._record_page_error)
-        return session
-
-    def _record_console_event(self, message) -> None:
-        self.console_events.append(
-            {
-                "level": str(message.type),
-                "text": str(message.text),
-            },
-        )
-
-    def _record_page_error(self, error: object) -> None:
-        self.page_errors.append(str(error))
-
-
-def _build_one_time_workspace_preload_script(
-    workspace_state: dict[str, object],
-    *,
-    repository: str,
-    token: str,
-    workspace_token_profile_ids: tuple[str, ...],
-) -> str:
-    serialized_state = json.dumps(json.dumps(workspace_state))
-    workspace_token_keys = _workspace_token_storage_keys(
-        workspace_state,
-        workspace_token_profile_ids=workspace_token_profile_ids,
-    )
-    return "".join(
-        [
-            "(() => {",
-            f"const state = {serialized_state};",
-            f"const token = {json.dumps(token)};",
-            "for (const key of [",
-            "  'trackstate.workspaceProfiles.state',",
-            "  'flutter.trackstate.workspaceProfiles.state',",
-            "]) {",
-            "  if (window.localStorage.getItem(key) === null) {",
-            "    window.localStorage.setItem(key, state);",
-            "  }",
-            "}",
-            "for (const key of [",
-            *[f"  {json.dumps(key)}," for key in workspace_token_keys],
-            "]) {",
-            "  if (window.localStorage.getItem(key) === null) {",
-            "    window.localStorage.setItem(key, token);",
-            "  }",
-            "}",
-            "})();",
-        ],
-    )
 
 
 def main() -> None:
@@ -327,18 +241,18 @@ def main() -> None:
                 workspace_directory_snapshot = _workspace_directory_snapshot(
                     Path(restored_local_workspace["path"]),
                 )
-                _install_restorable_directory_picker(
+                install_restorable_directory_picker(
                     tracker_page=tracker_page,
                     directory_snapshot=workspace_directory_snapshot,
                 )
                 result["manual_directory_picker_fixture"] = _workspace_directory_snapshot_summary(
                     workspace_directory_snapshot,
                 )
-                result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
+                result["manual_reauth_probe_before_action"] = read_manual_reauth_probe(
                     tracker_page,
                 )
                 result["manual_directory_picker_state_before_action"] = (
-                    _read_restorable_directory_picker_state(tracker_page)
+                    read_restorable_directory_picker_state(tracker_page)
                 )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
                 result["manual_restore_action_label"] = exact_action_label
@@ -421,7 +335,7 @@ def main() -> None:
                         "completed the Local Git restore flow.\n"
                         f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}\n"
                         "Observed injected picker state:\n"
-                        f"{json.dumps(_read_restorable_directory_picker_state(tracker_page), indent=2)}"
+                        f"{json.dumps(read_restorable_directory_picker_state(tracker_page), indent=2)}"
                     )
                     _record_request_steps_precondition_failure(result, message)
                     raise AssertionError(f"Precondition failed: {message}")
@@ -913,320 +827,6 @@ def _workspace_directory_snapshot_summary(
     }
 
 
-def _install_restorable_directory_picker(
-    *,
-    tracker_page: TrackStateTrackerPage,
-    directory_snapshot: dict[str, object],
-) -> None:
-    tracker_page.session.evaluate(
-        """
-        (snapshot) => {
-          const normalizeArgs = (args) => {
-            try {
-              return JSON.parse(JSON.stringify(args));
-            } catch (_) {
-              return Array.from(args, (value) => String(value));
-            }
-          };
-          const manualProbe = window.__ts980ManualReauthProbe || null;
-          const recordProbe = (bucket, args) => {
-            if (!manualProbe || !Array.isArray(manualProbe[bucket])) {
-              return;
-            }
-            manualProbe[bucket].push({
-              callNumber: manualProbe[bucket].length + 1,
-              args: normalizeArgs(args),
-            });
-          };
-          const state = window.__ts980RestorableDirectoryPickerState = {
-            calls: [],
-            selectedDirectoryName: null,
-            snapshotRootPath:
-              typeof snapshot?.rootPath === 'string' ? snapshot.rootPath : null,
-            seededPaths: Array.isArray(snapshot?.files)
-              ? snapshot.files
-                  .map((entry) => (entry && typeof entry.path === 'string' ? entry.path : null))
-                  .filter((entry) => entry !== null)
-              : [],
-            errors: [],
-            source: 'real-workspace-snapshot',
-          };
-          const textEncoder = new TextEncoder();
-          const decodeBase64 = (value) => {
-            const raw = atob(typeof value === 'string' ? value : '');
-            const bytes = new Uint8Array(raw.length);
-            for (let index = 0; index < raw.length; index += 1) {
-              bytes[index] = raw.charCodeAt(index);
-            }
-            return bytes;
-          };
-          const cloneBytes = (value) => new Uint8Array(value);
-          const cloneArrayBuffer = (value) => {
-            const view = value instanceof Uint8Array
-              ? value
-              : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-            return view.slice().buffer;
-          };
-          const createDirectoryNode = (name) => ({
-            kind: 'directory',
-            name,
-            children: new Map(),
-          });
-          const createFileNode = (name, bytes) => ({
-            kind: 'file',
-            name,
-            bytes: cloneBytes(bytes),
-          });
-          const rootName = typeof snapshot?.rootName === 'string' && snapshot.rootName.trim()
-            ? snapshot.rootName.trim()
-            : 'trackstate-ts980-workspace';
-          const rootNode = createDirectoryNode(rootName);
-          for (const entry of Array.isArray(snapshot?.files) ? snapshot.files : []) {
-            if (!entry || typeof entry.path !== 'string' || typeof entry.base64 !== 'string') {
-              continue;
-            }
-            const segments = entry.path
-              .split('/')
-              .map((segment) => segment.trim())
-              .filter((segment) => segment.length > 0);
-            if (segments.length === 0) {
-              continue;
-            }
-            let current = rootNode;
-            for (const segment of segments.slice(0, -1)) {
-              const existing = current.children.get(segment);
-              if (existing && existing.kind !== 'directory') {
-                throw new DOMException(
-                  `Could not create directory ${segment}. A file already exists at that path.`,
-                  'TypeMismatchError',
-                );
-              }
-              if (existing) {
-                current = existing;
-                continue;
-              }
-              const created = createDirectoryNode(segment);
-              current.children.set(segment, created);
-              current = created;
-            }
-            current.children.set(
-              segments.at(-1),
-              createFileNode(segments.at(-1), decodeBase64(entry.base64)),
-            );
-          }
-          const notFoundError = (message) => new DOMException(message, 'NotFoundError');
-          const typeMismatchError = (message) =>
-            new DOMException(message, 'TypeMismatchError');
-          const sameEntry = (left, right) => {
-            const leftPath = Array.isArray(left?.__ts980Path) ? left.__ts980Path : null;
-            const rightPath = Array.isArray(right?.__ts980Path) ? right.__ts980Path : null;
-            return (
-              Array.isArray(leftPath)
-              && Array.isArray(rightPath)
-              && leftPath.length === rightPath.length
-              && leftPath.every((segment, index) => segment === rightPath[index])
-            );
-          };
-          const attachMetadata = (handle, node, pathSegments) => {
-            Object.defineProperty(handle, '__ts980Node', {
-              configurable: true,
-              enumerable: false,
-              value: node,
-            });
-            Object.defineProperty(handle, '__ts980Path', {
-              configurable: true,
-              enumerable: false,
-              value: [...pathSegments],
-            });
-            return handle;
-          };
-          const createWritable = (node) => {
-            let nextBytes = cloneBytes(node.bytes);
-            const writeChunk = (value) => {
-              if (typeof value === 'string') {
-                nextBytes = textEncoder.encode(value);
-                return;
-              }
-              if (value instanceof Uint8Array) {
-                nextBytes = cloneBytes(value);
-                return;
-              }
-              if (value instanceof ArrayBuffer) {
-                nextBytes = new Uint8Array(value.slice(0));
-                return;
-              }
-              if (ArrayBuffer.isView(value)) {
-                nextBytes = new Uint8Array(
-                  value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
-                );
-                return;
-              }
-              nextBytes = textEncoder.encode(String(value ?? ''));
-            };
-            return {
-              async write(chunk) {
-                if (chunk && typeof chunk === 'object' && 'type' in chunk) {
-                  if (chunk.type === 'truncate') {
-                    nextBytes = nextBytes.slice(0, Number(chunk.size) || 0);
-                    return;
-                  }
-                  if (chunk.type === 'write') {
-                    writeChunk(chunk.data);
-                    return;
-                  }
-                }
-                writeChunk(chunk);
-              },
-              async close() {
-                node.bytes = cloneBytes(nextBytes);
-              },
-            };
-          };
-          const createFileHandle = (node, pathSegments) =>
-            attachMetadata(
-              {
-                kind: 'file',
-                name: node.name,
-                async queryPermission(...args) {
-                  recordProbe('queryPermissionCalls', args);
-                  return 'granted';
-                },
-                async requestPermission(...args) {
-                  recordProbe('requestPermissionCalls', args);
-                  return 'granted';
-                },
-                async isSameEntry(other) {
-                  return sameEntry(this, other);
-                },
-                async getFile() {
-                  return new File([cloneArrayBuffer(node.bytes)], node.name, {
-                    type: 'application/octet-stream',
-                  });
-                },
-                async createWritable() {
-                  return createWritable(node);
-                },
-              },
-              node,
-              pathSegments,
-            );
-          const createHandle = (node, pathSegments) =>
-            node.kind === 'directory'
-              ? createDirectoryHandle(node, pathSegments)
-              : createFileHandle(node, pathSegments);
-          const createDirectoryHandle = (node, pathSegments) =>
-            attachMetadata(
-              {
-                kind: 'directory',
-                name: node.name,
-                async queryPermission(...args) {
-                  recordProbe('queryPermissionCalls', args);
-                  return 'granted';
-                },
-                async requestPermission(...args) {
-                  recordProbe('requestPermissionCalls', args);
-                  return 'granted';
-                },
-                async isSameEntry(other) {
-                  return sameEntry(this, other);
-                },
-                async *values() {
-                  for (const child of node.children.values()) {
-                    yield createHandle(child, [...pathSegments, child.name]);
-                  }
-                },
-                async *keys() {
-                  for (const childName of node.children.keys()) {
-                    yield childName;
-                  }
-                },
-                async *entries() {
-                  for (const [childName, child] of node.children.entries()) {
-                    yield [childName, createHandle(child, [...pathSegments, childName])];
-                  }
-                },
-                async getDirectoryHandle(name, options = {}) {
-                  const normalized = String(name ?? '').trim();
-                  if (!normalized) {
-                    throw notFoundError('Directory name must not be empty.');
-                  }
-                  let child = node.children.get(normalized);
-                  if (!child) {
-                    if (options && options.create) {
-                      child = createDirectoryNode(normalized);
-                      node.children.set(normalized, child);
-                    } else {
-                      throw notFoundError(`Directory ${normalized} does not exist.`);
-                    }
-                  }
-                  if (child.kind !== 'directory') {
-                    throw typeMismatchError(
-                      `Expected ${normalized} to be a directory but found a file.`,
-                    );
-                  }
-                  return createDirectoryHandle(child, [...pathSegments, normalized]);
-                },
-                async getFileHandle(name, options = {}) {
-                  const normalized = String(name ?? '').trim();
-                  if (!normalized) {
-                    throw notFoundError('File name must not be empty.');
-                  }
-                  let child = node.children.get(normalized);
-                  if (!child) {
-                    if (options && options.create) {
-                      child = createFileNode(normalized, new Uint8Array());
-                      node.children.set(normalized, child);
-                    } else {
-                      throw notFoundError(`File ${normalized} does not exist.`);
-                    }
-                  }
-                  if (child.kind !== 'file') {
-                    throw typeMismatchError(
-                      `Expected ${normalized} to be a file but found a directory.`,
-                    );
-                  }
-                  return createFileHandle(child, [...pathSegments, normalized]);
-                },
-                async removeEntry(name) {
-                  const normalized = String(name ?? '').trim();
-                  if (!node.children.delete(normalized)) {
-                    throw notFoundError(`${normalized} does not exist.`);
-                  }
-                },
-                async resolve(handle) {
-                  const descendant = Array.isArray(handle?.__ts980Path)
-                    ? handle.__ts980Path
-                    : null;
-                  if (!Array.isArray(descendant) || descendant.length < pathSegments.length) {
-                    return null;
-                  }
-                  for (let index = 0; index < pathSegments.length; index += 1) {
-                    if (descendant[index] !== pathSegments[index]) {
-                      return null;
-                    }
-                  }
-                  return descendant.slice(pathSegments.length);
-                },
-              },
-              node,
-              pathSegments,
-            );
-          const rootHandle = createDirectoryHandle(rootNode, [rootName]);
-          globalThis.showDirectoryPicker = async (...args) => {
-            state.calls.push({
-              callNumber: state.calls.length + 1,
-              args: normalizeArgs(args),
-            });
-            recordProbe('showDirectoryPickerCalls', args);
-            state.selectedDirectoryName = rootHandle.name;
-            return rootHandle;
-          };
-        }
-        """,
-        arg=directory_snapshot,
-    )
-
-
 def _find_named_local_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
@@ -1702,44 +1302,6 @@ def _raise_startup_failure(
     )
 
 
-def _manual_reauth_probe_script() -> str:
-    return """
-    (() => {
-      const state = window.__ts980ManualReauthProbe = {
-        showDirectoryPickerCalls: [],
-        requestPermissionCalls: [],
-        queryPermissionCalls: [],
-        wrapErrors: [],
-      };
-      const serialize = (value) => {
-        try {
-          return JSON.parse(JSON.stringify(value));
-        } catch (error) {
-          state.wrapErrors.push(String(error));
-          return String(value);
-        }
-      };
-      const wrap = (target, key, bucket) => {
-        if (!target || typeof target[key] !== 'function') {
-          return;
-        }
-        const original = target[key];
-        target[key] = async function(...args) {
-          state[bucket].push({
-            callNumber: state[bucket].length + 1,
-            args: serialize(args),
-          });
-          return await original.apply(this, args);
-        };
-      };
-      wrap(window, 'showDirectoryPicker', 'showDirectoryPickerCalls');
-      const fileSystemHandleProto = window.FileSystemHandle && window.FileSystemHandle.prototype;
-      wrap(fileSystemHandleProto, 'requestPermission', 'requestPermissionCalls');
-      wrap(fileSystemHandleProto, 'queryPermission', 'queryPermissionCalls');
-    })();
-    """
-
-
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
@@ -1765,90 +1327,14 @@ def _saved_workspace_action_label(
     return action_label
 
 
-def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const probe = window.__ts980ManualReauthProbe || {};
-          return {
-            showDirectoryPickerCalls: Array.isArray(probe.showDirectoryPickerCalls)
-              ? probe.showDirectoryPickerCalls
-              : [],
-            requestPermissionCalls: Array.isArray(probe.requestPermissionCalls)
-              ? probe.requestPermissionCalls
-              : [],
-            queryPermissionCalls: Array.isArray(probe.queryPermissionCalls)
-              ? probe.queryPermissionCalls
-              : [],
-            wrapErrors: Array.isArray(probe.wrapErrors) ? probe.wrapErrors : [],
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "showDirectoryPickerCalls": [],
-            "requestPermissionCalls": [],
-            "queryPermissionCalls": [],
-            "wrapErrors": [],
-        }
-    return {
-        "showDirectoryPickerCalls": list(payload.get("showDirectoryPickerCalls", [])),
-        "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
-        "queryPermissionCalls": list(payload.get("queryPermissionCalls", [])),
-        "wrapErrors": list(payload.get("wrapErrors", [])),
-    }
-
-
-def _read_restorable_directory_picker_state(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const state = window.__ts980RestorableDirectoryPickerState || {};
-          return {
-            calls: Array.isArray(state.calls) ? state.calls : [],
-            selectedDirectoryName:
-              typeof state.selectedDirectoryName === 'string'
-                ? state.selectedDirectoryName
-                : null,
-            snapshotRootPath:
-              typeof state.snapshotRootPath === 'string'
-                ? state.snapshotRootPath
-                : null,
-            seededPaths: Array.isArray(state.seededPaths) ? state.seededPaths : [],
-            errors: Array.isArray(state.errors) ? state.errors : [],
-            source: typeof state.source === 'string' ? state.source : null,
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "calls": [],
-            "selectedDirectoryName": None,
-            "snapshotRootPath": None,
-            "seededPaths": [],
-            "errors": [],
-            "source": None,
-        }
-    return {
-        "calls": list(payload.get("calls", [])),
-        "selectedDirectoryName": payload.get("selectedDirectoryName"),
-        "snapshotRootPath": payload.get("snapshotRootPath"),
-        "seededPaths": list(payload.get("seededPaths", [])),
-        "errors": list(payload.get("errors", [])),
-        "source": payload.get("source"),
-    }
-
-
 def _observe_manual_restore_attempt(
     *,
     tracker_page,
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
-    probe = _read_manual_reauth_probe(tracker_page)
-    directory_picker_state = _read_restorable_directory_picker_state(tracker_page)
+    probe = read_manual_reauth_probe(tracker_page)
+    directory_picker_state = read_restorable_directory_picker_state(tracker_page)
     trigger = _safe_trigger_payload(page)
     return {
         "probe": probe,
@@ -2231,6 +1717,7 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Files Modified",
         "- `testing/tests/TS-980/test_ts_980.py`",
+        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
         "",
         "## Test Coverage",
         "- Manual Retry/Re-authenticate restore of the unavailable saved workspace using the prepared local repo shape.",
@@ -2385,12 +1872,12 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         f"{_exact_error_summary(result)}"
     )
     return (
-        "Fixed: the manual restore harness no longer returns an unrelated "
-        "`navigator.storage.getDirectory()` workspace. TS-980 now prepares the real "
-        "`/tmp/trackstate-ts980-workspace` repo content on disk, snapshots that exact "
-        "saved workspace, and injects a repo-backed directory handle shim so the "
-        "Retry/Re-authenticate flow restores against the intended workspace identity and "
-        "file tree. "
+        "Fixed: the TS-980-specific runtime and repo-backed directory-handle shim were "
+        "moved out of `testing/tests/TS-980/test_ts_980.py` into "
+        "`testing/tests/support/ts980_restore_persistence_runtime.py`, so the test "
+        "now stays focused on the ticket flow while the shared helper still prepares "
+        "the real `/tmp/trackstate-ts980-workspace` repo snapshot and injects the "
+        "manual Retry/Re-authenticate picker handle for that saved workspace. "
         f"{rerun_summary}"
     )
 
