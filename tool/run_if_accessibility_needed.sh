@@ -9,13 +9,17 @@ fi
 command_to_run="$1"
 
 ensure_accessibility_tooling() {
-  if [[ ! -f package.json || ! -f package-lock.json ]]; then
+  if [[ ! -f package.json ]]; then
     return
   fi
 
   if [[ ! -x node_modules/.bin/playwright ]]; then
-    echo "[a11y-gate] Installing Node accessibility dependencies with npm ci"
-    npm ci
+    echo "[a11y-gate] Installing Playwright test dependencies"
+    if [[ -f package-lock.json ]]; then
+      npm ci
+    else
+      npm install
+    fi
   fi
 
   if [[ ! -d "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" ]]; then
