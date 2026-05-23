@@ -1301,7 +1301,18 @@ class LiveWorkspaceSwitcherPage:
                     'button',
                     '[role="button"]',
                   ].join(',');
-                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return switcher.contains(element);
+                  };
+                  const candidate = Array.from(document.querySelectorAll(buttonSelector))
+                    .filter((element) => isSwitcherOwnedControl(element))
                     .filter(isVisible)
                     .find((element) => {
                       const elementLabel = labelFor(element);
@@ -1435,7 +1446,18 @@ class LiveWorkspaceSwitcherPage:
                     'button',
                     '[role="button"]',
                   ].join(',');
-                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return switcher.contains(element);
+                  };
+                  const candidate = Array.from(document.querySelectorAll(buttonSelector))
+                    .filter((element) => isSwitcherOwnedControl(element))
                     .filter(isVisible)
                     .find((element) => {
                       const elementLabel = labelFor(element);
