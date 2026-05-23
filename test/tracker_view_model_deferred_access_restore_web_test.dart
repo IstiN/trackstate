@@ -9,7 +9,7 @@ import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.da
 
 void main() {
   test(
-    'provider-backed deferred access restore waits for the delayed GitHub probe before publishing the setup snapshot',
+    'provider-backed deferred access restore publishes the setup snapshot before delayed GitHub auth completes',
     () async {
       const workspaceId = 'local:/tmp/trackstate-demo@main';
       final provider = _DelayedFixtureProvider();
@@ -32,16 +32,26 @@ void main() {
 
       expect(
         completedQuickly,
-        isFalse,
+        isTrue,
         reason:
-            'Provider-backed load(deferAccessRestore: true) must wait for the startup GitHub probe before publishing the shell snapshot.',
+            'Provider-backed load(deferAccessRestore: true) should publish the shell snapshot without waiting for delayed startup auth.',
       );
-      expect(viewModel.snapshot, isNull);
-      provider.completeAuthentication();
       await loadFuture;
       expect(viewModel.snapshot, isNotNull);
       expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.isConnected, isFalse);
+      expect(viewModel.providerSession, isNotNull);
+      expect(viewModel.providerSession?.canRead, isTrue);
+      expect(viewModel.providerSession?.canWrite, isFalse);
+      expect(viewModel.providerSession?.canCreateBranch, isFalse);
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
       expect(viewModel.isConnected, isTrue);
       expect(viewModel.providerSession?.canWrite, isTrue);
       expect(viewModel.providerSession?.canCreateBranch, isTrue);
