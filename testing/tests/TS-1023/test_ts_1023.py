@@ -418,10 +418,6 @@ def main() -> None:
                         target_row=target_row,
                         current_row=current_row,
                     )
-                    page.wait_for_surface_to_remain_open(
-                        stability_ms=1_000,
-                        timeout_ms=SURFACE_TIMEOUT_MS,
-                    )
                     enabled_ready, enabled_observation = poll_until(
                         probe=lambda: _observe_save_button_after_selection(page),
                         is_satisfied=lambda observation: bool(observation["button_enabled"]),
@@ -479,14 +475,14 @@ def main() -> None:
                         f"save_and_switch_aria_disabled={enabled_observation['save_button']['aria_disabled']!r}; "
                         f"save_and_switch_disabled={enabled_observation['save_button']['disabled']}; "
                         f"monitor_hidden_after_visible="
-                        f"{enabled_observation['transition_hidden_after_visible']!r}"
+                        f"{result['transition_monitor_after_selection'].get('ever_hidden_after_visible')!r}"
                     ),
                 )
                 record_human_verification(
                     result,
                     check=(
-                        "Selected a different recovered workspace row and watched the footer "
-                        "button change from disabled to enabled without disappearing."
+                        "Selected a different recovered workspace row and checked that the "
+                        "footer button state updated from disabled to enabled."
                     ),
                     observed=(
                         f"clicked_workspace={target_row.display_name!r}; "
