@@ -20,62 +20,72 @@ from testing.core.interfaces.github_accessibility_pull_request_gate_probe import
 from testing.core.interfaces.github_workflow_run_log_reader import (  # noqa: E402
     GitHubWorkflowRunLogReader,
 )
-from testing.tests.support.github_accessibility_wrapper_failure_probe_factory import (  # noqa: E402
-    create_github_accessibility_wrapper_failure_probe,
-    create_github_accessibility_wrapper_failure_run_log_reader,
+from testing.tests.support.github_accessibility_log_validation_step_presence_probe_factory import (  # noqa: E402
+    create_github_accessibility_log_validation_step_presence_probe,
+    create_github_accessibility_log_validation_step_presence_run_log_reader,
 )
 
-TICKET_KEY = "TS-969"
+TICKET_KEY = "TS-970"
 TEST_CASE_TITLE = (
-    "CI contract validation failure - standardized wrapper ensures failure propagation"
+    "Flutter Required Checks aggregate status depends on accessibility contract validation"
 )
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-969/test_ts_969.py"
-TEST_FILE_PATH = "testing/tests/TS-969/test_ts_969.py"
-CONFIG_PATH = REPO_ROOT / "testing/tests/TS-969/config.yaml"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-970/test_ts_970.py"
+TEST_FILE_PATH = "testing/tests/TS-970/test_ts_970.py"
+CONFIG_PATH = REPO_ROOT / "testing/tests/TS-970/config.yaml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
-DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
-    "Invoke the standardized CI test wrapper to execute a contract validation script that is designed to fail.",
-    "Inspect the execution logs to ensure the error was captured.",
-    "Verify the final exit code of the wrapper process.",
+    "Create a Pull Request that violates the accessibility contract by removing the mandatory `log-validation` step from the workflow.",
+    "Monitor the status of the `Flutter Required Checks` status check in the GitHub Pull Request interface.",
+    "Check if the Pull Request is allowed to merge while the accessibility contract check is failing.",
 ]
 EXPECTED_RESULT = (
-    "The wrapper identifies the validation failure and returns exit code 1, "
-    "preventing the CI step from allowing a contract violation to pass unnoticed."
+    "The `Flutter Required Checks` status remains in a failed state because the accessibility "
+    "contract validation fails, and the pull request merge is blocked."
 )
 EXPECTED_FAILURE_CONCLUSION = "failure"
-WRAPPER_STEP_PATTERN = re.compile(
-    r"Run axe-core accessibility checks",
-    re.IGNORECASE,
-)
-FAILURE_MESSAGE_PATTERNS = (
-    re.compile(r"TS-969 simulated contract validation failure", re.IGNORECASE),
+EXPECTED_MERGEABLE_STATE = "blocked"
+LOG_VALIDATION_STEP_PATTERN = re.compile(r"\blog[- ]validation\b", re.IGNORECASE)
+MISSING_STEP_MESSAGE_PATTERNS = (
     re.compile(
-        r"standardized wrapper must propagate exit code 1",
+        r"expected the accessibility workflow to expose a contributor-visible "
+        r"`?log-validation`? step",
         re.IGNORECASE,
     ),
-)
-EXIT_CODE_PATTERN = re.compile(
-    r"process completed with exit code (?P<code>\d+)",
-    re.IGNORECASE,
+    re.compile(
+        r"expected `?log-validation`? to run after the axe-core accessibility scan",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"expected the `?log-validation`? step to invoke the accessibility log validator",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"log-validation[^\n]*missing",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"missing[^\n]*log-validation",
+        re.IGNORECASE,
+    ),
 )
 
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     config = GitHubAccessibilityPullRequestGateConfig.from_file(CONFIG_PATH)
-    probe = create_github_accessibility_wrapper_failure_probe(
+    probe = create_github_accessibility_log_validation_step_presence_probe(
         REPO_ROOT,
         config_path=CONFIG_PATH,
     )
-    log_reader = create_github_accessibility_wrapper_failure_run_log_reader(REPO_ROOT)
+    log_reader = create_github_accessibility_log_validation_step_presence_run_log_reader(
+        REPO_ROOT
+    )
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -100,35 +110,32 @@ def main() -> None:
             observation,
             log_reader=log_reader,
         )
-        wrapper_step_output = _extract_step_output(full_run_log_text, WRAPPER_STEP_PATTERN)
         result["full_run_log_error"] = full_run_log_error
-        result["wrapper_step_output"] = wrapper_step_output
-        result["wrapper_failure_message"] = _extract_failure_message(wrapper_step_output)
-        result["wrapper_exit_code"] = _extract_exit_code(wrapper_step_output)
         result["full_run_log_excerpt"] = _extract_relevant_full_log_excerpt(
             full_run_log_text,
             observation=observation,
         )
 
         failures: list[str] = []
-        _evaluate_wrapper_invocation(result, observation, failures)
-        _evaluate_error_captured(
+        _evaluate_pull_request_creation(result, observation, failures)
+        _evaluate_aggregate_required_status(
             result,
             observation,
             failures,
+            expected_workflow_name=config.target_workflow_name,
             full_run_log_text=full_run_log_text,
             full_run_log_error=full_run_log_error,
         )
-        _evaluate_wrapper_exit_code(
+        _evaluate_merge_block(
             result,
             observation,
             failures,
-            full_run_log_text=full_run_log_text,
-            wrapper_step_output=wrapper_step_output,
+            expected_workflow_name=config.target_workflow_name,
         )
         _record_live_user_verification(
             result,
             observation,
+            expected_workflow_name=config.target_workflow_name,
             full_run_log_text=full_run_log_text,
             full_run_log_error=full_run_log_error,
         )
@@ -142,7 +149,7 @@ def main() -> None:
         raise
 
     _write_pass_outputs(result)
-    print("TS-969 passed")
+    print("TS-970 passed")
 
 
 def _read_full_run_log(
@@ -158,31 +165,26 @@ def _read_full_run_log(
         return "", f"{type(error).__name__}: {error}"
 
 
-def _evaluate_wrapper_invocation(
+def _evaluate_pull_request_creation(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
 ) -> None:
     step_failures: list[str] = []
-    expected_files = [
-        observation.pull_request_probe_path,
-        observation.probe_render_host_path,
-    ]
+    expected_files = [observation.pull_request_probe_path]
     missing_files = [
         path for path in expected_files if path and path not in observation.pull_request_file_paths
     ]
     unexpected_files = [
         path
         for path in observation.pull_request_file_paths
-        if path not in expected_files
+        if path != observation.target_workflow_path
     ]
     if missing_files:
-        step_failures.append(
-            f"GitHub did not record the expected wrapper probe files: {missing_files}."
-        )
+        step_failures.append(f"GitHub did not record the mutated workflow file: {missing_files}.")
     if unexpected_files:
         step_failures.append(
-            "the disposable PR changed files outside the wrapper scenario under test: "
+            "the disposable PR changed files outside the workflow contract under test: "
             f"{unexpected_files}."
         )
     if observation.latest_pull_request_run_id is None:
@@ -204,8 +206,8 @@ def _evaluate_wrapper_invocation(
         return
 
     observed = (
-        "Created a disposable PR that redirects `npm run test:a11y` to a failing "
-        "contract-validation node test and triggered the live pull-request workflow.\n"
+        "Created a disposable PR that removes only the mandatory workflow `log-validation` "
+        "step and triggered the live pull-request CI run.\n"
         f"Pull Request URL: {observation.pull_request_url}\n"
         f"Observed PR files: {observation.pull_request_file_paths}\n"
         f"Workflow run URL: {observation.latest_pull_request_run_url}\n"
@@ -214,37 +216,50 @@ def _evaluate_wrapper_invocation(
     _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
 
 
-def _evaluate_error_captured(
+def _evaluate_aggregate_required_status(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
     *,
+    expected_workflow_name: str,
     full_run_log_text: str,
     full_run_log_error: str | None,
 ) -> None:
     step_failures: list[str] = []
-    wrapper_step_output = _extract_step_output(full_run_log_text, WRAPPER_STEP_PATTERN)
-    failure_message = _extract_failure_message(wrapper_step_output)
-    wrapper_step_visible = _has_wrapper_step(
-        observation.observed_step_names,
-        full_run_log_text,
-    )
-
+    missing_step_message = _extract_missing_step_message(full_run_log_text)
+    observed_workflow_names = observation.observed_status_check_workflow_names or []
+    failed_workflow_names = observation.failed_status_check_workflow_names or []
+    if observation.latest_pull_request_run_event != "pull_request":
+        step_failures.append(
+            f"the observed workflow event was `{observation.latest_pull_request_run_event or '<none>'}` instead of `pull_request`."
+        )
+    if observation.latest_pull_request_run_status != "completed":
+        step_failures.append(
+            f"the workflow run never completed; observed status was `{observation.latest_pull_request_run_status or '<none>'}`."
+        )
+    if observation.latest_pull_request_run_conclusion != EXPECTED_FAILURE_CONCLUSION:
+        step_failures.append(
+            "the aggregate workflow did not finish in a failed state; observed conclusion "
+            f"was `{observation.latest_pull_request_run_conclusion or '<none>'}`."
+        )
+    if observation.pull_request_status_state != EXPECTED_FAILURE_CONCLUSION:
+        step_failures.append(
+            "the contributor-visible aggregate PR status did not report failure; observed "
+            f"status state was `{observation.pull_request_status_state or '<none>'}`."
+        )
+    if expected_workflow_name not in observed_workflow_names:
+        step_failures.append(
+            f"the PR checks surface did not expose the `{expected_workflow_name}` aggregate workflow."
+        )
+    if expected_workflow_name not in failed_workflow_names:
+        step_failures.append(
+            f"the PR checks surface did not show `{expected_workflow_name}` as a failed workflow."
+        )
     if full_run_log_error is not None:
+        step_failures.append(f"the hosted run log could not be read: {full_run_log_error}.")
+    if missing_step_message is None:
         step_failures.append(
-            f"the hosted run log could not be read: {full_run_log_error}."
-        )
-    if not wrapper_step_visible:
-        step_failures.append(
-            "the CI output did not expose the `Run axe-core accessibility checks` wrapper step."
-        )
-    if not wrapper_step_output.strip():
-        step_failures.append(
-            "the hosted run log did not include output from the wrapper step."
-        )
-    if failure_message is None:
-        step_failures.append(
-            "the wrapper step log did not capture the failing contract-validation error message."
+            "the CI output did not report that the `log-validation` step was missing from the accessibility contract."
         )
 
     if step_failures:
@@ -253,8 +268,13 @@ def _evaluate_error_captured(
             + " ".join(step_failures)
             + "\n"
             + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + f"Observed steps: {observation.observed_step_names or ['<none>']}\n"
-            + "Wrapper step excerpt:\n"
+            + "Run status/conclusion: "
+            + f"{observation.latest_pull_request_run_status or '<none>'}/"
+            + f"{observation.latest_pull_request_run_conclusion or '<none>'}\n"
+            + f"PR status state: {observation.pull_request_status_state or '<none>'}\n"
+            + f"Observed workflow names: {observed_workflow_names or ['<none>']}\n"
+            + f"Failed workflow names: {failed_workflow_names or ['<none>']}\n"
+            + "Full run log excerpt:\n"
             + (
                 _extract_relevant_full_log_excerpt(
                     full_run_log_text,
@@ -268,51 +288,35 @@ def _evaluate_error_captured(
         return
 
     observed = (
-        "Inspected the wrapper-step log and found the failing contract-validation "
-        "message captured in the contributor-visible GitHub Actions output.\n"
+        "Observed the contributor-visible `Flutter Required Checks` aggregate status fail after "
+        "the accessibility contract validation reported the missing `log-validation` step.\n"
         f"Run URL: {observation.latest_pull_request_run_url}\n"
-        f"Observed steps: {observation.observed_step_names}\n"
-        f"Failure message: {failure_message}"
+        f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
+        f"PR status state: {observation.pull_request_status_state}\n"
+        f"Observed workflow names: {observed_workflow_names}\n"
+        f"Failed workflow names: {failed_workflow_names}\n"
+        f"Missing-step message: {missing_step_message}"
     )
     _record_step(result, step=2, status="passed", action=REQUEST_STEPS[1], observed=observed)
 
 
-def _evaluate_wrapper_exit_code(
+def _evaluate_merge_block(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     failures: list[str],
     *,
-    full_run_log_text: str,
-    wrapper_step_output: str,
+    expected_workflow_name: str,
 ) -> None:
     step_failures: list[str] = []
-    exit_code = _extract_exit_code(wrapper_step_output)
-    if observation.latest_pull_request_run_event != "pull_request":
+    if observation.pull_request_mergeable_state != EXPECTED_MERGEABLE_STATE:
         step_failures.append(
-            f"the observed workflow event was `{observation.latest_pull_request_run_event or '<none>'}` instead of `pull_request`."
+            "GitHub did not report the disposable pull request as merge-blocked after the "
+            f"failing `{expected_workflow_name}` status; observed mergeable state was "
+            f"`{observation.pull_request_mergeable_state or '<none>'}`."
         )
-    if observation.latest_pull_request_run_status != "completed":
+    if expected_workflow_name not in (observation.failed_status_check_workflow_names or []):
         step_failures.append(
-            f"the workflow run never completed; observed status was `{observation.latest_pull_request_run_status or '<none>'}`."
-        )
-    if observation.latest_pull_request_run_conclusion != EXPECTED_FAILURE_CONCLUSION:
-        step_failures.append(
-            "the overall CI workflow did not finish in a failed state; observed conclusion "
-            f"was `{observation.latest_pull_request_run_conclusion or '<none>'}`."
-        )
-    if observation.pull_request_status_state != EXPECTED_FAILURE_CONCLUSION:
-        step_failures.append(
-            "the contributor-visible pull request checks did not report failure; observed "
-            f"status state was `{observation.pull_request_status_state or '<none>'}`."
-        )
-    if not wrapper_step_output.strip():
-        step_failures.append(
-            "the hosted run log did not include output from the `Run axe-core accessibility checks` wrapper step."
-        )
-    if exit_code != "1":
-        step_failures.append(
-            "the wrapper step did not report `Process completed with exit code 1` in its own output; "
-            f"observed exit code was `{exit_code or '<none>'}`."
+            f"`{expected_workflow_name}` was not among the failed contributor-visible workflows."
         )
 
     if step_failures:
@@ -320,37 +324,25 @@ def _evaluate_wrapper_exit_code(
             "Step 3 failed: "
             + " ".join(step_failures)
             + "\n"
-            + f"Run URL: {observation.latest_pull_request_run_url or '<none>'}\n"
-            + "Run status/conclusion: "
-            + f"{observation.latest_pull_request_run_status or '<none>'}/"
-            + f"{observation.latest_pull_request_run_conclusion or '<none>'}\n"
-            + f"Observed pull-request status state: {observation.pull_request_status_state or '<none>'}\n"
-            + f"Observed failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
-            + "Observed failed workflows: "
-            + f"{observation.failed_status_check_workflow_names or ['<none>']}\n"
-            + f"Observed exit code: {exit_code or '<none>'}\n"
-            + "Relevant log excerpt:\n"
-            + (
-                _extract_relevant_full_log_excerpt(
-                    full_run_log_text,
-                    observation=observation,
-                )
-                or "<none>"
-            )
+            + f"Pull Request URL: {observation.pull_request_url}\n"
+            + f"Checks URL: {observation.pull_request_checks_url}\n"
+            + f"Mergeable state: {observation.pull_request_mergeable_state or '<none>'}\n"
+            + f"Failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
+            + "Failed workflows: "
+            + f"{observation.failed_status_check_workflow_names or ['<none>']}"
         )
         failures.append(message)
         _record_step(result, step=3, status="failed", action=REQUEST_STEPS[2], observed=message)
         return
 
     observed = (
-        "Confirmed the wrapper propagated the failing contract-validation result as "
-        "exit code 1 and the CI surface finished in a failed state.\n"
-        f"Run URL: {observation.latest_pull_request_run_url}\n"
-        f"Run status/conclusion: {observation.latest_pull_request_run_status}/{observation.latest_pull_request_run_conclusion}\n"
-        f"Pull-request status state: {observation.pull_request_status_state}\n"
+        "Confirmed the disposable PR stayed merge-blocked while the failed "
+        "`Flutter Required Checks` aggregate status remained visible in the PR checks surface.\n"
+        f"Pull Request URL: {observation.pull_request_url}\n"
+        f"Checks URL: {observation.pull_request_checks_url}\n"
+        f"Mergeable state: {observation.pull_request_mergeable_state}\n"
         f"Failed status checks: {observation.failed_status_check_names or ['<none>']}\n"
-        f"Failed workflows: {observation.failed_status_check_workflow_names or ['<none>']}\n"
-        f"Observed exit code: {exit_code}"
+        f"Failed workflows: {observation.failed_status_check_workflow_names or ['<none>']}"
     )
     _record_step(result, step=3, status="passed", action=REQUEST_STEPS[2], observed=observed)
 
@@ -359,90 +351,46 @@ def _record_live_user_verification(
     result: dict[str, object],
     observation: GitHubAccessibilityPullRequestGateObservation,
     *,
+    expected_workflow_name: str,
     full_run_log_text: str,
     full_run_log_error: str | None,
 ) -> None:
-    wrapper_step_output = _extract_step_output(full_run_log_text, WRAPPER_STEP_PATTERN)
     _record_human_verification(
         result,
         check=(
-            "Reviewed the same contributor-visible PR checks surface and workflow summary a "
-            "maintainer would use before merging."
+            "Reviewed the same contributor-visible pull request checks summary a maintainer "
+            "would see before attempting to merge."
         ),
         observed=(
-            f"PR checks URL: `{observation.pull_request_checks_url}`; run URL: "
-            f"`{observation.latest_pull_request_run_url or '<none>'}`; workflow conclusion: "
-            f"`{observation.latest_pull_request_run_conclusion or '<none>'}`; pull-request "
-            f"status state: `{observation.pull_request_status_state or '<none>'}`; failed "
-            f"checks: `{observation.failed_status_check_names or ['<none>']}`; failed "
-            f"workflows: `{observation.failed_status_check_workflow_names or ['<none>']}`."
+            f"PR checks URL: `{observation.pull_request_checks_url}`; failed workflows: "
+            f"`{observation.failed_status_check_workflow_names or ['<none>']}`; PR status "
+            f"state: `{observation.pull_request_status_state or '<none>'}`; mergeable state: "
+            f"`{observation.pull_request_mergeable_state or '<none>'}`; aggregate workflow "
+            f"expected: `{expected_workflow_name}`."
         ),
     )
     _record_human_verification(
         result,
         check=(
-            "Read the hosted GitHub Actions log the way a reviewer would to confirm the "
-            "wrapper step showed the failure message and exit code."
+            "Read the hosted GitHub Actions log like a reviewer would to confirm the aggregate "
+            "status failure was caused by the accessibility contract validation."
         ),
         observed=(
-            f"Log read error: `{full_run_log_error or '<none>'}`; wrapper step visible: "
-            f"`{_has_wrapper_step(observation.observed_step_names, full_run_log_text)}`; failure "
-            f"message: `{_extract_failure_message(wrapper_step_output) or '<none>'}`; wrapper "
-            f"exit code: `{_extract_exit_code(wrapper_step_output) or '<none>'}`; "
-            f"log excerpt: `{_one_line(_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation)) or '<none>'}`."
+            f"Run URL: `{observation.latest_pull_request_run_url or '<none>'}`; log read error: "
+            f"`{full_run_log_error or '<none>'}`; missing-step message: "
+            f"`{_extract_missing_step_message(full_run_log_text) or '<none>'}`; visible steps: "
+            f"`{observation.observed_step_names or ['<none>']}`; log excerpt: "
+            f"`{_one_line(_extract_relevant_full_log_excerpt(full_run_log_text, observation=observation)) or '<none>'}`."
         ),
     )
 
 
-def _has_wrapper_step(step_names: list[str], full_run_log_text: str) -> bool:
-    if any(WRAPPER_STEP_PATTERN.search(name or "") for name in step_names):
-        return True
-    return any(
-        WRAPPER_STEP_PATTERN.search(step_name)
-        for step_name in _surface_step_names_from_log(full_run_log_text)
-    )
-
-
-def _surface_step_names_from_log(full_run_log_text: str) -> list[str]:
-    step_names: list[str] = []
-    for raw_line in full_run_log_text.splitlines():
-        parts = raw_line.lstrip("\ufeff").split("\t", 2)
-        if len(parts) != 3:
-            continue
-        step_name = parts[1].strip()
-        if step_name:
-            step_names.append(step_name)
-    return step_names
-
-
-def _extract_step_output(full_run_log_text: str, step_pattern: re.Pattern[str]) -> str:
-    lines: list[str] = []
-    for raw_line in full_run_log_text.splitlines():
-        parts = raw_line.lstrip("\ufeff").split("\t", 2)
-        if len(parts) != 3:
-            continue
-        step_name = parts[1].strip()
-        if not step_pattern.search(step_name):
-            continue
-        payload = parts[2].strip()
-        if payload:
-            lines.append(payload)
-    return "\n".join(lines)
-
-
-def _extract_failure_message(text: str) -> str | None:
-    for pattern in FAILURE_MESSAGE_PATTERNS:
+def _extract_missing_step_message(text: str) -> str | None:
+    for pattern in MISSING_STEP_MESSAGE_PATTERNS:
         match = pattern.search(text)
         if match is not None:
             return _one_line(match.group(0))
     return None
-
-
-def _extract_exit_code(text: str) -> str | None:
-    match = EXIT_CODE_PATTERN.search(text)
-    if match is None:
-        return None
-    return match.group("code")
 
 
 def _extract_relevant_full_log_excerpt(
@@ -450,19 +398,18 @@ def _extract_relevant_full_log_excerpt(
     *,
     observation: GitHubAccessibilityPullRequestGateObservation,
 ) -> str:
-    wrapper_step_output = _extract_step_output(full_run_log_text, WRAPPER_STEP_PATTERN)
-    if wrapper_step_output.strip():
-        return _snippet(wrapper_step_output, limit=1800)
     if not full_run_log_text.strip():
         return observation.run_log_excerpt or ""
 
     lowered = full_run_log_text.lower()
     markers = [
-        "run axe-core accessibility checks",
-        "ts-969 simulated contract validation failure",
-        "standardized wrapper must propagate exit code 1",
+        "log-validation",
+        "flutter required checks",
+        "contributor-visible",
+        "workflow configuration",
+        "unit-tests.yml",
+        "run unit and golden tests",
         "process completed with exit code 1",
-        "npm run test:a11y",
     ]
     for marker in markers:
         index = lowered.find(marker)
@@ -491,14 +438,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(
-        _review_replies_payload(result, passed=True),
-        encoding="utf-8",
-    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-969 failed"))
+    error = str(result.get("error", "AssertionError: TS-970 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -516,10 +459,6 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
-    REVIEW_REPLIES_PATH.write_text(
-        _review_replies_payload(result, passed=False),
-        encoding="utf-8",
-    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -532,9 +471,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Created a disposable pull request against the live repository that patches {{package.json}} so {{npm run test:a11y}} runs a ticket-specific failing contract-validation node test.",
-        "* Waited for the real {{Flutter Required Checks}} pull-request workflow to complete on GitHub Actions.",
-        "* Inspected the contributor-visible {{Run axe-core accessibility checks}} wrapper log for the captured failure message and {{Process completed with exit code 1}}.",
+        "* Created a disposable pull request against the live repository that removes only the mandatory {{log-validation}} step from {{.github/workflows/unit-tests.yml}} to violate the accessibility contract.",
+        "* Waited for the real {{Flutter Required Checks}} pull-request workflow and contributor-visible PR checks surface on GitHub.",
+        "* Verified that the aggregate {{Flutter Required Checks}} status failed because of the missing-{{log-validation}} accessibility contract error and kept the PR merge-blocked.",
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -576,9 +515,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Created a disposable pull request against the live repository that patches `package.json` so `npm run test:a11y` runs a ticket-specific failing contract-validation node test.",
-        "- Waited for the real `Flutter Required Checks` pull-request workflow to complete on GitHub Actions.",
-        "- Inspected the contributor-visible `Run axe-core accessibility checks` wrapper log for the captured failure message and `Process completed with exit code 1`.",
+        "- Created a disposable pull request against the live repository that removes only the mandatory `log-validation` step from `.github/workflows/unit-tests.yml` to violate the accessibility contract.",
+        "- Waited for the real `Flutter Required Checks` pull-request workflow and contributor-visible PR checks surface on GitHub.",
+        "- Verified that the aggregate `Flutter Required Checks` status failed because of the missing-`log-validation` accessibility contract error and kept the PR merge-blocked.",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -620,8 +559,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-969 as a disposable PR probe against the live GitHub Actions CI wrapper.",
-        "- The probe redirects `npm run test:a11y` to a failing contract-validation node test and checks whether the wrapper logs the error and exits with code 1.",
+        "- Added TS-970 as a disposable PR probe against the live GitHub Actions accessibility contract.",
+        "- The probe removes the workflow `log-validation` step and checks whether the contributor-visible `Flutter Required Checks` aggregate status fails and blocks merge.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -630,7 +569,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"using GitHub CLI on `{result['os']}`."
         ),
         (
-            "- Outcome: the live wrapper captured the failing contract-validation test and propagated exit code 1."
+            "- Outcome: the live PR checks surface failed `Flutter Required Checks` and blocked merge when accessibility contract validation failed."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -655,7 +594,7 @@ def _bug_description(result: dict[str, object]) -> str:
         if isinstance(step, dict) and isinstance(step.get("step"), int)
     }
     return (
-        f"# {TICKET_KEY} - CI wrapper does not propagate failing contract-validation exit code\n\n"
+        f"# {TICKET_KEY} - Flutter Required Checks does not fail when accessibility contract validation fails\n\n"
         "## Steps to reproduce\n"
         f"1. {REQUEST_STEPS[0]}  \n"
         f"   - Actual: {step_map.get(1, {}).get('observed', '<missing>')}  \n"
@@ -672,10 +611,10 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** The live `Run axe-core accessibility checks` wrapper did not expose the "
-        "ticket-specific contract-validation failure message and/or did not finish with "
-        "`Process completed with exit code 1`, so the failing validation could still pass "
-        "through the CI step without the expected non-zero exit.\n\n"
+        "- **Actual:** The live disposable PR did not expose a contributor-visible failing "
+        "`Flutter Required Checks` aggregate status tied to the missing-`log-validation` "
+        "accessibility contract validation and/or did not leave the pull request merge-blocked "
+        "after removing that step from `.github/workflows/unit-tests.yml`.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('pull_request_url', '<missing pull request URL>')}\n"
         "- **Browser:** GitHub CLI / GitHub Actions hosted log surface\n"
@@ -687,57 +626,18 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Run command:** `{result.get('run_command')}`\n"
         f"- **Config:** `{CONFIG_PATH}`\n\n"
         "## Screenshots or logs\n"
-        "- **Wrapper step output:**\n"
+        "- **Observed failed status checks:**\n"
         "```text\n"
-        f"{result.get('wrapper_step_output', '<missing wrapper step output>')}\n"
+        f"{result.get('failed_status_check_names', ['<none>'])}\n"
+        "```\n"
+        "- **Observed failed workflows:**\n"
+        "```text\n"
+        f"{result.get('failed_status_check_workflow_names', ['<none>'])}\n"
         "```\n"
         "- **Full workflow/log excerpt:**\n"
         "```text\n"
         f"{result.get('full_run_log_excerpt', '<missing log excerpt>')}\n"
         "```\n"
-    )
-
-
-def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
-    replies = [
-        {
-            "inReplyToId": thread.get("rootCommentId"),
-            "threadId": thread.get("threadId"),
-            "reply": _review_reply_text(result=result, passed=passed),
-        }
-        for thread in _discussion_threads()
-    ]
-    return json.dumps({"replies": replies}, indent=2) + "\n"
-
-
-def _discussion_threads() -> list[dict[str, object]]:
-    if not DISCUSSIONS_RAW_PATH.is_file():
-        return []
-    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
-    threads = raw.get("threads")
-    if not isinstance(threads, list):
-        return []
-    return [
-        thread
-        for thread in threads
-        if isinstance(thread, dict)
-        and thread.get("resolved") is False
-        and thread.get("rootCommentId") is not None
-        and thread.get("threadId") is not None
-    ]
-
-
-def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
-    rerun_summary = (
-        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
-        if passed
-        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
-    )
-    return (
-        "Fixed: step 3 now derives `Process completed with exit code 1` only from the "
-        "`Run axe-core accessibility checks` wrapper-step output, and TS-969 now includes "
-        "a regression that rejects exit-code lines emitted by other workflow steps. "
-        f"{rerun_summary}"
     )
 
 
