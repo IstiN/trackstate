@@ -62,7 +62,7 @@ SECOND_WORKSPACE_WRITE_BRANCH = "ts-1015-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-1015-third"
 POST_CLICK_STABILITY_MS = 1_000
 SURFACE_TIMEOUT_MS = 4_000
-LINKED_BUGS = ["TS-1010"]
+LINKED_BUGS = ["TS-1010", "TS-1017"]
 
 PRECONDITIONS = [
     "The workspace switcher is open.",
@@ -303,6 +303,20 @@ def main() -> None:
                         focus_ownership_after_click,
                     )
 
+                record_human_verification(
+                    result,
+                    check=(
+                        "Clicked the non-focusable workspace row like a user and watched whether the "
+                        "workspace switcher stayed on screen with its saved workspace rows still visible."
+                    ),
+                    observed=(
+                        f"title_visible={bool(switcher_after_click and 'Workspace switcher' in switcher_after_click.switcher_text)}; "
+                        f"saved_workspace_rows_after_click={len(rows_after_click) if rows_after_click is not None else None}; "
+                        f"selected_workspace_after_click={_selected_workspace_name(rows_after_click) if rows_after_click else None!r}; "
+                        f"focus_after_click={focus_after_click.accessible_name!r}; "
+                        f"monitor_hidden_after_visible={monitor_after_click.ever_hidden_after_visible if monitor_after_click else None}"
+                    ),
+                )
                 try:
                     if step4_error is not None:
                         raise AssertionError(
@@ -344,19 +358,6 @@ def main() -> None:
                         f"row_count={switcher_after_click.row_count if switcher_after_click else None}; "
                         f"monitor_hidden_after_visible={monitor_after_click.ever_hidden_after_visible if monitor_after_click else None}; "
                         f"selected_workspace_after_click={_selected_workspace_name(rows_after_click) if rows_after_click else None!r}."
-                    ),
-                )
-                record_human_verification(
-                    result,
-                    check=(
-                        "Clicked the non-focusable workspace row like a user and watched whether the "
-                        "workspace switcher stayed on screen instead of collapsing."
-                    ),
-                    observed=(
-                        f"title_visible={bool(switcher_after_click and 'Workspace switcher' in switcher_after_click.switcher_text)}; "
-                        f"selected_workspace_after_click={_selected_workspace_name(rows_after_click) if rows_after_click else None!r}; "
-                        f"focus_after_click={focus_after_click.accessible_name!r}; "
-                        f"monitor_hidden_after_visible={monitor_after_click.ever_hidden_after_visible if monitor_after_click else None}"
                     ),
                 )
             except Exception:
