@@ -3503,7 +3503,10 @@ class LiveWorkspaceSwitcherPage:
                   if (buttonLabels.some((label) => label.includes('Local Git'))) {
                     return null;
                   }
-                  if (!acceptedActions.some((label) => actionLabels.includes(label))) {
+                  if (
+                    acceptedActions.length > 0
+                    && !acceptedActions.some((label) => actionLabels.includes(label))
+                  ) {
                     return null;
                   }
                   return true;
