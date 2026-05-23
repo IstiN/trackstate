@@ -1230,81 +1230,114 @@ class LiveWorkspaceSwitcherPage:
         *,
         timeout_ms: int = 30_000,
     ) -> WorkspaceSwitcherButtonFocusabilityObservation:
-        payload = self._session.wait_for_function(
-            """
-            ({ heading, label }) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const displayNameHint = normalize(label.split(',')[0] || '');
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const visibleText = (element) =>
-                normalize(element?.innerText || element?.textContent || '');
-              const labelFor = (element) =>
-                normalize(
-                  element?.getAttribute?.('aria-label')
-                  || element?.getAttribute?.('placeholder')
-                  || element?.getAttribute?.('title')
-                  || element?.innerText
-                  || element?.textContent
-                  || '',
-                );
-              const buttonSelector = [
-                'flt-semantics[role="button"]',
-                'button',
-                '[role="button"]',
-              ].join(',');
-              const candidate = Array.from(document.querySelectorAll(buttonSelector))
-                .filter(isVisible)
-                .find((element) => {
-                  const elementLabel = labelFor(element);
-                  const elementText = visibleText(element);
-                  const combined = normalize(`${elementLabel} ${elementText}`);
-                  const isActionButton = elementLabel.startsWith('Delete:')
-                    || elementLabel.startsWith('Open:')
-                    || elementText === 'Active';
-                  return elementLabel === label
-                    || elementText === label
-                    || (
-                      displayNameHint.length > 0
-                      && !isActionButton
-                      && (
-                        elementLabel === displayNameHint
-                        || elementText === displayNameHint
-                        || combined.includes(displayNameHint)
-                      )
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ heading, label }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const displayNameHint = normalize(label.split(',')[0] || '');
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
                     );
-                });
-              if (!candidate) {
-                return null;
-              }
-              const active = document.activeElement instanceof Element
-                ? document.activeElement
-                : null;
-              const tabindex = candidate.getAttribute('tabindex');
-              return {
-                label: labelFor(candidate),
-                visibleText: visibleText(candidate),
-                role: candidate.getAttribute('role'),
-                tagName: candidate.tagName,
-                tabindex,
-                keyboardFocusable: candidate.tabIndex >= 0,
-                activeWithin: Boolean(active && (active === candidate || candidate.contains(active))),
-                outerHTML: candidate.outerHTML,
-              };
-            }
-            """,
-            arg={"heading": self._switcher_heading, "label": label},
-            timeout_ms=timeout_ms,
-        )
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const buttonSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                  ].join(',');
+                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                    .filter(isVisible)
+                    .find((element) => {
+                      const elementLabel = labelFor(element);
+                      const elementText = visibleText(element);
+                      const combined = normalize(`${elementLabel} ${elementText}`);
+                      const isActionButton = elementLabel.startsWith('Delete:')
+                        || elementLabel.startsWith('Open:')
+                        || elementText === 'Active';
+                      return elementLabel === label
+                        || elementText === label
+                        || (
+                          displayNameHint.length > 0
+                          && !isActionButton
+                          && (
+                            elementLabel === displayNameHint
+                            || elementText === displayNameHint
+                            || combined.includes(displayNameHint)
+                          )
+                        );
+                    });
+                  if (!candidate) {
+                    return null;
+                  }
+                  const active = document.activeElement instanceof Element
+                    ? document.activeElement
+                    : null;
+                  const tabindex = candidate.getAttribute('tabindex');
+                  return {
+                    label: labelFor(candidate),
+                    visibleText: visibleText(candidate),
+                    role: candidate.getAttribute('role'),
+                    tagName: candidate.tagName,
+                    tabindex,
+                    keyboardFocusable: candidate.tabIndex >= 0,
+                    activeWithin: Boolean(active && (active === candidate || candidate.contains(active))),
+                    outerHTML: candidate.outerHTML,
+                  };
+                }
+                """,
+                arg={"heading": self._switcher_heading, "label": label},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a visible button labelled "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
         if not isinstance(payload, dict):
             raise AssertionError(
                 f'The open workspace switcher did not expose a visible button labelled "{label}".\n'

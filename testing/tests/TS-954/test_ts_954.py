@@ -247,7 +247,7 @@ def main() -> None:
                             f"outer_html={_compact_html(save_button_before.outer_html)!r}"
                         ),
                     )
-                except Exception as error:
+                except AssertionError as error:
                     message = str(error)
                     _record_step(
                         result,
@@ -344,7 +344,7 @@ def main() -> None:
                             f"next focus={_active_from_state(traversal_result['wrap_state_after_footer']).get('accessible_name')!r}."
                         ),
                     )
-                except Exception as error:
+                except AssertionError as error:
                     message = str(error)
                     _record_step(
                         result,
