@@ -48,11 +48,16 @@ def build_workspace_state(
     default_branch: str,
     local_display_name: str,
     hosted_display_name: str,
+    active_workspace: str = "local",
 ) -> dict[str, object]:
     local_id = f"local:{local_target}@{default_branch}"
     hosted_id = f"hosted:{repository.lower()}@{default_branch}"
+    if active_workspace not in {"local", "hosted"}:
+        raise ValueError(
+            "build_workspace_state active_workspace must be 'local' or 'hosted'.",
+        )
     return {
-        "activeWorkspaceId": local_id,
+        "activeWorkspaceId": hosted_id if active_workspace == "hosted" else local_id,
         "migrationComplete": True,
         "profiles": [
             {
