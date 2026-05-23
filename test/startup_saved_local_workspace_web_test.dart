@@ -23,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup clears an unavailable saved local workspace after the delayed /user probe crosses the startup timeout',
+    'web startup waits for the delayed /user probe before exposing the shell when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -85,7 +85,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(seconds: 11));
+      await tester.pump(const Duration(milliseconds: 750));
 
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.requestedPaths, contains('/user'));
@@ -98,9 +98,9 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
-      expect(find.text('Add workspace'), findsOneWidget);
+      expect(find.text('Add workspace'), findsNothing);
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
-      expect(savedStateBeforeProbe.activeWorkspaceId, isNull);
+      expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateBeforeProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -111,15 +111,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
-        findsNothing,
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
-      expect(find.text('Add workspace'), findsOneWidget);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
       final savedStateAfterProbe = await workspaceProfiles.loadState();
-      expect(savedStateAfterProbe.activeWorkspaceId, isNull);
+      expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
