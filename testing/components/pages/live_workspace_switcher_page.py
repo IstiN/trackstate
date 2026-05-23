@@ -184,6 +184,30 @@ class WorkspaceSwitcherOutsideDismissObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherDisabledOutsideTargetObservation:
+    click_x: float
+    click_y: float
+    target_tag_name: str
+    target_role: str | None
+    target_label: str
+    target_text: str
+    target_outer_html: str
+    target_disabled: bool
+    target_aria_disabled: str | None
+    target_pointer_events: str | None
+    target_within_switcher_dom: bool
+    target_within_panel_bounds: bool
+    point_target_tag_name: str
+    point_target_role: str | None
+    point_target_label: str
+    point_target_text: str
+    point_target_outer_html: str
+    point_target_within_switcher_dom: bool
+    point_target_within_panel_bounds: bool
+    context_text: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherBlurDismissObservation:
     before_focus_label: str | None
     before_focus_role: str | None
@@ -6964,6 +6988,244 @@ class LiveWorkspaceSwitcherPage:
             click_target=click_target,
             timeout_ms=timeout_ms,
         )
+
+    def observe_disabled_interactive_outside_panel(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherDisabledOutsideTargetObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ heading, panelLeft, panelTop, panelRight, panelBottom }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('data-semantics-label')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const interactiveSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                    'a[href]',
+                    'input',
+                    'textarea',
+                    'select',
+                    '[tabindex]',
+                  ].join(',');
+                  const isWorkspaceRow = (text) =>
+                    text.includes('Branch:')
+                    && text.includes('Delete')
+                    && (text.includes('Hosted') || text.includes('Local'))
+                    && (text.includes('Open') || text.includes('Active'));
+                  const panelContainsPoint = (x, y) =>
+                    x >= panelLeft
+                    && x <= panelRight
+                    && y >= panelTop
+                    && y <= panelBottom;
+                  const elements = Array.from(document.querySelectorAll('*')).filter(isVisible);
+                  const switcher = elements
+                    .map((element) => ({
+                      element,
+                      text: visibleText(element),
+                      area: (() => {
+                        const rect = element.getBoundingClientRect();
+                        return rect.width * rect.height;
+                      })(),
+                    }))
+                    .filter((candidate) =>
+                      candidate.text.includes(heading)
+                      && (
+                        candidate.text.includes('Saved workspaces')
+                        || candidate.text.includes('Save and switch')
+                        || candidate.text.includes('Add workspace')
+                        || candidate.text.includes('Hosted Local')
+                        || isWorkspaceRow(candidate.text)
+                      ),
+                    )
+                    .sort((left, right) => left.area - right.area)[0]?.element || null;
+                  if (!switcher) {
+                    return null;
+                  }
+
+                  const nearbyContextText = (centerX, centerY) => {
+                    const candidates = elements
+                      .filter((element) => !switcher.contains(element))
+                      .map((element) => {
+                        const label = labelFor(element);
+                        const text = visibleText(element);
+                        const summary = label || text;
+                        if (!summary || summary.length > 160) {
+                          return null;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const elementCenterX = rect.left + (rect.width / 2);
+                        const elementCenterY = rect.top + (rect.height / 2);
+                        return {
+                          summary,
+                          distance: Math.hypot(centerX - elementCenterX, centerY - elementCenterY),
+                        };
+                      })
+                      .filter((candidate) => candidate !== null)
+                      .sort((left, right) => left.distance - right.distance);
+                    return candidates[0]?.summary || '';
+                  };
+
+                  const candidates = Array.from(document.querySelectorAll(interactiveSelector))
+                    .filter(isVisible)
+                    .map((element) => {
+                      const rect = element.getBoundingClientRect();
+                      const clickX = rect.left + (rect.width / 2);
+                      const clickY = rect.top + (rect.height / 2);
+                      const style = window.getComputedStyle(element);
+                      const ariaDisabled = normalize(element.getAttribute('aria-disabled'));
+                      const disabled =
+                        typeof element.disabled === 'boolean'
+                          ? element.disabled
+                          : element.hasAttribute('disabled');
+                      const pointTarget = document.elementFromPoint(clickX, clickY);
+                      return {
+                        clickX,
+                        clickY,
+                        area: rect.width * rect.height,
+                        targetTagName: element.tagName.toLowerCase(),
+                        targetRole: element.getAttribute('role'),
+                        targetLabel: labelFor(element),
+                        targetText: visibleText(element),
+                        targetOuterHtml: (element.outerHTML || '').slice(0, 500),
+                        targetDisabled: disabled,
+                        targetAriaDisabled: ariaDisabled || null,
+                        targetPointerEvents: style.pointerEvents || null,
+                        targetWithinSwitcherDom: switcher.contains(element),
+                        targetWithinPanelBounds: panelContainsPoint(clickX, clickY),
+                        pointTargetTagName: pointTarget?.tagName?.toLowerCase?.() || '',
+                        pointTargetRole: pointTarget?.getAttribute?.('role') || null,
+                        pointTargetLabel: labelFor(pointTarget),
+                        pointTargetText: visibleText(pointTarget),
+                        pointTargetOuterHtml: ((pointTarget && pointTarget.outerHTML) || '').slice(0, 500),
+                        pointTargetWithinSwitcherDom: Boolean(pointTarget && switcher.contains(pointTarget)),
+                        pointTargetWithinPanelBounds: Boolean(
+                          pointTarget && panelContainsPoint(clickX, clickY),
+                        ),
+                        contextText: nearbyContextText(clickX, clickY),
+                        pointTargetIsDescendant: Boolean(
+                          pointTarget
+                          && (pointTarget === element || element.contains(pointTarget)),
+                        ),
+                      };
+                    })
+                    .filter((candidate) =>
+                      (candidate.targetDisabled || candidate.targetAriaDisabled === 'true')
+                      && !candidate.targetWithinSwitcherDom
+                      && !candidate.targetWithinPanelBounds
+                      && !candidate.pointTargetWithinSwitcherDom
+                      && !candidate.pointTargetWithinPanelBounds
+                      && candidate.clickX > 0
+                      && candidate.clickY > 0,
+                    )
+                    .sort((left, right) => {
+                      if (left.pointTargetIsDescendant !== right.pointTargetIsDescendant) {
+                        return left.pointTargetIsDescendant ? -1 : 1;
+                      }
+                      return left.area - right.area;
+                    });
+                  return candidates[0] || null;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "panelLeft": panel.left,
+                    "panelTop": panel.top,
+                    "panelRight": panel.left + panel.width,
+                    "panelBottom": panel.top + panel.height,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The open workspace switcher did not expose a visible disabled "
+                "interactive element outside the panel.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The disabled outside-control probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherDisabledOutsideTargetObservation(
+            click_x=float(payload.get("clickX", 0.0)),
+            click_y=float(payload.get("clickY", 0.0)),
+            target_tag_name=str(payload.get("targetTagName", "")),
+            target_role=(
+                str(payload.get("targetRole"))
+                if payload.get("targetRole") is not None
+                else None
+            ),
+            target_label=str(payload.get("targetLabel", "")),
+            target_text=str(payload.get("targetText", "")),
+            target_outer_html=str(payload.get("targetOuterHtml", "")),
+            target_disabled=bool(payload.get("targetDisabled")),
+            target_aria_disabled=(
+                str(payload.get("targetAriaDisabled"))
+                if payload.get("targetAriaDisabled") is not None
+                else None
+            ),
+            target_pointer_events=(
+                str(payload.get("targetPointerEvents"))
+                if payload.get("targetPointerEvents") is not None
+                else None
+            ),
+            target_within_switcher_dom=bool(payload.get("targetWithinSwitcherDom")),
+            target_within_panel_bounds=bool(payload.get("targetWithinPanelBounds")),
+            point_target_tag_name=str(payload.get("pointTargetTagName", "")),
+            point_target_role=(
+                str(payload.get("pointTargetRole"))
+                if payload.get("pointTargetRole") is not None
+                else None
+            ),
+            point_target_label=str(payload.get("pointTargetLabel", "")),
+            point_target_text=str(payload.get("pointTargetText", "")),
+            point_target_outer_html=str(payload.get("pointTargetOuterHtml", "")),
+            point_target_within_switcher_dom=bool(
+                payload.get("pointTargetWithinSwitcherDom"),
+            ),
+            point_target_within_panel_bounds=bool(
+                payload.get("pointTargetWithinPanelBounds"),
+            ),
+            context_text=str(payload.get("contextText", "")),
+        )
+
+    def click_disabled_interactive_outside_panel(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        observation: WorkspaceSwitcherDisabledOutsideTargetObservation | None = None,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherDisabledOutsideTargetObservation:
+        target = observation or self.observe_disabled_interactive_outside_panel(
+            panel=panel,
+            timeout_ms=timeout_ms,
+        )
+        self._session.mouse_click(target.click_x, target.click_y)
+        return target
 
     def click_neutral_content_outside_panel(
         self,
