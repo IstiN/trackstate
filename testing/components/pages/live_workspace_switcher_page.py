@@ -175,6 +175,21 @@ class WorkspaceSwitcherInternalClickObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherRowClickObservation:
+    display_name: str
+    click_x: float
+    click_y: float
+    target_tag_name: str
+    target_role: str | None
+    target_label: str
+    target_text: str
+    target_tabindex: str | None
+    target_disabled: bool
+    target_aria_current: str | None
+    target_identifier: str | None
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherOutsideDismissObservation:
     click_x: float
     click_y: float
@@ -3823,17 +3838,176 @@ class LiveWorkspaceSwitcherPage:
         display_name: str,
         *,
         timeout_ms: int = 10_000,
-    ) -> None:
-        rows = self.observe_saved_workspace_rows(timeout_ms=timeout_ms)
-        row = next((candidate for candidate in rows if candidate.display_name == display_name), None)
-        if row is None:
+    ) -> WorkspaceSwitcherRowClickObservation:
+        payload = self._session.evaluate(
+            """
+            ({ displayName }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const textFor = (element) => normalize(element?.innerText || element?.textContent || '');
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.getAttribute?.('title')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              const allCandidates = Array.from(
+                document.querySelectorAll(
+                  [
+                    '[data-trackstate-browser-focus-row-id]',
+                    '[data-trackstate-browser-focus-id]',
+                    '[flt-semantics-identifier]',
+                    '[aria-current]',
+                    '[aria-selected]',
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                  ].join(','),
+                ),
+              ).filter((element, index, all) => all.indexOf(element) === index);
+              const candidates = allCandidates
+                .filter((element) => isVisible(element))
+                .map((element) => {
+                  const label = labelFor(element);
+                  const text = textFor(element);
+                  const combined = normalize(`${label} ${text}`);
+                  const focusId = normalize(
+                    element.getAttribute('data-trackstate-browser-focus-id') || '',
+                  );
+                  const rowId = normalize(
+                    element.getAttribute('data-trackstate-browser-focus-row-id') || '',
+                  );
+                  const identifier = normalize(
+                    element.getAttribute('flt-semantics-identifier') || '',
+                  );
+                  const ariaCurrent = normalize(element.getAttribute('aria-current') || '');
+                  const ariaSelected = normalize(element.getAttribute('aria-selected') || '');
+                  const isActionButton =
+                    label.startsWith('Open: ')
+                    || label.startsWith('Delete: ')
+                    || text.startsWith('Open: ')
+                    || text.startsWith('Delete: ')
+                    || label === 'Active'
+                    || text === 'Active';
+                  const rowSpecificId =
+                    rowId.startsWith('trackstate-workspace-switcher-row-')
+                    || focusId.startsWith('trackstate-workspace-switcher-row-')
+                    || identifier.startsWith('trackstate-workspace-switcher-row-');
+                  const looksLikeCurrentRow =
+                    ariaCurrent.toLowerCase() === 'true'
+                    || ariaSelected.toLowerCase() === 'true'
+                    || combined.includes('Active');
+                  const matchesDisplayName = combined.includes(displayName);
+                  const rowLikeCandidate = rowSpecificId || looksLikeCurrentRow;
+                  if (
+                    !matchesDisplayName
+                    || !rowLikeCandidate
+                    || isActionButton
+                    || focusId.includes('trigger')
+                  ) {
+                    return null;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  const area = rect.width * rect.height;
+                  const disabled =
+                    typeof element.disabled === 'boolean'
+                      ? element.disabled
+                      : element.hasAttribute('disabled');
+                  return {
+                    element,
+                    label,
+                    text,
+                    focusId,
+                    rowId,
+                    identifier,
+                    ariaCurrent: ariaCurrent || null,
+                    tabindex: element.getAttribute('tabindex'),
+                    role: element.getAttribute('role'),
+                    tagName: element.tagName,
+                    disabled,
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area,
+                    score:
+                      (rowSpecificId ? 1_000_000 : 0)
+                      + (looksLikeCurrentRow ? 100_000 : 0)
+                      + (combined.includes('Branch:') ? 10_000 : 0)
+                      + Math.round(area),
+                  };
+                })
+                .filter((candidate) => candidate !== null)
+                .sort((left, right) => right.score - left.score);
+              const target = candidates[0];
+              if (!target) {
+                return null;
+              }
+              return {
+                displayName,
+                clickX: target.left + (target.width / 2),
+                clickY: target.top + (target.height / 2),
+                targetTagName: target.tagName,
+                targetRole: target.role,
+                targetLabel: target.label,
+                targetText: target.text,
+                targetTabindex: target.tabindex,
+                targetDisabled: target.disabled,
+                targetAriaCurrent: target.ariaCurrent,
+                targetIdentifier: target.identifier || target.rowId || target.focusId || null,
+              };
+            }
+            """,
+            arg={"displayName": display_name},
+        )
+        if not isinstance(payload, dict):
             raise AssertionError(
                 f'The open workspace switcher did not expose a saved workspace row for "{display_name}".\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(
-            row.left + min(40.0, row.width * 0.15),
-            row.top + min(28.0, row.height * 0.25),
+        click_x = float(payload.get("clickX", 0.0))
+        click_y = float(payload.get("clickY", 0.0))
+        self._session.mouse_click(click_x, click_y)
+        return WorkspaceSwitcherRowClickObservation(
+            display_name=display_name,
+            click_x=click_x,
+            click_y=click_y,
+            target_tag_name=str(payload.get("targetTagName", "")),
+            target_role=(
+                str(payload.get("targetRole"))
+                if payload.get("targetRole") is not None
+                else None
+            ),
+            target_label=str(payload.get("targetLabel", "")),
+            target_text=str(payload.get("targetText", "")),
+            target_tabindex=(
+                str(payload.get("targetTabindex"))
+                if payload.get("targetTabindex") is not None
+                else None
+            ),
+            target_disabled=bool(payload.get("targetDisabled")),
+            target_aria_current=(
+                str(payload.get("targetAriaCurrent"))
+                if payload.get("targetAriaCurrent") is not None
+                else None
+            ),
+            target_identifier=(
+                str(payload.get("targetIdentifier"))
+                if payload.get("targetIdentifier") is not None
+                else None
+            ),
         )
 
     def click_saved_workspace_action_button(
