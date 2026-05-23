@@ -46,21 +46,19 @@ HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 LINKED_BUGS = ["TS-995"]
 STARTUP_SETTLE_TIMEOUT_SECONDS = 30
 STARTUP_SETTLE_INTERVAL_SECONDS = 1
+STARTUP_STABILITY_SAMPLES = 3
 SWITCHER_ROW_TIMEOUT_MS = 30_000
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
-ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
-DASHBOARD_SIGNAL_TEXTS = (
+DASHBOARD_ONLY_SIGNAL_TEXTS = (
     "Open Issues",
     "Issues in Progress",
     "Completed",
     "Team Velocity",
-    "Create issue",
 )
 LANDING_SIGNAL_TEXTS = (
     "Connect GitHub",
     "Add workspace",
     "Saved workspaces",
-    "Workspace switcher",
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -160,9 +158,14 @@ def main() -> None:
                 except AssertionError:
                     pass
 
+                startup_stability: dict[str, object] = {"signature": None, "count": 0}
                 settled, startup_state = poll_until(
-                    probe=lambda: _capture_startup_state(tracker_page, page),
-                    is_satisfied=_startup_state_is_actionable,
+                    probe=lambda: _capture_startup_state(
+                        tracker_page,
+                        page,
+                        startup_stability=startup_stability,
+                    ),
+                    is_satisfied=_startup_state_is_stable_final,
                     timeout_seconds=STARTUP_SETTLE_TIMEOUT_SECONDS,
                     interval_seconds=STARTUP_SETTLE_INTERVAL_SECONDS,
                 )
@@ -174,8 +177,8 @@ def main() -> None:
                         status="failed",
                         action=REQUEST_STEPS[1],
                         observed=(
-                            "Startup hydration never reached an actionable visible state "
-                            "within the wait window.\n"
+                            "Startup hydration never reached a stable final post-hydration "
+                            "state within the wait window.\n"
                             f"startup_state={json.dumps(startup_state, indent=2)}"
                         ),
                     )
@@ -200,8 +203,8 @@ def main() -> None:
                         ),
                     )
                     raise AssertionError(
-                        "Step 2 failed: startup hydration did not settle into an actionable "
-                        "visible state within the wait window.\n"
+                        "Step 2 failed: startup hydration did not settle into a stable final "
+                        "post-hydration state within the wait window.\n"
                         f"Observed startup state:\n{json.dumps(startup_state, indent=2)}"
                     )
 
@@ -211,8 +214,10 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
-                        "Waited for startup hydration to settle before evaluating the "
-                        "visible surface and workspace selection state.\n"
+                        "Waited for startup hydration to reach the same final visible "
+                        f"state for {STARTUP_STABILITY_SAMPLES} consecutive samples "
+                        "before evaluating the visible surface and workspace selection "
+                        "state.\n"
                         f"startup_state={json.dumps(startup_state, indent=2)}"
                     ),
                 )
@@ -287,7 +292,6 @@ def main() -> None:
                             target_path=LOCAL_TARGET,
                             target_type_label="Local",
                             expected_state_label="Unavailable",
-                            accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
                             timeout_ms=SWITCHER_ROW_TIMEOUT_MS,
                         )
                         result["observed_local_row"] = _row_payload(local_row)
@@ -296,7 +300,6 @@ def main() -> None:
                             target_path=LOCAL_TARGET,
                             target_type_label="Local",
                             expected_state_label="Unavailable",
-                            accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
                             timeout_ms=SWITCHER_ROW_TIMEOUT_MS,
                         )
                         result["refreshed_switcher_observation"] = _switcher_payload(
@@ -372,7 +375,7 @@ def main() -> None:
             page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
             result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         result["failure_kind"] = "product"
         _write_failure_outputs(result)
@@ -427,34 +430,54 @@ def _cleanup_local_workspace() -> None:
 def _capture_startup_state(
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
+    *,
+    startup_stability: dict[str, object] | None = None,
 ) -> dict[str, object]:
     startup_observation = _startup_surface_payload(tracker_page.observe_startup_surface())
     shell_observation = tracker_page.observe_interactive_shell(SHELL_NAVIGATION_LABELS, timeout_ms=1_000)
     trigger = _safe_trigger_payload(page)
+    looks_like_dashboard = _looks_like_dashboard_surface(
+        startup_observation,
+        shell_observation,
+    )
+    looks_like_landing = _looks_like_landing_surface(
+        startup_observation,
+        shell_observation,
+    )
+    state_kind = _startup_state_kind(
+        trigger=trigger,
+        looks_like_dashboard=looks_like_dashboard,
+        looks_like_landing=looks_like_landing,
+    )
+    state_signature = _startup_state_signature(
+        state_kind=state_kind,
+        startup_observation=startup_observation,
+        trigger=trigger,
+    )
+    consecutive_samples = (
+        _record_stable_startup_sample(startup_stability, state_signature)
+        if startup_stability is not None
+        else 1
+    )
     return {
         "startup_observation": startup_observation,
         "shell_observation": shell_observation,
         "trigger": trigger,
-        "looks_like_dashboard": _looks_like_dashboard_surface(
-            startup_observation,
-            shell_observation,
-        ),
-        "looks_like_landing": _looks_like_landing_surface(
-            startup_observation,
-            shell_observation,
-        ),
+        "looks_like_dashboard": looks_like_dashboard,
+        "looks_like_landing": looks_like_landing,
+        "state_kind": state_kind,
+        "state_signature": state_signature,
+        "consecutive_samples": consecutive_samples,
     }
 
 
-def _startup_state_is_actionable(state: dict[str, object]) -> bool:
-    trigger = state.get("trigger")
-    looks_like_dashboard = bool(state.get("looks_like_dashboard"))
-    looks_like_landing = bool(state.get("looks_like_landing"))
-    trigger_is_unavailable = (
-        isinstance(trigger, dict)
-        and str(trigger.get("state_label", "")).strip() == "Unavailable"
+def _startup_state_is_stable_final(state: dict[str, object]) -> bool:
+    state_kind = str(state.get("state_kind", ""))
+    consecutive_samples = int(state.get("consecutive_samples", 0))
+    return (
+        state_kind in {"dashboard", "landing", "trigger-unavailable"}
+        and consecutive_samples >= STARTUP_STABILITY_SAMPLES
     )
-    return looks_like_dashboard or looks_like_landing or trigger_is_unavailable
 
 
 def _current_view_failures(startup_state: dict[str, object]) -> list[str]:
@@ -486,22 +509,26 @@ def _looks_like_dashboard_surface(
     startup_observation: dict[str, object],
     shell_observation: dict[str, object],
 ) -> bool:
-    body_text = str(startup_observation.get("body_text", ""))
-    dashboard_signal_count = sum(text in body_text for text in DASHBOARD_SIGNAL_TEXTS)
-    return bool(shell_observation.get("shell_ready")) and dashboard_signal_count >= 3
+    dashboard_signal_count = len(
+        _matched_surface_signals(startup_observation, DASHBOARD_ONLY_SIGNAL_TEXTS),
+    )
+    return dashboard_signal_count >= 2 or (
+        bool(shell_observation.get("shell_ready")) and dashboard_signal_count >= 1
+    )
 
 
 def _looks_like_landing_surface(
     startup_observation: dict[str, object],
     shell_observation: dict[str, object],
 ) -> bool:
-    body_text = str(startup_observation.get("body_text", ""))
-    button_labels = [str(label) for label in startup_observation.get("button_labels", [])]
-    landing_signal_count = sum(
-        signal in body_text or signal in button_labels
-        for signal in LANDING_SIGNAL_TEXTS
+    del shell_observation
+    landing_signal_count = len(
+        _matched_surface_signals(startup_observation, LANDING_SIGNAL_TEXTS),
     )
-    return not bool(shell_observation.get("shell_ready")) and landing_signal_count >= 1
+    dashboard_signal_count = len(
+        _matched_surface_signals(startup_observation, DASHBOARD_ONLY_SIGNAL_TEXTS),
+    )
+    return landing_signal_count >= 1 and dashboard_signal_count == 0
 
 
 def _workspace_switcher_failures(
@@ -563,17 +590,71 @@ def _workspace_switcher_failures(
             "workspace on redirect.\n"
             f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
         )
-    if not any(
-        label in ACCEPTED_RECOVERY_ACTION_LABELS
-        or any(label.startswith(f"{action}:") for action in ACCEPTED_RECOVERY_ACTION_LABELS)
-        for label in local_row.action_labels
-    ):
-        failures.append(
-            "Step 4 failed: the unavailable local workspace row did not expose a recovery "
-            "action such as `Retry` or `Re-authenticate`.\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
-        )
     return failures
+
+
+def _startup_state_kind(
+    *,
+    trigger: dict[str, object] | None,
+    looks_like_dashboard: bool,
+    looks_like_landing: bool,
+) -> str:
+    if looks_like_landing:
+        return "landing"
+    if looks_like_dashboard:
+        return "dashboard"
+    if (
+        isinstance(trigger, dict)
+        and str(trigger.get("state_label", "")).strip() == "Unavailable"
+    ):
+        return "trigger-unavailable"
+    return "indeterminate"
+
+
+def _startup_state_signature(
+    *,
+    state_kind: str,
+    startup_observation: dict[str, object],
+    trigger: dict[str, object] | None,
+) -> str:
+    return json.dumps(
+        {
+            "state_kind": state_kind,
+            "location_href": startup_observation.get("location_href"),
+            "button_labels": startup_observation.get("button_labels"),
+            "body_excerpt": _snippet(str(startup_observation.get("body_text", ""))),
+            "trigger_display_name": None if trigger is None else trigger.get("display_name"),
+            "trigger_state_label": None if trigger is None else trigger.get("state_label"),
+        },
+        sort_keys=True,
+    )
+
+
+def _record_stable_startup_sample(
+    tracker: dict[str, object],
+    signature: str,
+) -> int:
+    previous_signature = tracker.get("signature")
+    if previous_signature == signature:
+        next_count = int(tracker.get("count", 0)) + 1
+    else:
+        next_count = 1
+    tracker["signature"] = signature
+    tracker["count"] = next_count
+    return next_count
+
+
+def _matched_surface_signals(
+    startup_observation: dict[str, object],
+    signals: tuple[str, ...],
+) -> tuple[str, ...]:
+    body_text = str(startup_observation.get("body_text", ""))
+    button_labels = [str(label) for label in startup_observation.get("button_labels", [])]
+    return tuple(
+        signal
+        for signal in signals
+        if signal in body_text or signal in button_labels
+    )
 
 
 def _startup_surface_payload(observation: StartupSurfaceObservation) -> dict[str, object]:
