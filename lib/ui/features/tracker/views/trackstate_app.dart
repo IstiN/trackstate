@@ -1201,9 +1201,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (widget.repository != null || !workspace.isLocal) {
       return;
     }
-    final selectedPath = await widget.workspaceDirectoryPicker(
-      initialDirectory: workspace.target,
-    );
+    String? selectedPath;
+    try {
+      selectedPath = await widget.workspaceDirectoryPicker(
+        initialDirectory: workspace.target,
+      );
+    } on WorkspaceDirectorySelectionMismatchException catch (error) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message: error.message,
+      );
+      return;
+    }
     if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
       return;
     }
@@ -1215,22 +1224,15 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (normalizedTarget.isEmpty) {
       return;
     }
+    if (normalizedTarget != workspace.normalizedTarget) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message: 'Selected directory does not match the saved workspace configuration.',
+      );
+      return;
+    }
 
-    final nextWorkspace = normalizedTarget == workspace.normalizedTarget
-        ? workspace
-        : await widget.workspaceProfileService.updateProfile(
-            workspace.id,
-            WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.local,
-              target: normalizedTarget,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-              displayName:
-                  workspace.normalizedCustomDisplayName ??
-                  workspace.displayName,
-            ),
-            select: false,
-          );
+    final nextWorkspace = workspace;
     if (!mounted) {
       return;
     }
@@ -1262,6 +1264,23 @@ class _TrackStateAppState extends State<TrackStateApp>
       TrackerMessage.workspaceSwitchFailed(
         workspaceName: nextWorkspace.displayName,
         reason: reason,
+      ),
+    );
+  }
+
+  Future<void> _showUnavailableLocalWorkspaceRetryMismatch(
+    WorkspaceProfile workspace, {
+    required String message,
+  }) async {
+    _rememberWorkspaceValidationFailure(workspace, message);
+    await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+    if (!mounted) {
+      return;
+    }
+    viewModel.showMessage(
+      TrackerMessage.workspaceSwitchFailed(
+        workspaceName: workspace.displayName,
+        reason: message,
       ),
     );
   }
