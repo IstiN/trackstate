@@ -135,7 +135,7 @@ void main() {
   );
 
   testWidgets(
-    'shared-preferences startup restore waits for delayed auth before exposing the local workspace switcher',
+    'shared-preferences startup restore exposes the local workspace switcher before delayed auth completes',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const hostedWorkspaceId = 'hosted:stable/repo@main';
@@ -218,13 +218,18 @@ void main() {
         _findExplicitWorkspaceSwitcherSemantics(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
+      final fallbackSession =
+          delayedRepository.session ??
+          (throw StateError('Expected a restricted session after startup.'));
+      expect(fallbackSession.canWrite, isFalse);
+      expect(fallbackSession.canCreateBranch, isFalse);
 
       delayedRepository.completeConnect();
       await tester.pump();
@@ -249,6 +254,11 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
       );
+      final connectedSession =
+          delayedRepository.session ??
+          (throw StateError('Expected a connected session after auth restore.'));
+      expect(connectedSession.canWrite, isTrue);
+      expect(connectedSession.canCreateBranch, isTrue);
     },
   );
 

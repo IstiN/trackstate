@@ -19,7 +19,7 @@ void main() {
   });
 
   testWidgets(
-    'startup waits for delayed auth before exposing the shell in web-style restore flow',
+    'startup exposes the shell with restricted capabilities after the deferred auth timeout in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -87,19 +87,24 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(seconds: 11));
 
       expect(
         find.bySemanticsLabel(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
+      final fallbackSession =
+          delayedRepository.session ??
+          (throw StateError('Expected a repository session after startup.'));
+      expect(fallbackSession.canWrite, isFalse);
+      expect(fallbackSession.canCreateBranch, isFalse);
 
       delayedRepository.completeConnect();
       await tester.pump();
@@ -116,6 +121,11 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
       );
+      final connectedSession =
+          delayedRepository.session ??
+          (throw StateError('Expected a connected repository session.'));
+      expect(connectedSession.canWrite, isTrue);
+      expect(connectedSession.canCreateBranch, isTrue);
     },
   );
 }
