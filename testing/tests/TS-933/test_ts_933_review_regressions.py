@@ -179,7 +179,7 @@ class Ts933ReviewRegressionTest(unittest.TestCase):
                     "Error: Flutter engine failed to render semantics nodes during "
                     "initialization after the accessibility polling threshold."
                 ),
-                run_log_matched_contrast_markers=["timeout", "playwright"],
+                run_log_matched_contrast_markers=["page.waitForFunction"],
                 run_log_mentions_contrast_issue=True,
             ),
             failures,
@@ -189,6 +189,26 @@ class Ts933ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("generic Playwright", failures[0])
         self.assertIn("Run-log timeout markers", failures[0])
+
+    def test_step_3_does_not_fail_on_non_timeout_playwright_reference(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt=(
+                    "Error: Flutter engine failed to render semantics nodes during "
+                    "initialization after the accessibility polling threshold."
+                ),
+                run_log_matched_contrast_markers=[],
+                run_log_mentions_contrast_issue=False,
+            ),
+            failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
 
     def test_step_2_requires_failed_accessibility_check(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}

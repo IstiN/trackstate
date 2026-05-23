@@ -64,6 +64,47 @@ class GitHubAccessibilitySemanticsFailureProbeRegressionTest(unittest.TestCase):
     def test_patch_spec_source_injects_require_and_simulation_call(self) -> None:
         original = """const { test, expect } = require('@playwright/test');
 const {
+  captureFlutterStartupDiagnostics,
+  collectAccessibilityViolations,
+  formatViolations,
+} = require('./accessibility_gate');
+
+test('TrackState web app has no axe-core accessibility violations', async ({
+  page,
+}) => {
+  await captureFlutterStartupDiagnostics(page, {
+    log: (entry) => console.log(entry),
+  });
+  await expect(page).toHaveTitle(/TrackState\\.AI/);
+
+  const results = await collectAccessibilityViolations(page);
+
+  expect(results, formatViolations(results)).toEqual([]);
+});
+"""
+
+        patched = self.probe._patch_spec_source(original)  # noqa: SLF001
+
+        self.assertIn(
+            "installTs933SemanticsFailureSimulation",
+            patched,
+        )
+        self.assertIn(
+            "await installTs933SemanticsFailureSimulation(page);",
+            patched,
+        )
+        self.assertEqual(
+            patched.count("installTs933SemanticsFailureSimulation"),
+            2,
+        )
+        self.assertLess(
+            patched.index("await installTs933SemanticsFailureSimulation(page);"),
+            patched.index("await captureFlutterStartupDiagnostics(page, {"),
+        )
+
+    def test_patch_spec_source_supports_legacy_navigation_flow(self) -> None:
+        original = """const { test, expect } = require('@playwright/test');
+const {
   collectAccessibilityViolations,
   enableFlutterSemantics,
   formatFlutterSemanticsEvidence,
@@ -116,6 +157,26 @@ test('TrackState web app has no axe-core accessibility violations', async ({
         )
 
         self.assertIn("Flutter engine failed to render semantics nodes", excerpt)
+
+    def test_accessibility_stage_log_text_excludes_other_jobs(self) -> None:
+        stage_log_text = self.probe._accessibility_stage_run_log_text(  # noqa: SLF001
+            "\n".join(
+                [
+                    "Flutter checks\tDetect Flutter changes\t2026-05-22T11:02:00Z waiting for nodes",
+                    "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:15Z Error: Flutter engine failed to render semantics nodes during initialization.",
+                ]
+            ),
+            jobs=[
+                {"name": "Flutter checks"},
+                {"name": "Accessibility checks"},
+            ],
+        )
+
+        self.assertIn(
+            "Accessibility checks Run axe-core accessibility checks",
+            stage_log_text,
+        )
+        self.assertNotIn("Flutter checks Detect Flutter changes", stage_log_text)
 
     def test_simulation_helper_source_hides_flt_semantics_nodes(self) -> None:
         source = self.probe._simulation_helper_source()  # noqa: SLF001
