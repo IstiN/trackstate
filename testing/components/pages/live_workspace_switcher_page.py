@@ -1304,7 +1304,17 @@ class LiveWorkspaceSwitcherPage:
                     '[disabled]',
                     '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
-                  const candidateMatches = Array.from(switcher.querySelectorAll('*'))
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return switcher.contains(element);
+                  };
+                  const candidateMatches = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
                     .map((element) => {
                       const elementLabel = labelFor(element);
@@ -1328,7 +1338,10 @@ class LiveWorkspaceSwitcherPage:
                         return null;
                       }
                       const control = element.closest(controlSelector);
-                      const target = control && switcher.contains(control) ? control : element;
+                      const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
                       if (!isVisible(target)) {
                         return null;
                       }
@@ -1442,6 +1455,30 @@ class LiveWorkspaceSwitcherPage:
                       || element?.textContent
                       || '',
                     );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
                   const controlSelector = [
                     'flt-semantics[role="button"]',
                     'button',
@@ -1450,6 +1487,16 @@ class LiveWorkspaceSwitcherPage:
                     '[disabled]',
                     '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return Boolean(switcher && switcher.contains(element));
+                  };
                   const candidateMatches = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
                     .map((element) => {
@@ -1475,6 +1522,9 @@ class LiveWorkspaceSwitcherPage:
                       }
                       const control = element.closest(controlSelector);
                       const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
                       if (!isVisible(target)) {
                         return null;
                       }
@@ -3722,7 +3772,10 @@ class LiveWorkspaceSwitcherPage:
                   if (buttonLabels.some((label) => label.includes('Local Git'))) {
                     return null;
                   }
-                  if (!acceptedActions.some((label) => actionLabels.includes(label))) {
+                  if (
+                    acceptedActions.length > 0
+                    && !acceptedActions.some((label) => actionLabels.includes(label))
+                  ) {
                     return null;
                   }
                   return true;
