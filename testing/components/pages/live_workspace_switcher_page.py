@@ -1161,7 +1161,11 @@ class LiveWorkspaceSwitcherPage:
                 const text = normalize(element?.innerText || element?.textContent || '');
                 return text.includes(displayName)
                   && text.includes('Branch:')
-                  && text.includes('Delete:');
+                  && (
+                    text.includes('Delete:')
+                    || text.includes('Open:')
+                    || text.includes('Active')
+                  );
               };
 
               const active = document.activeElement instanceof Element
@@ -1253,39 +1257,12 @@ class LiveWorkspaceSwitcherPage:
                   || element?.textContent
                   || '',
                 );
-              let switcher = Array.from(
-                document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-              )
-                .filter(isVisible)
-                .find((element) => visibleText(element).includes(heading)) || null;
-              if (!switcher) {
-                const candidates = Array.from(document.querySelectorAll('*'))
-                  .filter(isVisible)
-                  .filter((element) => {
-                    const text = visibleText(element);
-                    return text.includes(heading)
-                      && (
-                        text.includes('Saved workspaces')
-                        || text.includes('Save and switch')
-                        || text.includes('Hosted Local')
-                      );
-                  })
-                  .sort((left, right) => {
-                    const leftRect = left.getBoundingClientRect();
-                    const rightRect = right.getBoundingClientRect();
-                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                  });
-                switcher = candidates[0] || null;
-              }
-              if (!switcher) {
-                return null;
-              }
               const buttonSelector = [
                 'flt-semantics[role="button"]',
                 'button',
                 '[role="button"]',
               ].join(',');
-              const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+              const candidate = Array.from(document.querySelectorAll(buttonSelector))
                 .filter(isVisible)
                 .find((element) => {
                   const elementLabel = labelFor(element);
@@ -1380,39 +1357,12 @@ class LiveWorkspaceSwitcherPage:
                   || element?.textContent
                   || '',
                 );
-              let switcher = Array.from(
-                document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-              )
-                .filter(isVisible)
-                .find((element) => visibleText(element).includes(heading)) || null;
-              if (!switcher) {
-                const candidates = Array.from(document.querySelectorAll('*'))
-                  .filter(isVisible)
-                  .filter((element) => {
-                    const text = visibleText(element);
-                    return text.includes(heading)
-                      && (
-                        text.includes('Saved workspaces')
-                        || text.includes('Save and switch')
-                        || text.includes('Hosted Local')
-                      );
-                  })
-                  .sort((left, right) => {
-                    const leftRect = left.getBoundingClientRect();
-                    const rightRect = right.getBoundingClientRect();
-                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                  });
-                switcher = candidates[0] || null;
-              }
-              if (!switcher) {
-                return null;
-              }
               const buttonSelector = [
                 'flt-semantics[role="button"]',
                 'button',
                 '[role="button"]',
               ].join(',');
-              const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+              const candidate = Array.from(document.querySelectorAll(buttonSelector))
                 .filter(isVisible)
                 .find((element) => {
                   const elementLabel = labelFor(element);
