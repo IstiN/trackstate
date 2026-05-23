@@ -2558,6 +2558,33 @@ class LiveWorkspaceSwitcherPage:
                       || element?.textContent
                       || '',
                     );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
                   const controlSelector = [
                     'flt-semantics[role="button"]',
                     'button',
@@ -2566,6 +2593,16 @@ class LiveWorkspaceSwitcherPage:
                     '[disabled]',
                     '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return Boolean(switcher && switcher.contains(element));
+                  };
                   const candidateMatches = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
                     .map((element) => {
@@ -2580,6 +2617,9 @@ class LiveWorkspaceSwitcherPage:
                       }
                       const control = element.closest(controlSelector);
                       const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
                       if (!isVisible(target)) {
                         return null;
                       }
@@ -2588,7 +2628,10 @@ class LiveWorkspaceSwitcherPage:
                       const rect = target.getBoundingClientRect();
                       return {
                         target,
-                        exactMatch: targetLabel === label || targetText === label,
+                        exactMatch: targetLabel === label
+                          || targetText === label
+                          || elementLabel === label
+                          || elementText === label,
                         interactiveMatch:
                           target.matches?.('button,[role="button"],[aria-disabled],[disabled]')
                           || target.getAttribute?.('tabindex') === '0'
@@ -2611,26 +2654,6 @@ class LiveWorkspaceSwitcherPage:
                     return null;
                   }
                   const buttonRect = candidate.getBoundingClientRect();
-                  const switcherAncestors = [];
-                  let current = candidate;
-                  while (current && current instanceof Element && current !== document.body) {
-                    const text = visibleText(current);
-                    if (
-                      text.includes(heading)
-                      || text.includes('Saved workspaces')
-                      || text.includes('Add workspace')
-                      || text.includes('Hosted Local')
-                    ) {
-                      const rect = current.getBoundingClientRect();
-                      switcherAncestors.push({
-                        element: current,
-                        area: rect.width * rect.height,
-                      });
-                    }
-                    current = current.parentElement;
-                  }
-                  const switcher = switcherAncestors
-                    .sort((left, right) => left.area - right.area)[0]?.element || candidate;
                   const switcherRect = switcher.getBoundingClientRect();
                   return {
                     clickX: buttonRect.left + (buttonRect.width / 2),
