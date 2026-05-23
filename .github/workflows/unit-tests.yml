@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Detect Flutter changes
         id: changes
@@ -69,6 +70,10 @@ jobs:
         if: steps.changes.outputs.flutter == 'true'
         run: dart run tool/check_theme_tokens.dart
 
+      - name: Check web safety
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_web_safety.dart
+
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
         run: flutter test --coverage
@@ -97,6 +102,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Detect accessibility changes
         id: changes

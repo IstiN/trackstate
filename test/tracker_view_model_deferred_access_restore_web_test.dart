@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -8,10 +9,14 @@ import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.da
 
 void main() {
   test(
-    'deferred access restore publishes the snapshot before delayed connect completes',
+    'provider-backed deferred access restore waits for the delayed GitHub probe before publishing the setup snapshot',
     () async {
       const workspaceId = 'local:/tmp/trackstate-demo@main';
-      final repository = _DelayedConnectRepository();
+      final provider = _DelayedFixtureProvider();
+      final repository = _DelayedFixtureRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
       final viewModel = TrackerViewModel(
         repository: repository,
         authStore: _FixedAuthStore(),
@@ -19,18 +24,23 @@ void main() {
       );
       addTearDown(viewModel.dispose);
 
+      final loadFuture = viewModel.load(deferAccessRestore: true);
       final completedQuickly = await Future.any([
-        viewModel.load(deferAccessRestore: true).then((_) => true),
-        Future<bool>.delayed(const Duration(milliseconds: 200), () => false),
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
       ]);
 
       expect(
         completedQuickly,
-        isTrue,
+        isFalse,
         reason:
-            'load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
+            'Provider-backed load(deferAccessRestore: true) must wait for the startup GitHub probe before publishing the shell snapshot.',
       );
+      expect(viewModel.snapshot, isNull);
+      provider.completeAuthentication();
+      await loadFuture;
       expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
     },
   );
@@ -90,18 +100,6 @@ void main() {
   );
 }
 
-class _DelayedConnectRepository extends DemoTrackStateRepository {
-  _DelayedConnectRepository();
-
-  final Completer<void> _connectCompleter = Completer<void>();
-
-  @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    await _connectCompleter.future;
-    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
-  }
-}
-
 class _FailingConnectRepository extends DemoTrackStateRepository {
   @override
   bool get supportsGitHubAuth => true;
@@ -144,6 +142,164 @@ class _FixedAuthStore implements TrackStateAuthStore {
     String? repository,
     String? workspaceId,
   }) async {}
+}
+
+Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
+  final base = await const DemoTrackStateRepository().loadSnapshot();
+  return TrackerSnapshot(
+    project: ProjectConfig(
+      key: base.project.key,
+      name: base.project.name,
+      repository: repository,
+      branch: base.project.branch,
+      defaultLocale: base.project.defaultLocale,
+      supportedLocales: base.project.supportedLocales,
+      issueTypeDefinitions: base.project.issueTypeDefinitions,
+      statusDefinitions: base.project.statusDefinitions,
+      fieldDefinitions: base.project.fieldDefinitions,
+      workflowDefinitions: base.project.workflowDefinitions,
+      priorityDefinitions: base.project.priorityDefinitions,
+      versionDefinitions: base.project.versionDefinitions,
+      componentDefinitions: base.project.componentDefinitions,
+      resolutionDefinitions: base.project.resolutionDefinitions,
+      attachmentStorage: base.project.attachmentStorage,
+    ),
+    issues: base.issues,
+    repositoryIndex: base.repositoryIndex,
+    loadWarnings: base.loadWarnings,
+    readiness: base.readiness,
+    startupRecovery: base.startupRecovery,
+  );
+}
+
+class _DelayedFixtureRepository extends ProviderBackedTrackStateRepository {
+  _DelayedFixtureRepository({
+    required this.snapshot,
+    required _DelayedFixtureProvider provider,
+  }) : super(provider: provider);
+
+  final TrackerSnapshot snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _DelayedFixtureProvider implements TrackStateProviderAdapter {
+  _DelayedFixtureProvider();
+
+  final Completer<void> _authenticationGate = Completer<void>();
+  bool _authenticated = false;
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => 'IstiN/trackstate-setup';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    await _authenticationGate.future;
+    _authenticated = true;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'fixture-revision',
+  );
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _authenticated,
+    isAdmin: false,
+    canCreateBranch: _authenticated,
+    canManageAttachments: _authenticated,
+    attachmentUploadMode: _authenticated
+        ? AttachmentUploadMode.full
+        : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fixture-revision',
+      sessionRevision: _authenticated ? 'connected' : 'disconnected',
+      connectionState: _authenticated
+          ? ProviderConnectionState.connected
+          : ProviderConnectionState.disconnected,
+      permission: await getPermission(),
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<String> resolveWriteBranch() async => 'main';
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => RepositoryAttachmentWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'fixture-revision',
+  );
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => RepositoryWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'fixture-revision',
+  );
+
+  void completeAuthentication() {
+    if (_authenticationGate.isCompleted) {
+      return;
+    }
+    _authenticationGate.complete();
+  }
 }
 
 class _EmptyAuthStore implements TrackStateAuthStore {

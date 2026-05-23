@@ -35,6 +35,11 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
         failed_status_check_names: list[str],
         run_log_matched_contrast_markers: list[str],
         run_log_matched_semantic_markers: list[str],
+        runtime_accessibility_surface_present: bool = True,
+        runtime_accessibility_surface_summary: str = (
+            'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["button"]'
+        ),
+        runtime_accessibility_sample_labels: list[str] | None = None,
     ) -> GitHubAccessibilityPullRequestGateObservation:
         return GitHubAccessibilityPullRequestGateObservation(
             repository="IstiN/trackstate",
@@ -113,11 +118,15 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             run_log_mentions_semantic_issue=bool(run_log_matched_semantic_markers),
             run_log_excerpt="color contrast violation and aria-label defect",
             run_log_error=None,
-            runtime_accessibility_surface_present=False,
-            runtime_accessibility_surface_summary="",
+            runtime_accessibility_surface_present=runtime_accessibility_surface_present,
+            runtime_accessibility_surface_summary=runtime_accessibility_surface_summary,
+            runtime_accessibility_sample_labels=runtime_accessibility_sample_labels
+            if runtime_accessibility_sample_labels is not None
+            else ["button"],
             probe_contains_low_contrast_indicator=True,
             probe_contains_semantic_label_indicator=True,
             probe_semantic_label="button",
+            probe_visible_text="Sync issue",
             probe_contrast_technique="Uses reduced contrast.",
             cleanup_closed_pull_request=True,
             cleanup_deleted_branch=True,
@@ -132,7 +141,7 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             self._observation(
                 run_conclusion="failure",
                 failed_status_check_names=["Flutter checks"],
-                run_log_matched_contrast_markers=["contrast", "4.5:1"],
+                run_log_matched_contrast_markers=["color-contrast", "4.5:1"],
                 run_log_matched_semantic_markers=["aria-label", "semantic"],
             ),
             failures,
@@ -150,8 +159,68 @@ class Ts908ReviewRegressionTest(unittest.TestCase):
             self._observation(
                 run_conclusion="success",
                 failed_status_check_names=[],
-                run_log_matched_contrast_markers=["contrast", "4.5:1"],
+                run_log_matched_contrast_markers=["color-contrast", "4.5:1"],
                 run_log_matched_semantic_markers=["aria-label", "semantic"],
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_4_rejects_ratio_only_contrast_noise(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_accessibility_gate_result(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_conclusion="failure",
+                failed_status_check_names=["Accessibility checks"],
+                run_log_matched_contrast_markers=["ratio"],
+                run_log_matched_semantic_markers=["non-descriptive-label"],
+            ),
+            failures,
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(result["steps"][0]["status"], "failed")
+
+    def test_step_2_requires_runtime_generic_semantic_label(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_defective_component(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_conclusion="success",
+                failed_status_check_names=[],
+                run_log_matched_contrast_markers=[],
+                run_log_matched_semantic_markers=[],
+                runtime_accessibility_sample_labels=["button"],
+            ),
+            failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
+
+    def test_step_2_rejects_runtime_label_that_keeps_visible_text(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+
+        self.module._evaluate_defective_component(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_conclusion="success",
+                failed_status_check_names=[],
+                run_log_matched_contrast_markers=[],
+                run_log_matched_semantic_markers=[],
+                runtime_accessibility_sample_labels=["button Sync issue"],
+                runtime_accessibility_surface_summary=(
+                    'Accessibility runtime surface ready: hosts=1; nodes=4; '
+                    'sample-labels=["button Sync issue"]'
+                ),
             ),
             failures,
         )
