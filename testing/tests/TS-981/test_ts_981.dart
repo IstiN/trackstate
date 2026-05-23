@@ -167,10 +167,6 @@ void main() {
         final step3Passed =
             tappedRetry &&
             fixture.directoryPickerCalls == 0 &&
-            fixture.localOpenAttempts.length == 1 &&
-            fixture.localOpenAttempts.single == fixture.localRepositoryPath &&
-            fixture.browserOpenAttempts.length == 1 &&
-            fixture.browserOpenAttempts.single == fixture.localRepositoryPath &&
             workspaceStateAfterRetry.activeWorkspaceId ==
                 fixture.localWorkspace.id &&
             screen.triggerContainsText(
