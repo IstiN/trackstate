@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   captureFlutterStartupDiagnostics,
+  enableFlutterSemantics,
 } = require('./accessibility_gate');
 
 class FakeLocator {
@@ -130,6 +131,35 @@ test(
       assert.ok(
           placeholderIndex < runtimeIndex,
           'Expected placeholder verification to be logged before runtime readiness evidence.',
+      );
+    },
+);
+
+test(
+    'enableFlutterSemantics surfaces a descriptive pre-flight error when the placeholder never appears',
+    async () => {
+      const timeoutError = new Error(
+          'page.waitForSelector: Timeout 15000ms exceeded.',
+      );
+      timeoutError.name = 'TimeoutError';
+      const page = {
+        async waitForSelector(selector) {
+          if (selector === 'flt-semantics-placeholder') {
+            throw timeoutError;
+          }
+        },
+      };
+
+      await assert.rejects(
+          () => enableFlutterSemantics(page),
+          (error) => {
+            assert.match(
+                error.message,
+                /Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin/,
+            );
+            assert.doesNotMatch(error.message, /page\.waitForSelector/i);
+            return true;
+          },
       );
     },
 );

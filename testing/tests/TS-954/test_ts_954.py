@@ -662,9 +662,13 @@ def _assert_traversal_reached_footer(
             failures.append(
                 "the Save and switch footer control did not report active focus when Tab reached it",
             )
+        if footer_button_state.aria_disabled != "true" and not footer_button_state.disabled:
+            failures.append(
+                "the Save and switch footer control stopped reporting a disabled state once it received focus",
+            )
     if failures:
         raise AssertionError(
-            "Step 4 failed: repeated Tab navigation did not reach the Save and switch footer boundary as expected.\n"
+            "Step 4 failed: repeated Tab navigation did not reach the disabled Save and switch footer boundary as expected.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed trace: {json.dumps(tab_trace, indent=2)}\n"
@@ -1062,8 +1066,6 @@ def _summarize_failures(result: dict[str, object]) -> str:
             f"- Step {step.get('step')}: {step.get('observed')}",
         )
     return "\n".join(lines)
-
-
 def _mark_dependent_steps_failed(
     result: dict[str, object],
     *,

@@ -305,6 +305,7 @@ void main() {
     final viewModel = TrackerViewModel(
       repository: const DemoTrackStateRepository(),
     );
+    addTearDown(viewModel.dispose);
 
     await viewModel.load();
 
@@ -321,6 +322,7 @@ void main() {
       repository: const DemoTrackStateRepository(),
       workspaceId: 'hosted:trackstate/trackstate@main',
     );
+    addTearDown(viewModel.dispose);
 
     await viewModel.load();
 
@@ -343,6 +345,7 @@ void main() {
         authStore: authStore,
         workspaceId: workspaceId,
       );
+      addTearDown(viewModel.dispose);
 
       await viewModel.load();
 
@@ -364,6 +367,7 @@ void main() {
         writeBranch: 'feature/ts-632',
       );
       final viewModel = TrackerViewModel(repository: repository);
+      addTearDown(viewModel.dispose);
 
       await viewModel.load();
       await viewModel.connectGitHub('token');
