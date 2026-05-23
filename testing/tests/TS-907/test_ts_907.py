@@ -149,8 +149,8 @@ def _assert_live_semantic_contract(
     failures: list[str] = []
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production source no longer returned the dedicated localized "
-            f"semantic label getter `{config.required_source_snippet}`"
+            "the live production source no longer used the dedicated sync "
+            f"semantic-label contract `{config.required_source_snippet}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
@@ -180,7 +180,7 @@ def _assert_live_semantic_contract(
         status="passed",
         action=REQUEST_STEPS[0],
         observed=(
-            "Confirmed the live production source returns "
+            "Confirmed the live production source uses "
             f"`{config.required_source_snippet}` from "
             f"{config.target_relative_path.as_posix()} and the English localization "
             f"defines {config.required_semantic_label!r} for the sync error semantic label. "
@@ -204,7 +204,7 @@ def _assert_mutation_applied(
     if config.replacement_source_snippet not in validation.mutated_source:
         raise AssertionError(
             "Step 2 failed: the temp workspace source did not contain the weaker "
-            f"semantic-label return `{config.replacement_source_snippet}`.\n"
+            f"semantic-label usage `{config.replacement_source_snippet}`.\n"
             f"Mutated file: {validation.target_path}"
         )
     _record_step(
