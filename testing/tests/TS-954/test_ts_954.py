@@ -46,7 +46,7 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
-LINKED_BUGS = ["TS-948"]
+LINKED_BUGS = ["TS-948", "TS-958", "TS-963"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
@@ -159,6 +159,7 @@ def main() -> None:
             runtime_factory=lambda: runtime_context,
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
+            step_failures: list[str] = []
             try:
                 tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
@@ -214,96 +215,148 @@ def main() -> None:
                     ),
                 )
 
-                save_button_before = page.observe_switcher_button_state(
-                    LAST_INTERNAL_CONTROL_LABEL,
-                    timeout_ms=4_000,
-                )
-                result["save_and_switch_before_tab"] = _button_state_payload(
-                    save_button_before,
-                )
-                _assert_save_button_present(save_button_before)
-                _record_step(
-                    result,
-                    step=2,
-                    status="passed",
-                    action=REQUEST_STEPS[1],
-                    observed=(
-                        f"Visible button label={save_button_before.label!r}; "
-                        f"text={save_button_before.visible_text!r}; "
-                        f"tabindex={save_button_before.tabindex!r}."
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Confirmed the footer visibly rendered a Save and switch control "
-                        "instead of hiding the wrap-boundary button in pristine state."
-                    ),
-                    observed=(
-                        f"Footer control text={save_button_before.visible_text!r}; "
-                        f"outer_html={_compact_html(save_button_before.outer_html)!r}"
-                    ),
-                )
+                save_button_before: WorkspaceSwitcherButtonStateObservation | None = None
+                try:
+                    save_button_before = page.observe_switcher_button_state(
+                        LAST_INTERNAL_CONTROL_LABEL,
+                        timeout_ms=4_000,
+                    )
+                    result["save_and_switch_before_tab"] = _button_state_payload(
+                        save_button_before,
+                    )
+                    _assert_save_button_present(save_button_before)
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            f"Visible button label={save_button_before.label!r}; "
+                            f"text={save_button_before.visible_text!r}; "
+                            f"tabindex={save_button_before.tabindex!r}."
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Confirmed the footer visibly rendered a Save and switch control "
+                            "instead of hiding the wrap-boundary button in pristine state."
+                        ),
+                        observed=(
+                            f"Footer control text={save_button_before.visible_text!r}; "
+                            f"outer_html={_compact_html(save_button_before.outer_html)!r}"
+                        ),
+                    )
+                except AssertionError as error:
+                    message = str(error)
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=message,
+                    )
+                    step_failures.append(message)
 
-                _assert_save_button_disabled(save_button_before)
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=(
-                        f"aria-disabled={save_button_before.aria_disabled!r}; "
-                        f"disabled={save_button_before.disabled}; "
-                        f"keyboard_focusable_probe={save_button_before.keyboard_focusable}."
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Read the live footer control state the same way an accessibility "
-                        "check would: visible button plus disabled semantics."
-                    ),
-                    observed=(
-                        f"aria-disabled={save_button_before.aria_disabled!r}; "
-                        f"disabled={save_button_before.disabled}; "
-                        f"visible_text={save_button_before.visible_text!r}"
-                    ),
-                )
+                if save_button_before is None:
+                    step_three_message = (
+                        "Step 3 failed: the test could not read the live Save and switch "
+                        "button state after Step 2, so the disabled-state assertion could "
+                        "not be completed."
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=step_three_message,
+                    )
+                    step_failures.append(step_three_message)
+                else:
+                    try:
+                        _assert_save_button_disabled(save_button_before)
+                        _record_step(
+                            result,
+                            step=3,
+                            status="passed",
+                            action=REQUEST_STEPS[2],
+                            observed=(
+                                f"aria-disabled={save_button_before.aria_disabled!r}; "
+                                f"disabled={save_button_before.disabled}; "
+                                f"keyboard_focusable_probe={save_button_before.keyboard_focusable}."
+                            ),
+                        )
+                    except AssertionError as error:
+                        message = str(error)
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=REQUEST_STEPS[2],
+                            observed=message,
+                        )
+                        step_failures.append(message)
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Read the live footer control state the same way an accessibility "
+                            "check would: visible button plus disabled semantics."
+                        ),
+                        observed=(
+                            f"aria-disabled={save_button_before.aria_disabled!r}; "
+                            f"disabled={save_button_before.disabled}; "
+                            f"visible_text={save_button_before.visible_text!r}"
+                        ),
+                    )
 
                 first_row_label = _saved_workspace_row_focus_label(first_row)
                 result["first_row_label"] = first_row_label
-                traversal_result = _tab_to_footer_and_wrap(
-                    page=page,
-                    panel=step_one_context["panel"],
-                    first_row=first_row,
-                )
-                result.update(traversal_result)
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=(
-                        f"Visited labels={_visited_focus_labels(traversal_result['tab_trace_to_footer'])!r}; "
-                        f"footer_active={_active_from_state(traversal_result['footer_state']).get('accessible_name')!r}; "
-                        f"footer_aria_disabled={traversal_result['footer_button_state']['aria_disabled']!r}; "
-                        f"wrapped_to={_active_from_state(traversal_result['wrap_state_after_footer']).get('accessible_name')!r}."
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Tabbed through the live workspace switcher like a real keyboard "
-                        "user until the disabled Save and switch footer control received "
-                        "focus, then pressed Tab once more."
-                    ),
-                    observed=(
-                        f"Footer visibly received focus while disabled="
-                        f"{traversal_result['footer_button_state']['disabled']} and "
-                        f"aria-disabled={traversal_result['footer_button_state']['aria_disabled']!r}; "
-                        f"next focus={_active_from_state(traversal_result['wrap_state_after_footer']).get('accessible_name')!r}."
-                    ),
-                )
+                try:
+                    traversal_result = _tab_to_footer_and_wrap(
+                        page=page,
+                        panel=step_one_context["panel"],
+                        first_row=first_row,
+                    )
+                    result.update(traversal_result)
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            f"Visited labels={_visited_focus_labels(traversal_result['tab_trace_to_footer'])!r}; "
+                            f"footer_active={_active_from_state(traversal_result['footer_state']).get('accessible_name')!r}; "
+                            f"footer_aria_disabled={traversal_result['footer_button_state']['aria_disabled']!r}; "
+                            f"wrapped_to={_active_from_state(traversal_result['wrap_state_after_footer']).get('accessible_name')!r}."
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Tabbed through the live workspace switcher like a real keyboard "
+                            "user until the Save and switch footer control received focus, "
+                            "then pressed Tab once more."
+                        ),
+                        observed=(
+                            f"Footer visibly received focus while disabled="
+                            f"{traversal_result['footer_button_state']['disabled']} and "
+                            f"aria-disabled={traversal_result['footer_button_state']['aria_disabled']!r}; "
+                            f"next focus={_active_from_state(traversal_result['wrap_state_after_footer']).get('accessible_name')!r}."
+                        ),
+                    )
+                except AssertionError as error:
+                    message = str(error)
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=message,
+                    )
+                    step_failures.append(message)
+
+                if step_failures:
+                    raise AssertionError(_summarize_failures(result))
             except Exception:
                 if page is not None:
                     try:
@@ -990,6 +1043,29 @@ def _failed_step_label(result: dict[str, object]) -> str:
     return f"Step {failed.get('step')} — {failed.get('action')}"
 
 
+def _step_passed(result: dict[str, object], step_number: int) -> bool:
+    return any(
+        isinstance(step, dict)
+        and int(step.get("step", -1)) == step_number
+        and step.get("status") == "passed"
+        for step in _steps(result)
+    )
+
+
+def _summarize_failures(result: dict[str, object]) -> str:
+    failed_steps = [
+        step
+        for step in _steps(result)
+        if isinstance(step, dict) and step.get("status") == "failed"
+    ]
+    if not failed_steps:
+        return f"{TICKET_KEY} failed."
+    lines = [f"{TICKET_KEY} failed with {len(failed_steps)} recorded step issue(s):"]
+    for step in failed_steps:
+        lines.append(
+            f"- Step {step.get('step')}: {step.get('observed')}",
+        )
+    return "\n".join(lines)
 def _mark_dependent_steps_failed(
     result: dict[str, object],
     *,
@@ -1154,6 +1230,53 @@ def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
             "Instead it remained on a blank startup surface with only the visible "
             f"`Sync issue` control. Startup observation: {json.dumps(startup_observation, ensure_ascii=True)}"
         )
+    save_button_before = result.get("save_and_switch_before_tab")
+    wrap_state = result.get("wrap_state_after_footer")
+    footer_button_state = result.get("footer_button_state")
+    trace = result.get("tab_trace_to_footer")
+    if (
+        not _step_passed(result, 3)
+        and not _step_passed(result, 4)
+        and isinstance(save_button_before, dict)
+    ):
+        visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
+        return (
+            "The live workspace switcher rendered `Save and switch`, but left it enabled "
+            "in pristine state and never let Tab traversal reach that footer control. "
+            f"Observed footer state before Tab: {json.dumps(save_button_before, ensure_ascii=True)}. "
+            f"Visited labels before the loop stopped: {visited_labels!r}."
+        )
+    if not _step_passed(result, 3) and isinstance(save_button_before, dict):
+        summary = (
+            "The live workspace switcher rendered `Save and switch`, but it did not keep "
+            "the footer control disabled in pristine state. "
+            f"Observed footer state before Tab: {json.dumps(save_button_before, ensure_ascii=True)}."
+        )
+        if isinstance(wrap_state, dict):
+            summary += (
+                " The keyboard loop still wrapped from the footer boundary to "
+                f"{_active_from_state(wrap_state).get('accessible_name')!r}."
+            )
+        return summary
+    if not _step_passed(result, 4):
+        if isinstance(wrap_state, dict):
+            return (
+                "The live workspace switcher did not keep the expected Tab wrap behavior "
+                "after the footer boundary. "
+                f"Observed wrap state: {json.dumps(wrap_state, ensure_ascii=True)}."
+            )
+        if isinstance(footer_button_state, dict):
+            return (
+                "The live workspace switcher reached the footer control, but the Tab loop "
+                "did not complete the expected wrap. "
+                f"Observed footer state: {json.dumps(footer_button_state, ensure_ascii=True)}."
+            )
+        if isinstance(trace, list):
+            return (
+                "The live workspace switcher kept keyboard focus inside the panel, but Tab "
+                "navigation never reached `Save and switch`. "
+                f"Visited labels: {_visited_focus_labels(trace)!r}."
+            )
     return str(result.get("error", "The live result did not match the expected footer behavior."))
 
 
@@ -1313,9 +1436,8 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
-        "The deployed app never exposed the workspace switcher scenario required by the "
-        "ticket and stayed on the startup `Sync issue` surface instead.\n\n"
-        f"{result.get('error', 'The deployed app blocked the TS-954 footer scenario before it could run.')}\n"
+        f"{_actual_result_summary(result, passed=False)}\n\n"
+        f"{result.get('error', 'The live TS-954 result did not match the expected footer behavior.')}\n"
     )
 
 
