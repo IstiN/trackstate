@@ -94,6 +94,81 @@ void main() {
     );
 
     test(
+      'Shift+Tab ignores anonymous semantics wrappers and wraps to the last labelled in-panel control',
+      () {
+        final panel = _appendPanel(host);
+        _appendButton(
+          host,
+          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        final row = _appendSemanticsNode(
+          panel,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          semanticsIdentifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
+            'active',
+          ),
+          role: 'button',
+          tabIndex: 0,
+          current: true,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+        );
+        final branchInput = _appendInput(
+          panel,
+          label: 'Branch',
+          left: 0,
+          top: 220,
+          width: 220,
+          height: 36,
+        );
+        _appendSemanticsNode(
+          panel,
+          left: 0,
+          top: 268,
+          width: 150,
+          height: 32,
+          tabIndex: 0,
+        );
+
+        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+          onBrowserTab: () {},
+          onBrowserFocusOutside: () {},
+          onBrowserBoundaryKey: (_) {},
+        );
+        addTearDown(subscription.cancel);
+
+        row.focus();
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(
+            key: 'Tab',
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          ),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(
+          web.document.activeElement,
+          same(branchInput),
+          reason:
+              'Reverse tab should ignore anonymous focusable semantics wrappers '
+              'and land on the last labelled control inside the workspace '
+              'switcher.',
+        );
+      },
+    );
+
+    test(
       'Shift+Tab from the selected row does not wrap to a non-overlapping input outside the workspace switcher',
       () {
         final panel = _appendPanel(host);
@@ -161,6 +236,43 @@ void main() {
       },
     );
   });
+}
+
+web.HTMLElement _appendSemanticsNode(
+  web.Element parent, {
+  required double left,
+  required double top,
+  required double width,
+  required double height,
+  String? semanticsIdentifier,
+  String? role,
+  String? label,
+  int? tabIndex,
+  bool current = false,
+}) {
+  final element = web.document.createElement('flt-semantics') as web.HTMLElement
+    ..style.position = 'absolute'
+    ..style.left = '${left}px'
+    ..style.top = '${top}px'
+    ..style.width = '${width}px'
+    ..style.height = '${height}px';
+  if (semanticsIdentifier != null) {
+    element.setAttribute('flt-semantics-identifier', semanticsIdentifier);
+  }
+  if (role != null) {
+    element.setAttribute('role', role);
+  }
+  if (label != null) {
+    element.setAttribute('aria-label', label);
+  }
+  if (tabIndex != null) {
+    element.tabIndex = tabIndex;
+  }
+  if (current) {
+    element.setAttribute('aria-current', 'true');
+  }
+  parent.append(element);
+  return element;
 }
 
 web.HTMLDivElement _appendPanel(web.HTMLDivElement host) {

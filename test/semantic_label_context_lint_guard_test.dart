@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'flutter analyze flags weakened workspace sync semantic labels that drop sync error context',
+    'flutter analyze flags weakened workspace sync semantic getters that drop sync error context',
     () async {
       final tempDir = await Directory.systemTemp.createTemp(
         'trackstate-semantic-label-lint',
@@ -18,16 +18,16 @@ void main() {
       );
       final source = targetFile.readAsStringSync();
       final mutatedSource = source.replaceFirst(
-        'semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),',
-        'semanticLabel: l10n.workspaceSyncAttentionNeededVisibleLabel,',
+        ').workspaceSyncAttentionNeededSemanticLabel;',
+        ').workspaceSyncAttentionNeededVisibleLabel;',
       );
 
       expect(
         mutatedSource,
         isNot(equals(source)),
         reason:
-            'Expected the test mutation to weaken the sync semantic label '
-            'call-site contract.',
+            'Expected the test mutation to weaken the sync semantic-label '
+            'localization getter.',
       );
       targetFile.writeAsStringSync(mutatedSource);
 
@@ -49,10 +49,10 @@ void main() {
       expect(
         output.toLowerCase(),
         anyOf(
-          contains('sync error'),
-          contains('workspaceSyncAttentionNeeded'.toLowerCase()),
+          contains('workspacesyncattentionneededvisiblelabel'),
+          contains('_workspacesyncattentionneededvisibletext'),
           contains('semantic'),
-          contains('deprecated'),
+          contains("can't be assigned"),
         ),
         reason:
             'Expected the analyzer output to explain the missing sync-error '

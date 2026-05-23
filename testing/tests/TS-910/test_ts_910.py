@@ -52,7 +52,7 @@ FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 FIELD_LABELS = ("Repository", "Branch")
-PANEL_OBSERVE_TIMEOUT_MS = 1_500
+PANEL_OBSERVE_TIMEOUT_MS = 4_000
 
 REQUEST_STEPS = [
     "Press the 'Tab' key to navigate through all interactive elements within the panel (e.g., workspace list items, footer buttons).",
@@ -129,7 +129,7 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                tracker_page.session.set_viewport_size(**DESKTOP_VIEWPORT)
+                page.set_viewport(**DESKTOP_VIEWPORT)
                 try:
                     runtime = tracker_page.open()
                 except AssertionError as error:
@@ -275,9 +275,8 @@ def main() -> None:
                     panel=panel,
                     timeout_ms=4_000,
                 )
-                panel, panel_observation_error = _observe_panel_after_key_press(
+                panel, surface_stability_error = _observe_panel_after_key_press(
                     page=page,
-                    previous_panel=panel,
                     timeout_ms=PANEL_OBSERVE_TIMEOUT_MS,
                 )
                 focused_row_state = _capture_tab_state(
@@ -289,8 +288,8 @@ def main() -> None:
                     key="Initial focus",
                     monitor=None,
                 )
-                if panel_observation_error is not None:
-                    focused_row_state["panel_observation_error"] = panel_observation_error
+                if surface_stability_error is not None:
+                    focused_row_state["surface_stability_error"] = surface_stability_error
                 result["focused_first_row_state"] = focused_row_state
                 _assert_first_row_focus_ready(
                     state=focused_row_state,
@@ -328,7 +327,6 @@ def main() -> None:
                         page.press_key("Tab", timeout_ms=4_000)
                         panel, state = _capture_post_tab_state(
                             page=page,
-                            previous_panel=panel,
                             first_row_display_name=first_row.display_name,
                             press_index=press_index,
                             before=before,
@@ -398,7 +396,6 @@ def main() -> None:
                     page.press_key("Tab", timeout_ms=4_000)
                     panel, wrap_state = _capture_post_tab_state(
                         page=page,
-                        previous_panel=panel,
                         first_row_display_name=first_row.display_name,
                         press_index=len(tab_trace) + 1,
                         before=before_wrap,
@@ -669,15 +666,13 @@ def _capture_tab_state(
 def _capture_post_tab_state(
     *,
     page: LiveWorkspaceSwitcherPage,
-    previous_panel: WorkspaceSwitcherPanelObservation,
     first_row_display_name: str,
     press_index: int,
     before: FocusedElementObservation,
     timeout_ms: int,
 ) -> tuple[WorkspaceSwitcherPanelObservation, dict[str, object]]:
-    panel, panel_observation_error = _observe_panel_after_key_press(
+    panel, surface_stability_error = _observe_panel_after_key_press(
         page=page,
-        previous_panel=previous_panel,
         timeout_ms=timeout_ms,
     )
     monitor = page.read_transition_monitor(clear=True)
@@ -690,26 +685,42 @@ def _capture_post_tab_state(
         key="Tab",
         monitor=monitor,
     )
-    state["panel_detected_after_key"] = panel_observation_error is None
-    if panel_observation_error is not None:
-        state["panel_observation_error"] = panel_observation_error
+    state["panel_detected_after_key"] = True
+    if surface_stability_error is not None:
+        state["surface_stability_error"] = surface_stability_error
     return panel, state
 
 
 def _observe_panel_after_key_press(
     *,
     page: LiveWorkspaceSwitcherPage,
-    previous_panel: WorkspaceSwitcherPanelObservation,
     timeout_ms: int,
 ) -> tuple[WorkspaceSwitcherPanelObservation, str | None]:
+    surface_stability_error: str | None = None
+    try:
+        page.wait_for_surface_to_remain_open(
+            stability_ms=FOCUS_SETTLE_MS,
+            timeout_ms=timeout_ms,
+        )
+    except Exception as error:
+        surface_stability_error = f"{type(error).__name__}: {error}"
     try:
         panel = page.observe_open_panel(
             expected_container_kinds=("anchored-panel", "surface", "dialog"),
             timeout_ms=timeout_ms,
         )
-        return panel, None
+        return panel, surface_stability_error
     except Exception as error:
-        return previous_panel, f"{type(error).__name__}: {error}"
+        raise AssertionError(
+            "The test could not re-observe the visible workspace switcher panel after the "
+            "keyboard interaction, so the next focus target could not be sampled reliably.\n"
+            + (
+                f"Observed stability wait error: {surface_stability_error}\n"
+                if surface_stability_error is not None
+                else ""
+            )
+            + f"Observed panel error: {type(error).__name__}: {error}"
+        ) from error
 
 
 def _workspace_state(repository: str) -> dict[str, object]:

@@ -51,6 +51,27 @@ void main() {
       expect(selectedPath, isNull);
     },
   );
+
+  test(
+    'browser workspace picker rejects a handle whose directory name does not match the saved workspace target',
+    () async {
+      browserDirectoryAccessRequester =
+          ({String? confirmButtonText, String? initialDirectory}) async {
+            return <String, Object?>{'name': 'wrong-directory'};
+          };
+
+      await expectLater(
+        pickWorkspaceDirectory(initialDirectory: '/tmp/demo'),
+        throwsA(
+          isA<Exception>().having(
+            (error) => error.toString(),
+            'message',
+            'Selected directory does not match the saved workspace configuration.',
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _AbortError implements Exception {

@@ -116,6 +116,30 @@ test('TrackState web app has no axe-core accessibility violations', async ({
 
         self.assertIn("missing flt-semantics-placeholder", excerpt)
 
+    def test_extract_log_excerpt_prefers_missing_placeholder_over_waiting_marker(self) -> None:
+        excerpt = self.probe._extract_log_excerpt(  # noqa: SLF001
+            """
+            Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:00Z Semantics tree discovery: waiting for nodes
+            Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:15Z Error: Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin.
+            """,
+            "",
+        )
+
+        self.assertIn("missing before the scan could begin", excerpt)
+
+    def test_extract_log_excerpt_skips_subtest_title_and_prefers_actual_error(self) -> None:
+        excerpt = self.probe._extract_log_excerpt(  # noqa: SLF001
+            """
+            Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:00Z # Subtest: enableFlutterSemantics surfaces a descriptive pre-flight error when the placeholder never appears
+            Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:15Z Error: Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin.
+            """,
+            "",
+        )
+
+        self.assertIn(
+            "Error: Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin.",
+            excerpt,
+        )
 
 if __name__ == "__main__":
     unittest.main()

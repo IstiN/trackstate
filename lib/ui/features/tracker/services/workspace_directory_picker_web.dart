@@ -6,6 +6,9 @@ import 'dart:js_interop';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../../data/repositories/browser_local_workspace_repository.dart';
+import 'workspace_directory_picker.dart';
+
 typedef BrowserDirectoryAccessRequester =
     Future<Object?> Function({
       String? confirmButtonText,
@@ -33,10 +36,19 @@ Future<String?> pickWorkspaceDirectory({
       confirmButtonText: confirmButtonText,
       initialDirectory: normalizedInitialDirectory,
     );
-    return _normalizeSelection(
+    final normalizedSelection = _normalizeSelection(
       selection,
       initialDirectory: normalizedInitialDirectory,
     );
+    if (normalizedSelection != null &&
+        selection != null &&
+        selection is! String) {
+      rememberBrowserLocalWorkspaceSelection(
+        workspacePath: normalizedSelection,
+        selection: selection,
+      );
+    }
+    return normalizedSelection;
   } on Object catch (error) {
     if (_looksLikePickerCancellation(error)) {
       return null;
@@ -72,10 +84,18 @@ String? _normalizeSelection(
   if (selection case final String path) {
     return _normalizeDirectoryPath(path);
   }
+  final handleName = _directoryHandleName(selection);
   if (initialDirectory != null) {
+    final expectedDirectoryName = _directoryName(initialDirectory);
+    if (handleName != null &&
+        expectedDirectoryName != null &&
+        handleName != expectedDirectoryName) {
+      throw const WorkspaceDirectorySelectionMismatchException(
+        'Selected directory does not match the saved workspace configuration.',
+      );
+    }
     return initialDirectory;
   }
-  final handleName = _directoryHandleName(selection);
   if (handleName != null) {
     return handleName;
   }
@@ -83,6 +103,13 @@ String? _normalizeSelection(
 }
 
 String? _directoryHandleName(Object selection) {
+  if (selection case {'name': final Object? rawName}) {
+    final name = rawName?.toString().trim();
+    if (name == null || name.isEmpty) {
+      return null;
+    }
+    return name;
+  }
   try {
     final name = _DirectoryHandle(selection as JSObject).name.trim();
     if (name.isEmpty) {
@@ -100,6 +127,25 @@ String? _normalizeDirectoryPath(String? path) {
     return null;
   }
   return trimmed;
+}
+
+String? _directoryName(String? path) {
+  final normalized = _normalizeDirectoryPath(path);
+  if (normalized == null) {
+    return null;
+  }
+  final withoutTrailingSeparators = normalized.replaceAll(
+    RegExp(r'[\\/]+$'),
+    '',
+  );
+  final slashIndex = withoutTrailingSeparators.lastIndexOf('/');
+  final backslashIndex = withoutTrailingSeparators.lastIndexOf('\\');
+  final lastSeparator = slashIndex > backslashIndex
+      ? slashIndex
+      : backslashIndex;
+  return lastSeparator >= 0
+      ? withoutTrailingSeparators.substring(lastSeparator + 1)
+      : withoutTrailingSeparators;
 }
 
 bool _looksLikePickerCancellation(Object error) {
