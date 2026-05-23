@@ -214,6 +214,7 @@ def _assert_mutation_applied(
         raise AssertionError(
             "Step 2 failed: the temp workspace source did not contain the weaker "
             f"semantic-label return `{config.replacement_source_snippet}`.\n"
+            f"semantic-label value `{config.replacement_source_snippet}`.\n"
             f"Mutated file: {validation.target_path}"
         )
     _record_step(
@@ -226,8 +227,9 @@ def _assert_mutation_applied(
             f"`{config.required_source_snippet}` with "
             f"`{config.replacement_source_snippet}` inside "
             f"{config.target_relative_path.as_posix()}, downgrading the semantic "
-            f"label getter from {config.required_semantic_label!r} to the generic "
-            f"{config.generic_semantic_label!r}."
+            f"label from {config.required_semantic_label!r} to the generic "
+            f"{config.generic_semantic_label!r} while keeping the typed semantic "
+            "wrapper intact."
         ),
     )
 
@@ -246,9 +248,22 @@ def _assert_lint_blocks_regression(
         validation.mutated_analyze,
         normalized_output=normalized_output,
     )
+    issue_markers = sorted(
+        term for term in config.required_issue_terms if term in normalized_output
+    )
+    context_markers = sorted(
+        term for term in config.required_context_terms if term in normalized_output
+    )
+    forbidden_markers = _forbidden_contract_markers(normalized_output)
     clean_analysis = "no issues found!" in normalized_output
 
-    if diagnostic_signals and not clean_analysis:
+    if (
+        diagnostic_signals
+        and not clean_analysis
+        and issue_markers
+        and context_markers
+        and not forbidden_markers
+    ):
         _record_step(
             result,
             step=3,
@@ -275,6 +290,9 @@ def _assert_lint_blocks_regression(
             f"Observed exit_code={validation.mutated_analyze.exit_code}; "
             f"clean_analysis={clean_analysis}; "
             f"diagnostic_signals={diagnostic_signals}; "
+            f"issue_markers={issue_markers}; "
+            f"context_markers={context_markers}; "
+            f"forbidden_markers={sorted(forbidden_markers)}; "
             f"terminal output:\n{output}"
         ),
     )
@@ -285,21 +303,24 @@ def _assert_lint_blocks_regression(
             "`flutter analyze` against the weakened semantic-label change."
         ),
         observed=(
-            "The command still looked like a clean analysis run instead of surfacing "
-            "a real diagnostic for the weakened semantic label. Output:\n"
+            "The command did not surface a ticket-aligned diagnostic for the weakened "
+            "semantic label. Output:\n"
             f"{output}"
         ),
     )
     raise AssertionError(
         "Step 3 failed: `flutter analyze` did not identify the weakened sync-pill "
-        "semantic label regression with any real diagnostic.\n"
-        "Expected the mutated analysis run to stop looking clean and surface an "
-        "issue, warning, hint, or non-zero analyzer result instead of "
-        "`No issues found!`.\n"
+        "semantic label regression with a ticket-aligned diagnostic.\n"
+        "Expected the mutated analysis run to stop looking clean, mention the "
+        "sync/semantic-label context problem, and avoid unrelated type-contract "
+        "errors.\n"
         f"Observed command: {validation.mutated_analyze.command_text}\n"
         f"Observed exit code: {validation.mutated_analyze.exit_code}\n"
         f"Observed clean analysis: {clean_analysis}\n"
         f"Observed diagnostic signals: {diagnostic_signals}\n"
+        f"Observed issue markers: {issue_markers}\n"
+        f"Observed context markers: {context_markers}\n"
+        f"Observed forbidden markers: {sorted(forbidden_markers)}\n"
         f"Observed output:\n{output}"
     )
 
@@ -329,6 +350,24 @@ def _diagnostic_signals(
         signals.append("issue-summary")
 
     return signals
+
+
+def _forbidden_contract_markers(normalized_output: str) -> set[str]:
+    markers: dict[str, tuple[str, ...]] = {
+        "return-of-invalid-type": ("return_of_invalid_type",),
+        "return-type-mismatch": ("can't be returned from the function",),
+        "assignment-type-error": ("can't be assigned", "argument type"),
+        "visible-text-wrapper": (
+            "_workspacesyncattentionneededvisibletext",
+            "workspacesyncattentionneededvisiblelabel",
+        ),
+        "sync-pill-type-wrapper": ("_syncpillsemanticlabel",),
+    }
+    return {
+        name
+        for name, patterns in markers.items()
+        if any(pattern in normalized_output for pattern in patterns)
+    }
 
 
 def _populate_command_metadata(

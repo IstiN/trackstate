@@ -139,6 +139,49 @@ void main() {
   );
 
   test(
+    'saveLocalWorkspaceAvailability persists the unavailable local workspace guard until it is explicitly cleared',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final unavailableState = await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: false,
+      );
+      expect(
+        unavailableState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+      expect(
+        (await service.loadState()).unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+
+      final availableState = await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: true,
+      );
+      expect(
+        availableState.unavailableLocalWorkspaceIds,
+        isNot(contains('local:/tmp/trackstate@main')),
+      );
+      expect(
+        (await service.loadState()).unavailableLocalWorkspaceIds,
+        isNot(contains('local:/tmp/trackstate@main')),
+      );
+    },
+  );
+
+  test(
     'deleteProfile clears scoped credentials and falls back to the most recently opened workspace',
     () async {
       final authStore = _MemoryAuthStore()

@@ -22,7 +22,7 @@
   "syncStatus": "Synced with Git",
   "workspaceSyncSettings": "Workspace sync",
   "workspaceSyncChecking": "Syncing",
-  "workspaceSyncAttentionNeeded": "Attention needed",
+  "workspaceSyncAttentionNeededVisibleLabel": "Attention needed",
   "workspaceSyncAttentionNeededSemanticLabel": "Sync error, attention needed",
   "workspaceSyncUnavailable": "Sync unavailable",
   "workspaceSyncPending": "Updates pending",

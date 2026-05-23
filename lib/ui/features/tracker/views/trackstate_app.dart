@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../../data/repositories/browser_local_workspace_repository.dart';
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
@@ -21,6 +22,9 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_focusable_control_stub.dart'
+    if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
+    as browser_focusable_control;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -30,6 +34,12 @@ import '../view_models/tracker_view_model.dart';
 
 typedef LocalRepositoryLoader =
     Future<TrackStateRepository> Function({
+      required String repositoryPath,
+      required String defaultBranch,
+      required String writeBranch,
+    });
+typedef BrowserLocalRepositoryLoader =
+    Future<TrackStateRepository?> Function({
       required String repositoryPath,
       required String defaultBranch,
       required String writeBranch,
@@ -60,6 +70,14 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+const _workspaceSwitcherTargetTypeHostedFocusId =
+    'trackstate-workspace-switcher-target-type-hosted';
+const _workspaceSwitcherTargetTypeLocalFocusId =
+    'trackstate-workspace-switcher-target-type-local';
+const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
+
+String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
+    'trackstate-workspace-switcher-$action-$workspaceId';
 
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
@@ -85,6 +103,7 @@ class TrackStateApp extends StatefulWidget {
     this.repository,
     this.repositoryFactory,
     this.openLocalRepository,
+    this.openBrowserLocalRepository = openBrowserLocalWorkspaceRepository,
     this.openHostedRepository,
     this.workspaceProfileService =
         const SharedPreferencesWorkspaceProfileService(),
@@ -97,6 +116,7 @@ class TrackStateApp extends StatefulWidget {
   final TrackStateRepository? repository;
   final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
+  final BrowserLocalRepositoryLoader openBrowserLocalRepository;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
   final TrackStateAuthStore authStore;
@@ -124,7 +144,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
-  final Set<String> _preservedUnavailableLocalWorkspaceIds = <String>{};
   List<String>? _desktopWorkspaceSwitcherProfileOrder;
   browser_workspace_switcher_focus_monitor.BrowserViewportScrollSnapshot?
   _desktopWorkspaceSwitcherScrollSnapshot;
@@ -185,7 +204,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
-    _preservedUnavailableLocalWorkspaceIds.clear();
     _isDesktopWorkspaceSwitcherVisible = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
@@ -263,6 +281,78 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  Future<TrackStateRepository> _openWorkspaceRepository(
+    WorkspaceProfile workspace,
+  ) async {
+    if (!workspace.isLocal) {
+      return _openHostedRepository(
+        repository: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    if (!kIsWeb) {
+      return _openLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    final repository = await widget.openBrowserLocalRepository(
+      repositoryPath: workspace.target,
+      defaultBranch: workspace.defaultBranch,
+      writeBranch: workspace.writeBranch,
+    );
+    if (repository != null) {
+      return repository;
+    }
+    throw StateError(
+      'Saved local workspace access is unavailable until the folder is reselected in this browser.',
+    );
+  }
+
+  Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
+    WorkspaceProfile workspace, {
+    required TrackerViewModel previousViewModel,
+  }) async {
+    try {
+      final repository = await widget.openBrowserLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+      if (repository == null) {
+        return null;
+      }
+      final nextViewModel = _createViewModel(
+        repository: repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: workspace.id,
+      );
+      await nextViewModel.load();
+      if (nextViewModel.snapshot == null) {
+        final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
+        nextViewModel.dispose();
+        _rememberWorkspaceValidationFailure(workspace, reason);
+        return null;
+      }
+      _workspaceValidationFailures.remove(workspace.id);
+      return _PreparedWorkspaceSwitch(
+        viewModel: nextViewModel,
+        workspace: workspace,
+        localConfigurationKey:
+            '${workspace.target}\n${workspace.defaultBranch}\n${workspace.writeBranch}',
+      );
+    } on Object catch (error) {
+      _rememberWorkspaceValidationFailure(
+        workspace,
+        _normalizeWorkspaceFailureReason(error),
+      );
+      return null;
+    }
+  }
+
   Future<TrackStateRepository> _openHostedRepository({
     required String repository,
     required String defaultBranch,
@@ -317,15 +407,25 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
-        localWorkspaceAvailability[workspace.id] =
-            !_preservedUnavailableLocalWorkspaceIds.contains(workspace.id);
+        if (_shouldMarkActiveLocalWorkspaceUnavailableFromSync(workspace)) {
+          workspaceState = await _saveLocalWorkspaceAvailability(
+            workspace.id,
+            isAvailable: false,
+          );
+          localWorkspaceAvailability[workspace.id] = false;
+          continue;
+        }
+        localWorkspaceAvailability[workspace.id] = !workspaceState
+            .unavailableLocalWorkspaceIds
+            .contains(workspace.id);
+        continue;
+      }
+      if (workspaceState.unavailableLocalWorkspaceIds.contains(workspace.id)) {
+        localWorkspaceAvailability[workspace.id] = false;
         continue;
       }
       final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
       localWorkspaceAvailability[workspace.id] = isAvailable;
-      if (isAvailable) {
-        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
-      }
     }
     if (!mounted) {
       return;
@@ -343,15 +443,27 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
+  bool _shouldMarkActiveLocalWorkspaceUnavailableFromSync(
+    WorkspaceProfile workspace,
+  ) {
+    if (!workspace.isLocal || !viewModel.usesLocalPersistence) {
+      return false;
+    }
+    final status = viewModel.workspaceSyncStatus;
+    final latestError = status.latestError?.trim();
+    if (status.health != WorkspaceSyncHealth.attentionNeeded ||
+        latestError == null ||
+        latestError.isEmpty) {
+      return false;
+    }
+    return !_isUnsupportedActiveLocalStartupAccess(latestError);
+  }
+
   Future<bool> _validateLocalWorkspaceAvailability(
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on Object {
@@ -371,6 +483,30 @@ class _TrackStateAppState extends State<TrackStateApp>
     final previousViewModel = viewModel;
     _WorkspaceRestoreFailure? lastFailure;
     for (final workspace in candidates) {
+      if (_shouldBlockAutomaticRestore(state, workspace)) {
+        if (workspace.id == activeWorkspaceId) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: true,
+            markUnavailable: true,
+          );
+          final selectedState = await widget.workspaceProfileService
+              .selectProfile(workspace.id);
+          _pendingWorkspaceRestoreFailure = null;
+          await _commitPreparedWorkspaceSwitch(
+            preserved,
+            previousViewModel: previousViewModel,
+            workspaceState: selectedState,
+          );
+          return true;
+        }
+        lastFailure = _WorkspaceRestoreFailure(
+          workspaceName: workspace.displayName,
+          reason: _workspaceValidationFailureReason(workspace),
+        );
+        continue;
+      }
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
@@ -413,6 +549,14 @@ class _TrackStateAppState extends State<TrackStateApp>
     return false;
   }
 
+  bool _shouldBlockAutomaticRestore(
+    WorkspaceProfilesState state,
+    WorkspaceProfile workspace,
+  ) {
+    return workspace.isLocal &&
+        state.unavailableLocalWorkspaceIds.contains(workspace.id);
+  }
+
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
@@ -422,17 +566,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
   }) async {
     try {
-      final repository = workspace.isLocal
-          ? await _openLocalRepository(
-              repositoryPath: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            )
-          : await _openHostedRepository(
-              repository: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            );
+      final repository = await _openWorkspaceRepository(workspace);
       final nextViewModel = _createViewModel(
         repository: repository,
         previous: previousViewModel,
@@ -441,7 +575,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot != null) {
-        _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
         _workspaceValidationFailures.remove(workspace.id);
         return _PreparedWorkspaceSwitch(
           viewModel: nextViewModel,
@@ -536,9 +669,8 @@ class _TrackStateAppState extends State<TrackStateApp>
       await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     if (markUnavailable) {
-      _preservedUnavailableLocalWorkspaceIds.add(workspace.id);
+      await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
     } else {
-      _preservedUnavailableLocalWorkspaceIds.remove(workspace.id);
       _workspaceValidationFailures.remove(workspace.id);
     }
     return _PreparedWorkspaceSwitch(
@@ -546,6 +678,21 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace: workspace,
       localConfigurationKey: null,
     );
+  }
+
+  Future<WorkspaceProfilesState> _saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    final nextState = await widget.workspaceProfileService
+        .saveLocalWorkspaceAvailability(workspaceId, isAvailable: isAvailable);
+    if (!mounted) {
+      return nextState;
+    }
+    setState(() {
+      _workspaceState = nextState;
+    });
+    return nextState;
   }
 
   bool _isUnsupportedActiveLocalStartupAccess(String reason) {
@@ -654,6 +801,20 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     if (loadedState.hasProfiles) {
+      if (kIsWeb) {
+        if (loadedState.activeWorkspace case final activeWorkspace?) {
+          viewModel.updateWorkspaceScope(activeWorkspace.id);
+        }
+        final initialLoad = viewModel.load(deferAccessRestore: true);
+        if (mounted) {
+          setState(() {
+            _workspaceProfilesReady = true;
+          });
+        }
+        _scheduleWebStartupRefresh();
+        unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
+        return;
+      }
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
         if (mounted) {
@@ -689,6 +850,33 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
+  }
+
+  Future<void> _finishWebStartupWorkspaceRestore(
+    WorkspaceProfilesState loadedState,
+    Future<void> initialLoad,
+  ) async {
+    await initialLoad;
+    final restored = await _restoreWorkspaceFromSavedState(loadedState);
+    _scheduleWebStartupRefresh();
+    if (restored || !mounted) {
+      return;
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
+  }
+
+  void _scheduleWebStartupRefresh() {
+    if (!kIsWeb) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    });
   }
 
   Future<void> _awaitActiveLocalWorkspaceRevalidation(
@@ -740,18 +928,23 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on UnsupportedError {
       return true;
     } on Object catch (error) {
+      if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        return true;
+      }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
     }
+  }
+
+  bool _isUnavailableBrowserLocalWorkspaceAccess(Object error) {
+    return _normalizeWorkspaceFailureReason(
+      error,
+    ).toLowerCase().contains('reselected in this browser');
   }
 
   bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {
@@ -861,6 +1054,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         selectedState = await widget.workspaceProfileService.selectProfile(
           workspace.id,
         );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: true,
+        );
       }
       await _commitPreparedWorkspaceSwitch(
         prepared,
@@ -964,9 +1161,15 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (prepared == null) {
       return;
     }
-    final selectedState = await widget.workspaceProfileService.selectProfile(
+    var selectedState = await widget.workspaceProfileService.selectProfile(
       workspace.id,
     );
+    if (workspace.isLocal) {
+      selectedState = await _saveLocalWorkspaceAvailability(
+        workspace.id,
+        isAvailable: true,
+      );
+    }
     await _commitPreparedWorkspaceSwitch(
       prepared,
       previousViewModel: previousViewModel,
@@ -1127,6 +1330,119 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _showsWorkspaceOnboarding = true;
     });
+  }
+
+  Future<void> _retryUnavailableLocalWorkspace(
+    WorkspaceProfile workspace,
+  ) async {
+    if (widget.repository != null || !workspace.isLocal) {
+      return;
+    }
+    String? selectedPath;
+    try {
+      selectedPath = await widget.workspaceDirectoryPicker(
+        initialDirectory: workspace.target,
+      );
+    } on WorkspaceDirectorySelectionMismatchException catch (error) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message: error.message,
+      );
+      return;
+    }
+    if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
+      return;
+    }
+
+    final normalizedTarget = normalizeWorkspaceTarget(
+      WorkspaceProfileTargetType.local,
+      selectedPath,
+    );
+    if (normalizedTarget.isEmpty) {
+      return;
+    }
+    if (normalizedTarget != workspace.normalizedTarget) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message:
+            'Selected directory does not match the saved workspace configuration.',
+      );
+      return;
+    }
+
+    final previousViewModel = viewModel;
+    final nextWorkspace = workspace;
+    if (!mounted) {
+      return;
+    }
+
+    final prepared = await _prepareWorkspaceSwitch(
+      nextWorkspace,
+      previousViewModel: previousViewModel,
+      showFailureMessage: false,
+    );
+    if (prepared != null) {
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
+      );
+      await _commitPreparedWorkspaceSwitch(
+        prepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+      return;
+    }
+
+    var reason = _workspaceValidationFailureReason(nextWorkspace);
+    if (_isUnsupportedActiveLocalStartupAccess(reason)) {
+      final browserPrepared = await _prepareBrowserLocalWorkspaceSwitch(
+        nextWorkspace,
+        previousViewModel: previousViewModel,
+      );
+      if (browserPrepared != null) {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          nextWorkspace.id,
+        );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          nextWorkspace.id,
+          isAvailable: true,
+        );
+        await _commitPreparedWorkspaceSwitch(
+          browserPrepared,
+          previousViewModel: previousViewModel,
+          workspaceState: selectedState,
+        );
+        return;
+      }
+      reason = _workspaceValidationFailureReason(nextWorkspace);
+    }
+    previousViewModel.showMessage(
+      TrackerMessage.workspaceSwitchFailed(
+        workspaceName: nextWorkspace.displayName,
+        reason: reason,
+      ),
+    );
+  }
+
+  Future<void> _showUnavailableLocalWorkspaceRetryMismatch(
+    WorkspaceProfile workspace, {
+    required String message,
+  }) async {
+    _rememberWorkspaceValidationFailure(workspace, message);
+    await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+    if (!mounted) {
+      return;
+    }
+    viewModel.showMessage(
+      TrackerMessage.workspaceSwitchFailed(
+        workspaceName: workspace.displayName,
+        reason: message,
+      ),
+    );
   }
 
   Future<void> _deleteWorkspaceProfile(WorkspaceProfile workspace) async {
@@ -1348,6 +1664,11 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isDesktopWorkspaceSwitcherFocused() {
+    if (kIsWeb &&
+        browser_workspace_switcher_focus_monitor
+            .isBrowserFocusWithinWorkspaceSwitcher()) {
+      return true;
+    }
     return _workspaceSwitcherTriggerFocusNode.hasFocus ||
         _desktopWorkspaceSwitcherFocusScopeNode.hasFocus;
   }
@@ -1520,6 +1841,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             : _closeDesktopWorkspaceSwitcher;
         return Semantics(
           container: true,
+          explicitChildNodes: true,
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           label: AppLocalizations.of(sheetContext)!.workspaceSwitcher,
           onDidLoseAccessibilityFocus: compact
@@ -1551,6 +1873,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                 onSelectWorkspace: (workspace) {
                   closeSwitcher();
                   unawaited(_switchToWorkspace(workspace));
+                },
+                onRetryUnavailableLocalWorkspace: (workspace) {
+                  closeSwitcher();
+                  unawaited(_retryUnavailableLocalWorkspace(workspace));
                 },
                 onDeleteWorkspace: (workspace) {
                   unawaited(
@@ -2059,8 +2385,8 @@ class _TrackerHome extends StatelessWidget {
                               l10n.settings,
                             ),
                             browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
-                              '${l10n.workspaceSwitcher}:',
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.semanticsIdentifier(
+                              browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                             ),
                             browser_workspace_switcher_focus_monitor
                                 .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
@@ -4157,22 +4483,35 @@ class _TopBar extends StatelessWidget {
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   )
-                                : _PrimaryButton(
-                                    label: workspaceSummary.textLabel,
-                                    semanticLabel:
-                                        workspaceSummary.semanticLabel,
-                                    icon: workspaceSummary.icon,
-                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                : browser_focusable_control.BrowserFocusableControl(
+                                    label: workspaceSummary.semanticLabel,
                                     onPressed: openWorkspaceSwitcher,
-                                    height: _desktopTopBarControlHeight,
-                                    semanticsSortOrder: workspaceSwitcherOrder,
-                                    semanticsIdentifier:
+                                    focusTargetId:
                                         browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
-                                    controlsNodes: const {
-                                      browserWorkspaceSwitcherSemanticsIdentifier,
-                                    },
-                                    focusNode:
-                                        workspaceSwitcherTriggerFocusNode,
+                                    panelId:
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                    controlsId:
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                    child: _PrimaryButton(
+                                      label: workspaceSummary.textLabel,
+                                      semanticLabel:
+                                          workspaceSummary.semanticLabel,
+                                      icon: workspaceSummary.icon,
+                                      expanded:
+                                          isDesktopWorkspaceSwitcherVisible,
+                                      onPressed: openWorkspaceSwitcher,
+                                      height: _desktopTopBarControlHeight,
+                                      semanticsSortOrder:
+                                          workspaceSwitcherOrder,
+                                      semanticsIdentifier:
+                                          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+                                      controlsNodes: const {
+                                        browserWorkspaceSwitcherSemanticsIdentifier,
+                                      },
+                                      focusNode:
+                                          workspaceSwitcherTriggerFocusNode,
+                                    ),
                                   ),
                           ),
                         ),
@@ -4308,8 +4647,12 @@ class _TopBar extends StatelessWidget {
                         compact: true,
                         condensed: false,
                         onPressed: openWorkspaceSwitcher,
+                        semanticsSortOrder: workspaceSwitcherOrder,
                         semanticsIdentifier:
                             browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+                        controlsNodes: const {
+                          browserWorkspaceSwitcherSemanticsIdentifier,
+                        },
                         focusNode: workspaceSwitcherTriggerFocusNode,
                       ),
                     ),
@@ -4800,23 +5143,36 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
   return switch (status.health) {
     WorkspaceSyncHealth.synced => l10n.syncStatus,
     WorkspaceSyncHealth.checking => l10n.workspaceSyncChecking,
-    WorkspaceSyncHealth.attentionNeeded => l10n.workspaceSyncAttentionNeeded,
+    WorkspaceSyncHealth.attentionNeeded =>
+      _workspaceSyncAttentionNeededVisibleLabel(l10n),
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
 }
 
-String _workspaceSyncSemanticLabel(
+_SyncPillSemanticLabel _workspaceSyncSemanticLabel(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
-  final label = _workspaceSyncLabel(l10n, viewModel);
   final status = viewModel.workspaceSyncStatus;
   if (status.health == WorkspaceSyncHealth.attentionNeeded &&
       !status.hasPendingRefresh) {
-    return l10n.workspaceSyncAttentionNeededSemanticLabel;
+    return _StaticSyncPillSemanticLabel(
+      _workspaceSyncAttentionNeededSemanticLabel(l10n),
+    );
   }
-  return '${l10n.workspaceSyncSettings}, $label';
+  return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
 }
+
+String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededVisibleLabel.value;
+
+_WorkspaceSyncAttentionNeededSemanticText
+_workspaceSyncAttentionNeededSemanticLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededSemanticLabel;
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
   final l10n = AppLocalizations.of(context)!;
@@ -6555,6 +6911,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.requestedFocusedWorkspaceId,
     required this.focusRequestVersion,
     required this.onSelectWorkspace,
+    required this.onRetryUnavailableLocalWorkspace,
     required this.onDeleteWorkspace,
     required this.onAddWorkspace,
     required this.onMoveWorkspaceSelection,
@@ -6572,6 +6929,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final String? requestedFocusedWorkspaceId;
   final int focusRequestVersion;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
+  final ValueChanged<WorkspaceProfile> onRetryUnavailableLocalWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final WorkspaceProfileCreator onAddWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
@@ -6589,12 +6947,15 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   late final TextEditingController _branchController;
   final Map<String, VoidCallback> _workspaceRowFocusRequesters =
       <String, VoidCallback>{};
+  bool _canSaveWorkspace = false;
 
   @override
   void initState() {
     super.initState();
     _targetController = TextEditingController();
     _branchController = TextEditingController(text: 'main');
+    _targetController.addListener(_handleAddWorkspaceInputChanged);
+    _branchController.addListener(_handleAddWorkspaceInputChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
       if (!mounted || requestedFocusedWorkspaceId == null) {
@@ -6606,6 +6967,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
 
   @override
   void dispose() {
+    _targetController.removeListener(_handleAddWorkspaceInputChanged);
+    _branchController.removeListener(_handleAddWorkspaceInputChanged);
     _targetController.dispose();
     _branchController.dispose();
     super.dispose();
@@ -6628,8 +6991,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   }
 
   void _saveWorkspace() {
-    if (_targetController.text.trim().isEmpty ||
-        _branchController.text.trim().isEmpty) {
+    if (!_canSaveWorkspace) {
       return;
     }
     widget.onAddWorkspace(
@@ -6639,6 +7001,18 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
         defaultBranch: _branchController.text,
       ),
     );
+  }
+
+  void _handleAddWorkspaceInputChanged() {
+    final canSaveWorkspace =
+        _targetController.text.trim().isNotEmpty &&
+        _branchController.text.trim().isNotEmpty;
+    if (canSaveWorkspace == _canSaveWorkspace) {
+      return;
+    }
+    setState(() {
+      _canSaveWorkspace = canSaveWorkspace;
+    });
   }
 
   @override
@@ -6729,6 +7103,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           builder: (context) {
                             final workspace = widget.workspaces.profiles[index];
                             final workspaceId = workspace.id;
+                            final isUnavailableLocal =
+                                workspace.isLocal &&
+                                widget.localWorkspaceAvailability[workspaceId] ==
+                                    false;
+                            final showLocalHostedAccessAction =
+                                workspace.isLocal &&
+                                widget.viewModel.usesLocalPersistence;
                             return _WorkspaceSwitcherRow(
                               key: ValueKey('workspace-$workspaceId'),
                               workspace: workspace,
@@ -6746,25 +7127,34 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                     widget.localWorkspaceAvailability,
                               ),
                               focusOrderBase: index * 3.0 + 1,
-                              primaryActionLabel:
-                                  workspace.isLocal &&
-                                      widget.viewModel.usesLocalPersistence
+                              primaryActionLabel: isUnavailableLocal
+                                  ? l10n.retry
+                                  : showLocalHostedAccessAction
                                   ? (widget
                                             .viewModel
                                             .hasLocalHostedAccessSession
                                         ? l10n.manageGitHubAccess
                                         : l10n.connectGitHub)
                                   : null,
-                              onPrimaryAction:
-                                  workspace.isLocal &&
-                                      widget.viewModel.usesLocalPersistence
+                              primaryActionSemanticLabel: isUnavailableLocal
+                                  ? '${l10n.retry}: ${workspace.displayName}'
+                                  : null,
+                              onPrimaryAction: isUnavailableLocal
+                                  ? () =>
+                                        widget.onRetryUnavailableLocalWorkspace(
+                                          workspace,
+                                        )
+                                  : showLocalHostedAccessAction
                                   ? () => _showRepositoryAccessDialog(
                                       context,
                                       widget.viewModel,
                                       allowLocalGitHubConnection: true,
                                     )
                                   : null,
-                              onSelect: workspaceId == activeWorkspaceId
+                              showOpenAction: !isUnavailableLocal,
+                              onSelect:
+                                  workspaceId == activeWorkspaceId ||
+                                      isUnavailableLocal
                                   ? null
                                   : () => widget.onSelectWorkspace(workspace),
                               onDelete: () =>
@@ -6806,12 +7196,20 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase),
-                    child: _SettingsProviderButton(
+                    child: browser_focusable_control.BrowserFocusableControl(
                       label: l10n.workspaceTargetTypeHosted,
-                      selected:
-                          _targetType == WorkspaceProfileTargetType.hosted,
                       onPressed: () => setState(
                         () => _targetType = WorkspaceProfileTargetType.hosted,
+                      ),
+                      focusTargetId: _workspaceSwitcherTargetTypeHostedFocusId,
+                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                      child: _SettingsProviderButton(
+                        label: l10n.workspaceTargetTypeHosted,
+                        selected:
+                            _targetType == WorkspaceProfileTargetType.hosted,
+                        onPressed: () => setState(
+                          () => _targetType = WorkspaceProfileTargetType.hosted,
+                        ),
                       ),
                     ),
                   ),
@@ -6820,11 +7218,20 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase + 1),
-                    child: _SettingsProviderButton(
+                    child: browser_focusable_control.BrowserFocusableControl(
                       label: l10n.workspaceTargetTypeLocal,
-                      selected: _targetType == WorkspaceProfileTargetType.local,
                       onPressed: () => setState(
                         () => _targetType = WorkspaceProfileTargetType.local,
+                      ),
+                      focusTargetId: _workspaceSwitcherTargetTypeLocalFocusId,
+                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                      child: _SettingsProviderButton(
+                        label: l10n.workspaceTargetTypeLocal,
+                        selected:
+                            _targetType == WorkspaceProfileTargetType.local,
+                        onPressed: () => setState(
+                          () => _targetType = WorkspaceProfileTargetType.local,
+                        ),
                       ),
                     ),
                   ),
@@ -6854,11 +7261,24 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child: FilledButton(
-                  key: const ValueKey('workspace-add-button'),
-                  onPressed: _saveWorkspace,
-                  child: Text(l10n.workspaceSaveAndSwitch),
-                ),
+                child: kIsWeb && !_canSaveWorkspace
+                    ? _WorkspaceSwitcherDisabledFooterButton(
+                        buttonKey: const ValueKey('workspace-add-button'),
+                        label: l10n.workspaceSaveAndSwitch,
+                        semanticsIdentifier: _workspaceSwitcherSaveFocusId,
+                      )
+                    : browser_focusable_control.BrowserFocusableControl(
+                        label: l10n.workspaceSaveAndSwitch,
+                        onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                        focusTargetId: _workspaceSwitcherSaveFocusId,
+                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                        focusableWhenDisabled: true,
+                        child: FilledButton(
+                          key: const ValueKey('workspace-add-button'),
+                          onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                          child: Text(l10n.workspaceSaveAndSwitch),
+                        ),
+                      ),
               ),
             ),
           ],
@@ -6881,8 +7301,10 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     required this.onSelectLastWorkspace,
     required this.onSummaryFocusRequesterChanged,
     this.primaryActionLabel,
+    this.primaryActionSemanticLabel,
     this.onPrimaryAction,
     this.onSelect,
+    this.showOpenAction = true,
   });
 
   final WorkspaceProfile workspace;
@@ -6895,8 +7317,10 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final VoidCallback onSelectLastWorkspace;
   final ValueChanged<VoidCallback?> onSummaryFocusRequesterChanged;
   final String? primaryActionLabel;
+  final String? primaryActionSemanticLabel;
   final VoidCallback? onPrimaryAction;
   final VoidCallback? onSelect;
+  final bool showOpenAction;
 
   @override
   State<_WorkspaceSwitcherRow> createState() => _WorkspaceSwitcherRowState();
@@ -6931,7 +7355,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
   }
 
   void _requestSummaryFocus() {
-    if (!mounted) {
+    if (!mounted || kIsWeb) {
       return;
     }
     _summaryFocusNode.requestFocus();
@@ -6955,6 +7379,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final onSelect = widget.onSelect;
     final onDelete = widget.onDelete;
     final primaryActionLabel = widget.primaryActionLabel;
+    final primaryActionSemanticLabel =
+        widget.primaryActionSemanticLabel ?? primaryActionLabel;
     final onPrimaryAction = widget.onPrimaryAction;
     final typeLabel = workspace.isHosted
         ? l10n.workspaceTargetTypeHosted
@@ -6962,17 +7388,88 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final detailText = workspace.defaultBranch == workspace.writeBranch
         ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
         : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isActive ? colors.primarySoft : colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isActive ? colors.primary : colors.border),
+    final summaryButton = SizedBox(
+      width: double.infinity,
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+              widget.onMoveWorkspaceSelection(1),
+          const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+              widget.onMoveWorkspaceSelection(-1),
+          const SingleActivator(LogicalKeyboardKey.home):
+              widget.onSelectFirstWorkspace,
+          const SingleActivator(LogicalKeyboardKey.end):
+              widget.onSelectLastWorkspace,
+        },
+        child: OutlinedButton(
+          focusNode: _summaryFocusNode,
+          onPressed: () {
+            _summaryFocusNode.requestFocus();
+            onSelect?.call();
+          },
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.all(4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            side: BorderSide.none,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            foregroundColor: colors.text,
+          ),
+          child: Row(
+            children: [
+              TrackStateIcon(
+                workspace.isHosted
+                    ? TrackStateIconGlyph.repository
+                    : TrackStateIconGlyph.folder,
+                color: isActive ? colors.primary : colors.muted,
+                semanticLabel: workspace.isHosted ? 'repository' : 'folder',
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      workspace.displayName,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      detailText,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _WorkspaceStateBadge(label: typeLabel, active: isActive),
+              const SizedBox(width: 8),
+              _WorkspaceStateBadge(label: stateLabel, active: isActive),
+            ],
+          ),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Semantics(
+    );
+    final shouldUseBrowserFocusableSummaryControl = kIsWeb && onSelect != null;
+    final summaryControl = shouldUseBrowserFocusableSummaryControl
+        ? browser_focusable_control.BrowserFocusableControl(
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            onPressed: onSelect,
+            focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
+              workspace.id,
+            ),
+            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+            rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
+            selectedRow: isActive,
+            tabIndex: isActive ? 0 : -1,
+            child: summaryButton,
+          )
+        : Semantics(
             container: true,
             button: true,
             enabled: true,
@@ -6984,143 +7481,94 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             ),
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-            child: ExcludeSemantics(
-              child: SizedBox(
-                width: double.infinity,
-                child: CallbackShortcuts(
-                  bindings: <ShortcutActivator, VoidCallback>{
-                    const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                        widget.onMoveWorkspaceSelection(1),
-                    const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                        widget.onMoveWorkspaceSelection(-1),
-                    const SingleActivator(LogicalKeyboardKey.home):
-                        widget.onSelectFirstWorkspace,
-                    const SingleActivator(LogicalKeyboardKey.end):
-                        widget.onSelectLastWorkspace,
-                  },
-                  child: OutlinedButton(
-                    focusNode: _summaryFocusNode,
-                    onPressed: () {
-                      _summaryFocusNode.requestFocus();
-                      onSelect?.call();
-                    },
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.all(4),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      side: BorderSide.none,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      foregroundColor: colors.text,
-                    ),
-                    child: Row(
-                      children: [
-                        TrackStateIcon(
-                          workspace.isHosted
-                              ? TrackStateIconGlyph.repository
-                              : TrackStateIconGlyph.folder,
-                          color: isActive ? colors.primary : colors.muted,
-                          semanticLabel: workspace.isHosted
-                              ? 'repository'
-                              : 'folder',
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                workspace.displayName,
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                detailText,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: colors.muted),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        _WorkspaceStateBadge(
-                          label: typeLabel,
-                          active: isActive,
-                        ),
-                        const SizedBox(width: 8),
-                        _WorkspaceStateBadge(
-                          label: stateLabel,
-                          active: isActive,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (isActive)
-                Text(
-                  l10n.activeWorkspace,
-                  style: Theme.of(context).textTheme.labelMedium,
-                )
-              else
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(focusOrderBase),
-                  child: Semantics(
-                    button: true,
-                    label: '${l10n.openWorkspace}: ${workspace.displayName}',
-                    child: ExcludeSemantics(
-                      child: OutlinedButton(
-                        key: ValueKey('workspace-open-${workspace.id}'),
-                        onPressed: onSelect,
-                        child: Text(l10n.openWorkspace),
+            child: ExcludeSemantics(child: summaryButton),
+          );
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isActive ? colors.primarySoft : colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isActive ? colors.primary : colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            summaryControl,
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (isActive)
+                  Text(
+                    l10n.activeWorkspace,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  )
+                else if (widget.showOpenAction)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(focusOrderBase),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey('workspace-open-${workspace.id}'),
+                      label: l10n.openWorkspace,
+                      semanticsLabel:
+                          '${l10n.openWorkspace}: ${workspace.displayName}',
+                      onPressed: onSelect,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'open',
                       ),
                     ),
                   ),
-                ),
-              if (primaryActionLabel != null && onPrimaryAction != null)
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(focusOrderBase + 1),
-                  child: Semantics(
-                    button: true,
-                    label: primaryActionLabel,
-                    child: ExcludeSemantics(
-                      child: OutlinedButton(
-                        key: ValueKey(
-                          'workspace-primary-action-${workspace.id}',
-                        ),
-                        onPressed: onPrimaryAction,
-                        child: Text(primaryActionLabel),
+                if (primaryActionLabel != null && onPrimaryAction != null)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(
+                      focusOrderBase + (widget.showOpenAction ? 1 : 0),
+                    ),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey(
+                        'workspace-primary-action-${workspace.id}',
+                      ),
+                      label: primaryActionLabel,
+                      semanticsLabel: primaryActionSemanticLabel!,
+                      onPressed: onPrimaryAction,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'primary',
                       ),
                     ),
                   ),
-                ),
-              FocusTraversalOrder(
-                order: NumericFocusOrder(focusOrderBase + 2),
-                child: Semantics(
-                  button: true,
-                  label: '${l10n.delete}: ${workspace.displayName}',
-                  child: ExcludeSemantics(
-                    child: TextButton(
-                      key: ValueKey('workspace-delete-${workspace.id}'),
+                if (!isActive)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(
+                      focusOrderBase +
+                          (widget.showOpenAction ? 1 : 0) +
+                          ((primaryActionLabel != null &&
+                                  onPrimaryAction != null)
+                              ? 1
+                              : 0),
+                    ),
+                    child: _WorkspaceSwitcherActionButton(
+                      buttonKey: ValueKey('workspace-delete-${workspace.id}'),
+                      label: l10n.delete,
+                      semanticsLabel:
+                          '${l10n.delete}: ${workspace.displayName}',
                       onPressed: onDelete,
-                      child: Text(l10n.delete),
+                      destructive: true,
+                      focusTargetId: _workspaceSwitcherActionFocusId(
+                        workspace.id,
+                        'delete',
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -7163,7 +7611,7 @@ class _WorkspaceStateBadge extends StatelessWidget {
       borderColor = colors.border;
       textColor = colors.muted;
     }
-    return Container(
+    final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -7177,7 +7625,160 @@ class _WorkspaceStateBadge extends StatelessWidget {
         ).textTheme.labelSmall?.copyWith(color: textColor),
       ),
     );
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        readOnly: true,
+        label: label,
+        child: badge,
+      ),
+    );
   }
+}
+
+class _WorkspaceSwitcherActionButton extends StatelessWidget {
+  const _WorkspaceSwitcherActionButton({
+    required this.buttonKey,
+    required this.label,
+    required this.semanticsLabel,
+    required this.onPressed,
+    required this.focusTargetId,
+    this.destructive = false,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final String semanticsLabel;
+  final VoidCallback? onPressed;
+  final String focusTargetId;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final foregroundColor = destructive
+        ? _workspaceSwitcherDestructiveActionColor(context)
+        : colors.text;
+    final labelText = Text(
+      label,
+      semanticsLabel: semanticsLabel,
+      style: Theme.of(
+        context,
+      ).textTheme.labelLarge?.copyWith(color: foregroundColor),
+    );
+
+    final buttonChild = destructive
+        ? TextButton(
+            key: buttonKey,
+            onPressed: onPressed,
+            style: TextButton.styleFrom(
+              foregroundColor: foregroundColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: labelText,
+          )
+        : OutlinedButton(
+            key: buttonKey,
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: foregroundColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              side: BorderSide(color: colors.border),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: labelText,
+          );
+    return browser_focusable_control.BrowserFocusableControl(
+      label: semanticsLabel,
+      onPressed: onPressed,
+      focusTargetId: focusTargetId,
+      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+      child: buttonChild,
+    );
+  }
+}
+
+class _WorkspaceSwitcherDisabledFooterButton extends StatelessWidget {
+  const _WorkspaceSwitcherDisabledFooterButton({
+    required this.buttonKey,
+    required this.label,
+    required this.semanticsIdentifier,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final String semanticsIdentifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final disabledStates = <WidgetState>{WidgetState.disabled};
+    final style = theme.filledButtonTheme.style;
+    final backgroundColor =
+        style?.backgroundColor?.resolve(disabledStates) ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.12);
+    final foregroundColor =
+        style?.foregroundColor?.resolve(disabledStates) ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.38);
+    final padding =
+        style?.padding?.resolve(disabledStates) ??
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 10);
+    final minimumSize =
+        style?.minimumSize?.resolve(disabledStates) ?? const Size(64, 40);
+    final shape =
+        style?.shape?.resolve(disabledStates) ??
+        const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        );
+
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: false,
+      focusable: true,
+      identifier: semanticsIdentifier,
+      label: label,
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: minimumSize.width,
+            minHeight: minimumSize.height,
+          ),
+          child: DecoratedBox(
+            key: buttonKey,
+            decoration: ShapeDecoration(color: backgroundColor, shape: shape),
+            child: Padding(
+              padding: padding,
+              child: Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: foregroundColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Color _workspaceSwitcherDestructiveActionColor(BuildContext context) {
+  final theme = Theme.of(context);
+  final colors = context.ts;
+  if (theme.brightness == Brightness.light) {
+    return Color.lerp(colors.error, colors.text, 0.1)!;
+  }
+  return colors.error;
 }
 
 String _workspaceStateLabel(
@@ -11306,7 +11907,7 @@ class _PrimaryButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       focusable: enabled,
-      expanded: expanded,
+      expanded: kIsWeb ? null : expanded,
       identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
@@ -11471,6 +12072,39 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       ),
     );
 
+    final constrainedButton = ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: compact ? 44 : _desktopTopBarControlHeight,
+        maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+      ),
+      child: triggerButton,
+    );
+    final controlsId = controlsNodes == null || controlsNodes!.isEmpty
+        ? null
+        : controlsNodes!.first;
+    if (kIsWeb) {
+      return MergeSemantics(
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          focusable: enabled,
+          identifier: semanticsIdentifier,
+          label: summary.semanticLabel,
+          sortKey: _semanticsSortKey(semanticsSortOrder),
+          controlsNodes: controlsNodes,
+          onTap: enabled ? onPressed : null,
+          child: browser_focusable_control.BrowserFocusableControl(
+            label: summary.semanticLabel,
+            onPressed: onPressed,
+            focusTargetId: semanticsIdentifier,
+            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+            controlsId: controlsId,
+            expanded: expanded,
+            child: constrainedButton,
+          ),
+        ),
+      );
+    }
     return MergeSemantics(
       child: Semantics(
         button: true,
@@ -11482,15 +12116,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         sortKey: _semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
         onTap: enabled ? onPressed : null,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: compact ? 44 : _desktopTopBarControlHeight,
-            maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
-          ),
-          child: kIsWeb
-              ? ExcludeSemantics(child: triggerButton)
-              : triggerButton,
-        ),
+        child: constrainedButton,
       ),
     );
   }
@@ -13277,7 +13903,7 @@ class _SyncPill extends StatelessWidget {
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
-  final String? semanticLabel;
+  final _SyncPillSemanticLabel? semanticLabel;
   final double? semanticsSortOrder;
 
   @override
@@ -13307,10 +13933,11 @@ class _SyncPill extends StatelessWidget {
       _SyncPillTone.attention => attentionForegroundColor,
       _ => colors.text,
     };
+    final resolvedSemanticLabel = semanticLabel?.resolve(label) ?? label;
     return Semantics(
       button: onPressed != null,
       container: true,
-      label: semanticLabel ?? label,
+      label: resolvedSemanticLabel,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
@@ -13358,6 +13985,58 @@ class _SyncPill extends StatelessWidget {
       ),
     );
   }
+}
+
+sealed class _SyncPillSemanticLabel {
+  const _SyncPillSemanticLabel();
+
+  String resolve(String visibleLabel);
+}
+
+final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _StaticSyncPillSemanticLabel(this.value);
+
+  final _WorkspaceSyncAttentionNeededSemanticText value;
+
+  @override
+  String resolve(String visibleLabel) => value.value;
+}
+
+final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _PrefixedSyncPillSemanticLabel(this.prefix);
+
+  final String prefix;
+
+  @override
+  String resolve(String visibleLabel) => '$prefix, $visibleLabel';
+}
+
+final class _WorkspaceSyncAttentionNeededSemanticText {
+  const _WorkspaceSyncAttentionNeededSemanticText(this.value);
+
+  final String value;
+}
+
+final class _WorkspaceSyncAttentionNeededVisibleText {
+  const _WorkspaceSyncAttentionNeededVisibleText(this.value);
+
+  final String value;
+}
+
+extension type const _WorkspaceSyncAttentionNeededLocalizations(
+  AppLocalizations _l10n
+) {
+  _WorkspaceSyncAttentionNeededVisibleText
+  get workspaceSyncAttentionNeededVisibleLabel =>
+      _WorkspaceSyncAttentionNeededVisibleText(
+        _l10n.workspaceSyncAttentionNeededVisibleLabel,
+      );
+
+  _WorkspaceSyncAttentionNeededSemanticText
+  get workspaceSyncAttentionNeededSemanticLabel =>
+      _WorkspaceSyncAttentionNeededSemanticText(
+        _l10n.workspaceSyncAttentionNeededSemanticLabel,
+      );
 }
 
 class _InlineInfoBanner extends StatelessWidget {

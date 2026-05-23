@@ -59,12 +59,12 @@ class SemanticLabelContextLintConfig:
             required_source_snippet=_read_env(
                 "REQUIRED_SOURCE_SNIPPET",
                 env_prefixes=env_prefixes,
-                default=").workspaceSyncAttentionNeededSemanticLabel;",
+                default="_l10n.workspaceSyncAttentionNeededSemanticLabel,",
             ),
             replacement_source_snippet=_read_env(
                 "REPLACEMENT_SOURCE_SNIPPET",
                 env_prefixes=env_prefixes,
-                default=").workspaceSyncAttentionNeededVisibleLabel;",
+                default="_l10n.workspaceSyncAttentionNeededVisibleLabel,",
             ),
             required_semantic_label=_read_env(
                 "REQUIRED_SEMANTIC_LABEL",

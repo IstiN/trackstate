@@ -67,7 +67,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workspaceSyncChecking => 'Syncing';
 
   @override
-  String get workspaceSyncAttentionNeeded => 'Attention needed';
+  String get workspaceSyncAttentionNeededVisibleLabel => 'Attention needed';
 
   @override
   String get workspaceSyncAttentionNeededSemanticLabel =>

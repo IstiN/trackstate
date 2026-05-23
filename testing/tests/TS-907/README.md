@@ -6,15 +6,16 @@ semantic label regression described in the ticket.
 The automation:
 1. exports the current `origin/main` snapshot to a disposable temp workspace,
 2. verifies the current main snapshot uses the dedicated typed
-   `workspaceSyncAttentionNeededSemanticLabel` localization wrapper access for
-   the attention-needed sync pill,
-3. downgrades that wrapper access in the temp copy to
-   `workspaceSyncAttentionNeededVisibleLabel`, and
+  `_l10n.workspaceSyncAttentionNeededSemanticLabel` inside the typed
+  `workspaceSyncAttentionNeededSemanticLabel` getter,
+3. downgrades that semantic getter in the temp copy to the generic
+  `_l10n.workspaceSyncAttentionNeededVisibleLabel` value while preserving the
+  typed semantic wrapper, and
 4. runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart`.
 
 The test only passes when the local analysis command stops looking clean and
-surfaces a real diagnostic for that weakened semantic label instead of
-reporting `No issues found!`.
+surfaces a ticket-aligned diagnostic for the weakened semantic label instead of
+reporting `No issues found!` or some unrelated type-contract failure.
 
 ## Run this test
 

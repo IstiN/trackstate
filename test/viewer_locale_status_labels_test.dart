@@ -162,6 +162,16 @@ void main() {
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
         );
+        await _waitForIssueSearchResultTextVisibility(
+          tester,
+          screen,
+          key: Ts467LocaleResolutionFixture.issueKey,
+          summary: Ts467LocaleResolutionFixture.issueSummary,
+          text: fallbackStatus,
+          visible: true,
+          failureMessage:
+              'Timed out waiting for the default-locale fallback status to appear in JQL Search.',
+        );
         expect(
           await screen.isIssueSearchResultTextVisible(
             Ts467LocaleResolutionFixture.issueKey,
@@ -229,6 +239,16 @@ void main() {
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
+        );
+        await _waitForIssueSearchResultTextVisibility(
+          tester,
+          screen,
+          key: Ts467LocaleResolutionFixture.issueKey,
+          summary: Ts467LocaleResolutionFixture.issueSummary,
+          text: canonicalStatus,
+          visible: true,
+          failureMessage:
+              'Timed out waiting for the canonical fallback status to appear in JQL Search.',
         );
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -304,4 +324,26 @@ Future<void> _waitForLocaleFieldValue(
     failureMessage: failureMessage,
     step: const Duration(milliseconds: 250),
   );
+}
+
+Future<void> _waitForIssueSearchResultTextVisibility(
+  WidgetTester tester,
+  TrackStateAppComponent screen, {
+  required String key,
+  required String summary,
+  required String text,
+  required bool visible,
+  required String failureMessage,
+  Duration timeout = const Duration(seconds: 60),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (await screen.isIssueSearchResultTextVisible(key, summary, text) ==
+        visible) {
+      return;
+    }
+    await tester.pump(step);
+  }
+  fail(failureMessage);
 }

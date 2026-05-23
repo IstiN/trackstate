@@ -1,0 +1,13 @@
+test_id: TS-983
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app in Chromium with a stored hosted token.
+  - Starts from an empty stored workspace profile state so recovered rows must come from the live retry path.
+  - Forces a recoverable startup fetch failure for DEMO/project.json until the recovery action is triggered.
+  - Uses the startup recovery page object to scope the recovery control lookup and click to the recovery surface.
+  - Accepts the ticket label variant "Sync issue" and the current live label "Retry" for the recovery control.
