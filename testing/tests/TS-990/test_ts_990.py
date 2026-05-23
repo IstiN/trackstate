@@ -77,12 +77,22 @@ REWORK_SUMMARY = (
     "`/user` probe beyond the 11-second synchronization window and verifies the "
     "visible shell stays stable when the late probe finally resolves."
 )
+REWORK_FIXES = (
+    "Made the hosted workspace the active startup workspace and seeded its "
+    "workspace-scoped GitHub token.",
+    "Applied the required 1440x900 viewport before opening the app so startup "
+    "runs under the ticket dimensions.",
+    "Only write `bug_description.md` for confirmed product failures and emit "
+    "per-thread review replies.",
+)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts990_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts990_failure.png"
@@ -114,6 +124,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
@@ -121,6 +132,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -141,6 +153,7 @@ def main() -> None:
         "simulated_probe_delay_seconds": SIMULATED_PROBE_DELAY_SECONDS,
         "post_release_stability_seconds": POST_RELEASE_STABILITY_SECONDS,
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -153,8 +166,8 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
                 startup_started_at_monotonic = time.monotonic()
-                tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
+                tracker_page.open_entrypoint()
                 result["startup_observation_initial"] = startup_surface_payload(
                     tracker_page,
                 )
@@ -504,6 +517,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
+        active_workspace="hosted",
     )
 
 
@@ -820,6 +834,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -828,7 +843,11 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    _write_review_replies(result, passed=False)
+    if _should_write_bug_description(result):
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
@@ -883,7 +902,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"## {TICKET_KEY} passed" if passed else f"## {TICKET_KEY} failed",
         "",
         "## Rework summary",
-        f"- {REWORK_SUMMARY}",
+        *[f"- {item}" for item in REWORK_FIXES],
         "",
         f"**Test case:** {TEST_CASE_TITLE}",
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
@@ -929,22 +948,125 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         final_sample = result.get("final_stability_observation", {})
+        return "\n".join(
+            [
+                "h3. PR Rework Result",
+                "",
+                (
+                    "*Fixed:* Made the hosted workspace active for startup, applied the "
+                    "1440x900 viewport before opening the app, and only emit "
+                    "`bug_description.md` for confirmed product failures."
+                ),
+                f"*Test Run:* `{RUN_COMMAND}`",
+                "*Result:* ✅ PASSED",
+                "*Summary:* 1 passed, 0 failed.",
+                (
+                    "*Observed:* "
+                    f"shell_ready_after_start_seconds={final_sample.get('shell_ready_after_start_seconds')!r}; "
+                    f"auth_probe_released_after_start_seconds={final_sample.get('auth_probe_released_after_start_seconds')!r}."
+                ),
+                "",
+            ],
+        )
+    return "\n".join(
+        [
+            "h3. PR Rework Result",
+            "",
+            (
+                "*Fixed:* Made the hosted workspace active for startup, applied the "
+                "1440x900 viewport before opening the app, and only emit "
+                "`bug_description.md` for confirmed product failures."
+            ),
+            f"*Test Run:* `{RUN_COMMAND}`",
+            "*Result:* ❌ FAILED",
+            "*Summary:* 0 passed, 1 failed.",
+            f"*Error:* {_error_summary(result)}",
+            "",
+        ],
+    )
+
+
+def _write_review_replies(result: dict[str, Any], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(thread=thread, result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, Any]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    thread: dict[str, Any],
+    result: dict[str, Any],
+    passed: bool,
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
+    )
+    comment_id = thread.get("rootCommentId")
+    if comment_id == 3292430524:
         return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "After the 11-second synchronization window elapsed, the deployed app "
-            "was already interactive and stayed stable through the late delayed-probe "
-            "resolution.\n\n"
-            f"Observed shell_ready_after_start_seconds="
-            f"{final_sample.get('shell_ready_after_start_seconds')!r} and "
-            f"auth_probe_released_after_start_seconds="
-            f"{final_sample.get('auth_probe_released_after_start_seconds')!r}.\n"
+            "Fixed: TS-990 now seeds the hosted workspace as the active startup "
+            "workspace, so launch goes through the hosted GitHub auth path that starts "
+            f"the delayed `/user` probe. {rerun_summary}"
+        )
+    if comment_id == 3292430549:
+        return (
+            "Fixed: TS-990 now applies the required `1440x900` viewport before "
+            "calling `open_entrypoint()`, so the entire startup sequence runs under "
+            f"the ticket dimensions. {rerun_summary}"
+        )
+    if comment_id == 3292430577:
+        return (
+            "Fixed: TS-990 now writes `bug_description.md` only for confirmed product "
+            "failures and removes any stale bug artifact for test/setup failures, so "
+            f"rework-only regressions do not create false downstream bugs. {rerun_summary}"
         )
     return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The deployed app did not keep the shell stable through the late probe resolution.')}\n"
+        "Fixed: updated TS-990 to start from the hosted workspace, set the required "
+        "viewport before launch, gate `bug_description.md` to confirmed product "
+        f"failures, and emit per-thread review replies. {rerun_summary}"
     )
+
+
+def _should_write_bug_description(result: dict[str, Any]) -> bool:
+    error = str(result.get("error", ""))
+    if error.startswith("RuntimeError: TS-990 requires GH_TOKEN or GITHUB_TOKEN"):
+        return False
+    if error.startswith("ModuleNotFoundError:"):
+        return False
+    return True
+
+
+def _error_summary(result: dict[str, Any]) -> str:
+    error = str(result.get("error", "unknown error")).strip()
+    return error.splitlines()[0] if error else "unknown error"
 
 
 def _build_bug_description(result: dict[str, Any]) -> str:
@@ -964,6 +1086,9 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- **Expected:** {EXPECTED_RESULT}",
         f"- **Actual:** {_actual_result_summary(result, passed=False)}",
         "",
+        "## Missing or broken production capability",
+        _missing_capability_summary(result),
+        "",
         "## Environment details",
         f"- URL: {result.get('app_url')}",
         f"- Browser: {result.get('browser')}",
@@ -975,6 +1100,10 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Timeout assertion window: {TIMEOUT_ASSERTION_SECONDS} seconds",
         f"- Post-release stability window: {POST_RELEASE_STABILITY_SECONDS} seconds",
         "",
+        "## Failing command/output",
+        f"- Command: `{RUN_COMMAND}`",
+        f"- Error summary: `{_error_summary(result)}`",
+        "",
         "## Screenshots or logs",
         f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
         f"- Delayed requests seen: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
@@ -985,6 +1114,24 @@ def _build_bug_description(result: dict[str, Any]) -> str:
     if result.get("screenshot"):
         lines.append(f"- Screenshot: `{result['screenshot']}`")
     return "\n".join(lines) + "\n"
+
+
+def _missing_capability_summary(result: dict[str, Any]) -> str:
+    error = str(result.get("error", ""))
+    if (
+        "delayed GitHub `/user` startup probe never started" in error
+        and "Needs sign-in" in error
+    ):
+        return (
+            "The deployed app does not restore the valid stored GitHub token into an "
+            "active hosted workspace during startup. The UI renders the hosted shell in "
+            "`Needs sign-in` state, shows `Connect GitHub`, and never issues the GitHub "
+            "`/user` auth probe that this startup path is supposed to run."
+        )
+    return (
+        "The deployed app did not expose the production-visible startup behavior "
+        "required to complete this test scenario."
+    )
 
 
 def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
