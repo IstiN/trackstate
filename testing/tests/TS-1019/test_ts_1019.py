@@ -144,9 +144,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1019_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1019_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Launch the TrackState application.",
@@ -175,7 +177,7 @@ def main() -> None:
 
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
-    runtime = Ts984DelayedAuthProbeRuntime(
+    runtime = Ts1019PendingShellProbeRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
@@ -286,30 +288,29 @@ def main() -> None:
                 )
 
                 transition_tracker = ShellReadyTransitionTracker()
+                pending_samples: list[dict[str, Any]] = []
                 pending_shell_sample_observed = False
                 pending_shell_window: dict[str, Any] | None = None
                 if auth_probe_started:
                     _, pending_shell_window = poll_until(
-                        probe=lambda: _observe_shell_window(
+                        probe=lambda: _collect_pending_sample(
                             tracker_page=tracker_page,
                             page=page,
                             runtime=runtime,
                             startup_started_at_monotonic=startup_started_at_monotonic,
                             transition_tracker=transition_tracker,
-                            poll_timeout_ms=25,
+                            pending_samples=pending_samples,
                         ),
-                        is_satisfied=lambda observation: (
-                            int(observation["observed_pending_shell_samples"] or 0) >= 1
-                            or not bool(observation["auth_pending"])
-                        ),
-                        timeout_seconds=SIMULATED_PROBE_DELAY_SECONDS + 2,
+                        is_satisfied=lambda observation: not bool(observation["auth_pending"]),
+                        timeout_seconds=PENDING_WINDOW_WAIT_SECONDS,
                         interval_seconds=0.05,
                     )
-                    pending_shell_sample_observed = (
-                        int(pending_shell_window["observed_pending_shell_samples"] or 0) >= 1
-                    )
+                    pending_shell_sample_observed = bool(pending_samples)
                     result["pending_shell_window_observation"] = _pending_sample_payload(
                         pending_shell_window,
+                    )
+                    result["pending_window_samples"] = _sampled_pending_window_payloads(
+                        pending_samples,
                     )
 
                 shell_ready, shell_window = poll_until(
@@ -339,12 +340,21 @@ def main() -> None:
                 )
                 result["pending_shell_sample_observed"] = pending_shell_sample_observed
 
-                pending_window_duration_seconds = None
-                if pending_shell_window is not None:
+                pending_window_duration_seconds = _pending_window_duration_seconds(
+                    pending_samples,
+                )
+                if pending_window_duration_seconds is None:
                     pending_window_duration_seconds = (
-                        pending_shell_window["auth_probe_release_after_auth_start_seconds"]
+                        (pending_shell_window or shell_window).get(
+                            "auth_probe_release_after_auth_start_seconds",
+                        )
                     )
                 result["pending_window_duration_seconds"] = pending_window_duration_seconds
+                result["pending_window_pending_sample_count"] = len(pending_samples)
+                result["pending_shell_probe_state"] = shell_window.get(
+                    "pending_shell_probe_state",
+                    {},
+                )
 
                 _record_step(
                     result,
@@ -355,6 +365,7 @@ def main() -> None:
                         "Waited through the delayed `/user` startup probe window before "
                         "asserting the shell state.\n"
                         f"pending_shell_sample_observed={pending_shell_sample_observed!r}; "
+                        f"pending_sample_count={len(pending_samples)!r}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{auth_probe_started_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
@@ -364,38 +375,23 @@ def main() -> None:
                 )
 
                 pending_observation_failures: list[str] = []
-                if (
-                    pending_shell_window is not None
-                    and bool(pending_shell_window["auth_pending"])
-                ):
-                    if bool(pending_shell_window["shell_observation"]["shell_ready"]):
-                        pending_observation_failures.append(
-                            "The shell reported shell_ready during the pending startup window."
-                        )
-                    if pending_shell_window["trigger"] is not None:
-                        pending_observation_failures.append(
-                            "The top-bar workspace trigger was already visible during the "
-                            "pending startup window."
-                        )
-                    if bool(pending_shell_window["branding_visible"]):
-                        pending_observation_failures.append(
-                            "The TrackState branding tagline was already visible during the "
-                            "pending startup window."
-                        )
-                    if pending_shell_window["shell_observation"]["visible_navigation_labels"]:
-                        pending_observation_failures.append(
-                            "Sidebar navigation labels were already visible during the pending "
-                            "startup window."
-                        )
-                if (
-                    not pending_shell_sample_observed
-                    and shell_window["probe_recorded_shell_ready_after_start_seconds"] is None
-                ):
-                    pending_observation_failures.append(
-                        "The focused pending-window sampler did not capture an in-flight "
-                        "startup sample and there was no page-side first shell-ready timestamp "
-                        "to use as equivalent timing proof."
-                    )
+                pending_probe_state = shell_window["pending_shell_probe_state"]
+                pending_observation_failures.extend(
+                    _pending_state_failures(
+                        pending_samples=pending_samples,
+                        pending_probe_state=pending_probe_state,
+                        auth_probe_released_after_start_seconds=auth_probe_released_after_start_seconds,
+                        shell_ready_observed_while_auth_pending=bool(
+                            shell_window["shell_ready_observed_while_auth_pending"],
+                        ),
+                    ),
+                )
+                pending_observation_failures.extend(
+                    _pending_probe_state_coverage_failures(
+                        pending_probe_state=pending_probe_state,
+                        post_release_observation=shell_window,
+                    ),
+                )
 
                 if not shell_ready:
                     pending_observation_failures.append(
@@ -626,6 +622,7 @@ def _observe_shell_window(
     shell_window["probe_recorded_shell_ready_after_start_seconds"] = shell_window[
         "shell_probe_state"
     ].get("first_shell_ready_after_launch_seconds")
+    shell_window["pending_shell_probe_state"] = runtime.read_pending_shell_probe_state()
     shell_window["dom_markers"] = _shell_dom_markers(tracker_page)
     return shell_window
 
@@ -840,6 +837,7 @@ def _pending_sample_payload(observation: dict[str, Any]) -> dict[str, Any]:
         "body_excerpt": _snippet(str(shell.get("body_text", ""))),
         "dom_markers": observation.get("dom_markers"),
         "shell_probe_state": observation.get("shell_probe_state"),
+        "pending_shell_probe_state": observation.get("pending_shell_probe_state"),
     }
 
 
@@ -879,6 +877,62 @@ def _ms_to_seconds(value: Any) -> float | None:
     if not isinstance(value, (int, float)):
         return None
     return round(float(value) / 1000, 2)
+
+
+def _sampled_pending_window_payloads(
+    pending_samples: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not pending_samples:
+        return []
+    candidate_indexes = [0, 1, 2, len(pending_samples) // 2, len(pending_samples) - 3, len(pending_samples) - 2, len(pending_samples) - 1]
+    sampled_indexes: list[int] = []
+    for index in candidate_indexes:
+        if 0 <= index < len(pending_samples) and index not in sampled_indexes:
+            sampled_indexes.append(index)
+    return [_pending_sample_payload(pending_samples[index]) for index in sampled_indexes]
+
+
+def _pending_probe_state_coverage_failures(
+    *,
+    pending_probe_state: dict[str, Any],
+    post_release_observation: dict[str, Any],
+) -> list[str]:
+    failures: list[str] = []
+    shell_observation = post_release_observation["shell_observation"]
+    if (
+        shell_observation["visible_navigation_labels"]
+        and pending_probe_state.get("first_navigation_visible_after_launch_seconds") is None
+    ):
+        failures.append(
+            "The TS-1019 pending-shell observer never recorded when navigation first "
+            "appeared, even though the post-release shell snapshot showed navigation.\n"
+            f"pending_probe_state={json.dumps(pending_probe_state, indent=2)}"
+        )
+    if (
+        post_release_observation["trigger"] is not None
+        and pending_probe_state.get("first_trigger_visible_after_launch_seconds") is None
+    ):
+        failures.append(
+            "The TS-1019 pending-shell observer never recorded when the top-bar trigger "
+            "first appeared, even though the post-release shell snapshot showed it.\n"
+            f"pending_probe_state={json.dumps(pending_probe_state, indent=2)}"
+        )
+    if (
+        bool(post_release_observation["branding_visible"])
+        and pending_probe_state.get("first_branding_visible_after_launch_seconds") is None
+    ):
+        failures.append(
+            "The TS-1019 pending-shell observer never recorded when branding first "
+            "appeared, even though the post-release shell snapshot showed it.\n"
+            f"pending_probe_state={json.dumps(pending_probe_state, indent=2)}"
+        )
+    if pending_probe_state.get("first_any_shell_marker_visible_after_launch_seconds") is None:
+        failures.append(
+            "The TS-1019 pending-shell observer never recorded any shell marker becoming "
+            "visible, so the page-side pending DOM instrumentation was not exercised.\n"
+            f"pending_probe_state={json.dumps(pending_probe_state, indent=2)}"
+        )
+    return failures
 
 
 def _pending_shell_probe_script() -> str:
@@ -1072,6 +1126,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_review_replies_payload(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None:
@@ -1080,6 +1135,10 @@ def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     if product_bug:
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -1160,6 +1219,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"- Used the required desktop viewport `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`.",
         f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and sampled the full pending window before asserting.",
         f"- Considered linked bug {', '.join(LINKED_BUG_KEYS)} and coupled the assertions to the delayed probe timing.",
+        "- Wired the TS-1019 pending-shell runtime into the executed path and asserted the page-side pending-shell observer data against continuous pending-window samples.",
         "- Checked the user-visible shell trigger, navigation, branding, and shell DOM markers during the pending window and after release.",
         "",
         "## Automation checks",
@@ -1206,19 +1266,23 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
-            f"{TICKET_KEY} passed.\n\n"
-            "Added a live Playwright startup regression that delays the initial GitHub "
-            "`/user` probe by 5 seconds and proves the deployed shell stays hidden during "
-            "the pending window, then becomes interactive only after the probe resolves.\n\n"
-            "The live pending samples showed no TopBar trigger, sidebar navigation, or "
-            "branding, and the real shell appeared only after probe release.\n"
+            "h3. PR Rework Result\n\n"
+            "*Fixed:* Switched the test to `Ts1019PendingShellProbeRuntime`, collected "
+            "continuous pending-window samples, asserted `read_pending_shell_probe_state()` "
+            "via `_pending_state_failures()`, and generated review-thread replies.\n"
+            f"*Test Run:* `{RUN_COMMAND}`\n"
+            "*Result:* ✅ PASSED\n"
+            "*Summary:* 1 passed, 0 failed.\n"
         )
     return (
-        f"{TICKET_KEY} failed.\n\n"
-        "Added a live Playwright startup regression that delays the initial GitHub "
-        "`/user` probe by 5 seconds and checks whether the deployed shell stays hidden "
-        "while startup synchronization is still pending.\n\n"
-        f"{result.get('error', 'The deployed app did not keep the startup shell hidden during the pending probe window.')}\n"
+        "h3. PR Rework Result\n\n"
+        "*Fixed:* Switched the test to `Ts1019PendingShellProbeRuntime`, collected "
+        "continuous pending-window samples, asserted `read_pending_shell_probe_state()` "
+        "via `_pending_state_failures()`, and generated review-thread replies.\n"
+        f"*Test Run:* `{RUN_COMMAND}`\n"
+        "*Result:* ❌ FAILED\n"
+        "*Summary:* 0 passed, 1 failed.\n"
+        f"*Error:* {result.get('error', 'The deployed app did not keep the startup shell hidden during the pending probe window.')}\n"
     )
 
 
@@ -1251,9 +1315,13 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         "{code}",
         "",
         "h4. Notes",
+        "* Missing / broken production capability: the deployed startup bootstrap never "
+        "issues the GitHub {/user} startup synchronization probe, so the app cannot enter "
+        "the ticket's pending-probe path from the real loading flow.",
         f"* GitHub requests seen: {{code}}{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}{{code}}",
         f"* Delayed requests seen: {{code}}{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}{{code}}",
         f"* Pending samples: {{code}}{json.dumps(result.get('pending_window_samples', []), ensure_ascii=True)}{{code}}",
+        f"* Pending observer state: {{code}}{json.dumps(result.get('pending_shell_probe_state', {}), ensure_ascii=True)}{{code}}",
         f"* Post-release sample: {{code}}{json.dumps(result.get('shell_window_observation'), ensure_ascii=True)}{{code}}",
     ]
     if result.get("screenshot"):
@@ -1286,6 +1354,76 @@ def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
 
 def _human_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
     return format_human_lines(result, jira=jira)
+
+
+def _review_replies_payload(result: dict[str, Any], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(thread=thread, result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, Any]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    thread: dict[str, Any],
+    result: dict[str, Any],
+    passed: bool,
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
+    )
+    comment_id = thread.get("rootCommentId")
+    if comment_id == 3293498827:
+        return (
+            "Fixed: the test now instantiates `Ts1019PendingShellProbeRuntime`, so the "
+            "TS-1019 pending-shell observer script runs throughout the delayed `/user` "
+            f"startup probe. {rerun_summary}"
+        )
+    if comment_id == 3293498846:
+        return (
+            "Fixed: Step 3 now reads `read_pending_shell_probe_state()` from the TS-1019 "
+            "runtime and asserts `_pending_state_failures()` against continuously "
+            "collected pending-window samples, so the test proves shell markers stay "
+            f"unmounted until probe release. {rerun_summary}"
+        )
+    return (
+        "Fixed the TS-1019 startup rework by wiring the pending-shell runtime into the "
+        "executed path and asserting the page-side pending-shell observer data against "
+        f"continuous pending-window samples. {rerun_summary}"
+    )
+
+
+def _error_summary(result: dict[str, Any]) -> str:
+    steps = result.get("steps", [])
+    if isinstance(steps, list):
+        for step in steps:
+            if isinstance(step, dict) and step.get("status") != "passed":
+                return f"Step {step.get('step')}: {step.get('observed')}"
+    return str(result.get("error", "No failed step recorded."))
 
 
 if __name__ == "__main__":
