@@ -19,7 +19,7 @@ void main() {
   });
 
   testWidgets(
-    'startup waits for delayed auth before exposing the shell in web-style restore flow',
+    'startup clears the unavailable active local workspace after the deferred auth timeout in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -87,7 +87,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(seconds: 11));
 
       expect(
         find.bySemanticsLabel(
@@ -99,6 +99,13 @@ void main() {
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
+      );
+      expect(find.text('Add workspace'), findsOneWidget);
+      final timeoutState = await service.loadState();
+      expect(timeoutState.activeWorkspaceId, isNull);
+      expect(
+        timeoutState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
 
       delayedRepository.completeConnect();

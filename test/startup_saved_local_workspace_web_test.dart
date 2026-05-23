@@ -23,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup clears an unavailable saved local workspace and returns to landing instead of keeping it active',
+    'web startup clears an unavailable saved local workspace after the delayed /user probe crosses the startup timeout',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -85,7 +85,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 750));
+      await tester.pump(const Duration(seconds: 11));
 
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.requestedPaths, contains('/user'));
@@ -98,8 +98,13 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
+      expect(find.text('Add workspace'), findsOneWidget);
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
-      expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateBeforeProbe.activeWorkspaceId, isNull);
+      expect(
+        savedStateBeforeProbe.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
 
       delayedRepository.completeUserProbe();
       await tester.pump();
