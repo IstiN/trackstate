@@ -1,0 +1,18 @@
+test_id: TS-1003
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Runs in the supported Flutter widget runtime at the default desktop viewport of 1440x900.
+  - Reuses the existing hosted read-only sync-error fixture so the production TrackState app renders the top-bar workspace sync pill in the Attention needed state.
+  - Verifies the sync-pill semantics node starts with the required "Sync error" context prefix from the linked TS-1000 fix instead of exposing only the visible label.
+  - Performs user-style verification by checking the visible Attention needed pill text and opening Settings to confirm the Workspace sync error message is shown in context.
+runtime_inputs:
+  viewport: 1440x900
+  linked_bug: TS-1000
+  expected_visible_label: Attention needed
+  expected_semantic_prefix: Sync error
+  expected_semantic_label: Sync error, attention needed
+  run_command: flutter test testing/tests/TS-1003/test_ts_1003.dart --reporter expanded
