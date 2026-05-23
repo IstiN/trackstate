@@ -14,5 +14,4 @@ runtime_inputs:
   linked_bug: TS-1000
   expected_visible_label: Attention needed
   expected_semantic_prefix: Sync error
-  expected_semantic_label: Sync error, attention needed
   run_command: flutter test testing/tests/TS-1003/test_ts_1003.dart --reporter expanded

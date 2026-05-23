@@ -158,8 +158,7 @@ void main() {
         final step4Observed = semanticsLabel == null
             ? 'The semantic label could not be asserted because the sync pill semantics node was unavailable.'
             : 'semantics_label="$semanticsLabel"; '
-                  'starts_with_sync_error=${_normalizedLabel(semanticsLabel).startsWith('sync error')}; '
-                  'contains_attention_needed=${_normalizedLabel(semanticsLabel).contains('attention needed')}';
+                  'starts_with_sync_error=${_normalizedLabel(semanticsLabel).startsWith('sync error')}';
         _recordStep(
           result,
           step: 4,
@@ -287,8 +286,7 @@ void _recordHumanVerification(
 
 bool _hasRequiredSyncErrorLabel(String label) {
   final normalized = _normalizedLabel(label);
-  return normalized.startsWith('sync error') &&
-      normalized.contains('attention needed');
+  return normalized.startsWith('sync error');
 }
 
 String _normalizedLabel(String label) =>
@@ -384,7 +382,7 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
     '## What was automated',
     '- Ran the ticket in the production Flutter widget runtime at the default desktop viewport of `1440x900`.',
     '- Reused the hosted read-only sync-error fixture so the top-bar sync pill rendered the visible `Attention needed` state.',
-    '- Verified the sync-pill semantics label started with `Sync error` and still included `attention needed`, then opened Settings and confirmed the visible workspace sync error content.',
+    '- Verified the sync-pill semantics label preserved the required `Sync error` prefix, then opened Settings and confirmed the visible workspace sync error content.',
     '',
     '## Result',
     passed

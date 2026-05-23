@@ -10,7 +10,7 @@ The automation:
 2. reuses the existing hosted read-only sync-error fixture so the top-bar sync
    pill reaches the visible `Attention needed` state
 3. reads the semantics node for the rendered sync pill and verifies the label
-   starts with `Sync error` and still includes `attention needed`
+   starts with the required `Sync error` prefix
 4. taps the pill like a user and confirms Settings opens with the visible
    Workspace sync error content in context
 
