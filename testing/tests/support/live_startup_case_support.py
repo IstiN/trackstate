@@ -187,13 +187,14 @@ def observe_live_startup_shell_window(
     shell_navigation_labels: tuple[str, ...],
     branding_texts: tuple[str, ...],
     transition_tracker: ShellReadyTransitionTracker | None = None,
+    poll_timeout_ms: int = 1_000,
 ) -> dict[str, Any]:
     shell_observation = tracker_page.observe_interactive_shell(
         shell_navigation_labels,
-        timeout_ms=1_000,
+        timeout_ms=poll_timeout_ms,
     )
     startup_observation = startup_surface_payload(tracker_page)
-    trigger = safe_trigger_payload(page)
+    trigger = safe_trigger_payload(page, timeout_ms=poll_timeout_ms)
     body_text = str(shell_observation.get("body_text", ""))
     visible_shell_text = "\n".join(
         text
@@ -246,6 +247,9 @@ def observe_live_startup_shell_window(
             if transition_tracker is not None
             else None
         ),
+        "observed_shell_samples": (
+            transition_tracker.observed_samples if transition_tracker is not None else None
+        ),
         "shell_ready_observed_while_auth_pending": (
             transition_tracker.first_shell_ready_observed_while_auth_pending
             if transition_tracker is not None
@@ -292,9 +296,11 @@ def startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, An
 
 def safe_trigger_payload(
     page: LiveWorkspaceSwitcherPage,
+    *,
+    timeout_ms: int = 1_000,
 ) -> dict[str, Any] | None:
     try:
-        trigger = page.observe_trigger(timeout_ms=1_000)
+        trigger = page.observe_trigger(timeout_ms=timeout_ms)
     except (AssertionError, WebAppTimeoutError):
         return None
     return trigger_payload(trigger)
