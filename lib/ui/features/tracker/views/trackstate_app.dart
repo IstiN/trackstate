@@ -876,6 +876,12 @@ class _TrackStateAppState extends State<TrackStateApp>
         return;
       }
       setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {});
+      });
     });
   }
 

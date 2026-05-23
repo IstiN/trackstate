@@ -44,17 +44,17 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 10
 SIMULATED_SYNC_DELAY_SECONDS = 30
-TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS + 5
+TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
 AUTH_PROBE_START_WAIT_SECONDS = 45
 AUTH_PROBE_RELEASE_WAIT_SECONDS = SIMULATED_SYNC_DELAY_SECONDS + 45
 TIMELINE_SAMPLE_INTERVAL_SECONDS = 0.25
 TIMING_TOLERANCE_SECONDS = 0.25
 LINKED_BUGS = ["TS-996", "TS-977", "TS-971", "TS-958"]
 REWORK_SUMMARY = (
-    "Reworked the live startup regression to capture the timeout boundary from the "
-    "same startup snapshot that proves visible shell navigation, and to require that "
-    "snapshot while the delayed GitHub `/user` probe is still pending or no later "
-    "than its release."
+    "Reworked the live startup regression to anchor its timeout-boundary sample to "
+    f"{SYNC_TIMEOUT_SECONDS} seconds after the delayed GitHub `/user` startup probe "
+    "begins, and to require that same startup snapshot while the probe is still "
+    "pending or no later than its release."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -120,6 +120,7 @@ def main() -> None:
         "sync_timeout_seconds": SYNC_TIMEOUT_SECONDS,
         "simulated_sync_delay_seconds": SIMULATED_SYNC_DELAY_SECONDS,
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
+        "timeout_assertion_anchor": "delayed `/user` startup probe start",
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
@@ -211,6 +212,9 @@ def main() -> None:
                                 ],
                                 "auth_probe_released_after_start_seconds": observation[
                                     "auth_probe_released_after_start_seconds"
+                                ],
+                                "elapsed_since_auth_start_seconds": observation[
+                                    "elapsed_since_auth_start_seconds"
                                 ],
                             },
                         )
@@ -331,7 +335,8 @@ def main() -> None:
                 if not timeout_elapsed:
                     step_three_error = (
                         "Step 3 failed: the test never reached the explicit "
-                        "synchronization timeout window from application launch.\n"
+                        "synchronization timeout boundary measured from the delayed "
+                        "GitHub `/user` startup probe start.\n"
                         f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
                     )
                 elif not auth_probe_started:
@@ -351,7 +356,8 @@ def main() -> None:
                 elif not bool(timeout_window["shell_observation"]["shell_ready"]):
                     step_three_error = (
                         "Step 3 failed: after waiting past the explicit synchronization "
-                        "timeout from launch, the page still had not reached shell_ready.\n"
+                        "timeout from the delayed `/user` startup probe start, the page "
+                        "still had not reached shell_ready.\n"
                         f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
                     )
                 elif (
@@ -392,10 +398,12 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[2],
                         observed=(
-                            f"Waited {timeout_window['elapsed_since_start_seconds']!r} "
-                            "seconds from application launch, which exceeds the "
-                            f"{SYNC_TIMEOUT_SECONDS}-second startup timeout window. At that "
-                            f"point {auth_state} and shell_ready was "
+                            f"Waited {timeout_window['elapsed_since_auth_start_seconds']!r} "
+                            "seconds from the delayed GitHub `/user` startup probe start "
+                            f"({timeout_window['elapsed_since_start_seconds']!r} seconds "
+                            "from application launch), which reaches the explicit "
+                            f"{SYNC_TIMEOUT_SECONDS}-second startup timeout boundary. At "
+                            f"that point {auth_state} and shell_ready was "
                             f"{timeout_window['shell_observation']['shell_ready']!r}.\n"
                             f"first_shell_visible_after_start_seconds="
                             f"{first_shell_visible_after_start_seconds!r}; "
@@ -703,13 +711,23 @@ def _capture_timeout_window_observation(
         last_observation = observation
         return observation
 
+    auth_probe_started = runtime.auth_probe_started_at_monotonic is not None
+    if not auth_probe_started:
+        auth_probe_started = runtime.wait_for_auth_probe_start(
+            timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
+        )
+    if not auth_probe_started or runtime.auth_probe_started_at_monotonic is None:
+        observation = probe()
+        if last_observation is None:
+            raise RuntimeError("TS-967 did not capture any startup observations.")
+        return False, observation
+
+    timeout_boundary_monotonic = (
+        runtime.auth_probe_started_at_monotonic + TIMEOUT_ASSERTION_SECONDS
+    )
     timeout_elapsed, observation = poll_until(
         probe=probe,
-        is_satisfied=lambda candidate: (
-            candidate["elapsed_since_start_seconds"] is not None
-            and float(candidate["elapsed_since_start_seconds"])
-            >= TIMEOUT_ASSERTION_SECONDS
-        ),
+        is_satisfied=lambda _: time.monotonic() >= timeout_boundary_monotonic,
         timeout_seconds=TIMEOUT_ASSERTION_SECONDS + AUTH_PROBE_RELEASE_WAIT_SECONDS,
         interval_seconds=TIMELINE_SAMPLE_INTERVAL_SECONDS,
     )
@@ -843,10 +861,13 @@ def _fallback_trigger_payload(startup_observation: dict[str, Any]) -> dict[str, 
 
 
 def _observation_captures_timeout_boundary(observation: dict[str, Any]) -> bool:
+    elapsed_since_auth_start_seconds = observation.get("elapsed_since_auth_start_seconds")
+    if elapsed_since_auth_start_seconds is None:
+        return False
+    if float(elapsed_since_auth_start_seconds) < TIMEOUT_ASSERTION_SECONDS:
+        return False
     elapsed_since_start_seconds = observation.get("elapsed_since_start_seconds")
     if elapsed_since_start_seconds is None:
-        return False
-    if float(elapsed_since_start_seconds) < TIMEOUT_ASSERTION_SECONDS:
         return False
     if bool(observation.get("auth_pending")):
         return True
@@ -1021,12 +1042,12 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Environment*: URL={result.get('app_url')} | Browser={result.get('browser')} | OS={result.get('os')}",
         f"*Viewport*: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"*Linked bugs considered*: {', '.join(LINKED_BUGS)}",
-        f"*Observed timeout window*: {TIMEOUT_ASSERTION_SECONDS} seconds against a synthetic {SIMULATED_SYNC_DELAY_SECONDS}-second delayed `/user` startup probe",
+        f"*Observed timeout window*: {TIMEOUT_ASSERTION_SECONDS} seconds from delayed `/user` startup probe start against a synthetic {SIMULATED_SYNC_DELAY_SECONDS}-second delayed `/user` startup probe",
         "",
         "h4. What was automated",
         "* Preloaded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
         "* Delayed the initial GitHub {/user} startup probe so the startup synchronization path stayed pending beyond the 10-second timeout window.",
-        "* Waited past the timeout before asserting so the test proved the non-blocking behavior instead of checking too early.",
+        "* Waited until the delayed GitHub {/user} probe itself had been pending for 10 seconds before asserting so the test matched the real synchronization-timeout boundary instead of a fixed launch offset.",
         "* Verified the live page showed shell navigation, a header workspace trigger, and TrackState branding instead of remaining on the blank {Sync issue} surface.",
         "",
         "h4. Automation checks",
@@ -1067,12 +1088,12 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
         f"**Linked bugs considered:** {', '.join(LINKED_BUGS)}",
-        f"**Observed timeout window:** `{TIMEOUT_ASSERTION_SECONDS}` seconds against a synthetic `{SIMULATED_SYNC_DELAY_SECONDS}`-second delayed `/user` startup probe",
+        f"**Observed timeout window:** `{TIMEOUT_ASSERTION_SECONDS}` seconds from delayed `/user` startup probe start against a synthetic `{SIMULATED_SYNC_DELAY_SECONDS}`-second delayed `/user` startup probe",
         "",
         "## What was automated",
         "- Preloaded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
         "- Delayed the initial GitHub `/user` startup probe so the startup synchronization path stayed pending beyond the 10-second timeout window.",
-        "- Waited past the timeout before asserting so the test proved the non-blocking startup behavior instead of checking immediately.",
+        "- Waited until the delayed GitHub `/user` probe itself had been pending for 10 seconds before asserting so the test matched the real synchronization-timeout boundary instead of a fixed launch offset.",
         "- Verified the live page showed shell navigation, a header workspace trigger, and TrackState branding instead of remaining on the blank `Sync issue` surface.",
         "",
         "## Automation checks",
@@ -1161,7 +1182,7 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
         f"- Run command: `{RUN_COMMAND}`",
         f"- Simulated delayed startup probe: GitHub `/user` delayed by {SIMULATED_SYNC_DELAY_SECONDS} seconds",
-        f"- Timeout assertion window: {TIMEOUT_ASSERTION_SECONDS} seconds",
+        f"- Timeout assertion window: {TIMEOUT_ASSERTION_SECONDS} seconds from delayed `/user` probe start",
         "",
         "## Screenshots or logs",
         f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
@@ -1261,19 +1282,19 @@ def _review_reply_text(
     passed: bool,
 ) -> str:
     root_comment_id = thread.get("rootCommentId")
-    if root_comment_id == 3292588355:
+    if root_comment_id in {3292588355, 3292787878}:
         if passed:
             return (
-                "Fixed: Step 3 now captures the timeout-window sample from repeated "
-                "startup-surface snapshots and only accepts it when the delayed `/user` "
-                "probe is still pending or no later than its release. The timeout verdict "
-                "can no longer be based on a post-release sample."
+                "Fixed: Step 3 now waits for the delayed `/user` startup probe to be "
+                "pending for the full 10-second sync-timeout window, then captures the "
+                "timeout sample from the same startup snapshot and only accepts it while "
+                "the probe is still pending or no later than its release."
             )
         return (
-            "Fixed: Step 3 now rejects post-release timeout samples. This run still "
-            "failed, but the failure evidence now comes from a timeout-boundary snapshot "
-            "captured while the delayed `/user` probe was still pending or no later than "
-            "its release."
+            "Fixed: Step 3 now anchors the timeout verdict to 10 seconds after the "
+            "delayed `/user` probe starts and rejects post-release samples. This run "
+            "still failed, but the failure evidence now comes from the true timeout "
+            "boundary instead of a fixed offset from launch."
         )
     return (
         "Fixed: TS-967 now derives shell visibility from the same startup snapshot used "
