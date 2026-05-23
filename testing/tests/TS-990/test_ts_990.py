@@ -65,12 +65,13 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + POST_RELEASE_STABILITY_SECONDS + 20
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-971"]
+LINKED_BUGS = ["TS-996", "TS-992", "TS-971"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-971. Its fix makes shell_ready non-blocking after the 11-second "
-    "startup timeout, so this test intentionally waits past that timeout while the "
-    "delayed GitHub `/user` probe is still pending and then keeps observing until "
-    "the late probe resolution completes."
+    "Reviewed TS-996, TS-992, and TS-971. Their fixes require the startup GitHub "
+    "`/user` probe to begin normally, the shell to remain interactive once the "
+    "11-second timeout fallback is available, and the late probe resolution to "
+    "avoid resetting visible hosted-workspace state. This test therefore waits "
+    "past the timeout and continues observing through the delayed release."
 )
 REWORK_SUMMARY = (
     "Added a live Playwright startup regression that delays the initial GitHub "
@@ -230,6 +231,11 @@ def main() -> None:
                 result["initial_trigger_observation"] = (
                     _trigger_payload(initial_trigger) if initial_trigger is not None else None
                 )
+                initial_shell_interactive = _startup_surface_shows_interactive_shell(
+                    startup_surface,
+                    initial_trigger=initial_trigger,
+                )
+                result["initial_shell_interactive"] = initial_shell_interactive
                 _record_step(
                     result,
                     step=1,
@@ -271,10 +277,49 @@ def main() -> None:
 
                 failures: list[str] = []
                 step_two_error: str | None = None
+                startup_shell_ready_before_timeout = (
+                    initial_shell_interactive
+                    and auth_probe_started_after_start_seconds is not None
+                    and float(auth_probe_started_after_start_seconds)
+                    < TIMEOUT_ASSERTION_SECONDS
+                )
                 if not timeout_reached:
                     step_two_error = (
                         "Step 2 failed: the test never reached the post-timeout "
                         "observation window while watching the delayed startup probe.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
+                elif startup_shell_ready_before_timeout:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "The hosted shell was already interactive before the delayed "
+                            "GitHub `/user` probe fully resolved, so the user-visible app "
+                            "had reached the timeout-ready state well before the 11-second "
+                            "window elapsed.\n"
+                            f"auth_probe_started_after_start_seconds="
+                            f"{auth_probe_started_after_start_seconds!r}; "
+                            f"initial_trigger={json.dumps(result['initial_trigger_observation'], ensure_ascii=True)}; "
+                            f"initial_startup_buttons={startup_surface.get('button_labels', [])!r}; "
+                            f"late_window_shell_ready={timeout_window['shell_observation']['shell_ready']!r}"
+                        ),
+                    )
+                elif (
+                    not bool(timeout_window["auth_pending"])
+                    and timeout_window["shell_ready_after_start_seconds"] is not None
+                    and timeout_window["auth_probe_released_after_start_seconds"] is not None
+                    and float(timeout_window["shell_ready_after_start_seconds"])
+                    > TIMEOUT_ASSERTION_SECONDS
+                    and float(timeout_window["shell_ready_after_probe_release_seconds"] or 0)
+                    <= 1.0
+                ):
+                    step_two_error = (
+                        "Step 2 failed: the shell did not become interactive within the "
+                        f"{SYNC_TIMEOUT_SECONDS}-second timeout window. It only reported "
+                        "shell_ready after the delayed GitHub `/user` probe released.\n"
                         f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
                     )
                 elif not bool(timeout_window["auth_pending"]):
@@ -296,7 +341,7 @@ def main() -> None:
                     except AssertionError as error:
                         step_two_error = f"Step 2 failed: {error}"
 
-                if step_two_error is None:
+                if step_two_error is None and not startup_shell_ready_before_timeout:
                     _record_step(
                         result,
                         step=2,
@@ -316,7 +361,7 @@ def main() -> None:
                             f"{timeout_window['shell_observation']['visible_navigation_labels']!r}"
                         ),
                     )
-                else:
+                elif step_two_error is not None:
                     failures.append(step_two_error)
                     _record_step(
                         result,
@@ -406,6 +451,9 @@ def main() -> None:
                 step_four_failures = _stability_failures(
                     stability_samples=stability_samples,
                     required_navigation_labels=SHELL_NAVIGATION_LABELS,
+                    initial_trigger_signature=_trigger_signature(
+                        {"trigger": result.get("initial_trigger_observation")},
+                    ),
                 )
                 if step_two_error is not None and not step_four_failures:
                     step_four_failures.append(
@@ -453,27 +501,27 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the app after the synchronization timeout like a user and "
-                        "confirmed the page already showed the real shell instead of a reset "
-                        "or startup fallback."
+                        "Viewed the hosted shell as soon as the app rendered and confirmed "
+                        "the user-facing navigation, branding, and workspace trigger were "
+                        "visible before the delayed probe finished."
                     ),
                     observed=(
-                        f"body_excerpt={_snippet(timeout_window['shell_observation']['body_text'])!r}; "
-                        f"trigger_label={(timeout_window['trigger'] or {}).get('semantic_label')!r}; "
-                        f"branding_visible={timeout_window['branding_visible']!r}; "
-                        "visible_navigation_labels="
-                        f"{timeout_window['shell_observation']['visible_navigation_labels']!r}"
+                        f"initial_body_excerpt={_snippet(str(startup_surface.get('body_text', '')))!r}; "
+                        f"initial_trigger_label={(result.get('initial_trigger_observation') or {}).get('semantic_label')!r}; "
+                        f"initial_shell_interactive={initial_shell_interactive!r}; "
+                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Kept watching the live page through the delayed probe release and "
-                        "confirmed the top bar, branding text, and current route did not "
-                        "flicker or reset."
+                        "checked whether the hosted-workspace state stayed the same from the "
+                        "user's perspective."
                     ),
                     observed=(
                         f"final_route={_route_signature(final_window)!r}; "
+                        f"initial_trigger_signature={_trigger_signature({'trigger': result.get('initial_trigger_observation')})!r}; "
                         f"stable_trigger_signature={_trigger_signature(final_window)!r}; "
                         f"shell_ready_after_start_seconds={final_window['shell_ready_after_start_seconds']!r}; "
                         f"auth_probe_released_after_start_seconds={release_after_start_seconds!r}; "
@@ -610,6 +658,7 @@ def _stability_failures(
     *,
     stability_samples: list[dict[str, Any]],
     required_navigation_labels: tuple[str, ...],
+    initial_trigger_signature: tuple[str, str, str, str] | None = None,
 ) -> list[str]:
     failures: list[str] = []
     if len(stability_samples) < 3:
@@ -686,6 +735,8 @@ def _stability_failures(
         for signature in (_trigger_signature(sample) for sample in stability_samples)
         if signature is not None
     }
+    if initial_trigger_signature is not None:
+        trigger_signatures.add(initial_trigger_signature)
     if len(trigger_signatures) > 1:
         failures.append(
             "The visible TopBar workspace trigger changed during post-timeout monitoring, "
@@ -778,6 +829,21 @@ def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
     title = str(observation.get("title", "")).strip()
     button_labels = observation.get("button_labels", [])
     return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
+
+
+def _startup_surface_shows_interactive_shell(
+    observation: dict[str, Any],
+    *,
+    initial_trigger: Any | None,
+) -> bool:
+    body_text = str(observation.get("body_text", ""))
+    button_labels = {str(label) for label in observation.get("button_labels", [])}
+    return (
+        all(label in body_text for label in SHELL_NAVIGATION_LABELS)
+        and BRANDING_TEXT in body_text
+        and initial_trigger is not None
+        and "Connect GitHub" not in button_labels
+    )
 
 
 def _safe_trigger_payload(
