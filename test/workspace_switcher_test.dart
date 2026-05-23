@@ -1348,7 +1348,7 @@ void main() {
   );
 
   testWidgets(
-    'workspace switcher restores an unavailable saved local workspace through the browser retry fallback after unsupported web reopen',
+    'workspace switcher restores an unavailable saved local workspace through the browser retry fallback without reopening the directory picker',
     (tester) async {
       const localWorkspaceId = 'local:/tmp/demo@main';
       const hostedWorkspaceId = 'hosted:stable/repo@main';
@@ -1465,8 +1465,8 @@ void main() {
       await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(directoryPickerCalls, 1);
-      expect(productionOpenAttempts, 1);
+      expect(directoryPickerCalls, 0);
+      expect(productionOpenAttempts, 0);
       expect(browserRetryOpenAttempts, 1);
       expect(service.state.activeWorkspaceId, localWorkspaceId);
       expect(find.textContaining('/tmp/demo'), findsWidgets);

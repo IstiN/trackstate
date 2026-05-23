@@ -1372,6 +1372,32 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (widget.repository != null || !workspace.isLocal) {
       return;
     }
+    final previousViewModel = viewModel;
+    final nextWorkspace = workspace;
+    if (!mounted) {
+      return;
+    }
+
+    final browserPrepared = await _prepareBrowserLocalWorkspaceSwitch(
+      nextWorkspace,
+      previousViewModel: previousViewModel,
+    );
+    if (browserPrepared != null) {
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
+      );
+      await _commitPreparedWorkspaceSwitch(
+        browserPrepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+      return;
+    }
+
     String? selectedPath;
     try {
       selectedPath = await widget.workspaceDirectoryPicker(
@@ -1404,8 +1430,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final previousViewModel = viewModel;
-    final nextWorkspace = workspace;
     if (!mounted) {
       return;
     }
