@@ -31,7 +31,10 @@ const FLUTTER_FEEDBACK = {
         enabled: true,
         gates: [
             { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
-            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 },
+            { name: 'accessibility-build', command: 'flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main', maxAttempts: 1 },
+            { name: 'accessibility-axe', command: 'npm run test:a11y', maxAttempts: 1 },
+            { name: 'accessibility-log-validation', command: 'node testing/accessibility/log_validation.node.test.js', maxAttempts: 1 }
         ]
     },
     policyGates: {
