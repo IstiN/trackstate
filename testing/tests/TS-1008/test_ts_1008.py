@@ -56,6 +56,7 @@ THIRD_WORKSPACE_WRITE_BRANCH = "ts-1008-third"
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 POST_CLICK_STABILITY_MS = 1_000
 SURFACE_TIMEOUT_MS = 4_000
+LINKED_BUGS = ["TS-997", "TS-998", "TS-1010"]
 
 PRECONDITIONS = ["The workspace switcher is open in a pristine state."]
 REQUEST_STEPS = [
@@ -108,7 +109,7 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
-        "linked_bugs": ["TS-997"],
+        "linked_bugs": LINKED_BUGS,
         "preconditions": PRECONDITIONS,
         "request_steps": REQUEST_STEPS,
         "automation_steps": AUTOMATION_STEPS,
@@ -737,6 +738,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"**Environment:** `{_environment_summary(result)}`",
         "",
+        f"**Linked bugs covered:** {', '.join(result.get('linked_bugs', []))}",
+        "",
         "### Automated checks",
         *format_step_lines(result, jira=False),
         "",
@@ -757,6 +760,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     return (
         f"# {TICKET_KEY} {status}\n\n"
         f"{_result_summary(result, passed=passed)}\n\n"
+        f"Linked bugs covered: {', '.join(result.get('linked_bugs', []))}\n\n"
         f"Environment: `{_environment_summary(result)}`\n"
     )
 
@@ -816,6 +820,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual result",
             actual_details,
+            "",
+            "## Actual vs Expected",
+            f"- Actual: {str(result.get('error', ''))}",
+            f"- Expected: {EXPECTED_RESULT}",
             "",
             "## Expected result",
             EXPECTED_RESULT,
