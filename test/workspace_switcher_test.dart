@@ -1430,6 +1430,123 @@ void main() {
   );
 
   testWidgets(
+    'workspace switcher rejects a different directory during unavailable local workspace retry with a mismatch error',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'Restorable local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      var directoryPickerCalls = 0;
+      final reopenedRepositoryPaths = <String>[];
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                expect(initialDirectory, '/tmp/demo');
+                return '/tmp/wrong-directory';
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                reopenedRepositoryPaths.add(repositoryPath);
+                throw UnsupportedError('Unsupported operation: Process.run');
+              },
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(directoryPickerCalls, 1);
+      expect(reopenedRepositoryPaths, isNot(contains('/tmp/wrong-directory')));
+      expect(service.state.activeWorkspaceId, hostedWorkspaceId);
+      expect(
+        find.text(
+          'Could not open Restorable local workspace. Selected directory does not match the saved workspace configuration.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final originalLocalRow = find.byKey(
+        const ValueKey('workspace-$localWorkspaceId'),
+      );
+      expect(originalLocalRow, findsOneWidget);
+      expect(
+        find.descendant(
+          of: originalLocalRow,
+          matching: find.text('Unavailable'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('workspace-local:/tmp/wrong-directory@main')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'startup restore keeps the active local workspace visible when every saved workspace is invalid',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/missing@main';
@@ -3144,6 +3261,9 @@ void main() {
           'Branch': find.widgetWithText(TextFormField, 'Branch'),
           'Save and switch': find.byKey(const ValueKey('workspace-add-button')),
         };
+
+        await tester.enterText(sheetCandidates['Repository']!, 'gamma/repo');
+        await tester.pump();
 
         await tester.tap(sheetCandidates['Repository']!);
         await tester.pump();
