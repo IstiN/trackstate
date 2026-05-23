@@ -204,6 +204,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             runtime_accessibility_surface_summary=str(
                 pull_request_observation["runtime_accessibility_surface_summary"]
             ),
+            runtime_accessibility_sample_labels=list(
+                pull_request_observation.get("runtime_accessibility_sample_labels", [])
+            ),
             probe_contains_low_contrast_indicator=bool(
                 pull_request_observation["probe_contains_low_contrast_indicator"]
             ),
@@ -211,6 +214,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 pull_request_observation["probe_contains_semantic_label_indicator"]
             ),
             probe_semantic_label=str(pull_request_observation["probe_semantic_label"]),
+            probe_visible_text=str(pull_request_observation.get("probe_visible_text", "")),
             probe_contrast_technique=str(
                 pull_request_observation["probe_contrast_technique"]
             ),
@@ -391,8 +395,14 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 self._config.semantic_evidence_markers,
             )
             probe_semantic_label = self._extract_probe_semantic_label(probe_source)
+            probe_visible_text = self._extract_probe_visible_text(probe_source)
             runtime_accessibility_surface_summary = (
                 self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
+            )
+            runtime_accessibility_sample_labels = (
+                self._extract_runtime_accessibility_sample_labels(
                     accessibility_stage_run_log_text
                 )
             )
@@ -489,11 +499,15 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
+                "runtime_accessibility_sample_labels": (
+                    runtime_accessibility_sample_labels
+                ),
                 "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
                     probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
+                "probe_visible_text": probe_visible_text or "",
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
@@ -1067,9 +1081,23 @@ class GitHubAccessibilityPullRequestGateProbeService:
     @staticmethod
     def _extract_probe_semantic_label(probe_source: str) -> str | None:
         match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
-        if match is None:
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"label:\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
+        )
+        if variable_match is None:
             return None
-        return match.group("label")
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
@@ -1089,14 +1117,25 @@ class GitHubAccessibilityPullRequestGateProbeService:
         )
 
     @staticmethod
-    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
-        normalized = " ".join(probe_source.split())
-        return (
-            "final lowContrastColor = colorScheme.surface;" in normalized
-            or (
-                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
-            )
+    def _extract_probe_visible_text(probe_source: str) -> str | None:
+        match = re.search(r"Text\(\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"Text\(\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
         )
+        if variable_match is None:
+            return None
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
 
     @staticmethod
     def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
@@ -1115,6 +1154,27 @@ class GitHubAccessibilityPullRequestGateProbeService:
         ):
             return line
         return ""
+
+    def _extract_runtime_accessibility_sample_labels(self, run_log_text: str) -> list[str]:
+        if not run_log_text.strip():
+            return []
+
+        labels: list[str] = []
+        for match in re.finditer(
+            r"sample-labels=\[(?P<labels>[^\]]*)\]",
+            run_log_text,
+            flags=re.IGNORECASE,
+        ):
+            labels_payload = f"[{match.group('labels')}]"
+            try:
+                parsed = json.loads(labels_payload)
+            except json.JSONDecodeError:
+                parsed = re.findall(r"""['"]([^'"]+)['"]""", match.group("labels"))
+            if isinstance(parsed, list):
+                labels.extend(
+                    item.strip() for item in parsed if isinstance(item, str) and item.strip()
+                )
+        return self._dedupe(labels)
 
     def _extract_flutter_engine_initialization_log_entries(
         self,
@@ -1382,13 +1442,15 @@ class Ts908ProbeSurface extends StatelessWidget {
     return Semantics(
       label: semanticsLabel,
       button: true,
-      child: Container(
-        color: colorScheme.surface,
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          probeText,
-          style: textStyle?.copyWith(color: lowContrastColor) ??
-              TextStyle(color: lowContrastColor),
+      child: ExcludeSemantics(
+        child: Container(
+          color: colorScheme.surface,
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            probeText,
+            style: textStyle?.copyWith(color: lowContrastColor) ??
+                TextStyle(color: lowContrastColor),
+          ),
         ),
       ),
     );

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../../data/repositories/browser_local_workspace_repository.dart';
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
@@ -33,6 +34,12 @@ import '../view_models/tracker_view_model.dart';
 
 typedef LocalRepositoryLoader =
     Future<TrackStateRepository> Function({
+      required String repositoryPath,
+      required String defaultBranch,
+      required String writeBranch,
+    });
+typedef BrowserLocalRepositoryLoader =
+    Future<TrackStateRepository?> Function({
       required String repositoryPath,
       required String defaultBranch,
       required String writeBranch,
@@ -96,6 +103,7 @@ class TrackStateApp extends StatefulWidget {
     this.repository,
     this.repositoryFactory,
     this.openLocalRepository,
+    this.openBrowserLocalRepository = openBrowserLocalWorkspaceRepository,
     this.openHostedRepository,
     this.workspaceProfileService =
         const SharedPreferencesWorkspaceProfileService(),
@@ -108,6 +116,7 @@ class TrackStateApp extends StatefulWidget {
   final TrackStateRepository? repository;
   final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
+  final BrowserLocalRepositoryLoader openBrowserLocalRepository;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
   final TrackStateAuthStore authStore;
@@ -272,6 +281,78 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  Future<TrackStateRepository> _openWorkspaceRepository(
+    WorkspaceProfile workspace,
+  ) async {
+    if (!workspace.isLocal) {
+      return _openHostedRepository(
+        repository: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    if (!kIsWeb) {
+      return _openLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    final repository = await widget.openBrowserLocalRepository(
+      repositoryPath: workspace.target,
+      defaultBranch: workspace.defaultBranch,
+      writeBranch: workspace.writeBranch,
+    );
+    if (repository != null) {
+      return repository;
+    }
+    throw StateError(
+      'Saved local workspace access is unavailable until the folder is reselected in this browser.',
+    );
+  }
+
+  Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
+    WorkspaceProfile workspace, {
+    required TrackerViewModel previousViewModel,
+  }) async {
+    try {
+      final repository = await widget.openBrowserLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+      if (repository == null) {
+        return null;
+      }
+      final nextViewModel = _createViewModel(
+        repository: repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: workspace.id,
+      );
+      await nextViewModel.load();
+      if (nextViewModel.snapshot == null) {
+        final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
+        nextViewModel.dispose();
+        _rememberWorkspaceValidationFailure(workspace, reason);
+        return null;
+      }
+      _workspaceValidationFailures.remove(workspace.id);
+      return _PreparedWorkspaceSwitch(
+        viewModel: nextViewModel,
+        workspace: workspace,
+        localConfigurationKey:
+            '${workspace.target}\n${workspace.defaultBranch}\n${workspace.writeBranch}',
+      );
+    } on Object catch (error) {
+      _rememberWorkspaceValidationFailure(
+        workspace,
+        _normalizeWorkspaceFailureReason(error),
+      );
+      return null;
+    }
+  }
+
   Future<TrackStateRepository> _openHostedRepository({
     required String repository,
     required String defaultBranch,
@@ -326,6 +407,14 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
+        if (_shouldMarkActiveLocalWorkspaceUnavailableFromSync(workspace)) {
+          workspaceState = await _saveLocalWorkspaceAvailability(
+            workspace.id,
+            isAvailable: false,
+          );
+          localWorkspaceAvailability[workspace.id] = false;
+          continue;
+        }
         localWorkspaceAvailability[workspace.id] = !workspaceState
             .unavailableLocalWorkspaceIds
             .contains(workspace.id);
@@ -354,15 +443,27 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
+  bool _shouldMarkActiveLocalWorkspaceUnavailableFromSync(
+    WorkspaceProfile workspace,
+  ) {
+    if (!workspace.isLocal || !viewModel.usesLocalPersistence) {
+      return false;
+    }
+    final status = viewModel.workspaceSyncStatus;
+    final latestError = status.latestError?.trim();
+    if (status.health != WorkspaceSyncHealth.attentionNeeded ||
+        latestError == null ||
+        latestError.isEmpty) {
+      return false;
+    }
+    return !_isUnsupportedActiveLocalStartupAccess(latestError);
+  }
+
   Future<bool> _validateLocalWorkspaceAvailability(
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on Object {
@@ -465,17 +566,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
   }) async {
     try {
-      final repository = workspace.isLocal
-          ? await _openLocalRepository(
-              repositoryPath: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            )
-          : await _openHostedRepository(
-              repository: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            );
+      final repository = await _openWorkspaceRepository(workspace);
       final nextViewModel = _createViewModel(
         repository: repository,
         previous: previousViewModel,
@@ -710,6 +801,20 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     if (loadedState.hasProfiles) {
+      if (kIsWeb) {
+        if (loadedState.activeWorkspace case final activeWorkspace?) {
+          viewModel.updateWorkspaceScope(activeWorkspace.id);
+        }
+        final initialLoad = viewModel.load(deferAccessRestore: true);
+        if (mounted) {
+          setState(() {
+            _workspaceProfilesReady = true;
+          });
+        }
+        _scheduleWebStartupRefresh();
+        unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
+        return;
+      }
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
         if (mounted) {
@@ -745,6 +850,33 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
+  }
+
+  Future<void> _finishWebStartupWorkspaceRestore(
+    WorkspaceProfilesState loadedState,
+    Future<void> initialLoad,
+  ) async {
+    await initialLoad;
+    final restored = await _restoreWorkspaceFromSavedState(loadedState);
+    _scheduleWebStartupRefresh();
+    if (restored || !mounted) {
+      return;
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
+  }
+
+  void _scheduleWebStartupRefresh() {
+    if (!kIsWeb) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    });
   }
 
   Future<void> _awaitActiveLocalWorkspaceRevalidation(
@@ -796,18 +928,23 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on UnsupportedError {
       return true;
     } on Object catch (error) {
+      if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        return true;
+      }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
     }
+  }
+
+  bool _isUnavailableBrowserLocalWorkspaceAccess(Object error) {
+    return _normalizeWorkspaceFailureReason(
+      error,
+    ).toLowerCase().contains('reselected in this browser');
   }
 
   bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {
@@ -1201,9 +1338,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (widget.repository != null || !workspace.isLocal) {
       return;
     }
-    final selectedPath = await widget.workspaceDirectoryPicker(
-      initialDirectory: workspace.target,
-    );
+    String? selectedPath;
+    try {
+      selectedPath = await widget.workspaceDirectoryPicker(
+        initialDirectory: workspace.target,
+      );
+    } on WorkspaceDirectorySelectionMismatchException catch (error) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message: error.message,
+      );
+      return;
+    }
     if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
       return;
     }
@@ -1215,27 +1361,21 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (normalizedTarget.isEmpty) {
       return;
     }
-
-    final nextWorkspace = normalizedTarget == workspace.normalizedTarget
-        ? workspace
-        : await widget.workspaceProfileService.updateProfile(
-            workspace.id,
-            WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.local,
-              target: normalizedTarget,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-              displayName:
-                  workspace.normalizedCustomDisplayName ??
-                  workspace.displayName,
-            ),
-            select: false,
-          );
-    if (!mounted) {
+    if (normalizedTarget != workspace.normalizedTarget) {
+      await _showUnavailableLocalWorkspaceRetryMismatch(
+        workspace,
+        message:
+            'Selected directory does not match the saved workspace configuration.',
+      );
       return;
     }
 
     final previousViewModel = viewModel;
+    final nextWorkspace = workspace;
+    if (!mounted) {
+      return;
+    }
+
     final prepared = await _prepareWorkspaceSwitch(
       nextWorkspace,
       previousViewModel: previousViewModel,
@@ -1257,11 +1397,50 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final reason = _workspaceValidationFailureReason(nextWorkspace);
+    var reason = _workspaceValidationFailureReason(nextWorkspace);
+    if (_isUnsupportedActiveLocalStartupAccess(reason)) {
+      final browserPrepared = await _prepareBrowserLocalWorkspaceSwitch(
+        nextWorkspace,
+        previousViewModel: previousViewModel,
+      );
+      if (browserPrepared != null) {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          nextWorkspace.id,
+        );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          nextWorkspace.id,
+          isAvailable: true,
+        );
+        await _commitPreparedWorkspaceSwitch(
+          browserPrepared,
+          previousViewModel: previousViewModel,
+          workspaceState: selectedState,
+        );
+        return;
+      }
+      reason = _workspaceValidationFailureReason(nextWorkspace);
+    }
     previousViewModel.showMessage(
       TrackerMessage.workspaceSwitchFailed(
         workspaceName: nextWorkspace.displayName,
         reason: reason,
+      ),
+    );
+  }
+
+  Future<void> _showUnavailableLocalWorkspaceRetryMismatch(
+    WorkspaceProfile workspace, {
+    required String message,
+  }) async {
+    _rememberWorkspaceValidationFailure(workspace, message);
+    await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+    if (!mounted) {
+      return;
+    }
+    viewModel.showMessage(
+      TrackerMessage.workspaceSwitchFailed(
+        workspaceName: workspace.displayName,
+        reason: message,
       ),
     );
   }
@@ -4965,7 +5144,7 @@ String _workspaceSyncLabel(AppLocalizations l10n, TrackerViewModel viewModel) {
     WorkspaceSyncHealth.synced => l10n.syncStatus,
     WorkspaceSyncHealth.checking => l10n.workspaceSyncChecking,
     WorkspaceSyncHealth.attentionNeeded =>
-      l10n.workspaceSyncAttentionNeededVisibleLabel,
+      _workspaceSyncAttentionNeededVisibleLabel(l10n),
     WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
   };
 }
@@ -4978,11 +5157,22 @@ _SyncPillSemanticLabel _workspaceSyncSemanticLabel(
   if (status.health == WorkspaceSyncHealth.attentionNeeded &&
       !status.hasPendingRefresh) {
     return _StaticSyncPillSemanticLabel(
-      l10n.workspaceSyncAttentionNeededSemanticLabel,
+      _workspaceSyncAttentionNeededSemanticLabel(l10n),
     );
   }
   return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
 }
+
+String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededVisibleLabel.value;
+
+_WorkspaceSyncAttentionNeededSemanticText
+_workspaceSyncAttentionNeededSemanticLabel(AppLocalizations l10n) =>
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededSemanticLabel;
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
   final l10n = AppLocalizations.of(context)!;
@@ -6757,12 +6947,15 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   late final TextEditingController _branchController;
   final Map<String, VoidCallback> _workspaceRowFocusRequesters =
       <String, VoidCallback>{};
+  bool _canSaveWorkspace = false;
 
   @override
   void initState() {
     super.initState();
     _targetController = TextEditingController();
     _branchController = TextEditingController(text: 'main');
+    _targetController.addListener(_handleAddWorkspaceInputChanged);
+    _branchController.addListener(_handleAddWorkspaceInputChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
       if (!mounted || requestedFocusedWorkspaceId == null) {
@@ -6774,6 +6967,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
 
   @override
   void dispose() {
+    _targetController.removeListener(_handleAddWorkspaceInputChanged);
+    _branchController.removeListener(_handleAddWorkspaceInputChanged);
     _targetController.dispose();
     _branchController.dispose();
     super.dispose();
@@ -6796,8 +6991,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   }
 
   void _saveWorkspace() {
-    if (_targetController.text.trim().isEmpty ||
-        _branchController.text.trim().isEmpty) {
+    if (!_canSaveWorkspace) {
       return;
     }
     widget.onAddWorkspace(
@@ -6807,6 +7001,18 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
         defaultBranch: _branchController.text,
       ),
     );
+  }
+
+  void _handleAddWorkspaceInputChanged() {
+    final canSaveWorkspace =
+        _targetController.text.trim().isNotEmpty &&
+        _branchController.text.trim().isNotEmpty;
+    if (canSaveWorkspace == _canSaveWorkspace) {
+      return;
+    }
+    setState(() {
+      _canSaveWorkspace = canSaveWorkspace;
+    });
   }
 
   @override
@@ -7055,17 +7261,24 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child: browser_focusable_control.BrowserFocusableControl(
-                  label: l10n.workspaceSaveAndSwitch,
-                  onPressed: _saveWorkspace,
-                  focusTargetId: _workspaceSwitcherSaveFocusId,
-                  panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                  child: FilledButton(
-                    key: const ValueKey('workspace-add-button'),
-                    onPressed: _saveWorkspace,
-                    child: Text(l10n.workspaceSaveAndSwitch),
-                  ),
-                ),
+                child: kIsWeb && !_canSaveWorkspace
+                    ? _WorkspaceSwitcherDisabledFooterButton(
+                        buttonKey: const ValueKey('workspace-add-button'),
+                        label: l10n.workspaceSaveAndSwitch,
+                        semanticsIdentifier: _workspaceSwitcherSaveFocusId,
+                      )
+                    : browser_focusable_control.BrowserFocusableControl(
+                        label: l10n.workspaceSaveAndSwitch,
+                        onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                        focusTargetId: _workspaceSwitcherSaveFocusId,
+                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                        focusableWhenDisabled: true,
+                        child: FilledButton(
+                          key: const ValueKey('workspace-add-button'),
+                          onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                          child: Text(l10n.workspaceSaveAndSwitch),
+                        ),
+                      ),
               ),
             ),
           ],
@@ -7490,6 +7703,71 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
       focusTargetId: focusTargetId,
       panelId: browserWorkspaceSwitcherSemanticsIdentifier,
       child: buttonChild,
+    );
+  }
+}
+
+class _WorkspaceSwitcherDisabledFooterButton extends StatelessWidget {
+  const _WorkspaceSwitcherDisabledFooterButton({
+    required this.buttonKey,
+    required this.label,
+    required this.semanticsIdentifier,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final String semanticsIdentifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final disabledStates = <WidgetState>{WidgetState.disabled};
+    final style = theme.filledButtonTheme.style;
+    final backgroundColor =
+        style?.backgroundColor?.resolve(disabledStates) ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.12);
+    final foregroundColor =
+        style?.foregroundColor?.resolve(disabledStates) ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.38);
+    final padding =
+        style?.padding?.resolve(disabledStates) ??
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 10);
+    final minimumSize =
+        style?.minimumSize?.resolve(disabledStates) ?? const Size(64, 40);
+    final shape =
+        style?.shape?.resolve(disabledStates) ??
+        const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        );
+
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: false,
+      focusable: true,
+      identifier: semanticsIdentifier,
+      label: label,
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: minimumSize.width,
+            minHeight: minimumSize.height,
+          ),
+          child: DecoratedBox(
+            key: buttonKey,
+            decoration: ShapeDecoration(color: backgroundColor, shape: shape),
+            child: Padding(
+              padding: padding,
+              child: Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: foregroundColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -11629,7 +11907,7 @@ class _PrimaryButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       focusable: enabled,
-      expanded: expanded,
+      expanded: kIsWeb ? null : expanded,
       identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
@@ -11805,14 +12083,26 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         ? null
         : controlsNodes!.first;
     if (kIsWeb) {
-      return browser_focusable_control.BrowserFocusableControl(
-        label: summary.semanticLabel,
-        onPressed: onPressed,
-        focusTargetId: semanticsIdentifier,
-        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-        controlsId: controlsId,
-        expanded: expanded,
-        child: constrainedButton,
+      return MergeSemantics(
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          focusable: enabled,
+          identifier: semanticsIdentifier,
+          label: summary.semanticLabel,
+          sortKey: _semanticsSortKey(semanticsSortOrder),
+          controlsNodes: controlsNodes,
+          onTap: enabled ? onPressed : null,
+          child: browser_focusable_control.BrowserFocusableControl(
+            label: summary.semanticLabel,
+            onPressed: onPressed,
+            focusTargetId: semanticsIdentifier,
+            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+            controlsId: controlsId,
+            expanded: expanded,
+            child: constrainedButton,
+          ),
+        ),
       );
     }
     return MergeSemantics(
@@ -13706,10 +13996,10 @@ sealed class _SyncPillSemanticLabel {
 final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
   const _StaticSyncPillSemanticLabel(this.value);
 
-  final String value;
+  final _WorkspaceSyncAttentionNeededSemanticText value;
 
   @override
-  String resolve(String visibleLabel) => value;
+  String resolve(String visibleLabel) => value.value;
 }
 
 final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
@@ -13719,6 +14009,34 @@ final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
 
   @override
   String resolve(String visibleLabel) => '$prefix, $visibleLabel';
+}
+
+final class _WorkspaceSyncAttentionNeededSemanticText {
+  const _WorkspaceSyncAttentionNeededSemanticText(this.value);
+
+  final String value;
+}
+
+final class _WorkspaceSyncAttentionNeededVisibleText {
+  const _WorkspaceSyncAttentionNeededVisibleText(this.value);
+
+  final String value;
+}
+
+extension type const _WorkspaceSyncAttentionNeededLocalizations(
+  AppLocalizations _l10n
+) {
+  _WorkspaceSyncAttentionNeededVisibleText
+  get workspaceSyncAttentionNeededVisibleLabel =>
+      _WorkspaceSyncAttentionNeededVisibleText(
+        _l10n.workspaceSyncAttentionNeededVisibleLabel,
+      );
+
+  _WorkspaceSyncAttentionNeededSemanticText
+  get workspaceSyncAttentionNeededSemanticLabel =>
+      _WorkspaceSyncAttentionNeededSemanticText(
+        _l10n.workspaceSyncAttentionNeededSemanticLabel,
+      );
 }
 
 class _InlineInfoBanner extends StatelessWidget {

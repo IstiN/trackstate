@@ -8,6 +8,15 @@ typedef WorkspaceDirectoryPicker =
       String? initialDirectory,
     });
 
+class WorkspaceDirectorySelectionMismatchException implements Exception {
+  const WorkspaceDirectorySelectionMismatchException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 Future<String?> pickWorkspaceDirectory({
   String? confirmButtonText,
   String? initialDirectory,
