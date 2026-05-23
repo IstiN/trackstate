@@ -158,6 +158,26 @@ test('TrackState web app has no axe-core accessibility violations', async ({
 
         self.assertIn("Flutter engine failed to render semantics nodes", excerpt)
 
+    def test_accessibility_stage_log_text_excludes_other_jobs(self) -> None:
+        stage_log_text = self.probe._accessibility_stage_run_log_text(  # noqa: SLF001
+            "\n".join(
+                [
+                    "Flutter checks\tDetect Flutter changes\t2026-05-22T11:02:00Z waiting for nodes",
+                    "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:15Z Error: Flutter engine failed to render semantics nodes during initialization.",
+                ]
+            ),
+            jobs=[
+                {"name": "Flutter checks"},
+                {"name": "Accessibility checks"},
+            ],
+        )
+
+        self.assertIn(
+            "Accessibility checks Run axe-core accessibility checks",
+            stage_log_text,
+        )
+        self.assertNotIn("Flutter checks Detect Flutter changes", stage_log_text)
+
     def test_simulation_helper_source_hides_flt_semantics_nodes(self) -> None:
         source = self.probe._simulation_helper_source()  # noqa: SLF001
 
