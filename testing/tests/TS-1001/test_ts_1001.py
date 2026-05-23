@@ -28,7 +28,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
-from testing.frameworks.python.dart_probe_runtime import PythonDartProbeRuntime  # noqa: E402
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
     DelayedAuthWorkspaceProfilesRuntime,
 )
@@ -69,11 +68,13 @@ STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 10
 POLL_INTERVAL_SECONDS = 0.5
 LINKED_BUGS = ["TS-996"]
-DART_PROBE_ROOT = REPO_ROOT / "testing" / "tests" / TICKET_KEY / "dart_probe"
-DART_PROBE_ENTRYPOINT = Path("bin/restricted_session_probe.dart")
 REVIEW_THREADS = (
-    {"inReplyToId": 3292779536, "threadId": "PRRT_kwDOSU6Gf86ETYrh"},
-    {"inReplyToId": 3292779546, "threadId": "PRRT_kwDOSU6Gf86ETYro"},
+    {"inReplyToId": 3293062308, "threadId": "PRRT_kwDOSU6Gf86EUM-8"},
+    {"inReplyToId": 3293062331, "threadId": "PRRT_kwDOSU6Gf86EUM_M"},
+)
+WORKSPACE_PROFILE_STATE_KEYS = (
+    "trackstate.workspaceProfiles.state",
+    "flutter.trackstate.workspaceProfiles.state",
 )
 LINKED_BUG_NOTES = (
     "Reviewed TS-996. Its fix makes startup enter shell_ready after the 11-second "
@@ -84,8 +85,11 @@ REWORK_SUMMARY_ITEMS = (
     "Started the live scenario from the local workspace so the delayed GitHub `/user` "
     "startup probe is exercised deterministically, then switched into the hosted "
     "workspace after `shell_ready` to inspect the fallback state.",
-    "Added a direct production `ProviderSession` probe that asserts "
-    "`canWrite=false` and `canCreateBranch=false` while authentication remains unresolved.",
+    "Removed the synthetic Dart permission probe and now read the hosted workspace "
+    "access mode from the same live browser session that exercised the fallback UI.",
+    "Kept the rerun product-facing: if the live session still does not expose a "
+    "public same-session surface for `canCreateBranch`, the test fails as a real "
+    "product gap instead of proving a fixture-authored capability state.",
 )
 
 REQUEST_STEPS = [
@@ -126,6 +130,11 @@ def main() -> None:
 
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
+    expected_hosted_workspace_id = next(
+        str(profile["id"])
+        for profile in workspace_state["profiles"]
+        if isinstance(profile, dict) and profile.get("targetType") == "hosted"
+    )
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
         token=token,
@@ -152,6 +161,7 @@ def main() -> None:
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
+        "expected_hosted_workspace_id": expected_hosted_workspace_id,
         "auth_probe_observed": False,
         "startup_probe_missing": False,
         "startup_probe_late": False,
@@ -338,12 +348,33 @@ def main() -> None:
                     f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
                 )
             elif not bool(timeout_window["auth_pending"]):
-                step_two_error = (
-                    "Step 2 failed: by the time the timeout assertion ran, the delayed "
-                    "GitHub `/user` probe was no longer pending, so the unresolved-auth "
-                    "fallback state was not observed.\n"
-                    f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                shell_ready_after_start_seconds = timeout_window.get(
+                    "shell_ready_after_start_seconds",
                 )
+                auth_probe_released_after_start_seconds = timeout_window.get(
+                    "auth_probe_released_after_start_seconds",
+                )
+                if (
+                    isinstance(shell_ready_after_start_seconds, (int, float))
+                    and isinstance(auth_probe_released_after_start_seconds, (int, float))
+                    and shell_ready_after_start_seconds > SYNC_TIMEOUT_SECONDS
+                    and shell_ready_after_start_seconds
+                    >= auth_probe_released_after_start_seconds
+                ):
+                    step_two_error = (
+                        "Step 2 failed: the delayed GitHub `/user` probe started, but the "
+                        "app did not enter `shell_ready` within the 11-second timeout "
+                        "window. Instead, the shell only became ready after the delayed "
+                        "auth probe was released, so the TS-996 timeout fallback regressed.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
+                else:
+                    step_two_error = (
+                        "Step 2 failed: by the time the timeout assertion ran, the delayed "
+                        "GitHub `/user` probe was no longer pending, so the unresolved-auth "
+                        "fallback state was not observed.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
             elif not bool(timeout_window["shell_observation"]["shell_ready"]):
                 step_two_error = (
                     "Step 2 failed: after waiting beyond the 11-second startup timeout, "
@@ -382,6 +413,22 @@ def main() -> None:
                     action=REQUEST_STEPS[1],
                     observed=step_two_error,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the live shell after startup and compared the shell-ready "
+                        "timing against the delayed GitHub `/user` probe lifecycle."
+                    ),
+                    observed=(
+                        f"timeout_window={json.dumps(_sample_payload(timeout_window), ensure_ascii=True)}; "
+                        f"github_request_urls={json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}"
+                    ),
+                )
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                _record_not_reached_steps(result, starting_step=3)
+                raise AssertionError(step_two_error)
 
             try:
                 hosted_trigger = switcher_page.switch_to_workspace(
@@ -446,9 +493,24 @@ def main() -> None:
                 )
                 result["create_issue_gate_observation"] = _create_gate_payload(gate_observation)
                 _assert_write_gate(runtime=runtime, gate=gate_observation)
-                restricted_session_probe = _run_restricted_session_probe()
-                result["restricted_session_probe"] = restricted_session_probe
-                _assert_restricted_session_probe(restricted_session_probe)
+                workspace_profile_state = _read_workspace_profile_state(
+                    tracker_page,
+                    expected_hosted_workspace_id=expected_hosted_workspace_id,
+                )
+                result["workspace_profile_state"] = workspace_profile_state
+                _assert_workspace_profile_state(
+                    runtime=runtime,
+                    observation=workspace_profile_state,
+                )
+                raise AssertionError(
+                    "The live fallback session still does not expose any public "
+                    "same-browser-session surface for `canCreateBranch`. The test "
+                    "confirmed the real fallback UI (`Open settings` gate) and the "
+                    "same-session hosted access mode (`hostedAccessMode=disconnected`), "
+                    "but there is no production-visible session metadata or branch-creation "
+                    "boundary tied to that browser session that proves `canCreateBranch=false` "
+                    "without using a synthetic fixture."
+                )
                 _record_step(
                     result,
                     step=4,
@@ -457,11 +519,11 @@ def main() -> None:
                     observed=(
                         "Opened the user-visible Create issue action after the timeout and "
                         "confirmed the live app kept write operations blocked instead of "
-                        "showing an editable create form. The production `ProviderSession` "
-                        "probe also exposed `canWrite=false` and `canCreateBranch=false` "
-                        "while auth remained unresolved.\n"
+                        "showing an editable create form. The same live browser session "
+                        "also persisted the hosted fallback workspace as "
+                        "`hostedAccessMode=disconnected`.\n"
                         f"gate={json.dumps(result['create_issue_gate_observation'], ensure_ascii=True)}\n"
-                        f"restricted_session_probe={json.dumps(restricted_session_probe.get('payload'), ensure_ascii=True)}"
+                        f"workspace_profile_state={json.dumps(workspace_profile_state, ensure_ascii=True)}"
                     ),
                 )
             except Exception as error:
@@ -471,8 +533,8 @@ def main() -> None:
                     f"error={error}\n"
                     f"create_issue_gate_observation="
                     f"{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}\n"
-                    f"restricted_session_probe="
-                    f"{json.dumps(result.get('restricted_session_probe'), ensure_ascii=True)}\n"
+                    f"workspace_profile_state="
+                    f"{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}\n"
                     f"body_text={tracker_page.body_text()}"
                 )
                 failures.append(step_four_error)
@@ -735,62 +797,109 @@ def _assert_write_gate(
         )
 
 
-def _run_restricted_session_probe() -> dict[str, Any]:
-    runtime = PythonDartProbeRuntime(REPO_ROOT)
-    execution = runtime.execute(
-        probe_root=DART_PROBE_ROOT,
-        entrypoint=DART_PROBE_ENTRYPOINT,
+def _read_workspace_profile_state(
+    tracker_page: TrackStateTrackerPage,
+    *,
+    expected_hosted_workspace_id: str,
+) -> dict[str, Any]:
+    snapshot = tracker_page.snapshot_local_storage(WORKSPACE_PROFILE_STATE_KEYS)
+    raw_state = next(
+        (
+            raw_value
+            for key in WORKSPACE_PROFILE_STATE_KEYS
+            if (raw_value := snapshot.get(key))
+        ),
+        None,
     )
+    parsed_state: dict[str, Any] | None = None
+    parse_error: str | None = None
+    if raw_state is not None:
+        try:
+            candidate = json.loads(raw_state)
+            if isinstance(candidate, dict):
+                parsed_state = candidate
+            else:
+                parse_error = (
+                    "Workspace profile storage did not deserialize to a JSON object. "
+                    f"Observed type: {type(candidate).__name__}."
+                )
+        except json.JSONDecodeError as error:
+            parse_error = f"{type(error).__name__}: {error}"
+
+    active_workspace_id = (
+        str(parsed_state.get("activeWorkspaceId"))
+        if isinstance(parsed_state, dict) and parsed_state.get("activeWorkspaceId") is not None
+        else None
+    )
+    hosted_profile: dict[str, Any] | None = None
+    raw_profiles = parsed_state.get("profiles") if isinstance(parsed_state, dict) else None
+    if isinstance(raw_profiles, list):
+        hosted_profile = next(
+            (
+                profile
+                for profile in raw_profiles
+                if isinstance(profile, dict)
+                and str(profile.get("id", "")).strip() == expected_hosted_workspace_id
+            ),
+            None,
+        )
     return {
-        "succeeded": execution.succeeded,
-        "analyze_output": execution.analyze_output,
-        "run_output": execution.run_output,
-        "payload": execution.session_payload,
+        "snapshot": snapshot,
+        "raw_state": raw_state,
+        "parse_error": parse_error,
+        "active_workspace_id": active_workspace_id,
+        "hosted_profile": hosted_profile,
+        "hosted_access_mode": (
+            None
+            if hosted_profile is None
+            else str(hosted_profile.get("hostedAccessMode"))
+            if hosted_profile.get("hostedAccessMode") is not None
+            else None
+        ),
     }
 
 
-def _assert_restricted_session_probe(probe: dict[str, Any]) -> None:
-    if not bool(probe.get("succeeded")):
+def _assert_workspace_profile_state(
+    *,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    observation: dict[str, Any],
+) -> None:
+    if not runtime.auth_probe_pending:
         raise AssertionError(
-            "The restricted session metadata probe could not be analyzed before the "
-            "fallback capability flags were checked.\n"
-            f"analyze_output={probe.get('analyze_output')}"
+            "The delayed auth probe was no longer pending while the same-session hosted "
+            "workspace access mode was being inspected.",
         )
-    payload = probe.get("payload")
-    if not isinstance(payload, dict):
+    parse_error = observation.get("parse_error")
+    if parse_error:
         raise AssertionError(
-            "The restricted session metadata probe did not return a structured payload.\n"
-            f"payload={payload!r}"
+            "The browser session did not expose a parseable workspace profile state "
+            f"snapshot in localStorage.\nobservation={json.dumps(observation, ensure_ascii=True)}",
         )
-    if payload.get("status") != "passed":
+    active_workspace_id = observation.get("active_workspace_id")
+    if not active_workspace_id:
         raise AssertionError(
-            "The restricted session metadata probe reported a failure instead of the "
-            "expected unresolved-auth fallback session.\n"
-            f"payload={json.dumps(payload, ensure_ascii=True)}"
+            "The live browser session did not persist an active workspace id while the "
+            "fallback state was visible.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
         )
-    session = payload.get("session")
-    if not isinstance(session, dict):
+    hosted_profile = observation.get("hosted_profile")
+    if not isinstance(hosted_profile, dict):
         raise AssertionError(
-            "The restricted session metadata probe did not expose the session payload.\n"
-            f"payload={json.dumps(payload, ensure_ascii=True)}"
+            "The same-session workspace profile state did not expose the hosted "
+            "workspace profile needed for fallback-state inspection.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
         )
-    if session.get("connectionState") != "ProviderConnectionState.connecting":
+    if observation.get("hosted_access_mode") != "disconnected":
         raise AssertionError(
-            "The restricted session metadata probe did not keep the provider session in "
-            "the unresolved connecting state.\n"
-            f"session={json.dumps(session, ensure_ascii=True)}"
+            "The live browser session did not persist the hosted fallback workspace as "
+            "`hostedAccessMode=disconnected` while auth was unresolved.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
         )
-    if session.get("canWrite") is not False:
+    if active_workspace_id != str(hosted_profile.get("id", "")):
         raise AssertionError(
-            "The restricted session metadata probe did not expose `canWrite=false` "
-            "while auth remained unresolved.\n"
-            f"session={json.dumps(session, ensure_ascii=True)}"
-        )
-    if session.get("canCreateBranch") is not False:
-        raise AssertionError(
-            "The restricted session metadata probe did not expose `canCreateBranch=false` "
-            "while auth remained unresolved.\n"
-            f"session={json.dumps(session, ensure_ascii=True)}"
+            "The same-session workspace profile state did not keep the hosted workspace "
+            "selected while the fallback surface was being inspected.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
         )
 
 
@@ -916,7 +1025,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         "h4. What was tested",
         "* Started from the active local workspace so the delayed GitHub {/user} startup probe is exercised deterministically, then switched into the hosted workspace after the shell rendered.",
         "* Waited beyond the 11-second timeout before asserting instead of checking immediately.",
-        "* Checked the hosted fallback workspace state, the user-facing Create issue gate, and a direct production session probe for {canWrite=false} and {canCreateBranch=false}.",
+        "* Checked the hosted fallback workspace state, the user-facing Create issue gate, and the same-browser hosted access mode persisted in workspace storage.",
         "",
         "h4. Result",
         f"* {_actual_result_summary(result, passed=passed)}",
@@ -967,7 +1076,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "## What was automated",
         "- Delayed the live GitHub `/user` startup probe by 30 seconds and exercised it from the local-active startup path before switching into the hosted workspace.",
         "- Waited past the timeout before asserting the visible shell and fallback state.",
-        "- Verified the active hosted workspace state, the blocked Create issue flow, and a direct production `ProviderSession` probe for `canWrite=false` and `canCreateBranch=false`.",
+        "- Verified the active hosted workspace state, the blocked Create issue flow, and the same-session hosted workspace access mode persisted in browser storage.",
         "",
         "## Result",
         f"- {_actual_result_summary(result, passed=passed)}",
@@ -1067,7 +1176,7 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Trigger observation: `{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}`",
         f"- Switcher observation: `{json.dumps(result.get('switcher_observation'), ensure_ascii=True)}`",
         f"- Create issue gate observation: `{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}`",
-        f"- Restricted session probe: `{json.dumps(result.get('restricted_session_probe'), ensure_ascii=True)}`",
+        f"- Workspace profile state: `{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}`",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1078,9 +1187,8 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "After the 11-second startup timeout elapsed with the delayed auth probe "
             "still pending, the deployed app showed the interactive shell, the active "
             "hosted workspace exposed `Needs sign-in`, Create issue stayed blocked "
-            "behind the visible `Open settings` recovery gate, and the direct "
-            "production session probe exposed `canWrite=false` and "
-            "`canCreateBranch=false`."
+            "behind the visible `Open settings` recovery gate, and the same-session "
+            "workspace profile state persisted `hostedAccessMode=disconnected`."
         )
     return str(
         result.get(
@@ -1096,37 +1204,22 @@ def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
 
 
 def _write_review_replies(result: dict[str, Any]) -> None:
-    auth_probe_observed = bool(result.get("auth_probe_observed"))
-    startup_probe_missing = bool(result.get("startup_probe_missing"))
-    startup_probe_late = bool(result.get("startup_probe_late"))
-    restricted_session_probe = result.get("restricted_session_probe")
+    workspace_profile_state = result.get("workspace_profile_state")
     capability_reply = (
-        "Fixed: step 4 now pairs the live hosted `Create issue` recovery gate with a "
-        "production `ProviderSession` probe that asserts `canWrite=false` and "
-        "`canCreateBranch=false` while auth remains unresolved."
-        if restricted_session_probe
-        else "Fixed in code: step 4 now includes a production `ProviderSession` probe "
-        "for `canWrite=false` and `canCreateBranch=false`; the latest rerun did not "
-        "reach that assertion because an earlier step failed."
+        "Fixed in code: removed the synthetic Dart permission probe. Step 4 now relies "
+        "only on same-browser-session evidence from the live fallback UI, and the test "
+        "stays failed unless the product exposes a real same-session surface for "
+        "`canCreateBranch`."
+        if workspace_profile_state
+        else "Fixed in code: removed the synthetic Dart permission probe and the direct "
+        "`PythonDartProbeRuntime` dependency. The latest rerun failed earlier on the "
+        "startup-timeout regression before step 4 reached the live browser-session "
+        "access-mode assertion."
     )
-    precondition_reply = (
-        "Fixed: the harness now starts from the local workspace so the delayed GitHub "
-        "`/user` startup probe is observed before assertions, then switches into the "
-        "hosted workspace for the fallback checks."
-        if auth_probe_observed
-        else "Fixed: the rerun now captures the exact startup timing. The current "
-        "production build does issue GitHub `/user`, but only after other repository "
-        "bootstrap requests instead of as the startup auth probe required by TS-1001, "
-        "so the result is recorded as a real product defect."
-        if startup_probe_late
-        else "Fixed: the rerun now captures the exact startup request contract. The "
-        "current production build never issues the required GitHub `/user` startup "
-        "probe and only requests other GitHub endpoints, so TS-1001 is now recorded "
-        "as a real product gap instead of a generic setup failure."
-        if startup_probe_missing
-        else "Fixed: the harness now distinguishes a missing delayed GitHub `/user` "
-        "probe as a precondition/setup failure and does not emit downstream product "
-        "bug evidence unless that delayed auth path is actually observed."
+    layering_reply = (
+        "Fixed: `test_ts_1001.py` no longer instantiates `PythonDartProbeRuntime` or "
+        "any framework probe directly. The ticket flow now stays on the page/service "
+        "component side and uses browser-session evidence only."
     )
     payload = {
         "replies": [
@@ -1136,7 +1229,7 @@ def _write_review_replies(result: dict[str, Any]) -> None:
             },
             {
                 **REVIEW_THREADS[1],
-                "reply": precondition_reply,
+                "reply": layering_reply,
             },
         ]
     }

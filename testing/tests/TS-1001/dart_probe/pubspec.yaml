@@ -1,9 +1,0 @@
-name: ts1001_restricted_session_probe
-publish_to: none
-
-environment:
-  sdk: ^3.9.2
-
-dependencies:
-  http:
-    path: packages/http
