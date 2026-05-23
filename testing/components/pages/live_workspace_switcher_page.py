@@ -1296,10 +1296,13 @@ class LiveWorkspaceSwitcherPage:
                   if (!switcher) {
                     return null;
                   }
-                  const buttonSelector = [
+                  const controlSelector = [
                     'flt-semantics[role="button"]',
                     'button',
                     '[role="button"]',
+                    '[aria-disabled]',
+                    '[disabled]',
+                    '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
                   const isSwitcherOwnedControl = (element) => {
                     if (!element) {
@@ -1311,17 +1314,16 @@ class LiveWorkspaceSwitcherPage:
                     }
                     return switcher.contains(element);
                   };
-                  const candidate = Array.from(document.querySelectorAll(buttonSelector))
-                    .filter((element) => isSwitcherOwnedControl(element))
+                  const candidateMatches = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
-                    .find((element) => {
+                    .map((element) => {
                       const elementLabel = labelFor(element);
                       const elementText = visibleText(element);
                       const combined = normalize(`${elementLabel} ${elementText}`);
                       const isActionButton = elementLabel.startsWith('Delete:')
                         || elementLabel.startsWith('Open:')
                         || elementText === 'Active';
-                      return elementLabel === label
+                      const matches = elementLabel === label
                         || elementText === label
                         || (
                           displayNameHint.length > 0
@@ -1332,7 +1334,46 @@ class LiveWorkspaceSwitcherPage:
                             || combined.includes(displayNameHint)
                           )
                         );
+                      if (!matches) {
+                        return null;
+                      }
+                      const control = element.closest(controlSelector);
+                      const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
+                      if (!isVisible(target)) {
+                        return null;
+                      }
+                      const targetLabel = labelFor(target);
+                      const targetText = visibleText(target);
+                      const targetCombined = normalize(`${targetLabel} ${targetText}`);
+                      const rect = target.getBoundingClientRect();
+                      return {
+                        target,
+                        exactMatch: targetLabel === label
+                          || targetText === label
+                          || elementLabel === label
+                          || elementText === label,
+                        interactiveMatch:
+                          target.matches?.('button,[role="button"],[aria-disabled],[disabled]')
+                          || target.getAttribute?.('tabindex') === '0'
+                          || target.tabIndex >= 0,
+                        area: rect.width * rect.height,
+                        targetCombined,
+                      };
+                    })
+                    .filter((candidate) => candidate !== null)
+                    .sort((left, right) => {
+                      if (left.exactMatch !== right.exactMatch) {
+                        return left.exactMatch ? -1 : 1;
+                      }
+                      if (left.interactiveMatch !== right.interactiveMatch) {
+                        return left.interactiveMatch ? -1 : 1;
+                      }
+                      return left.area - right.area;
                     });
+                  const candidate = candidateMatches[0]?.target || null;
                   if (!candidate) {
                     return null;
                   }
@@ -1438,13 +1479,13 @@ class LiveWorkspaceSwitcherPage:
                       });
                     switcher = candidates[0] || null;
                   }
-                  if (!switcher) {
-                    return null;
-                  }
-                  const buttonSelector = [
+                  const controlSelector = [
                     'flt-semantics[role="button"]',
                     'button',
                     '[role="button"]',
+                    '[aria-disabled]',
+                    '[disabled]',
+                    '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
                   const isSwitcherOwnedControl = (element) => {
                     if (!element) {
@@ -1454,19 +1495,18 @@ class LiveWorkspaceSwitcherPage:
                     if (panelId === 'trackstate-workspace-switcher') {
                       return true;
                     }
-                    return switcher.contains(element);
+                    return Boolean(switcher && switcher.contains(element));
                   };
-                  const candidate = Array.from(document.querySelectorAll(buttonSelector))
-                    .filter((element) => isSwitcherOwnedControl(element))
+                  const candidateMatches = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
-                    .find((element) => {
+                    .map((element) => {
                       const elementLabel = labelFor(element);
                       const elementText = visibleText(element);
                       const combined = normalize(`${elementLabel} ${elementText}`);
                       const isActionButton = elementLabel.startsWith('Delete:')
                         || elementLabel.startsWith('Open:')
                         || elementText === 'Active';
-                      return elementLabel === label
+                      const matches = elementLabel === label
                         || elementText === label
                         || (
                           displayNameHint.length > 0
@@ -1477,7 +1517,44 @@ class LiveWorkspaceSwitcherPage:
                             || combined.includes(displayNameHint)
                           )
                         );
+                      if (!matches) {
+                        return null;
+                      }
+                      const control = element.closest(controlSelector);
+                      const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
+                      if (!isVisible(target)) {
+                        return null;
+                      }
+                      const targetLabel = labelFor(target);
+                      const targetText = visibleText(target);
+                      const rect = target.getBoundingClientRect();
+                      return {
+                        target,
+                        exactMatch: targetLabel === label
+                          || targetText === label
+                          || elementLabel === label
+                          || elementText === label,
+                        interactiveMatch:
+                          target.matches?.('button,[role="button"],[aria-disabled],[disabled]')
+                          || target.getAttribute?.('tabindex') === '0'
+                          || target.tabIndex >= 0,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) => candidate !== null)
+                    .sort((left, right) => {
+                      if (left.exactMatch !== right.exactMatch) {
+                        return left.exactMatch ? -1 : 1;
+                      }
+                      if (left.interactiveMatch !== right.interactiveMatch) {
+                        return left.interactiveMatch ? -1 : 1;
+                      }
+                      return left.area - right.area;
                     });
+                  const candidate = candidateMatches[0]?.target || null;
                   if (!candidate) {
                     return null;
                   }
@@ -1604,18 +1681,55 @@ class LiveWorkspaceSwitcherPage:
                   if (!switcher) {
                     return null;
                   }
-                  const buttonSelector = [
+                  const controlSelector = [
                     'flt-semantics[role="button"]',
                     'button',
                     '[role="button"]',
+                    '[aria-disabled]',
+                    '[disabled]',
+                    '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
-                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                  const candidateMatches = Array.from(switcher.querySelectorAll('*'))
                     .filter(isVisible)
-                    .find((element) => {
+                    .map((element) => {
                       const elementLabel = labelFor(element);
                       const elementText = visibleText(element);
-                      return elementLabel === label || elementText === label;
+                      const combined = normalize(`${elementLabel} ${elementText}`);
+                      const matches = elementLabel === label
+                        || elementText === label
+                        || combined.includes(label);
+                      if (!matches) {
+                        return null;
+                      }
+                      const control = element.closest(controlSelector);
+                      const target = control && switcher.contains(control) ? control : element;
+                      if (!isVisible(target)) {
+                        return null;
+                      }
+                      const targetLabel = labelFor(target);
+                      const targetText = visibleText(target);
+                      const rect = target.getBoundingClientRect();
+                      return {
+                        target,
+                        exactMatch: targetLabel === label || targetText === label,
+                        interactiveMatch:
+                          target.matches?.('button,[role="button"],[aria-disabled],[disabled]')
+                          || target.getAttribute?.('tabindex') === '0'
+                          || target.tabIndex >= 0,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) => candidate !== null)
+                    .sort((left, right) => {
+                      if (left.exactMatch !== right.exactMatch) {
+                        return left.exactMatch ? -1 : 1;
+                      }
+                      if (left.interactiveMatch !== right.interactiveMatch) {
+                        return left.interactiveMatch ? -1 : 1;
+                      }
+                      return left.area - right.area;
                     });
+                  const candidate = candidateMatches[0]?.target || null;
                   if (!candidate) {
                     return null;
                   }
@@ -2410,6 +2524,184 @@ class LiveWorkspaceSwitcherPage:
                 f'The open workspace switcher did not expose a clickable button labelled "{label}".\n'
                 f"Observed body text:\n{self.current_body_text()}",
             )
+
+    def click_switcher_button_center(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherInternalClickObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ heading, label }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const controlSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                    '[aria-disabled]',
+                    '[disabled]',
+                    '[tabindex]:not([tabindex="-1"])',
+                  ].join(',');
+                  const isSwitcherOwnedControl = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
+                    if (panelId === 'trackstate-workspace-switcher') {
+                      return true;
+                    }
+                    return Boolean(switcher && switcher.contains(element));
+                  };
+                  const candidateMatches = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .map((element) => {
+                      const elementLabel = labelFor(element);
+                      const elementText = visibleText(element);
+                      const combined = normalize(`${elementLabel} ${elementText}`);
+                      const matches = elementLabel === label
+                        || elementText === label
+                        || combined.includes(label);
+                      if (!matches) {
+                        return null;
+                      }
+                      const control = element.closest(controlSelector);
+                      const target = control instanceof Element ? control : element;
+                      if (!isSwitcherOwnedControl(target) && !isSwitcherOwnedControl(element)) {
+                        return null;
+                      }
+                      if (!isVisible(target)) {
+                        return null;
+                      }
+                      const targetLabel = labelFor(target);
+                      const targetText = visibleText(target);
+                      const rect = target.getBoundingClientRect();
+                      return {
+                        target,
+                        exactMatch: targetLabel === label
+                          || targetText === label
+                          || elementLabel === label
+                          || elementText === label,
+                        interactiveMatch:
+                          target.matches?.('button,[role="button"],[aria-disabled],[disabled]')
+                          || target.getAttribute?.('tabindex') === '0'
+                          || target.tabIndex >= 0,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) => candidate !== null)
+                    .sort((left, right) => {
+                      if (left.exactMatch !== right.exactMatch) {
+                        return left.exactMatch ? -1 : 1;
+                      }
+                      if (left.interactiveMatch !== right.interactiveMatch) {
+                        return left.interactiveMatch ? -1 : 1;
+                      }
+                      return left.area - right.area;
+                    });
+                  const candidate = candidateMatches[0]?.target || null;
+                  if (!candidate) {
+                    return null;
+                  }
+                  const buttonRect = candidate.getBoundingClientRect();
+                  const switcherRect = switcher.getBoundingClientRect();
+                  return {
+                    clickX: buttonRect.left + (buttonRect.width / 2),
+                    clickY: buttonRect.top + (buttonRect.height / 2),
+                    panelLeft: switcherRect.left,
+                    panelTop: switcherRect.top,
+                    panelWidth: switcherRect.width,
+                    panelHeight: switcherRect.height,
+                    targetTagName: candidate.tagName.toLowerCase(),
+                    targetRole: candidate.getAttribute('role'),
+                    targetLabel: labelFor(candidate),
+                    targetText: visibleText(candidate),
+                  };
+                }
+                """,
+                arg={"heading": self._switcher_heading, "label": label},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a visible button labelled "{label}" '
+                "for a pointer click.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f'The open workspace switcher did not expose a visible button labelled "{label}" '
+                "for a pointer click.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        observation = WorkspaceSwitcherInternalClickObservation(
+            click_x=float(payload.get("clickX", 0.0)),
+            click_y=float(payload.get("clickY", 0.0)),
+            panel_left=float(payload.get("panelLeft", 0.0)),
+            panel_top=float(payload.get("panelTop", 0.0)),
+            panel_width=float(payload.get("panelWidth", 0.0)),
+            panel_height=float(payload.get("panelHeight", 0.0)),
+            target_tag_name=str(payload.get("targetTagName", "")),
+            target_role=(
+                str(payload.get("targetRole"))
+                if payload.get("targetRole") is not None
+                else None
+            ),
+            target_label=str(payload.get("targetLabel", "")),
+            target_text=str(payload.get("targetText", "")),
+        )
+        self._session.mouse_click(observation.click_x, observation.click_y)
+        return observation
 
     def focus_switcher_text_field(
         self,
