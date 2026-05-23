@@ -76,6 +76,14 @@ const _workspaceSwitcherTargetTypeLocalFocusId =
     'trackstate-workspace-switcher-target-type-local';
 const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
 
+@visibleForTesting
+bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
+  required bool compact,
+  required bool isWeb,
+}) {
+  return !compact && !isWeb;
+}
+
 String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
     'trackstate-workspace-switcher-$action-$workspaceId';
 
@@ -1943,14 +1951,18 @@ class _TrackStateAppState extends State<TrackStateApp>
           explicitChildNodes: true,
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           label: AppLocalizations.of(sheetContext)!.workspaceSwitcher,
-          onDidLoseAccessibilityFocus: compact
-              ? null
-              : () {
+          onDidLoseAccessibilityFocus:
+              shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss(
+                compact: compact,
+                isWeb: kIsWeb,
+              )
+              ? () {
                   if (!desktopVisible) {
                     return;
                   }
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
-                },
+                }
+              : null,
           child: SizedBox(
             width: desktopVisible || compact ? null : 1,
             height: desktopVisible || compact ? null : 1,

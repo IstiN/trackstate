@@ -388,13 +388,18 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
     focusStops: [
       for (final target in focusTargets)
-        BrowserWorkspaceSwitcherTabStopSnapshot(
-          isFocusable: true,
-          isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
-          isWithinWorkspaceRow: target.isWithinWorkspaceRow,
-          isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
-          isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
-        ),
+        () {
+          final rect = target.element.getBoundingClientRect();
+          return BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+            visualTop: rect.top,
+            visualLeft: rect.left,
+          );
+        }(),
     ],
     currentIndex: currentIndex,
     backwards: backwards,
@@ -649,7 +654,8 @@ bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
   if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
     return true;
   }
-  if (element.getAttribute(_browserFocusPanelIdAttribute) case final String _?) {
+  if (element.getAttribute(_browserFocusPanelIdAttribute)
+      case final String _?) {
     return true;
   }
   if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {
