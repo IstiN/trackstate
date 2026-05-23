@@ -52,6 +52,7 @@ FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 FIELD_LABELS = ("Repository", "Branch")
+PANEL_OBSERVE_TIMEOUT_MS = 1_500
 
 REQUEST_STEPS = [
     "Press the 'Tab' key to navigate through all interactive elements within the panel (e.g., workspace list items, footer buttons).",
@@ -274,13 +275,10 @@ def main() -> None:
                     panel=panel,
                     timeout_ms=4_000,
                 )
-                page.wait_for_surface_to_remain_open(
-                    stability_ms=FOCUS_SETTLE_MS,
-                    timeout_ms=4_000,
-                )
-                panel = page.observe_open_panel(
-                    expected_container_kinds=("anchored-panel", "surface"),
-                    timeout_ms=4_000,
+                panel, panel_observation_error = _observe_panel_after_key_press(
+                    page=page,
+                    previous_panel=panel,
+                    timeout_ms=PANEL_OBSERVE_TIMEOUT_MS,
                 )
                 focused_row_state = _capture_tab_state(
                     page=page,
@@ -291,6 +289,8 @@ def main() -> None:
                     key="Initial focus",
                     monitor=None,
                 )
+                if panel_observation_error is not None:
+                    focused_row_state["panel_observation_error"] = panel_observation_error
                 result["focused_first_row_state"] = focused_row_state
                 _assert_first_row_focus_ready(
                     state=focused_row_state,
@@ -321,38 +321,52 @@ def main() -> None:
 
                 tab_trace: list[dict[str, object]] = []
                 footer_state: dict[str, object] | None = None
-                for press_index in range(1, MAX_TABS_TO_REACH_FOOTER + 1):
-                    before = page.active_element()
-                    page.start_transition_monitor()
-                    page.press_key("Tab", timeout_ms=4_000)
-                    page.wait_for_surface_to_remain_open(
-                        stability_ms=FOCUS_SETTLE_MS,
-                        timeout_ms=4_000,
+                try:
+                    for press_index in range(1, MAX_TABS_TO_REACH_FOOTER + 1):
+                        before = page.active_element()
+                        page.start_transition_monitor()
+                        page.press_key("Tab", timeout_ms=4_000)
+                        panel, state = _capture_post_tab_state(
+                            page=page,
+                            previous_panel=panel,
+                            first_row_display_name=first_row.display_name,
+                            press_index=press_index,
+                            before=before,
+                            timeout_ms=PANEL_OBSERVE_TIMEOUT_MS,
+                        )
+                        tab_trace.append(state)
+                        if _active_from_state(state).get("accessible_name") == LAST_INTERNAL_CONTROL_LABEL:
+                            footer_state = state
+                            break
+                    result["tab_trace_to_footer"] = tab_trace
+                    _assert_traversal_reached_footer(
+                        tab_trace=tab_trace,
+                        footer_state=footer_state,
+                        surface=surface,
                     )
-                    panel = page.observe_open_panel(
-                        expected_container_kinds=("anchored-panel", "surface"),
-                        timeout_ms=4_000,
+                except Exception as error:
+                    result["tab_trace_to_footer"] = tab_trace
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=AUTOMATION_STEPS[2],
+                        observed=_step3_failure_observed(tab_trace, error),
                     )
-                    monitor = page.read_transition_monitor(clear=True)
-                    state = _capture_tab_state(
-                        page=page,
-                        panel=panel,
-                        first_row_display_name=first_row.display_name,
-                        press_index=press_index,
-                        before=before,
-                        key="Tab",
-                        monitor=monitor,
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Pressed Tab repeatedly through the visible panel controls and "
+                            "watched whether focus stayed inside the switcher long enough to "
+                            "reach the visible Save and switch footer button."
+                        ),
+                        observed=(
+                            f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
+                            f"focus_escape={_focus_escape_summary(tab_trace)!r}; "
+                            f"footer_reached={footer_state is not None}"
+                        ),
                     )
-                    tab_trace.append(state)
-                    if _active_from_state(state).get("accessible_name") == LAST_INTERNAL_CONTROL_LABEL:
-                        footer_state = state
-                        break
-                result["tab_trace_to_footer"] = tab_trace
-                _assert_traversal_reached_footer(
-                    tab_trace=tab_trace,
-                    footer_state=footer_state,
-                    surface=surface,
-                )
+                    raise
                 _record_step(
                     result,
                     step=3,
@@ -361,7 +375,7 @@ def main() -> None:
                     observed=(
                         f"tab_count_to_footer={len(tab_trace)}; "
                         f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
-                        f"footer_state_label={_active_from_state(footer_state).get('accessible_name')!r}"
+                        f"footer_state_label={_focus_label_for_summary(footer_state)!r}"
                     ),
                 )
                 _record_human_verification(
@@ -373,7 +387,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
-                        f"footer_visible_label={_active_from_state(footer_state).get('accessible_name')!r}; "
+                        f"footer_visible_label={_focus_label_for_summary(footer_state)!r}; "
                         f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}"
                     ),
                 )
@@ -382,23 +396,13 @@ def main() -> None:
                     before_wrap = page.active_element()
                     page.start_transition_monitor()
                     page.press_key("Tab", timeout_ms=4_000)
-                    page.wait_for_surface_to_remain_open(
-                        stability_ms=FOCUS_SETTLE_MS,
-                        timeout_ms=4_000,
-                    )
-                    panel = page.observe_open_panel(
-                        expected_container_kinds=("anchored-panel", "surface"),
-                        timeout_ms=4_000,
-                    )
-                    wrap_monitor = page.read_transition_monitor(clear=True)
-                    wrap_state = _capture_tab_state(
+                    panel, wrap_state = _capture_post_tab_state(
                         page=page,
-                        panel=panel,
+                        previous_panel=panel,
                         first_row_display_name=first_row.display_name,
                         press_index=len(tab_trace) + 1,
                         before=before_wrap,
-                        key="Tab",
-                        monitor=wrap_monitor,
+                        timeout_ms=PANEL_OBSERVE_TIMEOUT_MS,
                     )
                     result["wrap_state_after_footer"] = wrap_state
                     _record_human_verification(
@@ -408,7 +412,7 @@ def main() -> None:
                             "button and watched the focus destination a user would experience next."
                         ),
                         observed=(
-                            f"focused_after_wrap={_active_from_state(wrap_state).get('accessible_name')!r}; "
+                            f"focused_after_wrap={_focus_label_for_summary(wrap_state)!r}; "
                             f"first_row_contains_active={_first_row_focus_from_state(wrap_state).get('row_contains_active')}; "
                             f"focus_owned_by_switcher={_focus_from_state(wrap_state).get('focus_owned_by_switcher')}"
                         ),
@@ -434,9 +438,9 @@ def main() -> None:
                     status="passed",
                     action=AUTOMATION_STEPS[3],
                     observed=(
-                        f"wrapped_focus_label={_active_from_state(wrap_state).get('accessible_name')!r}; "
+                        f"wrapped_focus_label={_focus_label_for_summary(wrap_state)!r}; "
                         f"first_row_contains_active={_first_row_focus_from_state(wrap_state).get('row_contains_active')}; "
-                        f"search_issues_reached={_active_from_state(wrap_state).get('accessible_name') == 'Search issues'}"
+                        f"search_issues_reached={_focus_label_for_summary(wrap_state) == 'Search issues'}"
                     ),
                 )
             except Exception:
@@ -547,23 +551,27 @@ def _assert_traversal_reached_footer(
     if not tab_trace:
         failures.append("no Tab traversal states were captured")
     for state in tab_trace:
-        active = _active_from_state(state)
+        label = _focus_label_for_summary(state)
         focus = _focus_from_state(state)
         monitor = _monitor_from_state(state)
         if not bool(focus.get("focus_owned_by_switcher")):
             failures.append(
-                f"focus was no longer owned by the switcher after Tab {state.get('press_index')}",
+                f"focus was no longer owned by the switcher after Tab {state.get('press_index')}; active={label!r}",
             )
         if not bool(focus.get("active_within_switcher")):
             failures.append(
-                f"the active element left the switcher panel after Tab {state.get('press_index')}",
+                f"the active element left the switcher panel after Tab {state.get('press_index')}; active={label!r}",
             )
         if bool(focus.get("active_on_trigger")):
             failures.append(
                 f"focus returned to the workspace-switcher trigger after Tab {state.get('press_index')}",
             )
-        if active.get("accessible_name") == "Search issues":
+        if label == "Search issues":
             failures.append("focus escaped to the external Search issues field before the footer button was reached")
+        if label == "FLUTTER-VIEW root":
+            failures.append(
+                f"focus escaped to the application root view after Tab {state.get('press_index')} instead of continuing to the footer button",
+            )
         if bool(monitor.get("ever_hidden_after_visible")):
             failures.append(
                 f"the switcher panel became hidden after Tab {state.get('press_index')}",
@@ -606,7 +614,7 @@ def _assert_wrap_to_first_row(
         failures.append("keyboard focus left the workspace switcher after the wrap attempt")
     if bool(focus.get("active_on_trigger")):
         failures.append("keyboard focus returned to the workspace-switcher trigger instead of wrapping inside the panel")
-    if active.get("accessible_name") == "Search issues":
+    if _focus_label_for_summary(state) == "Search issues":
         failures.append("keyboard focus escaped to the external Search issues field instead of wrapping inside the panel")
     if bool(monitor.get("ever_hidden_after_visible")):
         failures.append("the workspace switcher panel became hidden during the wrap attempt")
@@ -616,7 +624,7 @@ def _assert_wrap_to_first_row(
         )
     if active.get("accessible_name") != expected_label:
         failures.append(
-            f"the active label remained {active.get('accessible_name')!r} instead of wrapping to {expected_label!r}",
+            f"the active label remained {_focus_label_for_summary(state)!r} instead of wrapping to {expected_label!r}",
         )
     if failures:
         raise AssertionError(
@@ -656,6 +664,52 @@ def _capture_tab_state(
     if monitor is not None:
         state["monitor"] = _monitor_payload(monitor)
     return state
+
+
+def _capture_post_tab_state(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    previous_panel: WorkspaceSwitcherPanelObservation,
+    first_row_display_name: str,
+    press_index: int,
+    before: FocusedElementObservation,
+    timeout_ms: int,
+) -> tuple[WorkspaceSwitcherPanelObservation, dict[str, object]]:
+    panel, panel_observation_error = _observe_panel_after_key_press(
+        page=page,
+        previous_panel=previous_panel,
+        timeout_ms=timeout_ms,
+    )
+    monitor = page.read_transition_monitor(clear=True)
+    state = _capture_tab_state(
+        page=page,
+        panel=panel,
+        first_row_display_name=first_row_display_name,
+        press_index=press_index,
+        before=before,
+        key="Tab",
+        monitor=monitor,
+    )
+    state["panel_detected_after_key"] = panel_observation_error is None
+    if panel_observation_error is not None:
+        state["panel_observation_error"] = panel_observation_error
+    return panel, state
+
+
+def _observe_panel_after_key_press(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    previous_panel: WorkspaceSwitcherPanelObservation,
+    timeout_ms: int,
+) -> tuple[WorkspaceSwitcherPanelObservation, str | None]:
+    try:
+        panel = page.observe_open_panel(
+            expected_container_kinds=("anchored-panel", "surface", "dialog"),
+            timeout_ms=timeout_ms,
+        )
+        return panel, None
+    except Exception as error:
+        return previous_panel, f"{type(error).__name__}: {error}"
 
 
 def _workspace_state(repository: str) -> dict[str, object]:
@@ -877,14 +931,14 @@ def _surface_label_summary(surface: WorkspaceSwitcherSurfaceObservation) -> list
 def _visited_focus_labels(states: list[dict[str, object]]) -> list[str]:
     labels: list[str] = []
     for state in states:
-        label = str(_active_from_state(state).get("accessible_name") or "")
+        label = _focus_label_for_summary(state)
         if not labels or labels[-1] != label:
             labels.append(label)
     return labels
 
 
 def _trace_reached_label(states: list[dict[str, object]], label: str) -> bool:
-    return any(_active_from_state(state).get("accessible_name") == label for state in states)
+    return any(_focus_label_for_summary(state) == label for state in states)
 
 
 def _active_from_state(state: dict[str, object] | None) -> dict[str, object]:
@@ -913,6 +967,58 @@ def _monitor_from_state(state: dict[str, object] | None) -> dict[str, object]:
         return {}
     monitor = state.get("monitor")
     return monitor if isinstance(monitor, dict) else {}
+
+
+def _focus_label_for_summary(state: dict[str, object] | None) -> str:
+    active = _active_from_state(state)
+    accessible_name = str(active.get("accessible_name") or "").strip()
+    tag_name = str(active.get("tag_name") or "").strip()
+    role = str(active.get("role") or "").strip()
+    if tag_name == "FLUTTER-VIEW":
+        return "FLUTTER-VIEW root"
+    if accessible_name:
+        return accessible_name
+    if role or tag_name:
+        return " ".join(part for part in (role, tag_name) if part)
+    return "unknown focus target"
+
+
+def _first_focus_escape_index(states: list[dict[str, object]]) -> int | None:
+    for index, state in enumerate(states):
+        focus = _focus_from_state(state)
+        if (
+            _focus_label_for_summary(state) == "FLUTTER-VIEW root"
+            or not bool(focus.get("focus_owned_by_switcher"))
+            or not bool(focus.get("active_within_switcher"))
+            or not bool(state.get("panel_detected_after_key", True))
+        ):
+            return index
+    return None
+
+
+def _focus_escape_summary(states: list[dict[str, object]]) -> str:
+    escape_index = _first_focus_escape_index(states)
+    if escape_index is None:
+        return "none"
+    escape_state = states[escape_index]
+    return (
+        f"Tab {escape_state.get('press_index')} -> {_focus_label_for_summary(escape_state)} "
+        f"(focus_owned_by_switcher={_focus_from_state(escape_state).get('focus_owned_by_switcher')}, "
+        f"active_within_switcher={_focus_from_state(escape_state).get('active_within_switcher')})"
+    )
+
+
+def _step3_failure_observed(
+    states: list[dict[str, object]],
+    error: Exception,
+) -> str:
+    error_summary = str(error).splitlines()[0]
+    return (
+        f"visited_labels={_visited_focus_labels(states)!r}; "
+        f"focus_escape={_focus_escape_summary(states)!r}; "
+        f"footer_reached={_trace_reached_label(states, LAST_INTERNAL_CONTROL_LABEL)}; "
+        f"error={error_summary}"
+    )
 
 
 def _record_step(
@@ -993,13 +1099,34 @@ def _actual_vs_expected_summary(result: dict[str, object]) -> str:
             "focus-loop scenario. Instead of the desktop tracker shell and workspace switcher, "
             f"the visible page content was {body_text!r}."
         )
+    if failed is not None and failed.get("step") == 3:
+        trace = result.get("tab_trace_to_footer")
+        if isinstance(trace, list) and trace:
+            escape_index = _first_focus_escape_index(trace)
+            visited_labels = _visited_focus_labels(trace)
+            if escape_index is not None:
+                escape_state = trace[escape_index]
+                prior_label = (
+                    _focus_label_for_summary(trace[escape_index - 1])
+                    if escape_index > 0
+                    else str(result.get("first_row_label", "the first saved workspace row"))
+                )
+                return (
+                    f"After focus advanced to {prior_label!r}, pressing Tab moved focus to "
+                    f"{_focus_label_for_summary(escape_state)!r} outside the expected in-panel "
+                    f"loop before the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was reached. "
+                    f"visited_labels={visited_labels!r}."
+                )
+            return (
+                f"The switcher never reached the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer "
+                f"button during Tab traversal. visited_labels={visited_labels!r}."
+            )
     wrap_state = result.get("wrap_state_after_footer")
     if isinstance(wrap_state, dict):
-        active = _active_from_state(wrap_state)
         focus = _focus_from_state(wrap_state)
         return (
             f"After the final visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button received focus, "
-            f"pressing Tab left focus on {active.get('accessible_name')!r} instead of wrapping "
+            f"pressing Tab left focus on {_focus_label_for_summary(wrap_state)!r} instead of wrapping "
             f"to the first saved workspace row. "
             f"focus_owned_by_switcher={focus.get('focus_owned_by_switcher')}."
         )
@@ -1030,6 +1157,29 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
                 ),
             ],
         )
+    if failed is not None and failed.get("step") == 3:
+        trace = result.get("tab_trace_to_footer")
+        visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
+        escape_index = _first_focus_escape_index(trace if isinstance(trace, list) else [])
+        escape_label = (
+            _focus_label_for_summary(trace[escape_index])
+            if isinstance(trace, list) and escape_index is not None
+            else "an external element"
+        )
+        return "\n".join(
+            [
+                (
+                    f"# ❌ {REQUEST_STEPS[0]} — Focus moved through {visited_labels!r} and then "
+                    f"escaped to {escape_label!r} before the visible {LAST_INTERNAL_CONTROL_LABEL!r} "
+                    "footer control was reached."
+                ),
+                (
+                    f"# ❌ {REQUEST_STEPS[1]} — The wrap verification could not run because "
+                    "the workspace switcher lost the required in-panel focus loop before the "
+                    f"final interactive control was reachable. focus_escape={escape_label!r}."
+                ),
+            ],
+        )
     trace = result.get("tab_trace_to_footer")
     wrap_state = result.get("wrap_state_after_footer")
     visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
@@ -1050,7 +1200,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
             f"# {'✅' if wrapped_correctly else '❌'} "
             f"{REQUEST_STEPS[1]} — "
             + (
-                f"After the footer control, focus landed on {_active_from_state(wrap_state).get('accessible_name')!r}; "
+                f"After the footer control, focus landed on {_focus_label_for_summary(wrap_state)!r}; "
                 f"expected_first_row={result.get('first_row_label')!r}."
                 if isinstance(wrap_state, dict)
                 else "The wrap attempt could not be captured."
