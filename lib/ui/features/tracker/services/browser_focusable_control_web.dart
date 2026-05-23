@@ -159,8 +159,16 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
     return Stack(
       fit: StackFit.passthrough,
       children: [
-        IgnorePointer(child: ExcludeSemantics(child: widget.child)),
-        Positioned.fill(child: HtmlElementView(viewType: _viewType)),
+        Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          descendantsAreFocusable: false,
+          descendantsAreTraversable: false,
+          child: IgnorePointer(child: ExcludeSemantics(child: widget.child)),
+        ),
+        Positioned.fill(
+          child: HtmlElementView(viewType: _viewType),
+        ),
       ],
     );
   }
