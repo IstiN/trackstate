@@ -309,35 +309,35 @@ module.exports = {{
     @classmethod
     def _patch_spec_source(cls, source: str) -> str:
         if cls.simulation_require_statement not in source:
-            require_block = (
-                "const {\n"
-                "  collectAccessibilityViolations,\n"
-                "  enableFlutterSemantics,\n"
-                "  formatFlutterSemanticsEvidence,\n"
-                "  formatViolations,\n"
-                "} = require('./accessibility_gate');"
-            )
-            if require_block not in source:
+            import_anchor = "} = require('./accessibility_gate');"
+            if import_anchor not in source:
                 raise GitHubAccessibilityPullRequestGateError(
                     "TS-933 could not find the shared accessibility gate import block in "
                     f"{cls.__name__} source."
                 )
             source = source.replace(
-                require_block,
-                require_block + "\n" + cls.simulation_require_statement,
+                import_anchor,
+                import_anchor + "\n" + cls.simulation_require_statement,
                 1,
             )
 
         if cls.simulation_call not in source:
-            goto_line = "  await page.goto('/');"
-            if goto_line not in source:
+            insertion_targets = [
+                "  await captureFlutterStartupDiagnostics(page, {",
+                "  await page.goto('/');",
+            ]
+            insertion_target = next(
+                (target for target in insertion_targets if target in source),
+                None,
+            )
+            if insertion_target is None:
                 raise GitHubAccessibilityPullRequestGateError(
-                    "TS-933 could not find the page navigation in "
+                    "TS-933 could not find a supported accessibility gate setup step in "
                     "testing/accessibility/accessibility_gate.spec.js."
                 )
             source = source.replace(
-                goto_line,
-                f"{cls.simulation_call}\n{goto_line}",
+                insertion_target,
+                f"{cls.simulation_call}\n{insertion_target}",
                 1,
             )
 

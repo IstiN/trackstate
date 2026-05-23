@@ -64,6 +64,47 @@ class GitHubAccessibilitySemanticsFailureProbeRegressionTest(unittest.TestCase):
     def test_patch_spec_source_injects_require_and_simulation_call(self) -> None:
         original = """const { test, expect } = require('@playwright/test');
 const {
+  captureFlutterStartupDiagnostics,
+  collectAccessibilityViolations,
+  formatViolations,
+} = require('./accessibility_gate');
+
+test('TrackState web app has no axe-core accessibility violations', async ({
+  page,
+}) => {
+  await captureFlutterStartupDiagnostics(page, {
+    log: (entry) => console.log(entry),
+  });
+  await expect(page).toHaveTitle(/TrackState\\.AI/);
+
+  const results = await collectAccessibilityViolations(page);
+
+  expect(results, formatViolations(results)).toEqual([]);
+});
+"""
+
+        patched = self.probe._patch_spec_source(original)  # noqa: SLF001
+
+        self.assertIn(
+            "installTs933SemanticsFailureSimulation",
+            patched,
+        )
+        self.assertIn(
+            "await installTs933SemanticsFailureSimulation(page);",
+            patched,
+        )
+        self.assertEqual(
+            patched.count("installTs933SemanticsFailureSimulation"),
+            2,
+        )
+        self.assertLess(
+            patched.index("await installTs933SemanticsFailureSimulation(page);"),
+            patched.index("await captureFlutterStartupDiagnostics(page, {"),
+        )
+
+    def test_patch_spec_source_supports_legacy_navigation_flow(self) -> None:
+        original = """const { test, expect } = require('@playwright/test');
+const {
   collectAccessibilityViolations,
   enableFlutterSemantics,
   formatFlutterSemanticsEvidence,

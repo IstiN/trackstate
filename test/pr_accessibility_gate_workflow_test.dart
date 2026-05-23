@@ -36,9 +36,38 @@ void main() {
       );
       expect(workflow, contains('name: Accessibility checks'));
       expect(workflow, contains('npm ci'));
+      expect(
+        workflow,
+        contains('node --test testing/accessibility/log_validation.node.test.js'),
+        reason:
+            'The PR workflow must execute the workflow-contract regression so '
+            'contributors see a failed check when the accessibility job loses '
+            'the mandatory log-validation step.',
+      );
       expect(workflow, contains('npm run test:a11y'));
       expect(workflow, contains('playwright install --with-deps chromium'));
       expect(workflow, contains('TRACKSTATE_USE_DEMO_REPOSITORY=true'));
+      expect(
+        workflow,
+        contains("if: \${{ always() && steps.changes.outputs.accessibility == 'true' }}"),
+        reason:
+            'The log-validation step must opt into always() so it still runs '
+            'after a failed accessibility scan.',
+      );
+      expect(
+        workflow,
+        contains('exit "\$exit_code"'),
+        reason:
+            'The axe-core scan step must keep its real failure status instead '
+            'of forcing the run green before log-validation.',
+      );
+      expect(
+        workflow,
+        isNot(contains('\n          exit 0\n')),
+        reason:
+            'The axe-core scan step must not suppress failures, or the live run '
+            'cannot prove that log-validation executes after a failed scan.',
+      );
 
       expect(
         gateHelperFile.existsSync(),

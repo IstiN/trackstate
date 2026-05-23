@@ -135,6 +135,10 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Validate accessibility workflow contract
+        if: steps.changes.outputs.accessibility == 'true'
+        run: node --test testing/accessibility/log_validation.node.test.js
+
       - name: Install Flutter dependencies
         if: steps.changes.outputs.accessibility == 'true'
         run: flutter pub get
@@ -171,19 +175,14 @@ jobs:
           npm run test:a11y 2>&1 | tee "$log_path"
           exit_code=${PIPESTATUS[0]}
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
-          exit 0
+          exit "$exit_code"
 
       - name: log-validation
-        if: steps.changes.outputs.accessibility == 'true'
+        if: ${{ always() && steps.changes.outputs.accessibility == 'true' }}
         shell: bash
         run: |
           log_path="$RUNNER_TEMP/accessibility-check.log"
           node testing/accessibility/log_validation.js "$log_path"
-          axe_exit_code='${{ steps.axe_accessibility_scan.outputs.exit_code }}'
-          if [ "$axe_exit_code" != '0' ]; then
-            echo "Run axe-core accessibility checks failed with exit code $axe_exit_code."
-            exit "$axe_exit_code"
-          fi
 
   deploy-preview:
     name: Deploy preview

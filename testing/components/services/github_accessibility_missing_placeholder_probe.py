@@ -184,6 +184,10 @@ module.exports = {
             "testing/accessibility/accessibility_gate.spec.js",
             "test timeout",
             "timeout",
+            "missing flt-semantics-placeholder",
+            "pre-flight",
+            "preflight",
+            "flt-semantics-placeholder",
             "waiting for nodes",
         ]
         for marker in prioritized_markers:

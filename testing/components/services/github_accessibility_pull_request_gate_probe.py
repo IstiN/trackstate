@@ -1092,6 +1092,16 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         )
 
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
+        )
+
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         for line in self._extract_matching_log_lines(
             run_log_text,
@@ -1369,11 +1379,30 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        probe_import = f"import '{Path(self._config.probe_path).name}';"
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
         ):
+            if probe_import in source:
+                return source
+
+            updated_source, replacements = re.subn(
+                r"^import '[^']+_probe_surface\.dart';\n",
+                f"{probe_import}\n",
+                source,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if replacements > 0:
+                return updated_source
+
+            source = source.replace(
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n",
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n"
+                f"{probe_import}\n",
+            )
             return source
 
         if "package:flutter/material.dart" not in source:
@@ -1384,7 +1413,6 @@ class Ts908ProbeSurface extends StatelessWidget {
         if "package:flutter/material.dart" not in source:
             source = "import 'package:flutter/material.dart';\n\n" + source.lstrip()
 
-        probe_import = f"import '{Path(self._config.probe_path).name}';"
         if probe_import not in source:
             source = source.replace(
                 "import 'ui/features/tracker/views/trackstate_app.dart';\n",

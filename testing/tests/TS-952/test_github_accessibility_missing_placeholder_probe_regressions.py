@@ -141,6 +141,5 @@ test('TrackState web app has no axe-core accessibility violations', async ({
             excerpt,
         )
 
-
 if __name__ == "__main__":
     unittest.main()
