@@ -43,14 +43,14 @@ LOCAL_TARGET = "/tmp/trackstate-ts921-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 WRONG_DIRECTORY_NAME = "ts921-wrong-directory"
-LINKED_BUGS = ["TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
+LINKED_BUGS = ["TS-976", "TS-974", "TS-960", "TS-947", "TS-942", "TS-915", "TS-914"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 FAILURE_SETTLE_WAIT_SECONDS = 15
 REWORK_SUMMARY = (
-    "Resolved the TS-921 rework conflict, kept the live wrong-directory outcome "
-    "driven by the current rerun, and now builds review replies from the actual "
-    "unresolved PR thread metadata instead of stale hardcoded IDs."
+    "Resolved the TS-921 rework conflict, kept the wrong-directory assertion "
+    "mismatch-specific, treated startup-shell outages as setup failures instead "
+    "of TS-921 bug outcomes, and kept review replies driven by live thread metadata."
 )
 WRONG_DIRECTORY_REJECTION_VARIANTS = (
     "selected directory does not match the saved workspace configuration",
@@ -835,6 +835,31 @@ def _assert_wrong_directory_rejected(
     expected_local_workspace_id: str,
 ) -> None:
     if not settled:
+        local_row_payload = observation.get("local_row")
+        local_state = (
+            str(local_row_payload.get("state_label") or "")
+            if isinstance(local_row_payload, dict)
+            else ""
+        )
+        local_visible_text = (
+            str(local_row_payload.get("visible_text") or "")
+            if isinstance(local_row_payload, dict)
+            else ""
+        )
+        active_workspace_is_local = bool(observation.get("active_workspace_is_local"))
+        if (
+            isinstance(local_row_payload, dict)
+            and not active_workspace_is_local
+            and local_state != "Local Git"
+            and "Local Git" not in local_visible_text
+        ):
+            raise AssertionError(
+                "Step 4 failed: after selecting the wrong directory, the workspace stayed "
+                "`Local Unavailable` and the hosted workspace remained active, but no "
+                "visible directory/workspace mismatch error appeared within the allowed "
+                "async wait window.\n"
+                f"Observed post-retry state: {json.dumps(observation, indent=2)}"
+            )
         raise AssertionError(
             "Step 4 failed: the wrong-directory retry never surfaced the expected "
             "mismatch rejection within the allowed async wait window.\n"
@@ -1282,7 +1307,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         _build_review_replies(result, passed=False),
         encoding="utf-8",
     )
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    if _is_startup_precondition_failure(result):
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    else:
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
 
 def _build_jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -1385,10 +1413,16 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "passed" if passed else "failed"
     lines = [f"# {TICKET_KEY} {status}", ""]
     if not passed:
+        failure_note = (
+            "Re-run hit a setup/precondition failure before the TS-921 workspace-switcher "
+            "steps could execute."
+            if _is_startup_precondition_failure(result)
+            else f"Re-run failed: {_failed_step_summary(result)}"
+        )
         lines.extend(
             [
                 "## Issues/Notes",
-                f"- Re-run failed: {_failed_step_summary(result)}",
+                f"- {failure_note}",
                 "",
             ],
         )
@@ -1515,6 +1549,12 @@ def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
             "The wrong-directory retry showed a visible rejection and the local workspace "
             "stayed unavailable."
         )
+    if _is_startup_precondition_failure(result):
+        return (
+            "The rerun failed before the ticket scenario started because the deployed app "
+            "never rendered the interactive shell and Workspace switcher needed for the "
+            "TS-921 precondition."
+        )
     return str(
         result.get(
             "error",
@@ -1549,6 +1589,10 @@ def _missing_or_broken_capability(result: dict[str, object]) -> str:
         "The deployed web app did not produce the expected wrong-directory mismatch "
         "outcome required by TS-921."
     )
+
+
+def _is_startup_precondition_failure(result: dict[str, object]) -> bool:
+    return str(result.get("runtime_state", "")).strip() == "startup-failed"
 
 
 def _discussion_threads() -> list[dict[str, object]]:

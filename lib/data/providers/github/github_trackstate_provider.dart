@@ -32,6 +32,8 @@ class GitHubTrackStateProvider
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
   );
+  static final Map<String, Future<Map<String, Object?>>> _inFlightWebUserProbes =
+      <String, Future<Map<String, Object?>>>{};
 
   GitHubTrackStateProvider({
     http.Client? client,
@@ -89,9 +91,28 @@ class GitHubTrackStateProvider
         return (await _getGitHubJson('/user', token: connection.token))
             as Map<String, Object?>;
       }
+      return _fetchSharedWebUserProbeJson(connection.token);
+    })();
+    _connection = connection;
+    return RepositoryUser(
+      login: userJson['login']?.toString() ?? 'github',
+      displayName: userJson['name']?.toString() ?? '',
+      accountId: userJson['id']?.toString(),
+      emailAddress: userJson['email']?.toString(),
+      active: true,
+    );
+  }
+
+  Future<Map<String, Object?>> _fetchSharedWebUserProbeJson(String token) {
+    final probeKey = token.trim();
+    final inFlight = _inFlightWebUserProbes[probeKey];
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final future = () async {
       final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
         _githubUri('/user'),
-        headers: _githubHeaders(connection.token),
+        headers: _githubHeaders(token),
         client: _client,
       );
       if (userResponse.statusCode != 200) {
@@ -102,15 +123,14 @@ class GitHubTrackStateProvider
         );
       }
       return jsonDecode(userResponse.body) as Map<String, Object?>;
-    })();
-    _connection = connection;
-    return RepositoryUser(
-      login: userJson['login']?.toString() ?? 'github',
-      displayName: userJson['name']?.toString() ?? '',
-      accountId: userJson['id']?.toString(),
-      emailAddress: userJson['email']?.toString(),
-      active: true,
-    );
+    }();
+    _inFlightWebUserProbes[probeKey] = future;
+    future.whenComplete(() {
+      if (identical(_inFlightWebUserProbes[probeKey], future)) {
+        _inFlightWebUserProbes.remove(probeKey);
+      }
+    });
+    return future;
   }
 
   @override

@@ -155,6 +155,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ env.release_checkout_ref }}
           submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Verify runner toolchain
         shell: bash

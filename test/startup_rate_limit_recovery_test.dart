@@ -1,12 +1,13 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
+import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -90,6 +91,136 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'retrying blocking hosted startup migrates the recovered repository into the workspace switcher',
+    (tester) async {
+      if (!kIsWeb) {
+        return;
+      }
+      final semantics = tester.ensureSemantics();
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _WidgetStartupRecoveryRepository(
+        loadResults: [
+          const GitHubRateLimitException(
+            message:
+                'GitHub API request failed for /repos/demo/contents/.trackstate/index/issues.json (403): {"message":"API rate limit exceeded"}',
+            requestPath: '/repos/demo/contents/.trackstate/index/issues.json',
+            statusCode: 403,
+          ),
+          snapshot,
+        ],
+      );
+      final workspaceProfiles = _RetryMigrationWorkspaceProfileService();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repositoryFactory: () => repository,
+            workspaceProfileService: workspaceProfiles,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub startup limit reached'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+        await tester.pumpAndSettle();
+
+        final savedState = await workspaceProfiles.loadState();
+        expect(savedState.hasProfiles, isTrue);
+        expect(savedState.activeWorkspace?.target, snapshot.project.repository);
+
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Saved workspaces'), findsOneWidget);
+        expect(find.text(snapshot.project.repository), findsWidgets);
+        expect(find.text('No saved workspaces yet.'), findsNothing);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+}
+
+class _RetryMigrationWorkspaceProfileService
+    implements WorkspaceProfileService {
+  WorkspaceProfilesState _state = const WorkspaceProfilesState(
+    migrationComplete: true,
+  );
+
+  @override
+  Future<WorkspaceProfile> createProfile(
+    WorkspaceProfileInput input, {
+    bool select = true,
+  }) async {
+    final profile = WorkspaceProfile.create(input);
+    _state = WorkspaceProfilesState(
+      profiles: [profile],
+      activeWorkspaceId: select ? profile.id : null,
+      migrationComplete: true,
+    );
+    return profile;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> deleteProfile(String workspaceId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<WorkspaceProfile?> ensureLegacyContextMigrated(
+    WorkspaceProfileInput? input,
+  ) async => _state.activeWorkspace;
+
+  @override
+  Future<WorkspaceProfilesState> loadState() async => _state;
+
+  @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) async {
+    _state = WorkspaceProfilesState(
+      profiles: [
+        for (final profile in _state.profiles)
+          if (profile.id == workspaceId && profile.isHosted)
+            profile.copyWith(hostedAccessMode: accessMode)
+          else
+            profile,
+      ],
+      activeWorkspaceId: _state.activeWorkspaceId,
+      migrationComplete: _state.migrationComplete,
+      unavailableLocalWorkspaceIds: _state.unavailableLocalWorkspaceIds,
+    );
+    return _state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async => _state;
+
+  @override
+  Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
+    _state = _state.copyWith(activeWorkspaceId: workspaceId);
+    return _state;
+  }
+
+  @override
+  Future<WorkspaceProfile> updateProfile(
+    String workspaceId,
+    WorkspaceProfileInput input, {
+    bool select = true,
+  }) async => throw UnimplementedError();
 }
 
 TrackerSnapshot _withStartupRecovery(TrackerSnapshot snapshot) {

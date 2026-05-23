@@ -362,9 +362,8 @@ def _initial_workspace_state() -> dict[str, object]:
 
 def _footer_controls(switcher: WorkspaceSwitcherObservation) -> list[str]:
     controls: list[str] = []
-    combined_text = f"{switcher.switcher_text}\n{switcher.body_text}"
     for label in ("Add workspace", "Save and switch"):
-        if label in combined_text:
+        if label in switcher.switcher_text:
             controls.append(label)
     return controls
 
@@ -413,7 +412,7 @@ def _switcher_shows_recovered_workspaces(
         bool(recovered_workspace_names)
         and "Saved workspaces" in observation.switcher_text
         and "Add workspace" in footer_controls
-        and len(footer_controls) >= 2
+        and "Save and switch" in footer_controls
     )
 
 
