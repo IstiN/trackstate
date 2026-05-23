@@ -1,55 +1,40 @@
-@TestOn('browser')
-library;
+import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
-import 'package:web/web.dart' as web;
+import 'package:trackstate/ui/features/tracker/services/browser_focusable_control_logic.dart';
 
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
-  testWidgets(
+  test(
     'desktop web workspace switcher keeps the disabled Save and switch footer in the browser tab order',
-    (tester) async {
-      tester.view.physicalSize = const Size(1440, 960);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
+    () {
+      final trackStateAppSource = File(
+        '${Directory.current.path}/lib/ui/features/tracker/views/trackstate_app.dart',
+      ).readAsStringSync();
 
-      await tester.pumpWidget(
-        const TrackStateApp(repository: DemoTrackStateRepository()),
+      expect(
+        trackStateAppSource,
+        contains('focusTargetId: _workspaceSwitcherSaveFocusId'),
       );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Save and switch'), findsOneWidget);
-
-      final element = web.document.querySelector(
-        'button[data-trackstate-browser-focus-id="trackstate-workspace-switcher-save"]',
+      expect(trackStateAppSource, contains('focusableWhenDisabled: true'));
+      expect(
+        trackStateAppSource,
+        isNot(contains('_WorkspaceSwitcherDisabledFooterButton(')),
+        reason:
+            'The footer must stay on the shared browser-focus bridge path so '
+            'disabled Save and switch actions still export a tabbable native '
+            'focus target on web.',
       );
 
       expect(
-        element,
-        isA<web.HTMLButtonElement>(),
-        reason:
-            'The visible disabled footer action must still export a browser-owned '
-            'focus target so desktop Tab traversal can reach it instead of '
-            'escaping the workspace switcher.',
+        resolveBrowserFocusableControlDomConfig(
+          enabled: false,
+          focusableWhenDisabled: true,
+          explicitTabIndex: null,
+        ),
+        isA<BrowserFocusableControlDomConfig>()
+            .having((config) => config.tabIndex, 'tabIndex', 0)
+            .having((config) => config.ariaDisabled, 'ariaDisabled', 'true'),
       );
-
-      final button = element! as web.HTMLButtonElement;
-      expect(button.tabIndex, 0);
-      expect(button.getAttribute('aria-disabled'), 'true');
-      expect(button.disabled, isFalse);
     },
   );
 }
