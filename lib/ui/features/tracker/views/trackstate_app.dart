@@ -1216,31 +1216,40 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final nextWorkspace = normalizedTarget == workspace.normalizedTarget
-        ? workspace
-        : await widget.workspaceProfileService.updateProfile(
-            workspace.id,
-            WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.local,
-              target: normalizedTarget,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-              displayName:
-                  workspace.normalizedCustomDisplayName ??
-                  workspace.displayName,
-            ),
-            select: false,
-          );
+    final previousViewModel = viewModel;
+    if (normalizedTarget != workspace.normalizedTarget) {
+      await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+      if (!mounted) {
+        return;
+      }
+      previousViewModel.showMessage(
+        TrackerMessage.workspaceSwitchFailed(
+          workspaceName: workspace.displayName,
+          reason:
+              'Selected directory does not match the saved workspace configuration.',
+        ),
+      );
+      return;
+    }
+    final nextWorkspace = workspace;
     if (!mounted) {
       return;
     }
 
-    final previousViewModel = viewModel;
-    final prepared = await _prepareWorkspaceSwitch(
+    var prepared = await _prepareWorkspaceSwitch(
       nextWorkspace,
       previousViewModel: previousViewModel,
       showFailureMessage: false,
     );
+    if (prepared == null &&
+        _isUnsupportedActiveLocalStartupAccess(
+          _workspaceValidationFailureReason(nextWorkspace),
+        )) {
+      prepared = await _preserveActiveLocalWorkspaceSelection(
+        nextWorkspace,
+        previousViewModel,
+      );
+    }
     if (prepared != null) {
       var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
