@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../../data/repositories/browser_local_workspace_repository.dart';
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
@@ -33,6 +34,12 @@ import '../view_models/tracker_view_model.dart';
 
 typedef LocalRepositoryLoader =
     Future<TrackStateRepository> Function({
+      required String repositoryPath,
+      required String defaultBranch,
+      required String writeBranch,
+    });
+typedef BrowserLocalRepositoryLoader =
+    Future<TrackStateRepository?> Function({
       required String repositoryPath,
       required String defaultBranch,
       required String writeBranch,
@@ -96,6 +103,7 @@ class TrackStateApp extends StatefulWidget {
     this.repository,
     this.repositoryFactory,
     this.openLocalRepository,
+    this.openBrowserLocalRepository = openBrowserLocalWorkspaceRepository,
     this.openHostedRepository,
     this.workspaceProfileService =
         const SharedPreferencesWorkspaceProfileService(),
@@ -108,6 +116,7 @@ class TrackStateApp extends StatefulWidget {
   final TrackStateRepository? repository;
   final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
+  final BrowserLocalRepositoryLoader openBrowserLocalRepository;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
   final TrackStateAuthStore authStore;
@@ -270,6 +279,48 @@ class _TrackStateAppState extends State<TrackStateApp>
       dataRef: defaultBranch,
       writeBranch: writeBranch,
     );
+  }
+
+  Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
+    WorkspaceProfile workspace, {
+    required TrackerViewModel previousViewModel,
+  }) async {
+    try {
+      final repository = await widget.openBrowserLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+      if (repository == null) {
+        return null;
+      }
+      final nextViewModel = _createViewModel(
+        repository: repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: workspace.id,
+      );
+      await nextViewModel.load();
+      if (nextViewModel.snapshot == null) {
+        final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
+        nextViewModel.dispose();
+        _rememberWorkspaceValidationFailure(workspace, reason);
+        return null;
+      }
+      _workspaceValidationFailures.remove(workspace.id);
+      return _PreparedWorkspaceSwitch(
+        viewModel: nextViewModel,
+        workspace: workspace,
+        localConfigurationKey:
+            '${workspace.target}\n${workspace.defaultBranch}\n${workspace.writeBranch}',
+      );
+    } on Object catch (error) {
+      _rememberWorkspaceValidationFailure(
+        workspace,
+        _normalizeWorkspaceFailureReason(error),
+      );
+      return null;
+    }
   }
 
   Future<TrackStateRepository> _openHostedRepository({
@@ -1298,12 +1349,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
+    final previousViewModel = viewModel;
     final nextWorkspace = workspace;
     if (!mounted) {
       return;
     }
 
-    final previousViewModel = viewModel;
     final prepared = await _prepareWorkspaceSwitch(
       nextWorkspace,
       previousViewModel: previousViewModel,
@@ -1325,7 +1376,29 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final reason = _workspaceValidationFailureReason(nextWorkspace);
+    var reason = _workspaceValidationFailureReason(nextWorkspace);
+    if (_isUnsupportedActiveLocalStartupAccess(reason)) {
+      final browserPrepared = await _prepareBrowserLocalWorkspaceSwitch(
+        nextWorkspace,
+        previousViewModel: previousViewModel,
+      );
+      if (browserPrepared != null) {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          nextWorkspace.id,
+        );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          nextWorkspace.id,
+          isAvailable: true,
+        );
+        await _commitPreparedWorkspaceSwitch(
+          browserPrepared,
+          previousViewModel: previousViewModel,
+          workspaceState: selectedState,
+        );
+        return;
+      }
+      reason = _workspaceValidationFailureReason(nextWorkspace);
+    }
     previousViewModel.showMessage(
       TrackerMessage.workspaceSwitchFailed(
         workspaceName: nextWorkspace.displayName,
