@@ -37,6 +37,7 @@ TEST_CASE_TITLE = (
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-986/test_ts_986.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
+UNAVAILABLE_STATE_TIMEOUT_MS = 30_000
 LOCAL_TARGET = "/tmp/trackstate-ts986-mismatched-workspace"
 LOCAL_DISPLAY_NAME = "Broken local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
@@ -217,17 +218,22 @@ def main() -> None:
                         target_type_label="Local",
                         expected_state_label="Unavailable",
                         accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
-                        timeout_ms=20_000,
+                        timeout_ms=UNAVAILABLE_STATE_TIMEOUT_MS,
                     )
                     result["local_row"] = _row_payload(local_row)
-                    refreshed_switcher = page.observe_open_switcher(timeout_ms=5_000)
+                    refreshed_switcher = _wait_for_refreshed_switcher_row(
+                        tracker_page=tracker_page,
+                        page=page,
+                        timeout_ms=UNAVAILABLE_STATE_TIMEOUT_MS,
+                    )
                     refreshed_local_row = _find_seeded_local_row(refreshed_switcher)
                     result["refreshed_switcher_observation"] = _switcher_payload(
                         refreshed_switcher,
                     )
                     result["refreshed_local_row"] = _row_payload(refreshed_local_row)
                     _assert_unavailable_transition(
-                        local_row=local_row,
+                        local_row=refreshed_local_row,
+                        switcher=refreshed_switcher,
                     )
                 except AssertionError as error:
                     _record_step(
@@ -281,8 +287,8 @@ def main() -> None:
                         "the way a user would read it."
                     ),
                     observed=(
-                        f"row_visible_text={local_row.visible_text!r}; "
-                        f"row_actions={json.dumps(list(local_row.action_labels), ensure_ascii=True)}; "
+                        f"row_visible_text={refreshed_local_row.visible_text!r}; "
+                        f"row_actions={json.dumps(list(refreshed_local_row.action_labels), ensure_ascii=True)}; "
                         f"refreshed_row={json.dumps(result['refreshed_local_row'], ensure_ascii=True)}; "
                         f"switcher_text={refreshed_switcher.switcher_text!r}"
                     ),
@@ -354,8 +360,15 @@ def _cleanup_local_workspace() -> None:
 
 def _assert_unavailable_transition(
     *,
-    local_row: WorkspaceSwitcherRowObservation,
+    local_row: WorkspaceSwitcherRowObservation | None,
+    switcher: WorkspaceSwitcherObservation,
 ) -> None:
+    if local_row is None:
+        raise AssertionError(
+            "Step 4 failed: the refreshed Workspace switcher no longer exposed the seeded "
+            "broken local workspace row for verification.\n"
+            f"Observed refreshed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
+        )
     if local_row.display_name != LOCAL_DISPLAY_NAME or LOCAL_TARGET not in local_row.detail_text:
         raise AssertionError(
             "Step 4 failed: the observed Workspace switcher row did not match the seeded "
@@ -368,18 +381,24 @@ def _assert_unavailable_transition(
             "`Unavailable` status label.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if local_row.selected or "Active" in local_row.visible_text:
-        raise AssertionError(
-            "Step 4 failed: the mismatched local workspace still appeared selected as "
-            "`Active` in the awaited post-wait row observation.\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
-        )
     if "Local Git" in local_row.visible_text or "Local Git" in (local_row.semantics_label or ""):
         raise AssertionError(
             "Step 4 failed: the mismatched local workspace still showed `Local Git` instead "
             "of the expected `Unavailable` state in the awaited post-wait row "
             "observation.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
+        )
+    if (
+        local_row.selected
+        or "Active" in local_row.visible_text
+        or "Active" in local_row.action_labels
+        or "Active" in local_row.button_labels
+    ):
+        raise AssertionError(
+            "Step 4 failed: the refreshed full Workspace switcher still presented the "
+            "broken local workspace as `Active` after the unavailable wait window.\n"
+            f"Observed refreshed local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
+            f"Observed refreshed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
         )
     if not any(
         label in ACCEPTED_RECOVERY_ACTION_LABELS for label in local_row.action_labels
@@ -514,7 +533,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
-    _write_review_replies()
+    _write_review_replies(passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -536,7 +555,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    _write_review_replies()
+    _write_review_replies(passed=False)
     if result.get("failure_kind") == "product":
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -638,12 +657,12 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"h3. {TICKET_KEY} rework {status}",
         "",
         "*Fixes applied*",
-        "* Step 4 now bases the final `not Active` / `not Local Git` verdict on the awaited unavailable row observation instead of the stale pre-wait snapshot.",
-        "* Added the required PR review reply artifact for the addressed thread.",
+        "* Step 4 now waits on a refreshed full Workspace switcher observation and bases the final `not Active` / `not Local Git` verdict on that visible row instead of helper-only evidence.",
+        "* Updated the PR review reply artifact so it no longer claims the review is fixed unless the refreshed full-switcher evidence agrees.",
         "",
         "*New test result*",
         (
-            "* PASSED — startup hydration reached the interactive shell and the awaited broken local workspace row stayed in the `Unavailable` recovery state."
+            "* PASSED — startup hydration reached the interactive shell and the refreshed visible broken-workspace row stayed in the `Unavailable` recovery state without still presenting `Active`."
             if passed
             else f"* FAILED — {result.get('error', 'The deployed app did not expose the expected unavailable workspace state.')}"
         ),
@@ -683,11 +702,12 @@ def _build_bug_description(result: dict[str, object]) -> str:
 
     candidate_row = result.get("candidate_local_row")
     local_row = result.get("local_row")
+    refreshed_local_row = result.get("refreshed_local_row")
     actual_summary = (
-        "- **Actual:** The live Workspace switcher showed the broken local workspace with the "
-        "`Unavailable` label, but the same row still rendered an `Active` control and was "
-        "captured as selected. The state is therefore mixed and still defaults in part to the "
-        "persisted active workspace presentation."
+        "- **Actual:** The refreshed live Workspace switcher still showed the broken local "
+        "workspace with the `Unavailable` label while also presenting the row as `Active`. "
+        "The visible state remains mixed instead of resolving to a pure unavailable recovery "
+        "state."
     )
     lines = [
         f"# {TICKET_KEY} bug report",
@@ -730,6 +750,8 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Switcher observation: `{json.dumps(result.get('switcher_observation'), ensure_ascii=True)}`",
         f"- Candidate row: `{json.dumps(candidate_row, ensure_ascii=True)}`",
         f"- Verified unavailable row: `{json.dumps(local_row, ensure_ascii=True)}`",
+        f"- Refreshed switcher observation: `{json.dumps(result.get('refreshed_switcher_observation'), ensure_ascii=True)}`",
+        f"- Refreshed visible row: `{json.dumps(refreshed_local_row, ensure_ascii=True)}`",
     ]
     return "\n".join(lines) + "\n"
 
@@ -821,19 +843,139 @@ def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, objec
     }
 
 
-def _write_review_replies() -> None:
+def _wait_for_refreshed_switcher_row(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    page: LiveWorkspaceSwitcherPage,
+    timeout_ms: int,
+) -> WorkspaceSwitcherObservation:
+    try:
+        tracker_page.session.wait_for_function(
+            """
+            ({ heading, displayName, targetPath, targetTypeLabel, expectedStateLabel, acceptedActions }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const accessibleLabel = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                    || element?.getAttribute?.('alt')
+                    || element?.getAttribute?.('title')
+                    || element?.innerText
+                    || '',
+                );
+              const bodyText = document.body?.innerText ?? '';
+              if (!bodyText.includes(heading)) {
+                return null;
+              }
+              const allButtons = Array.from(
+                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+              ).filter((candidate) => isVisible(candidate));
+              const rowButton = allButtons.find((candidate) => {
+                const label = accessibleLabel(candidate);
+                if (!label.includes(displayName) || !label.includes(targetPath)) {
+                  return false;
+                }
+                if (targetTypeLabel && !label.includes(targetTypeLabel)) {
+                  return false;
+                }
+                if (expectedStateLabel && !label.includes(expectedStateLabel)) {
+                  return false;
+                }
+                return true;
+              });
+              if (!rowButton) {
+                return null;
+              }
+              const rowLabel = accessibleLabel(rowButton);
+              const rect = rowButton.getBoundingClientRect();
+              const buttonLabels = allButtons
+                .filter((candidate) => candidate !== rowButton)
+                .filter((candidate) => {
+                  const candidateRect = candidate.getBoundingClientRect();
+                  return candidateRect.top >= (rect.bottom - 4)
+                    && candidateRect.top <= (rect.bottom + 64)
+                    && candidateRect.left >= (rect.left - 8)
+                    && candidateRect.left <= (rect.right + 120);
+                })
+                .map((candidate) => accessibleLabel(candidate))
+                .filter(Boolean);
+              const actionLabels = buttonLabels.map((label) => {
+                const separatorIndex = label.indexOf(':');
+                return separatorIndex === -1 ? label.trim() : label.slice(0, separatorIndex).trim();
+              });
+              if (rowLabel.includes('Local Git') || rowLabel.includes('Active')) {
+                return null;
+              }
+              if (buttonLabels.includes('Active')) {
+                return null;
+              }
+              if (buttonLabels.some((label) => label.includes('Local Git'))) {
+                return null;
+              }
+              if (!acceptedActions.some((label) => actionLabels.includes(label))) {
+                return null;
+              }
+              return true;
+            }
+            """,
+            arg={
+                "heading": "Workspace switcher",
+                "displayName": LOCAL_DISPLAY_NAME,
+                "targetPath": LOCAL_TARGET,
+                "targetTypeLabel": "Local",
+                "expectedStateLabel": "Unavailable",
+                "acceptedActions": list(ACCEPTED_RECOVERY_ACTION_LABELS),
+            },
+            timeout_ms=timeout_ms,
+        )
+    except WebAppTimeoutError:
+        pass
+    return page.observe_open_switcher(timeout_ms=min(timeout_ms, 5_000))
+
+
+def _write_review_replies(*, passed: bool) -> None:
     REVIEW_REPLIES_PATH.write_text(
         json.dumps(
             {
                 "replies": [
                     {
-                        "inReplyToId": 3292383398,
-                        "threadId": "PRRT_kwDOSU6Gf86ESPy8",
+                        "inReplyToId": 3292393003,
+                        "threadId": "PRRT_kwDOSU6Gf86ESRiU",
                         "reply": (
-                            "Fixed: Step 4 now waits for the unavailable row and bases the "
-                            "final `not Active` / `not Local Git` assertions on that awaited "
-                            "post-wait row observation instead of the stale pre-wait "
-                            "`open_and_observe()` snapshot."
+                            "Fixed: Step 4 now waits on a refreshed full Workspace switcher "
+                            "observation and only passes when the refreshed seeded row itself "
+                            "still shows `Unavailable` without also presenting `Active` or "
+                            "`Local Git`."
+                            if passed
+                            else "Updated: Step 4 now waits on the refreshed full Workspace "
+                            "switcher state and asserts the refreshed seeded row itself. After "
+                            "that correction, the run still fails because the visible row keeps "
+                            "presenting `Active`, so this remains a genuine product failure "
+                            "instead of a helper-only false pass."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3292393036,
+                        "threadId": "PRRT_kwDOSU6Gf86ESRit",
+                        "reply": (
+                            "Fixed: the generated review reply artifact now tracks the refreshed "
+                            "full-switcher verdict, so it only claims the review is fixed when "
+                            "the visible switcher evidence and final result agree."
+                            if passed
+                            else "Updated: the earlier success-shaped reply has been removed from "
+                            "the generated artifact. This run reports failure instead of claiming "
+                            "the thread is fixed because the refreshed full-switcher evidence "
+                            "still contradicts a pass verdict."
                         ),
                     },
                 ],
