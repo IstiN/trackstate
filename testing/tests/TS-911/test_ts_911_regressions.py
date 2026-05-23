@@ -5,8 +5,10 @@ from pathlib import Path
 import unittest
 
 from testing.components.pages.live_workspace_switcher_page import (
+    WorkspaceSwitcherFocusOwnershipObservation,
     WorkspaceSwitcherTabStopObservation,
 )
+from testing.core.interfaces.web_app_session import FocusedElementObservation
 
 _LIVE_TEST_PATH = Path(__file__).with_name("test_ts_911.py")
 _LIVE_TEST_SPEC = spec_from_file_location("testing.tests.ts_911_live_module", _LIVE_TEST_PATH)
@@ -17,6 +19,59 @@ _LIVE_TEST_SPEC.loader.exec_module(_LIVE_TEST_MODULE)
 
 
 class Ts911RegressionsTest(unittest.TestCase):
+    def test_prefers_selected_row_when_panel_already_opens_on_first_internal_focus(self) -> None:
+        target = _LIVE_TEST_MODULE._resolve_first_internal_focus_target(
+            active=FocusedElementObservation(
+                tag_name="BUTTON",
+                role=None,
+                accessible_name=(
+                    "Hosted main workspace, Hosted, Attachments limited, "
+                    "istin/trackstate-setup • Branch: main"
+                ),
+                text="",
+                tabindex="0",
+                outer_html="<button></button>",
+            ),
+            focus=WorkspaceSwitcherFocusOwnershipObservation(
+                active_label=(
+                    "Hosted main workspace, Hosted, Attachments limited, "
+                    "istin/trackstate-setup • Branch: main"
+                ),
+                active_role=None,
+                active_tag_name="BUTTON",
+                active_outer_html="<button></button>",
+                active_visible=True,
+                active_in_viewport=True,
+                switcher_focus_within=True,
+                active_within_switcher=True,
+                active_on_trigger=False,
+                focus_owned_by_switcher=True,
+            ),
+            first_row_label=(
+                "Hosted main workspace, Hosted, Attachments limited, "
+                "istin/trackstate-setup • Branch: main"
+            ),
+            tab_stops=(
+                WorkspaceSwitcherTabStopObservation(
+                    label="Open: Hosted alt workspace",
+                    visible_text="Open: Hosted alt workspace",
+                    role=None,
+                    tag_name="BUTTON",
+                    tabindex="0",
+                    tab_index_value=0,
+                    dom_index=2,
+                    keyboard_focusable=True,
+                    disabled=False,
+                    outer_html="<button></button>",
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            target["label"],
+            "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+        )
+
     def test_derives_reverse_wrap_start_target_from_first_internal_tab_stop(self) -> None:
         tab_stops = (
             WorkspaceSwitcherTabStopObservation(

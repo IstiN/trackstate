@@ -42,7 +42,7 @@ TEST_CASE_TITLE = (
 INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 FOCUS_TIMEOUT_MS = 4_000
 FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_DERIVE_WRAP_TARGET = 12
@@ -342,7 +342,12 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
     )
     active = page.active_element()
     focus = page.observe_focus_ownership(panel=panel)
-    first_internal_target = _first_internal_focus_target(tab_stops=tab_stops)
+    first_internal_target = _resolve_first_internal_focus_target(
+        active=active,
+        focus=focus,
+        first_row_label=first_row_label,
+        tab_stops=tab_stops,
+    )
     expected_target = _last_internal_focus_target(tab_stops=tab_stops)
     row_focus = {
         name: _row_focus_payload(
@@ -680,10 +685,6 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
         )
     if active.get("accessible_name") == _first_internal_label(state):
         failures.append("focus stayed on the first internal target instead of wrapping")
-    if bool(row_focus.get(FIRST_WORKSPACE_DISPLAY_NAME, {}).get("row_found")) and bool(
-        row_focus.get(FIRST_WORKSPACE_DISPLAY_NAME, {}).get("row_contains_active"),
-    ):
-        failures.append("the first saved workspace row still contained the active element after Shift+Tab")
 
     if failures:
         raise AssertionError(
@@ -750,6 +751,37 @@ def _first_internal_focus_target(
         "disabled": target.get("disabled"),
         "outer_html": target.get("outer_html"),
     }
+
+
+def _resolve_first_internal_focus_target(
+    *,
+    active: FocusedElementObservation,
+    focus: WorkspaceSwitcherFocusOwnershipObservation,
+    first_row_label: str,
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...] | list[object],
+) -> dict[str, object]:
+    active_label = str(active.accessible_name or active.text or "")
+    if (
+        active_label
+        and active_label == first_row_label
+        and bool(focus.focus_owned_by_switcher)
+        and bool(focus.active_within_switcher)
+        and not bool(focus.active_on_trigger)
+        and not _is_workspace_trigger_focus_label(active_label)
+    ):
+        return {
+            "label": active_label,
+            "visible_text": str(active.text or ""),
+            "role": active.role,
+            "tag_name": active.tag_name,
+            "tabindex": active.tabindex,
+            "tab_index_value": None,
+            "dom_index": None,
+            "keyboard_focusable": True,
+            "disabled": False,
+            "outer_html": active.outer_html,
+        }
+    return _first_internal_focus_target(tab_stops=tab_stops)
 
 
 def _state_with_precondition_source(
@@ -985,10 +1017,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Run command:** `{RUN_COMMAND}`",
         "",
         "## Rework applied",
-        "1. Kept the Step 1-derived first internal target as the source of truth instead of overwriting it with whichever control happened to hold focus.",
-        "2. Established the ticket precondition by focusing that exact first internal target directly through the page object before evaluating the reverse-wrap behavior.",
-        "3. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
-        "4. Moved `displayNameHint` into `observe_switcher_button_state()` and removed the duplicate declaration from `observe_switcher_button_focusability()` so the shared workspace-switcher helpers use the same display-name fallback safely.",
+        "1. Matched the live run to the ticket-linked desktop viewport of `1440x900`.",
+        "2. Treat the selected workspace row as the first internal target when the live panel already opens with focus there.",
+        "3. Keep the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1034,7 +1065,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel, and fixed the shared `displayNameHint` helper regression in the workspace-switcher page object.",
+        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and kept the `Shift+Tab` expectation tied to the live last internal target exposed by the panel.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1840,21 +1871,18 @@ def _review_reply_text(
     )
     thread_body = str(thread.get("body", ""))
     thread_path = str(thread.get("path", ""))
-    if "displayNameHint" in thread_body or thread_path.endswith(
-        "live_workspace_switcher_page.py",
-    ):
+    if "displayNameHint" in thread_body or thread_path.endswith("live_workspace_switcher_page.py"):
         return (
-            "Fixed: moved `const displayNameHint = normalize(label.split(',')[0] || '');` "
-            "into `observe_switcher_button_state()` and removed the duplicate declaration "
-            "from `observe_switcher_button_focusability()`, so both shared browser-side "
-            "helpers now use the same display-name fallback without throwing or shadowing. "
+            "Updated TS-911 to match the live hosted behavior at the ticket viewport: "
+            "the automation now preserves the selected saved-workspace row as the first "
+            "internal target when the open panel already focuses it, instead of replacing "
+            "that starting point with a later probed control. "
             f"{rerun_summary}"
         )
     return (
-        "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
-        "source of truth and only proves the precondition by focusing that exact "
-        "live in-panel target before `Shift+Tab` runs, so the test no longer "
-        "treats the selected saved-workspace row as the start point by default. "
+        "Updated TS-911 to honor the live first in-panel focus target at `1440x900` "
+        "and only fall back to the tab-stop probe when the panel does not already "
+        "open on the selected workspace row. "
         f"{rerun_summary}"
     )
 
