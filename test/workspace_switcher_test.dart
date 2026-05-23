@@ -3256,6 +3256,9 @@ void main() {
           'Save and switch': find.byKey(const ValueKey('workspace-add-button')),
         };
 
+        await tester.enterText(sheetCandidates['Repository']!, 'gamma/repo');
+        await tester.pump();
+
         await tester.tap(sheetCandidates['Repository']!);
         await tester.pump();
         expect(_focusedLabel(tester, sheetCandidates), 'Repository');
