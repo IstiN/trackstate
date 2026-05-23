@@ -63,8 +63,10 @@ def main() -> None:
         "title": TEST_CASE_TITLE,
         "run_command": RUN_COMMAND,
         "config_path": str(CONFIG_PATH),
+        "source_git_ref": config.source_git_ref,
         "target_path": config.target_relative_path.as_posix(),
         "localization_path": config.localization_relative_path.as_posix(),
+        "semantic_label_localization_key": config.semantic_label_localization_key,
         "expected_semantic_label": config.required_semantic_label,
         "generic_semantic_label": config.generic_semantic_label,
         "os": platform.platform(),
@@ -104,8 +106,9 @@ def _evaluate(
             "`flutter analyze`."
         ),
         observed=(
-            "The analysis command exited non-zero and surfaced an accessibility "
-            f"diagnostic for {config.target_relative_path.as_posix()}:\n"
+            f"The analysis command against {config.source_git_ref} exited non-zero "
+            f"and surfaced an accessibility diagnostic for "
+            f"{config.target_relative_path.as_posix()}:\n"
             f"{_combined_output(validation.mutated_analyze)}"
         ),
     )
@@ -149,17 +152,22 @@ def _assert_live_semantic_contract(
     failures: list[str] = []
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production source no longer returned the dedicated localized "
-            f"semantic label getter `{config.required_source_snippet}`"
+            "the current main snapshot no longer used the dedicated typed sync "
+            f"semantic-label wrapper access `{config.required_source_snippet}`"
+        )
+    if config.semantic_label_localization_key not in validation.localization_source:
+        failures.append(
+            "the current main localization snapshot no longer contained the required "
+            f"semantic-label key `{config.semantic_label_localization_key}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
-            "the live English localization file no longer contained the required "
+            "the current main English localization file no longer contained the required "
             f"descriptive semantic label {config.required_semantic_label!r}"
         )
     if config.generic_semantic_label not in validation.localization_source:
         failures.append(
-            "the live English localization file no longer contained the visible "
+            "the current main English localization file no longer contained the visible "
             f"generic label {config.generic_semantic_label!r} needed for the regression mutation"
         )
     if not validation.baseline_analyze.succeeded:
@@ -170,7 +178,8 @@ def _assert_live_semantic_contract(
     if failures:
         raise AssertionError(
             "Precondition failed: TS-907 could not confirm the live production "
-            "sync-pill semantic-label contract before mutating the temp workspace.\n"
+            f"sync-pill semantic-label contract from {config.source_git_ref} before "
+            "mutating the temp workspace.\n"
             f"Problems: {'; '.join(failures)}\n"
             f"Baseline analyze output:\n{_combined_output(validation.baseline_analyze)}"
         )
@@ -180,7 +189,7 @@ def _assert_live_semantic_contract(
         status="passed",
         action=REQUEST_STEPS[0],
         observed=(
-            "Confirmed the live production source returns "
+            f"Confirmed the {config.source_git_ref} snapshot uses "
             f"`{config.required_source_snippet}` from "
             f"{config.target_relative_path.as_posix()} and the English localization "
             f"defines {config.required_semantic_label!r} for the sync error semantic label. "
@@ -217,7 +226,7 @@ def _assert_mutation_applied(
             f"`{config.required_source_snippet}` with "
             f"`{config.replacement_source_snippet}` inside "
             f"{config.target_relative_path.as_posix()}, downgrading the semantic "
-            f"label from {config.required_semantic_label!r} to the generic "
+            f"label getter from {config.required_semantic_label!r} to the generic "
             f"{config.generic_semantic_label!r}."
         ),
     )
@@ -391,6 +400,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Title:* {TEST_CASE_TITLE}",
         f"*Status:* {status}",
         f"*Environment:* local repository checkout | flutter analyze | {result.get('os')}",
+        f"*Source snapshot:* {{{{{result.get('source_git_ref')}}}}}",
         f"*Config:* {{{{{result.get('config_path')}}}}}",
         "",
         "h4. Automation checks",
@@ -426,6 +436,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"**Title:** {TEST_CASE_TITLE}",
         f"**Environment:** local repository checkout | flutter analyze | {result.get('os')}",
+        f"**Source snapshot:** `{result.get('source_git_ref')}`",
         f"**Target file:** `{result.get('target_path')}`",
         f"**Status:** {'passed' if passed else 'failed'}",
         "",
@@ -492,6 +503,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "- **URL:** local repository checkout (no deployed URL required for this lint case)\n"
         f"- **Browser:** N/A - local terminal validation\n"
         f"- **OS:** {result.get('os')}\n"
+        f"- **Source snapshot:** `{result.get('source_git_ref')}`\n"
         f"- **Run command:** `{result.get('run_command')}`\n"
         f"- **Config:** `{result.get('config_path')}`\n"
         f"- **Target file:** `{result.get('target_path')}`\n"
