@@ -24,7 +24,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
@@ -221,9 +220,12 @@ def main() -> None:
                         timeout_ms=UNAVAILABLE_STATE_TIMEOUT_MS,
                     )
                     result["local_row"] = _row_payload(local_row)
-                    refreshed_switcher = _wait_for_refreshed_switcher_row(
-                        tracker_page=tracker_page,
-                        page=page,
+                    refreshed_switcher = page.wait_for_refreshed_switcher_row_state(
+                        display_name=LOCAL_DISPLAY_NAME,
+                        target_path=LOCAL_TARGET,
+                        target_type_label="Local",
+                        expected_state_label="Unavailable",
+                        accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
                         timeout_ms=UNAVAILABLE_STATE_TIMEOUT_MS,
                     )
                     refreshed_local_row = _find_seeded_local_row(refreshed_switcher)
@@ -843,139 +845,25 @@ def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, objec
     }
 
 
-def _wait_for_refreshed_switcher_row(
-    *,
-    tracker_page: TrackStateTrackerPage,
-    page: LiveWorkspaceSwitcherPage,
-    timeout_ms: int,
-) -> WorkspaceSwitcherObservation:
-    try:
-        tracker_page.session.wait_for_function(
-            """
-            ({ heading, displayName, targetPath, targetTypeLabel, expectedStateLabel, acceptedActions }) => {
-              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = (element) => {
-                if (!element) {
-                  return false;
-                }
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const accessibleLabel = (element) =>
-                normalize(
-                  element?.getAttribute?.('aria-label')
-                    || element?.getAttribute?.('alt')
-                    || element?.getAttribute?.('title')
-                    || element?.innerText
-                    || '',
-                );
-              const bodyText = document.body?.innerText ?? '';
-              if (!bodyText.includes(heading)) {
-                return null;
-              }
-              const allButtons = Array.from(
-                document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
-              ).filter((candidate) => isVisible(candidate));
-              const rowButton = allButtons.find((candidate) => {
-                const label = accessibleLabel(candidate);
-                if (!label.includes(displayName) || !label.includes(targetPath)) {
-                  return false;
-                }
-                if (targetTypeLabel && !label.includes(targetTypeLabel)) {
-                  return false;
-                }
-                if (expectedStateLabel && !label.includes(expectedStateLabel)) {
-                  return false;
-                }
-                return true;
-              });
-              if (!rowButton) {
-                return null;
-              }
-              const rowLabel = accessibleLabel(rowButton);
-              const rect = rowButton.getBoundingClientRect();
-              const buttonLabels = allButtons
-                .filter((candidate) => candidate !== rowButton)
-                .filter((candidate) => {
-                  const candidateRect = candidate.getBoundingClientRect();
-                  return candidateRect.top >= (rect.bottom - 4)
-                    && candidateRect.top <= (rect.bottom + 64)
-                    && candidateRect.left >= (rect.left - 8)
-                    && candidateRect.left <= (rect.right + 120);
-                })
-                .map((candidate) => accessibleLabel(candidate))
-                .filter(Boolean);
-              const actionLabels = buttonLabels.map((label) => {
-                const separatorIndex = label.indexOf(':');
-                return separatorIndex === -1 ? label.trim() : label.slice(0, separatorIndex).trim();
-              });
-              if (rowLabel.includes('Local Git') || rowLabel.includes('Active')) {
-                return null;
-              }
-              if (buttonLabels.includes('Active')) {
-                return null;
-              }
-              if (buttonLabels.some((label) => label.includes('Local Git'))) {
-                return null;
-              }
-              if (!acceptedActions.some((label) => actionLabels.includes(label))) {
-                return null;
-              }
-              return true;
-            }
-            """,
-            arg={
-                "heading": "Workspace switcher",
-                "displayName": LOCAL_DISPLAY_NAME,
-                "targetPath": LOCAL_TARGET,
-                "targetTypeLabel": "Local",
-                "expectedStateLabel": "Unavailable",
-                "acceptedActions": list(ACCEPTED_RECOVERY_ACTION_LABELS),
-            },
-            timeout_ms=timeout_ms,
-        )
-    except WebAppTimeoutError:
-        pass
-    return page.observe_open_switcher(timeout_ms=min(timeout_ms, 5_000))
-
-
 def _write_review_replies(*, passed: bool) -> None:
     REVIEW_REPLIES_PATH.write_text(
         json.dumps(
             {
                 "replies": [
                     {
-                        "inReplyToId": 3292393003,
-                        "threadId": "PRRT_kwDOSU6Gf86ESRiU",
+                        "inReplyToId": 3292403736,
+                        "threadId": "PRRT_kwDOSU6Gf86ESTdt",
                         "reply": (
-                            "Fixed: Step 4 now waits on a refreshed full Workspace switcher "
-                            "observation and only passes when the refreshed seeded row itself "
-                            "still shows `Unavailable` without also presenting `Active` or "
-                            "`Local Git`."
+                            "Fixed: moved the refreshed switcher wait/probe out of "
+                            "`test_ts_986.py` into `LiveWorkspaceSwitcherPage`, so the test now "
+                            "uses the page abstraction instead of reaching through to the "
+                            "session and re-implementing DOM logic."
                             if passed
-                            else "Updated: Step 4 now waits on the refreshed full Workspace "
-                            "switcher state and asserts the refreshed seeded row itself. After "
-                            "that correction, the run still fails because the visible row keeps "
-                            "presenting `Active`, so this remains a genuine product failure "
-                            "instead of a helper-only false pass."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3292393036,
-                        "threadId": "PRRT_kwDOSU6Gf86ESRit",
-                        "reply": (
-                            "Fixed: the generated review reply artifact now tracks the refreshed "
-                            "full-switcher verdict, so it only claims the review is fixed when "
-                            "the visible switcher evidence and final result agree."
-                            if passed
-                            else "Updated: the earlier success-shaped reply has been removed from "
-                            "the generated artifact. This run reports failure instead of claiming "
-                            "the thread is fixed because the refreshed full-switcher evidence "
-                            "still contradicts a pass verdict."
+                            else "Updated: moved the refreshed switcher wait/probe into "
+                            "`LiveWorkspaceSwitcherPage`, so the test now keeps DOM polling "
+                            "inside the component layer. The latest run still fails because the "
+                            "visible switcher keeps presenting the broken workspace as `Active`, "
+                            "which remains a genuine product failure."
                         ),
                     },
                 ],

@@ -3380,6 +3380,116 @@ class LiveWorkspaceSwitcherPage:
             button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
         )
 
+    def wait_for_refreshed_switcher_row_state(
+        self,
+        *,
+        display_name: str,
+        target_path: str,
+        target_type_label: str | None = None,
+        expected_state_label: str | None = None,
+        accepted_action_labels: tuple[str, ...] = (),
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({
+                  heading,
+                  displayName,
+                  targetPath,
+                  targetTypeLabel,
+                  expectedStateLabel,
+                  acceptedActions,
+                }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const accessibleLabel = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                        || element?.getAttribute?.('alt')
+                        || element?.getAttribute?.('title')
+                        || element?.innerText
+                        || '',
+                    );
+                  const bodyText = document.body?.innerText ?? '';
+                  if (!bodyText.includes(heading)) {
+                    return null;
+                  }
+                  const allButtons = Array.from(
+                    document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+                  ).filter((candidate) => isVisible(candidate));
+                  const rowButton = allButtons.find((candidate) => {
+                    const label = accessibleLabel(candidate);
+                    if (!label.includes(displayName) || !label.includes(targetPath)) {
+                      return false;
+                    }
+                    if (targetTypeLabel && !label.includes(targetTypeLabel)) {
+                      return false;
+                    }
+                    if (expectedStateLabel && !label.includes(expectedStateLabel)) {
+                      return false;
+                    }
+                    return true;
+                  });
+                  if (!rowButton) {
+                    return null;
+                  }
+                  const rowLabel = accessibleLabel(rowButton);
+                  const rect = rowButton.getBoundingClientRect();
+                  const buttonLabels = allButtons
+                    .filter((candidate) => candidate !== rowButton)
+                    .filter((candidate) => {
+                      const candidateRect = candidate.getBoundingClientRect();
+                      return candidateRect.top >= (rect.bottom - 4)
+                        && candidateRect.top <= (rect.bottom + 64)
+                        && candidateRect.left >= (rect.left - 8)
+                        && candidateRect.left <= (rect.right + 120);
+                    })
+                    .map((candidate) => accessibleLabel(candidate))
+                    .filter(Boolean);
+                  const actionLabels = buttonLabels.map((label) => {
+                    const separatorIndex = label.indexOf(':');
+                    return separatorIndex === -1 ? label.trim() : label.slice(0, separatorIndex).trim();
+                  });
+                  if (rowLabel.includes('Local Git') || rowLabel.includes('Active')) {
+                    return null;
+                  }
+                  if (buttonLabels.includes('Active')) {
+                    return null;
+                  }
+                  if (buttonLabels.some((label) => label.includes('Local Git'))) {
+                    return null;
+                  }
+                  if (!acceptedActions.some((label) => actionLabels.includes(label))) {
+                    return null;
+                  }
+                  return true;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "displayName": display_name,
+                    "targetPath": target_path,
+                    "targetTypeLabel": target_type_label,
+                    "expectedStateLabel": expected_state_label,
+                    "acceptedActions": list(accepted_action_labels),
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            pass
+        return self.observe_open_switcher(timeout_ms=min(timeout_ms, 5_000))
+
     def click_saved_workspace_row_surface(
         self,
         display_name: str,
