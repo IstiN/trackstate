@@ -135,6 +135,10 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Validate accessibility workflow contract
+        if: steps.changes.outputs.accessibility == 'true'
+        run: node --test testing/accessibility/log_validation.node.test.js
+
       - name: Install Flutter dependencies
         if: steps.changes.outputs.accessibility == 'true'
         run: flutter pub get

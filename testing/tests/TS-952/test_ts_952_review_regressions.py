@@ -209,6 +209,26 @@ class Ts952ReviewRegressionTest(unittest.TestCase):
         self.assertIn("generic Playwright timeout", failures[0])
         self.assertIn("Run-log timeout markers", failures[0])
 
+    def test_step_3_accepts_waiting_for_nodes_before_descriptive_error(self) -> None:
+        result: dict[str, object] = {"steps": [], "human_verification": []}
+        failures: list[str] = []
+        stage_lines = [
+            "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:01Z Semantics tree discovery: waiting for nodes",
+            "Accessibility checks\tRun axe-core accessibility checks\t2026-05-22T11:02:15Z Error: Accessibility pre-flight failed because flt-semantics-placeholder was missing before the scan could begin.",
+        ]
+
+        self.module._evaluate_error_log(  # type: ignore[attr-defined]
+            result,
+            self._observation(
+                run_log_excerpt="\n".join(stage_lines),
+            ),
+            failures,
+            stage_log_lines=stage_lines,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(result["steps"][0]["status"], "passed")
+
     def test_step_3_rejects_polling_progression_after_missing_placeholder(self) -> None:
         result: dict[str, object] = {"steps": [], "human_verification": []}
         failures: list[str] = []

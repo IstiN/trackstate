@@ -342,10 +342,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
     )
     active = page.active_element()
     focus = page.observe_focus_ownership(panel=panel)
-    first_internal_target = _first_reverse_wrap_start_target(
-        first_row=first_row,
-        tab_stops=tab_stops,
-    )
+    first_internal_target = _first_internal_focus_target(tab_stops=tab_stops)
     expected_target = _last_internal_focus_target(tab_stops=tab_stops)
     row_focus = {
         name: _row_focus_payload(
@@ -400,19 +397,11 @@ def _reach_first_keyboard_target(
     panel = WorkspaceSwitcherPanelObservation(**_panel_from_state(current_state))
     before = page.active_element()
     try:
-        first_row_display_name = str(current_state.get("first_row_display_name") or "").strip()
-        if first_row_display_name and first_internal_label == current_state.get("first_row_label"):
-            focus_observation = page.focus_saved_workspace_row(
-                first_row_display_name,
-                panel=panel,
-                timeout_ms=FOCUS_TIMEOUT_MS,
-            )
-        else:
-            focus_observation = page.focus_internal_tab_stop(
-                first_internal_label,
-                panel=panel,
-                timeout_ms=FOCUS_TIMEOUT_MS,
-            )
+        focus_observation = page.focus_internal_tab_stop(
+            first_internal_label,
+            panel=panel,
+            timeout_ms=FOCUS_TIMEOUT_MS,
+        )
     except AssertionError as error:
         failed_state = _capture_current_state(
             page=page,
@@ -738,28 +727,6 @@ def _last_internal_focus_target(
     }
 
 
-def _first_reverse_wrap_start_target(
-    *,
-    first_row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
-    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...] | list[object],
-) -> dict[str, object]:
-    if first_row is not None:
-        label = _saved_workspace_row_focus_label(first_row)
-        return {
-            "label": label,
-            "visible_text": first_row.display_name,
-            "role": None,
-            "tag_name": "saved-workspace-row",
-            "tabindex": None,
-            "tab_index_value": 0,
-            "dom_index": -1,
-            "keyboard_focusable": True,
-            "disabled": False,
-            "outer_html": "",
-        }
-    return _first_internal_focus_target(tab_stops=tab_stops)
-
-
 def _first_internal_focus_target(
     tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...] | list[object],
 ) -> dict[str, object]:
@@ -1018,9 +985,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Run command:** `{RUN_COMMAND}`",
         "",
         "## Rework applied",
-        "1. Restored the selected saved-workspace row as the TS-911 starting focus target when the live panel opens on that row.",
-        "2. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
-        "3. Added a direct trigger-label guard so the failure report still identifies an escape to the workspace-switcher trigger even if the focus-ownership probe misclassifies it.",
+        "1. Kept the Step 1-derived first internal target as the source of truth instead of overwriting it with whichever control happened to hold focus.",
+        "2. Established the ticket precondition by focusing that exact first internal target directly through the page object before evaluating the reverse-wrap behavior.",
+        "3. Kept the reverse-wrap expectation tied to the live last internal keyboard target exposed by the open panel.",
+        "4. Moved `displayNameHint` into `observe_switcher_button_state()` and removed the duplicate declaration from `observe_switcher_button_focusability()` so the shared workspace-switcher helpers use the same display-name fallback safely.",
         "",
         "## What automation checked",
         f"1. {AUTOMATION_STEPS[0]} — **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
@@ -1066,7 +1034,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: restored the selected saved-workspace row as the TS-911 starting focus target, kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel, and added a direct trigger-label guard so escapes to the workspace-switcher trigger are reported accurately.",
+        "- Rework: preserved the Step 1-derived first internal target as the baseline, established that exact label directly through the page object, kept the `Shift+Tab` expectation tied to the live last internal target exposed by the open panel, and fixed the shared `displayNameHint` helper regression in the workspace-switcher page object.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -1884,10 +1852,9 @@ def _review_reply_text(
         )
     return (
         "Fixed: TS-911 now keeps the Step 1-derived first internal target as the "
-        "source of truth, establishes that exact label directly through the page "
-        "object before Shift+Tab runs, and keeps the reverse-wrap expectation tied "
-        "to the live last internal switcher control. Failure reporting no longer "
-        "rewrites setup issues into a separate public-keyboard-path product bug. "
+        "source of truth and only proves the precondition by focusing that exact "
+        "live in-panel target before `Shift+Tab` runs, so the test no longer "
+        "treats the selected saved-workspace row as the start point by default. "
         f"{rerun_summary}"
     )
 

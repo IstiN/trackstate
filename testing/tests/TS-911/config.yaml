@@ -8,5 +8,5 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
   - Opens the desktop workspace switcher from a focused trigger and confirms the live visible controls plus the last internal keyboard target are present.
-  - Establishes the ticket precondition by focusing the live selected first workspace row directly through the page object before the reverse-wrap assertion.
+  - Establishes the ticket precondition by focusing the live first internal keyboard target directly through the page object before the reverse-wrap assertion.
   - Verifies reverse wrap returns to the observed last internal control instead of escaping to the app shell.

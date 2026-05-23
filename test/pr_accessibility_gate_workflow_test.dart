@@ -36,6 +36,14 @@ void main() {
       );
       expect(workflow, contains('name: Accessibility checks'));
       expect(workflow, contains('npm ci'));
+      expect(
+        workflow,
+        contains('node --test testing/accessibility/log_validation.node.test.js'),
+        reason:
+            'The PR workflow must execute the workflow-contract regression so '
+            'contributors see a failed check when the accessibility job loses '
+            'the mandatory log-validation step.',
+      );
       expect(workflow, contains('npm run test:a11y'));
       expect(workflow, contains('playwright install --with-deps chromium'));
       expect(workflow, contains('TRACKSTATE_USE_DEMO_REPOSITORY=true'));

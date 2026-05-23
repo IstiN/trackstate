@@ -5,7 +5,6 @@ from pathlib import Path
 import unittest
 
 from testing.components.pages.live_workspace_switcher_page import (
-    WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTabStopObservation,
 )
 
@@ -18,38 +17,23 @@ _LIVE_TEST_SPEC.loader.exec_module(_LIVE_TEST_MODULE)
 
 
 class Ts911RegressionsTest(unittest.TestCase):
-    def test_prefers_selected_saved_workspace_row_as_reverse_wrap_start_target(self) -> None:
-        first_row = WorkspaceSwitcherSavedWorkspaceRowObservation(
-            display_name="Hosted main workspace",
-            target_type_label="Hosted",
-            state_label="Attachments limited",
-            detail_text="istin/trackstate-setup • Branch: main",
-            selected=True,
-            action_labels=("Active",),
-            left=0.0,
-            top=0.0,
-            width=100.0,
-            height=32.0,
-        )
+    def test_derives_reverse_wrap_start_target_from_first_internal_tab_stop(self) -> None:
         tab_stops = (
             WorkspaceSwitcherTabStopObservation(
-                label="Open: Hosted alt workspace",
+                label="Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
                 visible_text="",
                 role=None,
                 tag_name="BUTTON",
                 tabindex="0",
                 tab_index_value=0,
-                dom_index=4,
+                dom_index=0,
                 keyboard_focusable=True,
                 disabled=False,
                 outer_html="<button></button>",
             ),
         )
 
-        target = _LIVE_TEST_MODULE._first_reverse_wrap_start_target(
-            first_row=first_row,
-            tab_stops=tab_stops,
-        )
+        target = _LIVE_TEST_MODULE._first_internal_focus_target(tab_stops=tab_stops)
 
         self.assertEqual(
             target["label"],
