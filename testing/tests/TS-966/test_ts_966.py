@@ -260,22 +260,41 @@ def main() -> None:
             try:
                 page.close_switcher()
                 result["fault_state_before_enable"] = _fault_state(tracker_page)
+                console_event_count_before_fault = len(runtime_context.console_events)
+                page_error_count_before_fault = len(runtime_context.page_errors)
                 result["fault_state_after_enable"] = _enable_fault(tracker_page)
                 try:
                     switcher_after_fault = page.open_and_observe(timeout_ms=10_000)
                     result["switcher_after_fault"] = _switcher_payload(switcher_after_fault)
                 except Exception as error:
                     result["switcher_after_fault_error"] = _format_error(error)
+                    raise AssertionError(
+                        "The workspace switcher could not be re-observed after the "
+                        "synthetic runtime fault fired, so the test did not prove the "
+                        "error boundary contained the failure locally.",
+                    ) from error
                 fault_state_after_trigger = _wait_for_fault_trigger(tracker_page, timeout_ms=10_000)
                 result["fault_state_after_trigger"] = fault_state_after_trigger
                 result["console_events"] = list(runtime_context.console_events)
                 result["page_errors"] = list(runtime_context.page_errors)
+                result["post_fault_console_events"] = list(
+                    runtime_context.console_events[console_event_count_before_fault:],
+                )
+                result["post_fault_page_errors"] = list(
+                    runtime_context.page_errors[page_error_count_before_fault:],
+                )
 
                 if int(fault_state_after_trigger.get("triggerCount", 0)) <= 0:
                     raise AssertionError(
                         "The synthetic workspace-switcher fault never fired after it was "
                         "enabled, so the runtime error path was not proven.",
                     )
+
+                _assert_fault_locally_contained(
+                    switcher_after_fault=switcher_after_fault,
+                    post_fault_console_events=result["post_fault_console_events"],
+                    post_fault_page_errors=result["post_fault_page_errors"],
+                )
 
                 _record_step(
                     result,
@@ -286,8 +305,9 @@ def main() -> None:
                         "Enabled the workspace-switcher-scoped synthetic runtime fault and "
                         "re-triggered the switcher path.\n"
                         f"fault_state_after_trigger={json.dumps(fault_state_after_trigger, indent=2)}\n"
-                        f"switcher_after_fault_error={result.get('switcher_after_fault_error')!r}\n"
-                        f"page_errors={json.dumps(result['page_errors'], indent=2)}"
+                        f"switcher_after_fault={json.dumps(result['switcher_after_fault'], indent=2)}\n"
+                        f"post_fault_console_events={json.dumps(result['post_fault_console_events'], indent=2)}\n"
+                        f"post_fault_page_errors={json.dumps(result['post_fault_page_errors'], indent=2)}"
                     ),
                 )
             except Exception as error:
@@ -302,6 +322,10 @@ def main() -> None:
                         "The synthetic runtime fault was not exercised as expected.\n"
                         f"error={_format_error(error)}\n"
                         f"fault_state_after_enable={json.dumps(result.get('fault_state_after_enable'), ensure_ascii=True)}\n"
+                        f"switcher_after_fault={json.dumps(result.get('switcher_after_fault'), ensure_ascii=True)}\n"
+                        f"switcher_after_fault_error={json.dumps(result.get('switcher_after_fault_error'), ensure_ascii=True)}\n"
+                        f"post_fault_console_events={json.dumps(result.get('post_fault_console_events'), ensure_ascii=True)}\n"
+                        f"post_fault_page_errors={json.dumps(result.get('post_fault_page_errors'), ensure_ascii=True)}\n"
                         f"console_events={json.dumps(result['console_events'], ensure_ascii=True)}\n"
                         f"page_errors={json.dumps(result['page_errors'], ensure_ascii=True)}"
                     ),
@@ -651,6 +675,56 @@ def _assert_shell_survived(
             "The header workspace switcher trigger no longer exposed a readable label "
             "after the workspace-switcher fault.",
         )
+
+
+def _assert_fault_locally_contained(
+    *,
+    switcher_after_fault: WorkspaceSwitcherObservation,
+    post_fault_console_events: object,
+    post_fault_page_errors: object,
+) -> None:
+    if switcher_after_fault.row_count <= 0:
+        raise AssertionError(
+            "The workspace switcher reopened after the synthetic fault, but it no "
+            "longer exposed any saved workspace rows.",
+        )
+    if PRIMARY_WORKSPACE_DISPLAY_NAME not in switcher_after_fault.switcher_text:
+        raise AssertionError(
+            "The workspace switcher reopened after the synthetic fault, but it did "
+            "not render the expected primary workspace entry.",
+        )
+
+    page_errors = [
+        str(item) for item in post_fault_page_errors if isinstance(item, str) and item.strip()
+    ]
+    if page_errors:
+        raise AssertionError(
+            "The synthetic workspace-switcher fault leaked as a global page error.\n"
+            f"Observed page errors:\n{json.dumps(page_errors, indent=2)}",
+        )
+
+    leaked_console_events = [
+        {
+            "level": str(event.get("level", "")),
+            "text": str(event.get("text", "")),
+        }
+        for event in post_fault_console_events
+        if isinstance(event, dict) and _console_event_requires_failure(event)
+    ]
+    if leaked_console_events:
+        raise AssertionError(
+            "The synthetic workspace-switcher fault leaked as a global console error.\n"
+            f"Observed console events:\n{json.dumps(leaked_console_events, indent=2)}",
+        )
+
+
+def _console_event_requires_failure(event: dict[str, object]) -> bool:
+    level = str(event.get("level", "")).strip().lower()
+    text = str(event.get("text", "")).strip()
+    lowered = text.lower()
+    if level == "error":
+        return True
+    return any(marker in lowered for marker in ("uncaught", "unhandled"))
 
 
 def _record_step(
