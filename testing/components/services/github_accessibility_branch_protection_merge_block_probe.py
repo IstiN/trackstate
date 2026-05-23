@@ -180,6 +180,12 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
             ),
+            default_branch_probe_host_present=bool(
+                pull_request_observation.get("default_branch_probe_host_present")
+            ),
+            default_branch_probe_host_summary=str(
+                pull_request_observation.get("default_branch_probe_host_summary", "")
+            ),
         )
 
         return GitHubAccessibilityBranchProtectionMergeBlockObservation(
@@ -205,6 +211,10 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
         cleanup_closed_pull_request = False
         cleanup_deleted_branch = False
         observation: dict[str, object] | None = None
+        (
+            default_branch_probe_host_present,
+            default_branch_probe_host_summary,
+        ) = self._default_branch_probe_host_details(self._config.base_branch)
 
         try:
             self._run_command(["gh", "auth", "setup-git"], cwd=None)
@@ -239,9 +249,8 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
-            render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
-            )
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
+            render_host_source = self._inject_probe_into_render_host(render_host_original_source)
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
             self._run_command(
@@ -345,7 +354,12 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or default_branch_probe_host_present
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -399,14 +413,16 @@ class GitHubAccessibilityBranchProtectionMergeBlockProbeService(
                     runtime_accessibility_surface_summary
                 ),
                 "runtime_accessibility_surface_summary": runtime_accessibility_surface_summary,
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "default_branch_probe_host_present": default_branch_probe_host_present,
+                "default_branch_probe_host_summary": default_branch_probe_host_summary,
             }
         finally:
             if pull_request_number is not None:

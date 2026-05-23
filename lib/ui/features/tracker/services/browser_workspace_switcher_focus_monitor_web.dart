@@ -615,7 +615,9 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     if (seen.contains(element)) {
       continue;
     }
-    if (!_isVisible(element) || !_isFocusable(element)) {
+    if (!_isVisible(element) ||
+        !_isFocusable(element) ||
+        !_isMeaningfullyInteractiveFocusTarget(element)) {
       continue;
     }
     seen.add(element);
@@ -633,6 +635,44 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     );
   }
   return targets;
+}
+
+bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
+  final tagName = element.tagName.toLowerCase();
+  if (tagName == 'button' ||
+      tagName == 'input' ||
+      tagName == 'textarea' ||
+      tagName == 'select') {
+    return true;
+  }
+
+  if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusPanelIdAttribute) case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {
+    return true;
+  }
+
+  final role = element.getAttribute('role')?.trim().toLowerCase();
+  switch (role) {
+    case 'button':
+    case 'checkbox':
+    case 'combobox':
+    case 'link':
+    case 'menuitem':
+    case 'option':
+    case 'radio':
+    case 'searchbox':
+    case 'switch':
+    case 'tab':
+    case 'textbox':
+      return true;
+  }
+
+  return false;
 }
 
 int? _focusTargetIndexForActiveElement({
@@ -769,10 +809,14 @@ web.Element? _workspaceSwitcherElementFor(web.Element element) {
   if (browserControlAncestor != null) {
     return browserControlAncestor;
   }
-  return _ancestorWithSemanticsIdentifier(
+  final semanticsAncestor = _ancestorWithSemanticsIdentifier(
     element,
     (identifier) => identifier == browserWorkspaceSwitcherSemanticsIdentifier,
   );
+  if (semanticsAncestor != null) {
+    return semanticsAncestor;
+  }
+  return _overlappingWorkspaceSwitcherPanel(element);
 }
 
 web.Element? _workspaceSwitcherTriggerElementFor(web.Element element) {
@@ -823,6 +867,51 @@ web.Element? _ancestorWithAttribute(
     current = current.parentElement;
   }
   return null;
+}
+
+web.Element? _overlappingWorkspaceSwitcherPanel(web.Element element) {
+  final htmlElement = element as web.HTMLElement;
+  if (!_isWorkspaceSwitcherPanelOverlapCandidate(htmlElement)) {
+    return null;
+  }
+  final elementRect = htmlElement.getBoundingClientRect();
+  if (elementRect.width <= 0 || elementRect.height <= 0) {
+    return null;
+  }
+  final panelElements = web.document.querySelectorAll(
+    '[flt-semantics-identifier="$browserWorkspaceSwitcherSemanticsIdentifier"]',
+  );
+  for (var index = 0; index < panelElements.length; index += 1) {
+    final panelNode = panelElements.item(index);
+    if (panelNode == null) {
+      continue;
+    }
+    final panelElement = panelNode as web.Element;
+    if (!_isVisible(panelElement)) {
+      continue;
+    }
+    final panelRect = panelElement.getBoundingClientRect();
+    if (_rectanglesOverlap(a: elementRect, b: panelRect)) {
+      return panelElement;
+    }
+  }
+  return null;
+}
+
+bool _isWorkspaceSwitcherPanelOverlapCandidate(web.HTMLElement element) {
+  final tagName = element.tagName.toLowerCase();
+  if (tagName == 'input' || tagName == 'textarea' || tagName == 'select') {
+    return true;
+  }
+  final role = element.getAttribute('role')?.trim().toLowerCase();
+  return role == 'textbox' || role == 'combobox';
+}
+
+bool _rectanglesOverlap({required web.DOMRect a, required web.DOMRect b}) {
+  return a.left < b.right &&
+      a.right > b.left &&
+      a.top < b.bottom &&
+      a.bottom > b.top;
 }
 
 web.HTMLElement? _resolveDesktopPrimaryNavigationTarget({

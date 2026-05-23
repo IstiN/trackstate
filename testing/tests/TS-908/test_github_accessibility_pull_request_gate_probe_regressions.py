@@ -167,6 +167,17 @@ class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
             pull_request_timeout_seconds=180,
         )
 
+    def test_probe_source_publishes_runtime_contrast_signal(self) -> None:
+        source = GitHubAccessibilityPullRequestGateProbeService._probe_source()
+
+        self.assertIn(
+            "import 'ui/features/tracker/services/accessibility_probe_signal.dart';",
+            source,
+        )
+        self.assertIn("publishAccessibilityContrastProbeSignal(", source)
+        self.assertIn("foreground: lowContrastColor", source)
+        self.assertIn("background: colorScheme.surface", source)
+
     def test_validate_combines_workflow_contract_with_live_pr_observation(self) -> None:
         workflow_text = """
 name: Flutter Required Checks

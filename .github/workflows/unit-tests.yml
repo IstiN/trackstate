@@ -69,6 +69,10 @@ jobs:
         if: steps.changes.outputs.flutter == 'true'
         run: dart run tool/check_theme_tokens.dart
 
+      - name: Check web safety
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_web_safety.dart
+
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
         run: flutter test --coverage
@@ -135,6 +139,10 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Validate accessibility workflow contract
+        if: steps.changes.outputs.accessibility == 'true'
+        run: node --test testing/accessibility/log_validation.node.test.js
+
       - name: Install Flutter dependencies
         if: steps.changes.outputs.accessibility == 'true'
         run: flutter pub get
@@ -161,8 +169,24 @@ jobs:
             --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
 
       - name: Run axe-core accessibility checks
+        id: axe_accessibility_scan
         if: steps.changes.outputs.accessibility == 'true'
-        run: npm run test:a11y
+        shell: bash
+        run: |
+          log_path="$RUNNER_TEMP/accessibility-check.log"
+          : > "$log_path"
+          set +e
+          npm run test:a11y 2>&1 | tee "$log_path"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: log-validation
+        if: ${{ always() && steps.changes.outputs.accessibility == 'true' }}
+        shell: bash
+        run: |
+          log_path="$RUNNER_TEMP/accessibility-check.log"
+          node testing/accessibility/log_validation.js "$log_path"
 
   deploy-preview:
     name: Deploy preview

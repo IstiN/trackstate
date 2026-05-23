@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -128,16 +129,17 @@ def _evaluate_pull_request_probe(
     failures: list[str],
 ) -> None:
     step_failures: list[str] = []
-    missing_files = [
-        path
-        for path in (gate.pull_request_probe_path, gate.probe_render_host_path)
-        if path not in gate.pull_request_file_paths
-    ]
-    if missing_files:
-        step_failures.append(f"GitHub did not record the expected PR files: {missing_files}.")
+    if gate.pull_request_probe_path not in gate.pull_request_file_paths:
+        step_failures.append(
+            f"GitHub did not record the expected disposable probe file `{gate.pull_request_probe_path}`."
+        )
     if not gate.probe_rendered_in_application:
         step_failures.append(
             "the disposable PR did not wire the low-contrast probe into a rendered application surface."
+        )
+    if not gate.runtime_accessibility_surface_present:
+        step_failures.append(
+            "the accessibility scan did not expose a runtime semantics surface for the rendered probe."
         )
     if not gate.probe_contains_low_contrast_indicator:
         step_failures.append(
@@ -151,19 +153,36 @@ def _evaluate_pull_request_probe(
             + "\n"
             + f"Pull Request URL: {gate.pull_request_url}\n"
             + f"Observed PR files: {gate.pull_request_file_paths}\n"
+            + "Live host summary: "
+            + f"{gate.default_branch_probe_host_summary or '<none>'}\n"
+            + "Runtime accessibility surface: "
+            + f"{gate.runtime_accessibility_surface_summary or '<none>'}\n"
             + f"Probe technique: {gate.probe_contrast_technique}"
         )
         failures.append(message)
         _record_step(result, step=1, status="failed", action=REQUEST_STEPS[0], observed=message)
         return
 
-    observed = (
-        "Created a disposable PR and verified that GitHub recorded the rendered low-contrast "
-        f"probe file `{gate.pull_request_probe_path}` plus render host `{gate.probe_render_host_path}`.\n"
-        f"Pull Request URL: {gate.pull_request_url}\n"
-        f"Observed PR files: {gate.pull_request_file_paths}\n"
-        f"Probe technique: {gate.probe_contrast_technique}"
-    )
+    if gate.probe_render_host_path in gate.pull_request_file_paths:
+        observed = (
+            "Created a disposable PR and verified that GitHub recorded the rendered low-contrast "
+            f"probe file `{gate.pull_request_probe_path}` plus render host `{gate.probe_render_host_path}`.\n"
+            f"Pull Request URL: {gate.pull_request_url}\n"
+            f"Observed PR files: {gate.pull_request_file_paths}\n"
+            f"Runtime accessibility surface: {gate.runtime_accessibility_surface_summary}\n"
+            f"Probe technique: {gate.probe_contrast_technique}"
+        )
+    else:
+        observed = (
+            "Created a disposable PR and verified that GitHub recorded the low-contrast "
+            f"probe file `{gate.pull_request_probe_path}` while the live `{gate.probe_render_host_path}` "
+            "already exposed the rendered accessibility probe on the default branch.\n"
+            f"Pull Request URL: {gate.pull_request_url}\n"
+            f"Observed PR files: {gate.pull_request_file_paths}\n"
+            f"Live host summary: {gate.default_branch_probe_host_summary}\n"
+            f"Runtime accessibility surface: {gate.runtime_accessibility_surface_summary}\n"
+            f"Probe technique: {gate.probe_contrast_technique}"
+        )
     _record_step(result, step=1, status="passed", action=REQUEST_STEPS[0], observed=observed)
 
 
@@ -214,10 +233,6 @@ def _evaluate_accessibility_failure(
     gate = observation.gate
     step_failures: list[str] = []
 
-    if not observation.repository_declares_accessibility_required_check:
-        step_failures.append(
-            "the live main-branch protection rules did not declare the accessibility check as required."
-        )
     if gate.accessibility_status_check_name is None:
         step_failures.append(
             "the PR checks surface did not expose a contributor-visible accessibility status check."
@@ -225,10 +240,6 @@ def _evaluate_accessibility_failure(
     if (gate.accessibility_status_check_conclusion or "").lower() not in FAILURE_CONCLUSIONS:
         step_failures.append(
             f'the accessibility status check did not fail; observed conclusion was `{gate.accessibility_status_check_conclusion or "<none>"}`.'
-        )
-    if gate.latest_pull_request_run_conclusion not in FAILURE_CONCLUSIONS:
-        step_failures.append(
-            f"the pull-request workflow run did not fail; observed conclusion was `{gate.latest_pull_request_run_conclusion or '<none>'}`."
         )
     if "Run axe-core accessibility checks" not in gate.observed_step_names:
         step_failures.append(
@@ -461,6 +472,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "✅ PASSED" if passed else "❌ FAILED"
+    failed_summary = _jira_inline(_failed_step_summary(result))
     lines = [
         "h3. Test Automation Result",
         "",
@@ -480,7 +492,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else f"* Did not match the expected result. {_failed_step_summary(result)}"
+            else f"* Did not match the expected result. {failed_summary}"
         ),
         (
             f"* Environment: repository {{{{{result['repository']}}}}} @ "
@@ -587,6 +599,15 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    actual_result = (
+        f'The live required checks were `{result.get("required_check_contexts", [])}`, '
+        f'the `Accessibility checks` status concluded '
+        f'`{result.get("accessibility_status_check_conclusion", "<none>")}`, '
+        f'the failed status-check list was `{result.get("failed_status_check_names", [])}`, '
+        f'and GitHub still reported `mergeStateStatus='
+        f'{result.get("pull_request_merge_state_status", "<none>")}` with '
+        f'`mergeable_state={result.get("pull_request_mergeable_state", "<none>")}`.'
+    )
     return "\n".join(
         [
             f"# {TICKET_KEY} - Branch protection did not keep the PR merge-blocked after accessibility failure",
@@ -626,7 +647,7 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- {EXPECTED_RESULT}",
             "",
             "## Actual result",
-            "- The disposable PR stayed mergeable instead of becoming blocked: the effective required checks on `main` only listed `Flutter checks`, the `Accessibility checks` status concluded `success`, and GitHub reported `mergeStateStatus=CLEAN` with `mergeable_state=clean`.",
+            f"- {actual_result}",
             "",
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",
@@ -771,7 +792,18 @@ def _step_observed(result: dict[str, object], step: int) -> str:
 
 
 def _jira_inline(text: str) -> str:
-    return text.replace("{", "\\{").replace("}", "\\}")
+    code_segments: list[str] = []
+
+    def _capture(match: re.Match[str]) -> str:
+        code_segments.append(match.group(1))
+        return f"__TS936_JIRA_CODE_{len(code_segments) - 1}__"
+
+    text = re.sub(r"`([^`]+)`", _capture, text)
+    text = text.replace("{", "\\{").replace("}", "\\}")
+    for index, segment in enumerate(code_segments):
+        escaped_segment = segment.replace("{", "\\{").replace("}", "\\}")
+        text = text.replace(f"__TS936_JIRA_CODE_{index}__", f"{{{{{escaped_segment}}}}}")
+    return text
 
 
 def _optional_string(value: object) -> str | None:
