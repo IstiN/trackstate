@@ -173,6 +173,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   _desktopWorkspaceSwitcherBrowserFocusRequest;
   Timer? _desktopWorkspaceSwitcherBrowserBlurCheckTimer;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
+  bool _isEnsuringCurrentContextWorkspaceMigration = false;
 
   @override
   void initState() {
@@ -185,6 +186,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _handleDesktopWorkspaceSwitcherFocusChange,
     );
     viewModel = _createViewModel(autoLoad: false);
+    viewModel.addListener(_handleViewModelChanged);
     unawaited(_initializeWorkspaceProfiles());
   }
 
@@ -197,7 +199,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     final previousViewModel = viewModel;
     viewModel = _createViewModel(previous: previousViewModel, autoLoad: false);
+    previousViewModel.removeListener(_handleViewModelChanged);
     previousViewModel.dispose();
+    viewModel.addListener(_handleViewModelChanged);
     _isCreateIssueVisible = false;
     _createIssuePrefill = null;
     _workspaceProfilesReady = false;
@@ -222,6 +226,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _desktopWorkspaceSwitcherFocusScopeNode.removeListener(
       _handleDesktopWorkspaceSwitcherFocusChange,
     );
+    viewModel.removeListener(_handleViewModelChanged);
     _workspaceSwitcherTriggerFocusNode.dispose();
     _desktopSearchFocusNode.dispose();
     _desktopSettingsFocusNode.dispose();
@@ -235,6 +240,30 @@ class _TrackStateAppState extends State<TrackStateApp>
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       unawaited(viewModel.handleAppResumed());
+    }
+  }
+
+  void _handleViewModelChanged() {
+    if (_shouldEnsureCurrentContextWorkspaceMigration) {
+      unawaited(_ensureCurrentContextWorkspaceMigrationIfNeeded());
+    }
+  }
+
+  bool get _shouldEnsureCurrentContextWorkspaceMigration =>
+      !_isEnsuringCurrentContextWorkspaceMigration &&
+      widget.repository == null &&
+      !_workspaceState.hasProfiles &&
+      viewModel.project != null;
+
+  Future<void> _ensureCurrentContextWorkspaceMigrationIfNeeded() async {
+    if (!_shouldEnsureCurrentContextWorkspaceMigration) {
+      return;
+    }
+    _isEnsuringCurrentContextWorkspaceMigration = true;
+    try {
+      await _ensureCurrentContextWorkspaceMigration();
+    } finally {
+      _isEnsuringCurrentContextWorkspaceMigration = false;
     }
   }
 
@@ -1247,9 +1276,25 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     final currentContext = _workspaceProfileInputForCurrentContext();
-    final workspace = await widget.workspaceProfileService
+    var workspace = await widget.workspaceProfileService
         .ensureLegacyContextMigrated(currentContext);
-    final updatedState = await widget.workspaceProfileService.loadState();
+    var updatedState = await widget.workspaceProfileService.loadState();
+    if (workspace == null &&
+        currentContext != null &&
+        currentContext.isValid &&
+        !updatedState.hasProfiles) {
+      try {
+        workspace = await widget.workspaceProfileService.createProfile(
+          currentContext,
+        );
+      } on WorkspaceProfileException {
+        updatedState = await widget.workspaceProfileService.loadState();
+        if (updatedState.activeWorkspace case final activeWorkspace?) {
+          workspace = activeWorkspace;
+        }
+      }
+      updatedState = await widget.workspaceProfileService.loadState();
+    }
     if (!mounted) {
       return;
     }
@@ -1315,6 +1360,14 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _showsWorkspaceOnboarding = true;
     });
+  }
+
+  Future<void> _retryStartupRecovery() async {
+    await viewModel.retryStartupRecovery();
+    if (!mounted) {
+      return;
+    }
+    await _ensureCurrentContextWorkspaceMigrationIfNeeded();
   }
 
   Future<void> _retryUnavailableLocalWorkspace(
@@ -2183,6 +2236,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onFocusActiveWorkspaceSwitcherRow:
                       _focusActiveWorkspaceSwitcherRow,
                   workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
+                  onRetryStartupRecovery: _retryStartupRecovery,
                   onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
                 ),
@@ -2219,6 +2273,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onMoveWorkspaceSelection,
     required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
@@ -2249,6 +2304,7 @@ class _TrackerHome extends StatelessWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
@@ -2270,7 +2326,12 @@ class _TrackerHome extends StatelessWidget {
       if (viewModel.startupRecovery != null) {
         return Scaffold(
           backgroundColor: colors.page,
-          body: SafeArea(child: _StartupRecoveryView(viewModel: viewModel)),
+          body: SafeArea(
+            child: _StartupRecoveryView(
+              viewModel: viewModel,
+              onRetryStartupRecovery: onRetryStartupRecovery,
+            ),
+          ),
         );
       }
       return Scaffold(
@@ -2358,6 +2419,7 @@ class _TrackerHome extends StatelessWidget {
                           onFocusActiveWorkspaceSwitcherRow:
                               onFocusActiveWorkspaceSwitcherRow,
                           workspaceRestoreFailure: workspaceRestoreFailure,
+                          onRetryStartupRecovery: onRetryStartupRecovery,
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
@@ -2440,6 +2502,7 @@ class _TrackerHome extends StatelessWidget {
                             onFocusActiveWorkspaceSwitcherRow:
                                 onFocusActiveWorkspaceSwitcherRow,
                             workspaceRestoreFailure: workspaceRestoreFailure,
+                            onRetryStartupRecovery: onRetryStartupRecovery,
                             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                             attachmentPicker: attachmentPicker,
                           ),
@@ -3807,6 +3870,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onMoveWorkspaceSelection,
     required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
@@ -3837,6 +3901,7 @@ class _DesktopShell extends StatelessWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
@@ -3884,6 +3949,7 @@ class _DesktopShell extends StatelessWidget {
             onFocusActiveWorkspaceSwitcherRow:
                 onFocusActiveWorkspaceSwitcherRow,
             workspaceRestoreFailure: workspaceRestoreFailure,
+            onRetryStartupRecovery: onRetryStartupRecovery,
             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
           ),
@@ -3920,6 +3986,7 @@ class _MobileShell extends StatelessWidget {
     required this.onMoveWorkspaceSelection,
     required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
@@ -3950,6 +4017,7 @@ class _MobileShell extends StatelessWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
@@ -3982,6 +4050,7 @@ class _MobileShell extends StatelessWidget {
       onMoveWorkspaceSelection: onMoveWorkspaceSelection,
       onFocusActiveWorkspaceSwitcherRow: onFocusActiveWorkspaceSwitcherRow,
       workspaceRestoreFailure: workspaceRestoreFailure,
+      onRetryStartupRecovery: onRetryStartupRecovery,
       onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
     );
@@ -4015,6 +4084,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onMoveWorkspaceSelection,
     required this.onFocusActiveWorkspaceSwitcherRow,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
@@ -4047,6 +4117,7 @@ class _TrackerMainPane extends StatelessWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onFocusActiveWorkspaceSwitcherRow;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
@@ -4095,6 +4166,7 @@ class _TrackerMainPane extends StatelessWidget {
                   onSelectWorkspace: onSelectWorkspace,
                   onDeleteWorkspace: onDeleteWorkspace,
                   workspaceRestoreFailure: workspaceRestoreFailure,
+                  onRetryStartupRecovery: onRetryStartupRecovery,
                   onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                   attachmentPicker: attachmentPicker,
                 ),
@@ -5740,9 +5812,13 @@ class _OrderedFocusAction extends StatelessWidget {
 }
 
 class _StartupRecoveryView extends StatelessWidget {
-  const _StartupRecoveryView({required this.viewModel});
+  const _StartupRecoveryView({
+    required this.viewModel,
+    required this.onRetryStartupRecovery,
+  });
 
   final TrackerViewModel viewModel;
+  final Future<void> Function() onRetryStartupRecovery;
 
   @override
   Widget build(BuildContext context) {
@@ -5780,7 +5856,9 @@ class _StartupRecoveryView extends StatelessWidget {
                 title: _startupRecoveryTitle(l10n, recovery),
                 message: _startupRecoveryMessage(l10n, viewModel),
                 primaryActionLabel: l10n.retry,
-                onPrimaryAction: viewModel.retryStartupRecovery,
+                onPrimaryAction: () {
+                  unawaited(onRetryStartupRecovery());
+                },
                 secondaryActionLabel: viewModel.supportsGitHubAuth
                     ? l10n.connectGitHub
                     : null,
@@ -5805,6 +5883,7 @@ class _SectionBody extends StatelessWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
@@ -5817,6 +5896,7 @@ class _SectionBody extends StatelessWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
   final bool compact;
@@ -5845,6 +5925,7 @@ class _SectionBody extends StatelessWidget {
         onSelectWorkspace: onSelectWorkspace,
         onDeleteWorkspace: onDeleteWorkspace,
         workspaceRestoreFailure: workspaceRestoreFailure,
+        onRetryStartupRecovery: onRetryStartupRecovery,
         onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       ),
     };
@@ -6397,6 +6478,7 @@ class _Settings extends StatefulWidget {
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
+    required this.onRetryStartupRecovery,
     required this.onRetryWorkspaceRestore,
   });
 
@@ -6406,6 +6488,7 @@ class _Settings extends StatefulWidget {
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final Future<void> Function() onRetryStartupRecovery;
   final VoidCallback onRetryWorkspaceRestore;
 
   @override
@@ -6628,7 +6711,9 @@ class _SettingsState extends State<_Settings> {
             title: _startupRecoveryTitle(l10n, recovery),
             message: _startupRecoveryMessage(l10n, widget.viewModel),
             primaryActionLabel: l10n.retry,
-            onPrimaryAction: widget.viewModel.retryStartupRecovery,
+            onPrimaryAction: () {
+              unawaited(widget.onRetryStartupRecovery());
+            },
             secondaryActionLabel: widget.viewModel.supportsGitHubAuth
                 ? l10n.connectGitHub
                 : null,
