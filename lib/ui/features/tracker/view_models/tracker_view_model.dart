@@ -588,7 +588,6 @@ class TrackerViewModel extends ChangeNotifier {
           _section = TrackerSection.settings;
         }
       }
-
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -1951,15 +1950,14 @@ class TrackerViewModel extends ChangeNotifier {
       notifyListeners();
     }
 
-    final connectionFuture = connect();
-    unawaited(
-      connectionFuture.then<void>(
-        finishSuccess,
-        onError: (Object error, StackTrace _) => finishError(error),
-      ),
+    final handledConnectionFuture = connect().then<void>(
+      finishSuccess,
+      onError: (Object error, StackTrace _) async {
+        await finishError(error);
+      },
     );
     try {
-      await connectionFuture.timeout(_startupAccessRestoreTimeout);
+      await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
     } on TimeoutException {
       return;
     }

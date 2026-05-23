@@ -1268,7 +1268,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (normalizedTarget != workspace.normalizedTarget) {
       await _showUnavailableLocalWorkspaceRetryMismatch(
         workspace,
-        message: 'Selected directory does not match the saved workspace configuration.',
+        message:
+            'Selected directory does not match the saved workspace configuration.',
       );
       return;
     }
@@ -11706,7 +11707,7 @@ class _PrimaryButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       focusable: enabled,
-      expanded: expanded,
+      expanded: kIsWeb ? null : expanded,
       identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
@@ -11887,7 +11888,6 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           button: true,
           enabled: enabled,
           focusable: enabled,
-          expanded: expanded,
           identifier: semanticsIdentifier,
           label: summary.semanticLabel,
           sortKey: _semanticsSortKey(semanticsSortOrder),

@@ -14,7 +14,7 @@ void main() {
       final repository = _DelayedConnectRepository();
       final viewModel = TrackerViewModel(
         repository: repository,
-        authStore: const _FixedAuthStore(),
+        authStore: _FixedAuthStore(),
         workspaceId: workspaceId,
       );
       addTearDown(viewModel.dispose);
@@ -34,6 +34,30 @@ void main() {
       expect(viewModel.isLoading, isFalse);
     },
   );
+
+  test(
+    'deferred access restore consumes handled token failures after publishing the snapshot',
+    () async {
+      final authStore = _FixedAuthStore();
+      final viewModel = TrackerViewModel(
+        repository: _FailingConnectRepository(),
+        authStore: authStore,
+      );
+      addTearDown(viewModel.dispose);
+
+      await viewModel.load(deferAccessRestore: true);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.storedGitHubTokenInvalid,
+      );
+      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+    },
+  );
 }
 
 class _DelayedConnectRepository extends DemoTrackStateRepository {
@@ -48,11 +72,25 @@ class _DelayedConnectRepository extends DemoTrackStateRepository {
   }
 }
 
-class _FixedAuthStore implements TrackStateAuthStore {
-  const _FixedAuthStore();
+class _FailingConnectRepository extends DemoTrackStateRepository {
+  @override
+  bool get supportsGitHubAuth => true;
 
   @override
-  Future<void> clearToken({String? repository, String? workspaceId}) async {}
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    throw const TrackStateRepositoryException('Bad credentials');
+  }
+}
+
+class _FixedAuthStore implements TrackStateAuthStore {
+  _FixedAuthStore();
+
+  final List<String?> clearedRepositories = <String?>[];
+
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {
+    clearedRepositories.add(repository);
+  }
 
   @override
   Future<String?> migrateLegacyRepositoryToken({

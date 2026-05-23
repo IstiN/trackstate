@@ -143,6 +143,31 @@ void main() {
     },
   );
 
+  test(
+    'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
+    () async {
+      final authStore = _TokenTrackingAuthStore(
+        repository: 'trackstate/trackstate',
+        token: 'github-token',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _FailingStoredTokenRepository(),
+        authStore: authStore,
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.storedGitHubTokenInvalid,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+    },
+  );
+
   test('view model appends the next search page through load more', () async {
     final viewModel = TrackerViewModel(
       repository: DemoTrackStateRepository(
@@ -1749,6 +1774,16 @@ class _LocalHostedAccessRepository extends _LocalRuntimeRepository {
   }
 }
 
+class _FailingStoredTokenRepository extends DemoTrackStateRepository {
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    throw const TrackStateRepositoryException('Bad credentials');
+  }
+}
+
 class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   _LegacyRepositoryFallbackAuthStore({
     required this.repository,
@@ -1781,6 +1816,46 @@ class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     readScopes.add((repository: repository, workspaceId: workspaceId));
     if (repository == this.repository && workspaceId == this.workspaceId) {
+      return token;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveToken(
+    String token, {
+    String? repository,
+    String? workspaceId,
+  }) async {}
+}
+
+class _TokenTrackingAuthStore implements TrackStateAuthStore {
+  _TokenTrackingAuthStore({required this.repository, required this.token});
+
+  final String repository;
+  final String token;
+  final List<String?> clearedRepositories = <String?>[];
+
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {
+    clearedRepositories.add(repository);
+  }
+
+  @override
+  Future<String?> migrateLegacyRepositoryToken({
+    required String repository,
+    required String workspaceId,
+  }) async => null;
+
+  @override
+  Future<void> moveToken({
+    required String fromWorkspaceId,
+    required String toWorkspaceId,
+  }) async {}
+
+  @override
+  Future<String?> readToken({String? repository, String? workspaceId}) async {
+    if (repository == this.repository) {
       return token;
     }
     return null;

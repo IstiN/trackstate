@@ -84,15 +84,25 @@ class GitHubTrackStateProvider
         prefix: 'GitHub connection failed',
       );
     }
-    final userJson =
-        (kIsWeb
-                ? await github_auth_probe.fetchGitHubAuthProbeJson(
-                    _githubUri('/user'),
-                    headers: _githubHeaders(connection.token),
-                    client: _client,
-                  )
-                : await _getGitHubJson('/user', token: connection.token))
+    final userJson = await (() async {
+      if (!kIsWeb) {
+        return (await _getGitHubJson('/user', token: connection.token))
             as Map<String, Object?>;
+      }
+      final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
+        _githubUri('/user'),
+        headers: _githubHeaders(connection.token),
+        client: _client,
+      );
+      if (userResponse.statusCode != 200) {
+        _throwGitHubResponseException(
+          path: '/user',
+          response: http.Response(userResponse.body, userResponse.statusCode),
+          prefix: 'GitHub API request failed for /user',
+        );
+      }
+      return jsonDecode(userResponse.body) as Map<String, Object?>;
+    })();
     _connection = connection;
     return RepositoryUser(
       login: userJson['login']?.toString() ?? 'github',
