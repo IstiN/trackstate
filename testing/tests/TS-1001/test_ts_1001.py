@@ -28,6 +28,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
+from testing.frameworks.python.dart_probe_runtime import PythonDartProbeRuntime  # noqa: E402
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
     DelayedAuthWorkspaceProfilesRuntime,
 )
@@ -68,10 +69,23 @@ STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 10
 POLL_INTERVAL_SECONDS = 0.5
 LINKED_BUGS = ["TS-996"]
+DART_PROBE_ROOT = REPO_ROOT / "testing" / "tests" / TICKET_KEY / "dart_probe"
+DART_PROBE_ENTRYPOINT = Path("bin/restricted_session_probe.dart")
+REVIEW_THREADS = (
+    {"inReplyToId": 3292779536, "threadId": "PRRT_kwDOSU6Gf86ETYrh"},
+    {"inReplyToId": 3292779546, "threadId": "PRRT_kwDOSU6Gf86ETYro"},
+)
 LINKED_BUG_NOTES = (
     "Reviewed TS-996. Its fix makes startup enter shell_ready after the 11-second "
     "timeout instead of waiting for a hanging GitHub `/user` probe, so this test "
     "waits past that timeout before asserting the fallback session state."
+)
+REWORK_SUMMARY_ITEMS = (
+    "Started the live scenario from the local workspace so the delayed GitHub `/user` "
+    "startup probe is exercised deterministically, then switched into the hosted "
+    "workspace after `shell_ready` to inspect the fallback state.",
+    "Added a direct production `ProviderSession` probe that asserts "
+    "`canWrite=false` and `canCreateBranch=false` while authentication remains unresolved.",
 )
 
 REQUEST_STEPS = [
@@ -92,6 +106,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1001_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1001_failure.png"
 
@@ -110,7 +125,6 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
-    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
@@ -118,7 +132,6 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
         delayed_paths=("/user",),
-        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -138,8 +151,11 @@ def main() -> None:
         "simulated_probe_delay_seconds": SIMULATED_PROBE_DELAY_SECONDS,
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "preloaded_workspace_state": workspace_state,
-        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
+        "auth_probe_observed": False,
+        "startup_probe_missing": False,
+        "startup_probe_late": False,
+        "product_failure": False,
         "steps": [],
         "human_verification": [],
     }
@@ -198,13 +214,51 @@ def main() -> None:
                 trigger = _safe_trigger_payload(switcher_page)
                 result["startup_observation_late"] = late_surface
                 result["trigger_observation"] = trigger
-                step_one_error = (
-                    "Step 1 failed: the delayed GitHub `/user` startup probe never started, "
-                    "so the 11-second startup-timeout fallback scenario was not exercised.\n"
-                    f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
-                    f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
-                    f"Observed body text:\n{tracker_page.body_text()}"
+                result["github_request_urls"] = list(runtime.github_request_urls)
+                result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+                late_start_seconds = relative_startup_event_seconds(
+                    startup_started_at_monotonic,
+                    runtime.auth_probe_started_at_monotonic,
                 )
+                if runtime.delayed_request_urls or runtime.auth_probe_started_at_monotonic is not None:
+                    result["startup_probe_late"] = True
+                    result["product_failure"] = True
+                    step_one_error = (
+                        "Step 1 failed: the delayed GitHub `/user` request did not start "
+                        "within the startup observation window. It only appeared after the "
+                        "app had already issued other repository bootstrap requests, so the "
+                        "TS-1001 delayed-auth startup scenario was not exercised as a startup "
+                        "probe.\n"
+                        f"Observed GitHub requests:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
+                        f"Observed delayed requests:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
+                        f"auth_probe_started_after_start_seconds={late_start_seconds!r}\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
+                elif runtime.github_request_urls:
+                    result["startup_probe_missing"] = True
+                    result["product_failure"] = True
+                    step_one_error = (
+                        "Step 1 failed: the deployed app never issued the required GitHub "
+                        "`/user` startup auth probe. Startup only requested other GitHub "
+                        "endpoints, so the TS-1001 delayed-auth fallback scenario cannot be "
+                        "exercised from the current production surface.\n"
+                        f"Observed GitHub requests:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
+                        f"Observed delayed requests:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
+                else:
+                    step_one_error = (
+                        "Step 1 failed: the delayed GitHub `/user` startup probe never "
+                        "started, so the 11-second startup-timeout fallback scenario was not "
+                        "exercised.\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
                 tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 _record_step(
@@ -217,11 +271,13 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the live startup shell like a user and confirmed the app "
-                        "already showed `Needs sign-in` and `Connect GitHub` instead of "
-                        "running the delayed hosted auth bootstrap."
+                        "Viewed the live startup shell like a user and checked whether the "
+                        "current production build ever issued the required delayed GitHub "
+                        "`/user` startup auth probe."
                     ),
                     observed=(
+                        f"github_request_urls={json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}; "
                         f"trigger={json.dumps(trigger, ensure_ascii=True) if trigger else 'null'}; "
                         f"body_excerpt={_snippet(tracker_page.body_text())!r}; "
                         f"screenshot={result['screenshot']!r}"
@@ -229,6 +285,7 @@ def main() -> None:
                 )
                 _record_not_reached_steps(result, starting_step=2)
                 raise AssertionError(step_one_error)
+            result["auth_probe_observed"] = True
 
             auth_probe_started_after_start_seconds = relative_startup_event_seconds(
                 startup_started_at_monotonic,
@@ -317,6 +374,7 @@ def main() -> None:
                 )
             else:
                 failures.append(step_two_error)
+                result["product_failure"] = True
                 _record_step(
                     result,
                     step=2,
@@ -326,9 +384,17 @@ def main() -> None:
                 )
 
             try:
+                hosted_trigger = switcher_page.switch_to_workspace(
+                    display_name=HOSTED_DISPLAY_NAME,
+                    target_type_label="Hosted",
+                    detail_contains=service.repository,
+                    expected_state_label="Needs sign-in",
+                    timeout_ms=20_000,
+                )
                 trigger_observation = switcher_page.observe_trigger(timeout_ms=10_000)
                 switcher_observation = switcher_page.open_and_observe(timeout_ms=10_000)
                 active_row = _active_row(switcher_observation)
+                result["hosted_trigger_after_switch"] = _trigger_payload(hosted_trigger)
                 result["trigger_observation"] = _trigger_payload(trigger_observation)
                 result["switcher_observation"] = _switcher_payload(switcher_observation)
                 result["active_row_observation"] = _row_payload(active_row)
@@ -343,22 +409,26 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Inspected the active hosted workspace state while the delayed auth "
-                        "probe was still unresolved. The workspace trigger and the selected "
-                        "workspace row both exposed the exact `Needs sign-in` fallback state.\n"
+                        "Switched from the local startup shell into the hosted workspace "
+                        "while the delayed auth probe was still unresolved. The workspace "
+                        "trigger and the selected hosted row both exposed the exact "
+                        "`Needs sign-in` fallback state.\n"
                         f"trigger_label={trigger_observation.semantic_label!r}; "
                         f"active_row={json.dumps(result['active_row_observation'], ensure_ascii=True)}"
                     ),
                 )
             except Exception as error:
                 step_three_error = (
-                    "Step 3 failed: the live shell did not expose the expected fallback "
+                    "Step 3 failed: the test could not switch into the hosted fallback "
                     "workspace state while authentication was still unresolved.\n"
                     f"error={error}\n"
+                    f"hosted_trigger_after_switch="
+                    f"{json.dumps(result.get('hosted_trigger_after_switch'), ensure_ascii=True)}\n"
                     f"trigger_observation={json.dumps(result.get('trigger_observation'), ensure_ascii=True)}\n"
                     f"switcher_observation={json.dumps(result.get('switcher_observation'), ensure_ascii=True)}"
                 )
                 failures.append(step_three_error)
+                result["product_failure"] = True
                 _record_step(
                     result,
                     step=3,
@@ -376,6 +446,9 @@ def main() -> None:
                 )
                 result["create_issue_gate_observation"] = _create_gate_payload(gate_observation)
                 _assert_write_gate(runtime=runtime, gate=gate_observation)
+                restricted_session_probe = _run_restricted_session_probe()
+                result["restricted_session_probe"] = restricted_session_probe
+                _assert_restricted_session_probe(restricted_session_probe)
                 _record_step(
                     result,
                     step=4,
@@ -384,20 +457,35 @@ def main() -> None:
                     observed=(
                         "Opened the user-visible Create issue action after the timeout and "
                         "confirmed the live app kept write operations blocked instead of "
-                        "showing an editable create form.\n"
-                        f"gate={json.dumps(result['create_issue_gate_observation'], ensure_ascii=True)}"
+                        "showing an editable create form. The production `ProviderSession` "
+                        "probe also exposed `canWrite=false` and `canCreateBranch=false` "
+                        "while auth remained unresolved.\n"
+                        f"gate={json.dumps(result['create_issue_gate_observation'], ensure_ascii=True)}\n"
+                        f"restricted_session_probe={json.dumps(restricted_session_probe.get('payload'), ensure_ascii=True)}"
                     ),
                 )
             except Exception as error:
                 step_four_error = (
                     "Step 4 failed: the live Create issue flow did not expose the "
-                    "expected restricted-capability gate while auth remained unresolved.\n"
+                    "expected restricted-capability state while auth remained unresolved.\n"
                     f"error={error}\n"
                     f"create_issue_gate_observation="
                     f"{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}\n"
+                    f"restricted_session_probe="
+                    f"{json.dumps(result.get('restricted_session_probe'), ensure_ascii=True)}\n"
                     f"body_text={tracker_page.body_text()}"
                 )
                 failures.append(step_four_error)
+                error_text = str(error)
+                if result.get("auth_probe_observed") and not any(
+                    marker in error_text
+                    for marker in (
+                        "probe could not be analyzed",
+                        "did not return a structured payload",
+                        "did not expose the session payload",
+                    )
+                ):
+                    result["product_failure"] = True
                 _record_step(
                     result,
                     step=4,
@@ -502,7 +590,6 @@ def _workspace_state(repository: str) -> dict[str, object]:
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
-        active_workspace="hosted",
     )
 
 
@@ -648,6 +735,65 @@ def _assert_write_gate(
         )
 
 
+def _run_restricted_session_probe() -> dict[str, Any]:
+    runtime = PythonDartProbeRuntime(REPO_ROOT)
+    execution = runtime.execute(
+        probe_root=DART_PROBE_ROOT,
+        entrypoint=DART_PROBE_ENTRYPOINT,
+    )
+    return {
+        "succeeded": execution.succeeded,
+        "analyze_output": execution.analyze_output,
+        "run_output": execution.run_output,
+        "payload": execution.session_payload,
+    }
+
+
+def _assert_restricted_session_probe(probe: dict[str, Any]) -> None:
+    if not bool(probe.get("succeeded")):
+        raise AssertionError(
+            "The restricted session metadata probe could not be analyzed before the "
+            "fallback capability flags were checked.\n"
+            f"analyze_output={probe.get('analyze_output')}"
+        )
+    payload = probe.get("payload")
+    if not isinstance(payload, dict):
+        raise AssertionError(
+            "The restricted session metadata probe did not return a structured payload.\n"
+            f"payload={payload!r}"
+        )
+    if payload.get("status") != "passed":
+        raise AssertionError(
+            "The restricted session metadata probe reported a failure instead of the "
+            "expected unresolved-auth fallback session.\n"
+            f"payload={json.dumps(payload, ensure_ascii=True)}"
+        )
+    session = payload.get("session")
+    if not isinstance(session, dict):
+        raise AssertionError(
+            "The restricted session metadata probe did not expose the session payload.\n"
+            f"payload={json.dumps(payload, ensure_ascii=True)}"
+        )
+    if session.get("connectionState") != "ProviderConnectionState.connecting":
+        raise AssertionError(
+            "The restricted session metadata probe did not keep the provider session in "
+            "the unresolved connecting state.\n"
+            f"session={json.dumps(session, ensure_ascii=True)}"
+        )
+    if session.get("canWrite") is not False:
+        raise AssertionError(
+            "The restricted session metadata probe did not expose `canWrite=false` "
+            "while auth remained unresolved.\n"
+            f"session={json.dumps(session, ensure_ascii=True)}"
+        )
+    if session.get("canCreateBranch") is not False:
+        raise AssertionError(
+            "The restricted session metadata probe did not expose `canCreateBranch=false` "
+            "while auth remained unresolved.\n"
+            f"session={json.dumps(session, ensure_ascii=True)}"
+        )
+
+
 def _sample_payload(observation: dict[str, Any]) -> dict[str, Any]:
     trigger = observation.get("trigger")
     startup = observation.get("startup_observation", {})
@@ -740,6 +886,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result)
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -748,6 +895,7 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies(result)
     if _should_write_bug_description(result):
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -766,9 +914,9 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Linked Bugs Considered:* {', '.join(LINKED_BUGS)}",
         "",
         "h4. What was tested",
-        "* Delayed the GitHub {/user} startup probe by 30 seconds to reproduce the post-timeout fallback window from the linked bug fix.",
+        "* Started from the active local workspace so the delayed GitHub {/user} startup probe is exercised deterministically, then switched into the hosted workspace after the shell rendered.",
         "* Waited beyond the 11-second timeout before asserting instead of checking immediately.",
-        "* Checked the visible workspace state and the user-facing Create issue write gate while auth was expected to remain unresolved.",
+        "* Checked the hosted fallback workspace state, the user-facing Create issue gate, and a direct production session probe for {canWrite=false} and {canCreateBranch=false}.",
         "",
         "h4. Result",
         f"* {_actual_result_summary(result, passed=passed)}",
@@ -813,10 +961,13 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
         f"**Linked Bugs Considered:** {', '.join(LINKED_BUGS)}",
         "",
+        "## Rework summary",
+        *[f"- {item}" for item in REWORK_SUMMARY_ITEMS],
+        "",
         "## What was automated",
-        "- Delayed the live GitHub `/user` startup probe by 30 seconds to exercise the 11-second startup-timeout fallback path.",
+        "- Delayed the live GitHub `/user` startup probe by 30 seconds and exercised it from the local-active startup path before switching into the hosted workspace.",
         "- Waited past the timeout before asserting the visible shell and fallback state.",
-        "- Verified the active hosted workspace state and the blocked Create issue flow that a real user sees.",
+        "- Verified the active hosted workspace state, the blocked Create issue flow, and a direct production `ProviderSession` probe for `canWrite=false` and `canCreateBranch=false`.",
         "",
         "## Result",
         f"- {_actual_result_summary(result, passed=passed)}",
@@ -847,27 +998,30 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
-        f"## {TICKET_KEY} {'passed' if passed else 'failed'}",
+        "h3. Rework summary",
         "",
-        f"**Test case:** {TEST_CASE_TITLE}",
-        f"**Run command:** `{RUN_COMMAND}`",
-        f"**Result:** {'✅ PASSED' if passed else '❌ FAILED'}",
-        f"**Summary:** {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}",
-        f"**Observed:** {_actual_result_summary(result, passed=passed)}",
+        *[f"* {item}" for item in REWORK_SUMMARY_ITEMS],
+        "",
+        "h3. Latest result",
+        "",
+        f"*Status:* {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
+        f"*Run command:* {{code:bash}}{RUN_COMMAND}{{code}}",
+        f"*Summary:* {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}",
+        f"*Observed:* {_actual_result_summary(result, passed=passed)}",
         "",
     ]
     if not passed:
         lines.extend(
             [
-                "### Error",
-                "",
-                "```text",
-                str(result.get("traceback", result.get("error", ""))),
-                "```",
+                "h4. Error",
+                "{code}",
+                str(result.get("error", "")),
+                "{code}",
                 "",
             ],
         )
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def _should_write_bug_description(result: dict[str, Any]) -> bool:
@@ -876,7 +1030,7 @@ def _should_write_bug_description(result: dict[str, Any]) -> bool:
         return False
     if error.startswith("ModuleNotFoundError:"):
         return False
-    return True
+    return bool(result.get("product_failure"))
 
 
 def _build_bug_description(result: dict[str, Any]) -> str:
@@ -909,9 +1063,11 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
         f"- Delayed requests seen: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
         f"- Timeout observation: `{json.dumps(result.get('timeout_window_observation'), ensure_ascii=True)}`",
+        f"- Hosted trigger after switch: `{json.dumps(result.get('hosted_trigger_after_switch'), ensure_ascii=True)}`",
         f"- Trigger observation: `{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}`",
         f"- Switcher observation: `{json.dumps(result.get('switcher_observation'), ensure_ascii=True)}`",
         f"- Create issue gate observation: `{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}`",
+        f"- Restricted session probe: `{json.dumps(result.get('restricted_session_probe'), ensure_ascii=True)}`",
     ]
     return "\n".join(lines) + "\n"
 
@@ -921,8 +1077,10 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
         return (
             "After the 11-second startup timeout elapsed with the delayed auth probe "
             "still pending, the deployed app showed the interactive shell, the active "
-            "hosted workspace exposed `Needs sign-in`, and Create issue stayed blocked "
-            "behind the visible `Open settings` recovery gate."
+            "hosted workspace exposed `Needs sign-in`, Create issue stayed blocked "
+            "behind the visible `Open settings` recovery gate, and the direct "
+            "production session probe exposed `canWrite=false` and "
+            "`canCreateBranch=false`."
         )
     return str(
         result.get(
@@ -935,6 +1093,54 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
 
 def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
     return format_step_lines(result, jira=jira)
+
+
+def _write_review_replies(result: dict[str, Any]) -> None:
+    auth_probe_observed = bool(result.get("auth_probe_observed"))
+    startup_probe_missing = bool(result.get("startup_probe_missing"))
+    startup_probe_late = bool(result.get("startup_probe_late"))
+    restricted_session_probe = result.get("restricted_session_probe")
+    capability_reply = (
+        "Fixed: step 4 now pairs the live hosted `Create issue` recovery gate with a "
+        "production `ProviderSession` probe that asserts `canWrite=false` and "
+        "`canCreateBranch=false` while auth remains unresolved."
+        if restricted_session_probe
+        else "Fixed in code: step 4 now includes a production `ProviderSession` probe "
+        "for `canWrite=false` and `canCreateBranch=false`; the latest rerun did not "
+        "reach that assertion because an earlier step failed."
+    )
+    precondition_reply = (
+        "Fixed: the harness now starts from the local workspace so the delayed GitHub "
+        "`/user` startup probe is observed before assertions, then switches into the "
+        "hosted workspace for the fallback checks."
+        if auth_probe_observed
+        else "Fixed: the rerun now captures the exact startup timing. The current "
+        "production build does issue GitHub `/user`, but only after other repository "
+        "bootstrap requests instead of as the startup auth probe required by TS-1001, "
+        "so the result is recorded as a real product defect."
+        if startup_probe_late
+        else "Fixed: the rerun now captures the exact startup request contract. The "
+        "current production build never issues the required GitHub `/user` startup "
+        "probe and only requests other GitHub endpoints, so TS-1001 is now recorded "
+        "as a real product gap instead of a generic setup failure."
+        if startup_probe_missing
+        else "Fixed: the harness now distinguishes a missing delayed GitHub `/user` "
+        "probe as a precondition/setup failure and does not emit downstream product "
+        "bug evidence unless that delayed auth path is actually observed."
+    )
+    payload = {
+        "replies": [
+            {
+                **REVIEW_THREADS[0],
+                "reply": capability_reply,
+            },
+            {
+                **REVIEW_THREADS[1],
+                "reply": precondition_reply,
+            },
+        ]
+    }
+    REVIEW_REPLIES_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
