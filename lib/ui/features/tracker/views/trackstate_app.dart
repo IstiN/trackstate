@@ -5164,13 +5164,15 @@ _SyncPillSemanticLabel _workspaceSyncSemanticLabel(
 }
 
 String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
-    l10n.workspaceSyncAttentionNeededVisibleLabel;
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededVisibleLabel.value;
 
 _WorkspaceSyncAttentionNeededSemanticText
 _workspaceSyncAttentionNeededSemanticLabel(AppLocalizations l10n) =>
-    _WorkspaceSyncAttentionNeededSemanticText(
-      l10n.workspaceSyncAttentionNeededSemanticLabel,
-    );
+    _WorkspaceSyncAttentionNeededLocalizations(
+      l10n,
+    ).workspaceSyncAttentionNeededSemanticLabel;
 
 String _workspaceSyncMessage(BuildContext context, TrackerViewModel viewModel) {
   final l10n = AppLocalizations.of(context)!;
@@ -14013,6 +14015,28 @@ final class _WorkspaceSyncAttentionNeededSemanticText {
   const _WorkspaceSyncAttentionNeededSemanticText(this.value);
 
   final String value;
+}
+
+final class _WorkspaceSyncAttentionNeededVisibleText {
+  const _WorkspaceSyncAttentionNeededVisibleText(this.value);
+
+  final String value;
+}
+
+extension type const _WorkspaceSyncAttentionNeededLocalizations(
+  AppLocalizations _l10n
+) {
+  _WorkspaceSyncAttentionNeededVisibleText
+  get workspaceSyncAttentionNeededVisibleLabel =>
+      _WorkspaceSyncAttentionNeededVisibleText(
+        _l10n.workspaceSyncAttentionNeededVisibleLabel,
+      );
+
+  _WorkspaceSyncAttentionNeededSemanticText
+  get workspaceSyncAttentionNeededSemanticLabel =>
+      _WorkspaceSyncAttentionNeededSemanticText(
+        _l10n.workspaceSyncAttentionNeededSemanticLabel,
+      );
 }
 
 class _InlineInfoBanner extends StatelessWidget {

@@ -149,8 +149,8 @@ def _assert_live_semantic_contract(
     failures: list[str] = []
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production source no longer used the dedicated helper-localized "
-            f"sync semantic label `{config.required_source_snippet}`"
+            "the live production source no longer used the dedicated typed sync "
+            f"semantic-label wrapper access `{config.required_source_snippet}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
@@ -170,7 +170,7 @@ def _assert_live_semantic_contract(
     if failures:
         raise AssertionError(
             "Precondition failed: TS-907 could not confirm the live production "
-            "sync-pill helper-localized semantic label before mutating the temp workspace.\n"
+            "sync-pill semantic-label wrapper access before mutating the temp workspace.\n"
             f"Problems: {'; '.join(failures)}\n"
             f"Baseline analyze output:\n{_combined_output(validation.baseline_analyze)}"
         )
@@ -204,7 +204,7 @@ def _assert_mutation_applied(
     if config.replacement_source_snippet not in validation.mutated_source:
         raise AssertionError(
             "Step 2 failed: the temp workspace source did not contain the weaker "
-            f"semantic-label usage `{config.replacement_source_snippet}`.\n"
+            f"semantic-label wrapper access `{config.replacement_source_snippet}`.\n"
             f"Mutated file: {validation.target_path}"
         )
     _record_step(

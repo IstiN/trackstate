@@ -6,10 +6,10 @@ semantic label regression described in the ticket.
 The automation:
 1. copies this repository to a disposable temp workspace,
 2. verifies the live production source currently uses the dedicated
-   `_workspaceSyncAttentionNeededSemanticLabel(l10n)` helper-localized value
-   for the attention-needed sync pill,
-3. downgrades that helper-localized semantic label call in the temp copy to
-   `_workspaceSyncAttentionNeededVisibleLabel(l10n)`, and
+   typed `workspaceSyncAttentionNeededSemanticLabel` localization wrapper inside
+   `_workspaceSyncAttentionNeededSemanticLabel()`,
+3. downgrades that wrapper access inside the temp copy to
+   `workspaceSyncAttentionNeededVisibleLabel`, and
 4. runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart`.
 
 The test only passes when the local analysis command stops looking clean and
