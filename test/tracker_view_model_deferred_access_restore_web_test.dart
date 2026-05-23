@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -31,6 +33,37 @@ void main() {
             'load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
       );
       expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+    },
+  );
+
+  test(
+    'provider-backed deferred access restore publishes the setup snapshot before delayed connect completes',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final repository = ProviderBackedTrackStateRepository(
+        provider: _DelayedFixtureProvider(),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final completedQuickly = await Future.any([
+        viewModel.load(deferAccessRestore: true).then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
+      ]);
+
+      expect(
+        completedQuickly,
+        isTrue,
+        reason:
+            'Provider-backed load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
+      );
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
     },
   );
@@ -144,6 +177,132 @@ class _FixedAuthStore implements TrackStateAuthStore {
     String? repository,
     String? workspaceId,
   }) async {}
+}
+
+class _DelayedFixtureProvider implements TrackStateProviderAdapter {
+  _DelayedFixtureProvider();
+
+  final Completer<void> _authenticationGate = Completer<void>();
+  final Directory _root = Directory(
+    '${Directory.current.path}/trackstate-setup/DEMO',
+  );
+  bool _authenticated = false;
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => 'IstiN/trackstate-setup';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    await _authenticationGate.future;
+    _authenticated = true;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'fixture-revision',
+  );
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _authenticated,
+    isAdmin: false,
+    canCreateBranch: _authenticated,
+    canManageAttachments: _authenticated,
+    attachmentUploadMode: _authenticated
+        ? AttachmentUploadMode.full
+        : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fixture-revision',
+      sessionRevision: _authenticated ? 'connected' : 'disconnected',
+      connectionState: _authenticated
+          ? ProviderConnectionState.connected
+          : ProviderConnectionState.disconnected,
+      permission: await getPermission(),
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
+    final entries = <RepositoryTreeEntry>[];
+    await for (final entity in _root.list(recursive: true, followLinks: false)) {
+      final relative = entity.path.substring(_root.parent.path.length + 1);
+      if (entity is File) {
+        entries.add(RepositoryTreeEntry(path: relative, type: 'blob'));
+      }
+    }
+    entries.sort((left, right) => left.path.compareTo(right.path));
+    return entries;
+  }
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    final file = File('${_root.parent.path}/$path');
+    return RepositoryAttachment(path: path, bytes: await file.readAsBytes());
+  }
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    final file = File('${_root.parent.path}/$path');
+    return RepositoryTextFile(path: path, content: await file.readAsString());
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => 'main';
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => RepositoryAttachmentWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'fixture-revision',
+  );
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => RepositoryWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'fixture-revision',
+  );
 }
 
 class _EmptyAuthStore implements TrackStateAuthStore {
