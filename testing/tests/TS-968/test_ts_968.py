@@ -49,9 +49,10 @@ EXPECTED_RESULT = (
 REWORK_FIXES = [
     "Relaxed the control precondition so it checks for a clean passing baseline via exit code `0`, `# fail 0`, and no `not ok` lines instead of hardcoding the current pass count.",
     "Restricted `bug_description.md` generation to the real product-defect path where the baseline passed, the disposable workflow mutation succeeded, the expected assertion failure surfaced, and only the exit-code propagation stayed broken.",
+    "Relaxed the Step 2 TAP-summary assertion so it now accepts any failing summary plus a visible `not ok` record instead of pinning the mutated run to exactly `# fail 1`.",
 ]
 ASSERTION_PATTERN = re.compile(r"AssertionError", re.IGNORECASE)
-FAIL_COUNT_PATTERN = re.compile(r"# fail\s+1", re.IGNORECASE)
+FAILING_SUMMARY_PATTERN = re.compile(r"# fail\s+[1-9]\d*", re.IGNORECASE)
 ZERO_FAIL_COUNT_PATTERN = re.compile(r"# fail\s+0", re.IGNORECASE)
 NOT_OK_PATTERN = re.compile(r"^\s*not ok\b", re.IGNORECASE | re.MULTILINE)
 
@@ -250,9 +251,13 @@ def _evaluate_direct_command_output(
         step_failures.append(
             "the terminal output did not identify the failure as an `AssertionError`."
         )
-    if not FAIL_COUNT_PATTERN.search(mutated_output):
+    if not FAILING_SUMMARY_PATTERN.search(mutated_output):
         step_failures.append(
-            "the terminal summary did not report exactly one failed subtest."
+            "the terminal summary did not report a failing TAP summary."
+        )
+    if not NOT_OK_PATTERN.search(mutated_output):
+        step_failures.append(
+            "the terminal output did not include a failing `not ok` TAP record."
         )
 
     if step_failures:
@@ -396,7 +401,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             "",
             "h4. Result",
             "* Step 1 passed: the local environment mutation removed the mandatory workflow step without altering the production repository.",
-            "* Step 2 passed: the terminal visibly showed the failing accessibility subtest, the missing-step assertion, and a single failing TAP summary.",
+            "* Step 2 passed: the terminal visibly showed the failing accessibility subtest, the missing-step assertion, and a failing TAP summary.",
             "* Step 3 passed: the process propagated the assertion failure with exit code 1.",
             "* The observed behavior matched the expected result.",
             "",
@@ -803,6 +808,14 @@ def _review_reply_text(
             "Fixed: `bug_description.md` is now gated behind the real product-defect "
             "path only. This run still failed, but automation/setup failures no longer "
             "produce downstream product-bug payloads."
+        )
+
+    if root_comment_id == 3291709994:
+        return (
+            "Fixed: Step 2 no longer pins the mutated run to `# fail 1`. It now requires "
+            "the expected failing subtest and assertion message, a failing TAP summary, "
+            "and at least one visible `not ok` record, so future mutation-sensitive "
+            "subtests will not create false negatives."
         )
 
     status = "passed" if passed else "failed"
