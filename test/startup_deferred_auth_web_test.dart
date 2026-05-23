@@ -109,12 +109,15 @@ void main() {
         find.bySemanticsLabel(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Add workspace'), findsOneWidget);
+      final savedState = await service.loadState();
+      expect(savedState.activeWorkspaceId, isNull);
       expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        savedState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
     },
   );
