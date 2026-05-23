@@ -6,6 +6,7 @@ import 'dart:js_interop';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../../data/repositories/browser_local_workspace_repository.dart';
 import 'workspace_directory_picker.dart';
 
 typedef BrowserDirectoryAccessRequester =
@@ -35,10 +36,19 @@ Future<String?> pickWorkspaceDirectory({
       confirmButtonText: confirmButtonText,
       initialDirectory: normalizedInitialDirectory,
     );
-    return _normalizeSelection(
+    final normalizedSelection = _normalizeSelection(
       selection,
       initialDirectory: normalizedInitialDirectory,
     );
+    if (normalizedSelection != null &&
+        selection != null &&
+        selection is! String) {
+      rememberBrowserLocalWorkspaceSelection(
+        workspacePath: normalizedSelection,
+        selection: selection,
+      );
+    }
+    return normalizedSelection;
   } on Object catch (error) {
     if (_looksLikePickerCancellation(error)) {
       return null;
@@ -124,7 +134,10 @@ String? _directoryName(String? path) {
   if (normalized == null) {
     return null;
   }
-  final withoutTrailingSeparators = normalized.replaceAll(RegExp(r'[\\/]+$'), '');
+  final withoutTrailingSeparators = normalized.replaceAll(
+    RegExp(r'[\\/]+$'),
+    '',
+  );
   final slashIndex = withoutTrailingSeparators.lastIndexOf('/');
   final backslashIndex = withoutTrailingSeparators.lastIndexOf('\\');
   final lastSeparator = slashIndex > backslashIndex
