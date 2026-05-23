@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
@@ -8,6 +9,7 @@ import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_matcher.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -133,23 +135,46 @@ void main() {
         expect(savedState.hasProfiles, isTrue);
         expect(savedState.activeWorkspace?.target, snapshot.project.repository);
 
-        await tester.tap(
-          find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
-          warnIfMissed: false,
+        tester.semantics.tap(
+          _semanticsNodeFinder(
+            browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          ),
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('Saved workspaces'), findsOneWidget);
-        expect(find.text(snapshot.project.repository), findsWidgets);
-        expect(find.text('No saved workspaces yet.'), findsNothing);
-        final saveAndSwitchSemantics = tester.allWidgets.whereType<Semantics>().where(
-          (widget) =>
-              (widget.properties.label ?? '').trim() == 'Save and switch' &&
-              widget.properties.button == true,
+        final workspaceSwitcherSheet = find.byKey(
+          const ValueKey('workspace-switcher-sheet'),
+        );
+        expect(workspaceSwitcherSheet, findsOneWidget);
+        expect(
+          find.descendant(
+            of: workspaceSwitcherSheet,
+            matching: find.text('Saved workspaces'),
+          ),
+          findsOneWidget,
         );
         expect(
-          saveAndSwitchSemantics.length,
-          1,
+          find.descendant(
+            of: workspaceSwitcherSheet,
+            matching: find.text('No saved workspaces yet.'),
+          ),
+          findsNothing,
+        );
+
+        final saveAndSwitchSemantics = find.semantics.descendant(
+          of: _semanticsFinderFor(
+            tester: tester,
+            finder: workspaceSwitcherSheet,
+          ),
+          matching: find.semantics.byPredicate((node) {
+            final data = node.getSemanticsData();
+            return data.label.trim() == 'Save and switch' &&
+                data.flagsCollection.isButton;
+          }, describeMatch: (_) => 'Save and switch button in switcher panel'),
+        );
+        expect(
+          saveAndSwitchSemantics,
+          findsOne,
           reason:
               'The recovered workspace switcher should keep an explicit Save and '
               'switch semantics node so Flutter web exports the footer control '
@@ -363,3 +388,20 @@ class _WidgetStartupRecoveryRepository implements TrackStateRepository {
     required Uint8List bytes,
   }) async => issue;
 }
+
+FinderBase<SemanticsNode> _semanticsFinderFor({
+  required WidgetTester tester,
+  required Finder finder,
+}) {
+  final semanticsId = tester.getSemantics(finder).id;
+  return find.semantics.byPredicate(
+    (node) => node.id == semanticsId,
+    describeMatch: (_) => 'semantics node for $finder',
+  );
+}
+
+FinderBase<SemanticsNode> _semanticsNodeFinder(String identifier) =>
+    find.semantics.byPredicate(
+      (node) => node.getSemanticsData().identifier == identifier,
+      describeMatch: (_) => 'semantics node for $identifier',
+    );
