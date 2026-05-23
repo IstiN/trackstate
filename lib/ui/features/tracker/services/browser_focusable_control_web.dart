@@ -4,6 +4,8 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/widgets.dart';
 import 'package:web/web.dart' as web;
 
+import 'browser_focusable_control_logic.dart';
+
 class BrowserFocusableControl extends StatefulWidget {
   const BrowserFocusableControl({
     super.key,
@@ -16,6 +18,7 @@ class BrowserFocusableControl extends StatefulWidget {
     this.controlsId,
     this.expanded,
     this.selectedRow = false,
+    this.focusableWhenDisabled = false,
     this.tabIndex,
   });
 
@@ -28,6 +31,7 @@ class BrowserFocusableControl extends StatefulWidget {
   final String? controlsId;
   final bool? expanded;
   final bool selectedRow;
+  final bool focusableWhenDisabled;
   final int? tabIndex;
 
   @override
@@ -89,13 +93,19 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       return;
     }
     final enabled = widget.onPressed != null;
+    final domConfig = resolveBrowserFocusableControlDomConfig(
+      enabled: enabled,
+      focusableWhenDisabled: widget.focusableWhenDisabled,
+      explicitTabIndex: widget.tabIndex,
+    );
     element.disabled = false;
-    element.tabIndex = widget.tabIndex ?? (enabled ? 0 : -1);
+    element.tabIndex = domConfig.tabIndex;
+    element.textContent = widget.label;
     element.setAttribute('aria-label', widget.label);
     _setOptionalAttribute(
       element,
       attributeName: 'aria-disabled',
-      value: enabled ? null : 'true',
+      value: domConfig.ariaDisabled,
     );
     _setOptionalAttribute(
       element,
@@ -135,8 +145,12 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
     style.border = '0';
     style.borderRadius = '8px';
     style.background = 'transparent';
+    style.color = 'transparent';
     style.boxSizing = 'border-box';
     style.cursor = enabled ? 'pointer' : 'default';
+    style.textIndent = '-9999px';
+    style.overflow = 'hidden';
+    style.whiteSpace = 'nowrap';
     style.outlineOffset = '2px';
   }
 
