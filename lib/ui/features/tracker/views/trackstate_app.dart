@@ -6757,12 +6757,15 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   late final TextEditingController _branchController;
   final Map<String, VoidCallback> _workspaceRowFocusRequesters =
       <String, VoidCallback>{};
+  bool _canSaveWorkspace = false;
 
   @override
   void initState() {
     super.initState();
     _targetController = TextEditingController();
     _branchController = TextEditingController(text: 'main');
+    _targetController.addListener(_handleAddWorkspaceInputChanged);
+    _branchController.addListener(_handleAddWorkspaceInputChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
       if (!mounted || requestedFocusedWorkspaceId == null) {
@@ -6774,6 +6777,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
 
   @override
   void dispose() {
+    _targetController.removeListener(_handleAddWorkspaceInputChanged);
+    _branchController.removeListener(_handleAddWorkspaceInputChanged);
     _targetController.dispose();
     _branchController.dispose();
     super.dispose();
@@ -6796,8 +6801,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   }
 
   void _saveWorkspace() {
-    if (_targetController.text.trim().isEmpty ||
-        _branchController.text.trim().isEmpty) {
+    if (!_canSaveWorkspace) {
       return;
     }
     widget.onAddWorkspace(
@@ -6807,6 +6811,18 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
         defaultBranch: _branchController.text,
       ),
     );
+  }
+
+  void _handleAddWorkspaceInputChanged() {
+    final canSaveWorkspace =
+        _targetController.text.trim().isNotEmpty &&
+        _branchController.text.trim().isNotEmpty;
+    if (canSaveWorkspace == _canSaveWorkspace) {
+      return;
+    }
+    setState(() {
+      _canSaveWorkspace = canSaveWorkspace;
+    });
   }
 
   @override
@@ -7057,12 +7073,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
                 child: browser_focusable_control.BrowserFocusableControl(
                   label: l10n.workspaceSaveAndSwitch,
-                  onPressed: _saveWorkspace,
+                  onPressed: _canSaveWorkspace ? _saveWorkspace : null,
                   focusTargetId: _workspaceSwitcherSaveFocusId,
                   panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                  focusableWhenDisabled: true,
                   child: FilledButton(
                     key: const ValueKey('workspace-add-button'),
-                    onPressed: _saveWorkspace,
+                    onPressed: _canSaveWorkspace ? _saveWorkspace : null,
                     child: Text(l10n.workspaceSaveAndSwitch),
                   ),
                 ),
