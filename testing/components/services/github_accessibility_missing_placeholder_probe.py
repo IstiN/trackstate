@@ -154,8 +154,31 @@ module.exports = {
         if not text.strip():
             return ""
 
+        for raw_line in text.splitlines():
+            normalized_line = " ".join(raw_line.split()).strip()
+            lowered_line = normalized_line.lower()
+            if "flt-semantics-placeholder" not in lowered_line:
+                continue
+            if any(
+                marker in lowered_line
+                for marker in (
+                    "missing",
+                    "absent",
+                    "not found",
+                    "not present",
+                    "did not render",
+                    "never appeared",
+                )
+            ):
+                return self._snippet(normalized_line, limit=1200)
+
         lowered = text.lower()
         prioritized_markers = [
+            "missing flt-semantics-placeholder",
+            "accessibility pre-flight failed because flt-semantics-placeholder",
+            "pre-flight",
+            "preflight",
+            "flt-semantics-placeholder",
             "page.waitforselector",
             "page.waitforfunction",
             "testing/accessibility/accessibility_gate.spec.js",
