@@ -157,6 +157,85 @@ void main() {
         );
       },
     );
+
+    test(
+      'Shift+Tab from the selected row still wraps to disabled Save and switch when the footer bridge appears earlier in DOM order',
+      () {
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        final saveDomConfig = resolveBrowserFocusableControlDomConfig(
+          enabled: false,
+          focusableWhenDisabled: true,
+          explicitTabIndex: null,
+        );
+        final reverseWrapSaveButton = _appendButton(
+          panel,
+          label: 'Save and switch',
+          focusId: _saveFocusId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 216,
+          width: 180,
+          height: 40,
+          tabIndex: saveDomConfig.tabIndex,
+          ariaDisabled: saveDomConfig.ariaDisabled,
+        );
+
+        final reverseWrapRepositoryInput = _appendInput(
+          panel,
+          label: 'Repository',
+          left: 0,
+          top: 120,
+          width: 220,
+          height: 36,
+        );
+        final reverseWrapBranchInput = _appendInput(
+          panel,
+          label: 'Branch',
+          left: 0,
+          top: 168,
+          width: 220,
+          height: 36,
+        );
+
+        expect(reverseWrapSaveButton.tabIndex, 0);
+        expect(reverseWrapSaveButton.getAttribute('aria-disabled'), 'true');
+
+        activeRow.focus();
+        expect(web.document.activeElement, same(activeRow));
+
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(
+            key: 'Tab',
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          ),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        final activeElement = web.document.activeElement;
+        expect(
+          activeElement?.getAttribute('aria-label'),
+          'Save and switch',
+          reason:
+              'Reverse tab should use the visual workspace-switcher order, so '
+              'the disabled footer remains the wrap target even if its bridge '
+              'button is earlier than Repository and Branch in DOM order.',
+        );
+        expect(activeElement?.getAttribute('aria-disabled'), 'true');
+        expect(activeElement, isNot(same(reverseWrapBranchInput)));
+        expect(activeElement, isNot(same(reverseWrapRepositoryInput)));
+      },
+    );
   });
 }
 

@@ -5,6 +5,8 @@ class BrowserWorkspaceSwitcherTabStopSnapshot {
     required this.isWithinWorkspaceRow,
     required this.isSelectedWorkspaceRow,
     required this.isWorkspaceSwitcherTrigger,
+    this.visualTop,
+    this.visualLeft,
   });
 
   final bool isFocusable;
@@ -12,6 +14,8 @@ class BrowserWorkspaceSwitcherTabStopSnapshot {
   final bool isWithinWorkspaceRow;
   final bool isSelectedWorkspaceRow;
   final bool isWorkspaceSwitcherTrigger;
+  final double? visualTop;
+  final double? visualLeft;
 }
 
 int? browserWorkspaceSwitcherTabHandoffIndex({
@@ -77,16 +81,14 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
 int _lastInPanelControlIndex(
   List<BrowserWorkspaceSwitcherTabStopSnapshot> stops,
 ) {
-  for (var index = stops.length - 1; index >= 0; index -= 1) {
-    final stop = stops[index];
-    if (stop.isFocusable &&
+  return _lastMatchingIndex(
+    stops,
+    matches: (stop) =>
+        stop.isFocusable &&
         stop.isWithinWorkspaceSwitcher &&
         !stop.isWithinWorkspaceRow &&
-        !stop.isWorkspaceSwitcherTrigger) {
-      return index;
-    }
-  }
-  return -1;
+        !stop.isWorkspaceSwitcherTrigger,
+  );
 }
 
 int _lastWorkspaceRowIndex(
@@ -119,13 +121,61 @@ int _lastPostRowControlIndex(
   List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
   required int startIndex,
 }) {
-  for (var index = stops.length - 1; index >= startIndex; index -= 1) {
-    final stop = stops[index];
-    if (stop.isFocusable &&
+  return _lastMatchingIndex(
+    stops,
+    startIndex: startIndex,
+    matches: (stop) =>
+        stop.isFocusable &&
         stop.isWithinWorkspaceSwitcher &&
-        !stop.isWithinWorkspaceRow) {
-      return index;
+        !stop.isWithinWorkspaceRow,
+  );
+}
+
+int _lastMatchingIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
+  int startIndex = 0,
+  required bool Function(BrowserWorkspaceSwitcherTabStopSnapshot stop) matches,
+}) {
+  var fallbackIndex = -1;
+  var visuallyLastIndex = -1;
+  for (var index = startIndex; index < stops.length; index += 1) {
+    final stop = stops[index];
+    if (!matches(stop)) {
+      continue;
+    }
+    fallbackIndex = index;
+    if (stop.visualTop == null || stop.visualLeft == null) {
+      continue;
+    }
+    if (visuallyLastIndex == -1 ||
+        _compareVisualOrder(stops[visuallyLastIndex], stop) < 0) {
+      visuallyLastIndex = index;
     }
   }
-  return -1;
+  return visuallyLastIndex != -1 ? visuallyLastIndex : fallbackIndex;
+}
+
+int _compareVisualOrder(
+  BrowserWorkspaceSwitcherTabStopSnapshot left,
+  BrowserWorkspaceSwitcherTabStopSnapshot right,
+) {
+  final leftTop = left.visualTop;
+  final rightTop = right.visualTop;
+  if (leftTop != null && rightTop != null) {
+    final topDelta = leftTop - rightTop;
+    if (topDelta.abs() > 4) {
+      return topDelta < 0 ? -1 : 1;
+    }
+  }
+
+  final leftLeft = left.visualLeft;
+  final rightLeft = right.visualLeft;
+  if (leftLeft != null && rightLeft != null) {
+    final leftDelta = leftLeft - rightLeft;
+    if (leftDelta.abs() > 4) {
+      return leftDelta < 0 ? -1 : 1;
+    }
+  }
+
+  return 0;
 }
