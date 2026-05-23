@@ -549,14 +549,32 @@ class TrackerViewModel extends ChangeNotifier {
     _startupRecovery = null;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
+    Future<void> Function()? deferredAccessRestore;
+    var startedDeferredAccessRestore = false;
+
+    void startDeferredAccessRestoreIfNeeded() {
+      if (!deferAccessRestore ||
+          deferredAccessRestore == null ||
+          startedDeferredAccessRestore) {
+        return;
+      }
+      startedDeferredAccessRestore = true;
+      unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+    }
+
     try {
+      if (_repository is ProviderBackedTrackStateRepository &&
+          !usesLocalPersistence &&
+          supportsGitHubAuth) {
+        deferredAccessRestore = _restoreGitHubConnection;
+        startDeferredAccessRestoreIfNeeded();
+      }
       await _loadSnapshotAndSearch();
-      Future<void> Function()? deferredAccessRestore;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
         deferredAccessRestore = _restoreLocalHostedAccess;
       } else if (supportsGitHubAuth) {
-        deferredAccessRestore = _restoreGitHubConnection;
+        deferredAccessRestore ??= _restoreGitHubConnection;
       }
       if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
@@ -571,7 +589,7 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _configureWorkspaceSync();
       if (deferAccessRestore && deferredAccessRestore != null) {
-        unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+        startDeferredAccessRestoreIfNeeded();
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
