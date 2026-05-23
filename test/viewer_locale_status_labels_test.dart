@@ -158,7 +158,6 @@ void main() {
               'Timed out waiting for the cleared viewer-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
-        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
@@ -172,7 +171,6 @@ void main() {
           visible: true,
           failureMessage:
               'Timed out waiting for the default-locale fallback status to appear in JQL Search.',
-          onRetry: () => screen.searchIssues(query),
         );
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -238,7 +236,6 @@ void main() {
               'Timed out waiting for the cleared default-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
-        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
@@ -252,7 +249,6 @@ void main() {
           visible: true,
           failureMessage:
               'Timed out waiting for the canonical fallback status to appear in JQL Search.',
-          onRetry: () => screen.searchIssues(query),
         );
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -338,7 +334,6 @@ Future<void> _waitForIssueSearchResultTextVisibility(
   required String text,
   required bool visible,
   required String failureMessage,
-  Future<void> Function()? onRetry,
   Duration timeout = const Duration(seconds: 60),
   Duration step = const Duration(milliseconds: 100),
 }) async {
@@ -347,9 +342,6 @@ Future<void> _waitForIssueSearchResultTextVisibility(
     if (await screen.isIssueSearchResultTextVisible(key, summary, text) ==
         visible) {
       return;
-    }
-    if (onRetry != null) {
-      await onRetry();
     }
     await tester.pump(step);
   }
