@@ -711,9 +711,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         deadline = time.time() + self._config.pull_request_timeout_seconds
         latest: dict[str, Any] | None = None
         while time.time() < deadline:
-            latest = self._read_json_object(
+            latest = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if latest is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             head_sha = self._optional_string(((latest.get("head") or {}).get("sha")))
             if head_sha:
                 return latest
@@ -742,9 +745,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         }
 
         while time.time() < deadline:
-            pull_request = self._read_json_object(
+            pull_request = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if pull_request is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             sha = self._optional_string(((pull_request.get("head") or {}).get("sha"))) or head_sha
             mergeable_state = self._optional_string(pull_request.get("mergeable_state"))
             status_state = self._read_check_runs_state(sha) if sha else None
@@ -1293,6 +1299,20 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 f"Expected a JSON object from gh api {endpoint}, got {type(payload)}."
             )
         return payload
+
+    def _try_read_json_object(
+        self,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        field_args: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._read_json_object(endpoint, method=method, field_args=field_args)
+        except GitHubAccessibilityPullRequestGateError as error:
+            if "HTTP 404" in str(error):
+                return None
+            raise
 
     def _read_json_array(self, endpoint: str) -> list[Any]:
         payload = self._read_json(endpoint)
