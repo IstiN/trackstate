@@ -205,6 +205,7 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
+      expect(find.text('Add workspace'), findsOneWidget);
 
       delayedRepository.completeConnect();
       await tester.pump();
