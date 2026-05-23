@@ -2281,6 +2281,7 @@ class LiveWorkspaceSwitcherPage:
             return []
         return [item for item in payload if isinstance(item, dict)]
 
+
     def click_switcher_button(
         self,
         label: str,
