@@ -597,7 +597,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       final reason = _normalizeWorkspaceFailureReason(error);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-            error is UnsupportedError) {
+            _isUnsupportedActiveLocalStartupAccess(reason)) {
           return _preserveActiveLocalWorkspaceSelection(
             workspace,
             previousViewModel,
@@ -675,6 +675,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     return normalizedReason.contains(
           'local git startup access is unavailable',
         ) ||
+        normalizedReason.contains(
+          'saved local workspace access is unavailable until the folder is reselected in this browser',
+        ) ||
+        normalizedReason.contains('reselected in this browser') ||
         normalizedReason.contains('unsupported operation: process.run') ||
         normalizedReason.contains('process.run') ||
         normalizedReason.contains('unsupported operation') ||
@@ -923,9 +927,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isUnavailableBrowserLocalWorkspaceAccess(Object error) {
-    return _normalizeWorkspaceFailureReason(
-      error,
-    ).toLowerCase().contains('reselected in this browser');
+    return _isUnsupportedActiveLocalStartupAccess(
+      _normalizeWorkspaceFailureReason(error),
+    );
   }
 
   bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {

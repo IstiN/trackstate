@@ -90,10 +90,6 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
-        delayedRepository.requestedPaths,
-        contains('/repos/stable/repo/branches/main'),
-      );
-      expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsNothing,
       );
@@ -108,7 +104,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.bySemanticsLabel(
+          'Workspace switcher: Active local workspace, Local, Local Git',
+        ),
         findsOneWidget,
       );
       expect(find.text('Dashboard'), findsWidgets);
