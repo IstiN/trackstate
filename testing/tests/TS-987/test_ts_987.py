@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherButtonStateObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherRowObservation,
 )
@@ -22,6 +23,7 @@ from testing.components.pages.live_workspace_sync_page import (  # noqa: E402
 )
 from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
     StartupSurfaceObservation,
+    TrackStateTrackerPage,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -47,15 +49,16 @@ HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 LINKED_BUGS = ["TS-972"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 EXPECTED_HEADER_ACCESSIBLE_LABEL = "Sync error, attention needed"
-EXPECTED_HEADER_VISIBLE_LABEL = "Attention needed"
+EXPECTED_HEADER_VISIBLE_LABEL = "Sync error, attention needed"
 EXPECTED_SWITCHER_STATE = "Unavailable"
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
 DISALLOWED_ACTION_LABELS = ("Active",)
+RECOVERY_ACTION_CALLBACK_WAIT_SECONDS = 20
 REWORK_SUMMARY = (
     "Reused the live broken-local-workspace startup scenario from TS-964, then added "
-    "the stricter UI-guard assertions TS-987 needs: the header must surface the "
-    "sync error state and the Workspace switcher row must prioritize recovery over "
-    "the persisted active state."
+    "the stricter UI-guard assertions TS-987 needs: the header must surface the exact "
+    "sync error copy, and the Workspace switcher row must prioritize recovery over "
+    "the persisted active state with a usable recovery action."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -326,6 +329,40 @@ def main() -> None:
                         )
                         result["local_row"] = _row_payload(local_row)
                         _assert_switcher_row(local_row)
+                        recovery_action_label = _recovery_action_button_label(local_row)
+                        result["recovery_action_label"] = recovery_action_label
+                        recovery_button_state = _observe_recovery_action_button_state(
+                            tracker_page,
+                            action_label=recovery_action_label,
+                            local_row=local_row,
+                        )
+                        result["recovery_action_button_state"] = _button_state_payload(
+                            recovery_button_state,
+                        )
+                        _install_recovery_action_probe(tracker_page)
+                        result["recovery_action_probe_before"] = _read_recovery_action_probe(
+                            tracker_page,
+                        )
+                        page.click_saved_workspace_action_button(
+                            recovery_action_label,
+                            timeout_ms=10_000,
+                        )
+                        callback_observed, callback_observation = poll_until(
+                            probe=lambda: _observe_recovery_action_callback(tracker_page),
+                            is_satisfied=lambda observation: observation[
+                                "browser_access_callback_observed"
+                            ],
+                            timeout_seconds=RECOVERY_ACTION_CALLBACK_WAIT_SECONDS,
+                            interval_seconds=1,
+                        )
+                        result["recovery_action_callback_observation"] = callback_observation
+                        result["recovery_action_probe_after"] = callback_observation["probe"]
+                        _assert_recovery_action_usable(
+                            button_state=recovery_button_state,
+                            action_label=recovery_action_label,
+                            callback_observed=callback_observed,
+                            callback_observation=callback_observation,
+                        )
                     except AssertionError as error:
                         _record_step(
                             result,
@@ -361,20 +398,27 @@ def main() -> None:
                             action=REQUEST_STEPS[3],
                             observed=(
                                 "The broken local workspace row rendered in the recovery state "
-                                "instead of preserving the persisted active state.\n"
-                                f"local_row={json.dumps(result['local_row'], indent=2)}"
+                                "instead of preserving the persisted active state, and its "
+                                "visible recovery action remained usable.\n"
+                                f"local_row={json.dumps(result['local_row'], indent=2)}\n"
+                                f"recovery_action_label={result.get('recovery_action_label')!r}\n"
+                                "recovery_action_button_state="
+                                f"{json.dumps(result.get('recovery_action_button_state'), indent=2)}\n"
+                                "recovery_action_probe_after="
+                                f"{json.dumps(result.get('recovery_action_probe_after'), indent=2)}"
                             ),
                         )
                         _record_human_verification(
                             result,
                             check=(
                                 "Opened Workspace switcher and visually verified the broken "
-                                "workspace row text, state badge, and recovery action."
+                                "workspace row text, state badge, and usable recovery action."
                             ),
                             observed=(
                                 f"visible_text={local_row.visible_text!r}; "
                                 f"state_label={local_row.state_label!r}; "
-                                f"action_labels={json.dumps(list(local_row.action_labels), ensure_ascii=True)}"
+                                f"action_labels={json.dumps(list(local_row.action_labels), ensure_ascii=True)}; "
+                                f"recovery_action_label={result.get('recovery_action_label')!r}"
                             ),
                         )
 
@@ -519,6 +563,247 @@ def _assert_switcher_row(local_row: WorkspaceSwitcherRowObservation) -> None:
         raise AssertionError(
             "Step 4 failed: " + "; ".join(errors) + "."
         )
+
+
+def _recovery_action_button_label(local_row: WorkspaceSwitcherRowObservation) -> str:
+    for label in local_row.button_labels:
+        if any(label.startswith(f"{action}:") for action in ACCEPTED_RECOVERY_ACTION_LABELS):
+            return label
+    for label in local_row.action_labels:
+        if label in ACCEPTED_RECOVERY_ACTION_LABELS:
+            return label
+    raise AssertionError(
+        "Step 4 failed: the broken local workspace row did not expose a recovery "
+        "button label that could be clicked."
+    )
+
+
+def _observe_recovery_action_button_state(
+    tracker_page: TrackStateTrackerPage,
+    *,
+    action_label: str,
+    local_row: WorkspaceSwitcherRowObservation,
+) -> WorkspaceSwitcherButtonStateObservation:
+    payload = tracker_page.session.evaluate(
+        """
+        ({ actionLabel, displayName, acceptedActionLabels }) => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const isVisible = (element) => {
+            if (!element) {
+              return false;
+            }
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0
+              && rect.height > 0
+              && style.visibility !== 'hidden'
+              && style.display !== 'none';
+          };
+          const labelFor = (element) =>
+            normalize(
+              element?.getAttribute?.('aria-label')
+              || element?.getAttribute?.('title')
+              || element?.innerText
+              || element?.textContent
+              || '',
+            );
+          const visibleText = (element) =>
+            normalize(element?.innerText || element?.textContent || '');
+          const matchesAcceptedAction = (value) =>
+            acceptedActionLabels.includes(value.split(':', 1)[0].trim());
+          const candidates = Array.from(
+            document.querySelectorAll('button,[role="button"],flt-semantics[role="button"]'),
+          ).filter((element) => isVisible(element));
+          const candidate = candidates.find((element) => {
+            const elementLabel = labelFor(element);
+            const elementText = visibleText(element);
+            const combined = normalize(`${elementLabel} ${elementText}`);
+            return elementLabel === actionLabel
+              || elementText === actionLabel
+              || (
+                matchesAcceptedAction(elementLabel)
+                && combined.includes(displayName)
+              );
+          });
+          if (!candidate) {
+            return null;
+          }
+          const tabindex = candidate.getAttribute('tabindex');
+          const tabIndexValue = Number.isFinite(candidate.tabIndex)
+            ? candidate.tabIndex
+            : -1;
+          const ariaDisabled = normalize(candidate.getAttribute('aria-disabled'));
+          const disabled =
+            typeof candidate.disabled === 'boolean'
+              ? candidate.disabled
+              : candidate.hasAttribute('disabled');
+          const active = document.activeElement instanceof Element
+            ? document.activeElement
+            : null;
+          return {
+            label: labelFor(candidate),
+            visibleText: visibleText(candidate),
+            role: candidate.getAttribute('role'),
+            tagName: candidate.tagName,
+            tabindex,
+            tabIndexValue,
+            ariaDisabled: ariaDisabled.length > 0 ? ariaDisabled : null,
+            disabled,
+            keyboardFocusable: tabIndexValue >= 0,
+            activeWithin: Boolean(active && (active === candidate || candidate.contains(active))),
+            outerHTML: candidate.outerHTML,
+          };
+        }
+        """,
+        arg={
+            "actionLabel": action_label,
+            "displayName": local_row.display_name or LOCAL_DISPLAY_NAME,
+            "acceptedActionLabels": list(ACCEPTED_RECOVERY_ACTION_LABELS),
+        },
+    )
+    if not isinstance(payload, dict):
+        raise AssertionError(
+            "Step 4 failed: the open Workspace switcher did not expose a visible recovery "
+            f"button matching {action_label!r}.\n"
+            f"Observed body text:\n{tracker_page.session.evaluate('() => document.body?.innerText || \"\"')}"
+        )
+    return WorkspaceSwitcherButtonStateObservation(
+        label=str(payload.get("label", action_label)),
+        visible_text=str(payload.get("visibleText", "")),
+        role=str(payload.get("role")) if payload.get("role") is not None else None,
+        tag_name=str(payload.get("tagName", "")),
+        tabindex=(
+            str(payload.get("tabindex"))
+            if payload.get("tabindex") is not None
+            else None
+        ),
+        tab_index_value=int(payload.get("tabIndexValue", -1)),
+        aria_disabled=(
+            None if payload.get("ariaDisabled") is None else str(payload.get("ariaDisabled"))
+        ),
+        disabled=bool(payload.get("disabled")),
+        keyboard_focusable=bool(payload.get("keyboardFocusable")),
+        active_within=bool(payload.get("activeWithin")),
+        outer_html=str(payload.get("outerHTML", "")),
+    )
+
+
+def _install_recovery_action_probe(tracker_page: TrackStateTrackerPage) -> None:
+    tracker_page.session.evaluate(
+        """
+        () => {
+          if (window.__ts987RecoveryActionProbeInstalled) {
+            return;
+          }
+          const state = window.__ts987RecoveryActionProbe = window.__ts987RecoveryActionProbe || {
+            showDirectoryPickerCalls: [],
+            requestPermissionCalls: [],
+            installErrors: [],
+          };
+          const normalizeArgs = (args) => {
+            try {
+              return JSON.parse(JSON.stringify(args));
+            } catch (_) {
+              return Array.from(args, (value) => String(value));
+            }
+          };
+          try {
+            const fileSystemHandleProto = globalThis.FileSystemHandle?.prototype;
+            if (fileSystemHandleProto && typeof fileSystemHandleProto.requestPermission === 'function') {
+              fileSystemHandleProto.requestPermission = async function(...args) {
+                state.requestPermissionCalls.push({
+                  callNumber: state.requestPermissionCalls.length + 1,
+                  args: normalizeArgs(args),
+                });
+                return 'denied';
+              };
+            }
+            if (typeof globalThis.showDirectoryPicker === 'function') {
+              globalThis.showDirectoryPicker = async (...args) => {
+                state.showDirectoryPickerCalls.push({
+                  callNumber: state.showDirectoryPickerCalls.length + 1,
+                  args: normalizeArgs(args),
+                });
+                throw new DOMException('The user aborted a request.', 'AbortError');
+              };
+            }
+          } catch (error) {
+            state.installErrors.push(String(error));
+          }
+          window.__ts987RecoveryActionProbeInstalled = true;
+        }
+        """,
+    )
+
+
+def _read_recovery_action_probe(tracker_page: TrackStateTrackerPage) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const probe = window.__ts987RecoveryActionProbe || {};
+          return {
+            showDirectoryPickerCalls: Array.isArray(probe.showDirectoryPickerCalls)
+              ? probe.showDirectoryPickerCalls
+              : [],
+            requestPermissionCalls: Array.isArray(probe.requestPermissionCalls)
+              ? probe.requestPermissionCalls
+              : [],
+            installErrors: Array.isArray(probe.installErrors)
+              ? probe.installErrors
+              : [],
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "showDirectoryPickerCalls": [],
+            "requestPermissionCalls": [],
+            "installErrors": ["Recovery-action probe payload was not a dict."],
+        }
+    return {
+        "showDirectoryPickerCalls": list(payload.get("showDirectoryPickerCalls", [])),
+        "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
+        "installErrors": list(payload.get("installErrors", [])),
+    }
+
+
+def _observe_recovery_action_callback(
+    tracker_page: TrackStateTrackerPage,
+) -> dict[str, object]:
+    probe = _read_recovery_action_probe(tracker_page)
+    return {
+        "probe": probe,
+        "browser_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
+        ),
+    }
+
+
+def _assert_recovery_action_usable(
+    *,
+    button_state: WorkspaceSwitcherButtonStateObservation,
+    action_label: str,
+    callback_observed: bool,
+    callback_observation: dict[str, object],
+) -> None:
+    errors: list[str] = []
+    if button_state.disabled or button_state.aria_disabled == "true":
+        errors.append(
+            f"the recovery action {action_label!r} was rendered disabled"
+        )
+    if not button_state.keyboard_focusable:
+        errors.append(
+            f"the recovery action {action_label!r} was not keyboard focusable"
+        )
+    if not callback_observed:
+        errors.append(
+            "clicking the recovery action did not trigger any browser recovery flow "
+            "(`showDirectoryPicker()` or `requestPermission()`).\n"
+            f"callback_observation={json.dumps(callback_observation, indent=2)}"
+        )
+    if errors:
+        raise AssertionError("Step 4 failed: " + "; ".join(errors) + ".")
 
 
 def _record_step(
@@ -885,6 +1170,26 @@ def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, objec
         "icon_accessibility_label": row.icon_accessibility_label,
         "action_labels": list(row.action_labels),
         "button_labels": list(row.button_labels),
+    }
+
+
+def _button_state_payload(
+    button_state: WorkspaceSwitcherButtonStateObservation | None,
+) -> dict[str, object] | None:
+    if button_state is None:
+        return None
+    return {
+        "label": button_state.label,
+        "visible_text": button_state.visible_text,
+        "role": button_state.role,
+        "tag_name": button_state.tag_name,
+        "tabindex": button_state.tabindex,
+        "tab_index_value": button_state.tab_index_value,
+        "aria_disabled": button_state.aria_disabled,
+        "disabled": button_state.disabled,
+        "keyboard_focusable": button_state.keyboard_focusable,
+        "active_within": button_state.active_within,
+        "outer_html": button_state.outer_html,
     }
 
 
