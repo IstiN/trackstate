@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
@@ -10,39 +9,13 @@ import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.da
 
 void main() {
   test(
-    'deferred access restore publishes the snapshot before delayed connect completes',
+    'provider-backed deferred access restore waits for the delayed GitHub probe before publishing the setup snapshot',
     () async {
       const workspaceId = 'local:/tmp/trackstate-demo@main';
-      final repository = _DelayedConnectRepository();
-      final viewModel = TrackerViewModel(
-        repository: repository,
-        authStore: _FixedAuthStore(),
-        workspaceId: workspaceId,
-      );
-      addTearDown(viewModel.dispose);
-
-      final completedQuickly = await Future.any([
-        viewModel.load(deferAccessRestore: true).then((_) => true),
-        Future<bool>.delayed(const Duration(milliseconds: 200), () => false),
-      ]);
-
-      expect(
-        completedQuickly,
-        isTrue,
-        reason:
-            'load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
-      );
-      expect(viewModel.snapshot, isNotNull);
-      expect(viewModel.isLoading, isFalse);
-    },
-  );
-
-  test(
-    'provider-backed deferred access restore publishes the setup snapshot before delayed connect completes',
-    () async {
-      const workspaceId = 'local:/tmp/trackstate-demo@main';
-      final repository = ProviderBackedTrackStateRepository(
-        provider: _DelayedFixtureProvider(),
+      final provider = _DelayedFixtureProvider();
+      final repository = _DelayedFixtureRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
       );
       final viewModel = TrackerViewModel(
         repository: repository,
@@ -51,17 +24,21 @@ void main() {
       );
       addTearDown(viewModel.dispose);
 
+      final loadFuture = viewModel.load(deferAccessRestore: true);
       final completedQuickly = await Future.any([
-        viewModel.load(deferAccessRestore: true).then((_) => true),
+        loadFuture.then((_) => true),
         Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
       ]);
 
       expect(
         completedQuickly,
-        isTrue,
+        isFalse,
         reason:
-            'Provider-backed load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
+            'Provider-backed load(deferAccessRestore: true) must wait for the startup GitHub probe before publishing the shell snapshot.',
       );
+      expect(viewModel.snapshot, isNull);
+      provider.completeAuthentication();
+      await loadFuture;
       expect(viewModel.snapshot, isNotNull);
       expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
@@ -123,18 +100,6 @@ void main() {
   );
 }
 
-class _DelayedConnectRepository extends DemoTrackStateRepository {
-  _DelayedConnectRepository();
-
-  final Completer<void> _connectCompleter = Completer<void>();
-
-  @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    await _connectCompleter.future;
-    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
-  }
-}
-
 class _FailingConnectRepository extends DemoTrackStateRepository {
   @override
   bool get supportsGitHubAuth => true;
@@ -179,13 +144,53 @@ class _FixedAuthStore implements TrackStateAuthStore {
   }) async {}
 }
 
+Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
+  final base = await const DemoTrackStateRepository().loadSnapshot();
+  return TrackerSnapshot(
+    project: ProjectConfig(
+      key: base.project.key,
+      name: base.project.name,
+      repository: repository,
+      branch: base.project.branch,
+      defaultLocale: base.project.defaultLocale,
+      supportedLocales: base.project.supportedLocales,
+      issueTypeDefinitions: base.project.issueTypeDefinitions,
+      statusDefinitions: base.project.statusDefinitions,
+      fieldDefinitions: base.project.fieldDefinitions,
+      workflowDefinitions: base.project.workflowDefinitions,
+      priorityDefinitions: base.project.priorityDefinitions,
+      versionDefinitions: base.project.versionDefinitions,
+      componentDefinitions: base.project.componentDefinitions,
+      resolutionDefinitions: base.project.resolutionDefinitions,
+      attachmentStorage: base.project.attachmentStorage,
+    ),
+    issues: base.issues,
+    repositoryIndex: base.repositoryIndex,
+    loadWarnings: base.loadWarnings,
+    readiness: base.readiness,
+    startupRecovery: base.startupRecovery,
+  );
+}
+
+class _DelayedFixtureRepository extends ProviderBackedTrackStateRepository {
+  _DelayedFixtureRepository({
+    required this.snapshot,
+    required _DelayedFixtureProvider provider,
+  }) : super(provider: provider);
+
+  final TrackerSnapshot snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
 class _DelayedFixtureProvider implements TrackStateProviderAdapter {
   _DelayedFixtureProvider();
 
   final Completer<void> _authenticationGate = Completer<void>();
-  final Directory _root = Directory(
-    '${Directory.current.path}/trackstate-setup/DEMO',
-  );
   bool _authenticated = false;
 
   @override
@@ -253,35 +258,20 @@ class _DelayedFixtureProvider implements TrackStateProviderAdapter {
   Future<bool> isLfsTracked(String path) async => false;
 
   @override
-  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
-    final entries = <RepositoryTreeEntry>[];
-    await for (final entity in _root.list(recursive: true, followLinks: false)) {
-      final relative = entity.path.substring(_root.parent.path.length + 1);
-      if (entity is File) {
-        entries.add(RepositoryTreeEntry(path: relative, type: 'blob'));
-      }
-    }
-    entries.sort((left, right) => left.path.compareTo(right.path));
-    return entries;
-  }
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
 
   @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
-  }) async {
-    final file = File('${_root.parent.path}/$path');
-    return RepositoryAttachment(path: path, bytes: await file.readAsBytes());
-  }
+  }) async => throw UnimplementedError();
 
   @override
   Future<RepositoryTextFile> readTextFile(
     String path, {
     required String ref,
-  }) async {
-    final file = File('${_root.parent.path}/$path');
-    return RepositoryTextFile(path: path, content: await file.readAsString());
-  }
+  }) async => throw UnimplementedError();
 
   @override
   Future<String> resolveWriteBranch() async => 'main';
@@ -303,6 +293,13 @@ class _DelayedFixtureProvider implements TrackStateProviderAdapter {
     branch: request.branch,
     revision: 'fixture-revision',
   );
+
+  void completeAuthentication() {
+    if (_authenticationGate.isCompleted) {
+      return;
+    }
+    _authenticationGate.complete();
+  }
 }
 
 class _EmptyAuthStore implements TrackStateAuthStore {

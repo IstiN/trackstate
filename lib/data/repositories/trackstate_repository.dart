@@ -1908,6 +1908,7 @@ class ProviderBackedTrackStateRepository
     final dataRoot = projectPath.contains('/')
         ? projectPath.substring(0, projectPath.lastIndexOf('/'))
         : '';
+    final resolvedBranchFuture = _provider.resolveWriteBranch();
     final projectJson =
         await _getRepositoryJson(projectPath) as Map<String, Object?>;
     final configRoot = _resolveConfigRoot(projectJson, dataRoot);
@@ -1924,63 +1925,79 @@ class ProviderBackedTrackStateRepository
       configRoot: configRoot,
       locales: supportedLocales,
     );
-    final issueTypes = await _loadRequiredConfigEntries(
+    final issueTypeWarnings = <String>[];
+    final statusWarnings = <String>[];
+    final fieldWarnings = <String>[];
+    final issueTypesFuture = _loadRequiredConfigEntries(
       _joinPath(configRoot, 'issue-types.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['issueTypes'] ?? const {},
-      loadWarnings: loadWarnings,
+      loadWarnings: issueTypeWarnings,
       warningSubject: 'issue types',
       fallbackEntries: _issueTypeDefinitions,
     );
-    final statuses = await _loadRequiredConfigEntries(
+    final statusesFuture = _loadRequiredConfigEntries(
       _joinPath(configRoot, 'statuses.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['statuses'] ?? const {},
-      loadWarnings: loadWarnings,
+      loadWarnings: statusWarnings,
       warningSubject: 'statuses',
       fallbackEntries: _statusDefinitions,
     );
-    final fields = await _getFieldDefinitions(
+    final fieldsFuture = _getFieldDefinitions(
       _joinPath(configRoot, 'fields.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['fields'] ?? const {},
-      loadWarnings: loadWarnings,
+      loadWarnings: fieldWarnings,
     );
-    final workflows = await _loadWorkflowDefinitions(
-      blobPaths: blobPaths,
-      path: _joinPath(configRoot, 'workflows.json'),
-      statusDefinitions: statuses,
-    );
-    final priorities = await _loadOptionalConfigEntries(
+    final prioritiesFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'priorities.json'),
       localizedLabels: localizedLabels['priorities'] ?? const {},
     );
-    final versions = await _loadOptionalConfigEntries(
+    final versionsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'versions.json'),
       localizedLabels: localizedLabels['versions'] ?? const {},
     );
-    final components = await _loadOptionalConfigEntries(
+    final componentsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'components.json'),
       localizedLabels: localizedLabels['components'] ?? const {},
     );
-    final resolutions = await _loadOptionalConfigEntries(
+    final resolutionsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'resolutions.json'),
       localizedLabels: localizedLabels['resolutions'] ?? const {},
     );
-    final repositoryIndex = await _loadRepositoryIndex(
+    final issueTypes = await issueTypesFuture;
+    final repositoryIndexFuture = _loadRepositoryIndex(
       blobPaths: blobPaths,
       dataRoot: dataRoot,
       issueTypeDefinitions: issueTypes,
     );
+    final statuses = await statusesFuture;
+    final workflowsFuture = _loadWorkflowDefinitions(
+      blobPaths: blobPaths,
+      path: _joinPath(configRoot, 'workflows.json'),
+      statusDefinitions: statuses,
+    );
+    final fields = await fieldsFuture;
+    final priorities = await prioritiesFuture;
+    final versions = await versionsFuture;
+    final components = await componentsFuture;
+    final resolutions = await resolutionsFuture;
+    final workflows = await workflowsFuture;
+    final repositoryIndex = await repositoryIndexFuture;
+    loadWarnings
+      ..addAll(issueTypeWarnings)
+      ..addAll(statusWarnings)
+      ..addAll(fieldWarnings);
     final project = ProjectConfig(
       key: (projectJson['key'] as String?) ?? 'DEMO',
       name: (projectJson['name'] as String?) ?? 'TrackState Project',
       repository: _provider.repositoryLabel,
-      branch: await _provider.resolveWriteBranch(),
+      branch: await resolvedBranchFuture,
       defaultLocale: defaultLocale,
       supportedLocales: supportedLocales,
       issueTypeDefinitions: issueTypes,

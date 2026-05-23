@@ -599,12 +599,16 @@ class _TrackStateAppState extends State<TrackStateApp>
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         nextViewModel.dispose();
+        final requiresBrowserReselection =
+            _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-            _isUnsupportedActiveLocalStartupAccess(reason)) {
+            (requiresBrowserReselection ||
+                _isUnsupportedActiveLocalStartupAccess(reason))) {
           return _preserveActiveLocalWorkspaceSelection(
             workspace,
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
+            markUnavailable: requiresBrowserReselection,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -625,12 +629,16 @@ class _TrackStateAppState extends State<TrackStateApp>
     } on Object catch (error) {
       final reason = _normalizeWorkspaceFailureReason(error);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
+        final requiresBrowserReselection =
+            _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
-            error is UnsupportedError) {
+            (requiresBrowserReselection ||
+                _isUnsupportedActiveLocalStartupAccess(reason))) {
           return _preserveActiveLocalWorkspaceSelection(
             workspace,
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
+            markUnavailable: requiresBrowserReselection,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -952,9 +960,17 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isUnavailableBrowserLocalWorkspaceAccess(Object error) {
-    return _normalizeWorkspaceFailureReason(
-      error,
-    ).toLowerCase().contains('reselected in this browser');
+    return _requiresBrowserLocalWorkspaceReselection(
+      _normalizeWorkspaceFailureReason(error),
+    );
+  }
+
+  bool _requiresBrowserLocalWorkspaceReselection(String reason) {
+    final normalizedReason = reason.toLowerCase();
+    return normalizedReason.contains(
+          'saved local workspace access is unavailable until the folder is reselected in this browser',
+        ) ||
+        normalizedReason.contains('reselected in this browser');
   }
 
   bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {
