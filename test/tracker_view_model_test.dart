@@ -421,6 +421,43 @@ void main() {
   );
 
   test(
+    'view model keeps startup recovery active when retry fails with a non-rate-limit startup error',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [
+            GitHubRateLimitException(
+              message:
+                  'GitHub API request failed for /repos/demo/contents/DEMO/project.json (403): {"message":"API rate limit exceeded"}',
+              requestPath: '/repos/demo/contents/DEMO/project.json',
+              statusCode: 403,
+            ),
+            TrackStateRepositoryException(
+              'GitHub API request failed for /repos/demo/contents/DEMO/project.json (500): {"message":"Internal Server Error"}',
+            ),
+          ],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message, isNull);
+
+      await viewModel.retryStartupRecovery();
+
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
     'view model loads the local repository user for avatar details',
     () async {
       final viewModel = TrackerViewModel(

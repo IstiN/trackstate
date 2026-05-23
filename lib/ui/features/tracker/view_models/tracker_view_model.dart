@@ -539,6 +539,7 @@ class TrackerViewModel extends ChangeNotifier {
       issues.where((issue) => issue.status == IssueStatus.inProgress).length;
 
   Future<void> load({bool deferAccessRestore = false}) async {
+    final previousStartupRecovery = startupRecovery;
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
       maxResults: _searchPageSize,
@@ -601,10 +602,10 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
-      if (recovery == null) {
+      if (recovery == null && previousStartupRecovery == null) {
         _message = TrackerMessage.dataLoadFailed(error);
       } else {
-        _startupRecovery = recovery;
+        _startupRecovery = recovery ?? previousStartupRecovery;
         if (supportsGitHubAuth) {
           await _restoreGitHubConnection();
         }
