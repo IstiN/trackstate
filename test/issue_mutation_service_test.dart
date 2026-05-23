@@ -743,10 +743,22 @@ Future<void> _deleteDirectoryIfPresent(Directory directory) async {
   if (!directory.existsSync()) {
     return;
   }
-  try {
-    await directory.delete(recursive: true);
-  } on PathNotFoundException {
-    // Another cleanup path may have already removed the temp fixture directory.
+  for (var attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await directory.delete(recursive: true);
+      return;
+    } on PathNotFoundException {
+      // Another cleanup path may have already removed the temp fixture directory.
+      return;
+    } on FileSystemException catch (error) {
+      final isDirectoryNotEmpty =
+          error.osError?.errorCode == 39 ||
+          error.message.contains('Directory not empty');
+      if (!isDirectoryNotEmpty || attempt == 2) {
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
   }
 }
 

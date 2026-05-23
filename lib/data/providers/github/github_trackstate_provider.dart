@@ -6,6 +6,9 @@ import 'package:http/http.dart' as http;
 import '../../../domain/models/trackstate_models.dart';
 import '../foundation_compat.dart' show kIsWeb;
 import '../trackstate_provider.dart';
+import 'github_auth_probe_stub.dart'
+    if (dart.library.js_interop) 'github_auth_probe_web.dart'
+    as github_auth_probe;
 
 class GitHubTrackStateProvider
     implements
@@ -81,9 +84,25 @@ class GitHubTrackStateProvider
         prefix: 'GitHub connection failed',
       );
     }
-    final userJson =
-        await _getGitHubJson('/user', token: connection.token)
+    final userJson = await (() async {
+      if (!kIsWeb) {
+        return (await _getGitHubJson('/user', token: connection.token))
             as Map<String, Object?>;
+      }
+      final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
+        _githubUri('/user'),
+        headers: _githubHeaders(connection.token),
+        client: _client,
+      );
+      if (userResponse.statusCode != 200) {
+        _throwGitHubResponseException(
+          path: '/user',
+          response: http.Response(userResponse.body, userResponse.statusCode),
+          prefix: 'GitHub API request failed for /user',
+        );
+      }
+      return jsonDecode(userResponse.body) as Map<String, Object?>;
+    })();
     _connection = connection;
     return RepositoryUser(
       login: userJson['login']?.toString() ?? 'github',

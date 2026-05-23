@@ -13,7 +13,8 @@ The automation:
 3. opens the Workspace switcher and clicks the exact visible action exposed for
    the unavailable saved workspace row
 4. records whether the deployed app invokes `showDirectoryPicker(...)` or
-   `FileSystemHandle.requestPermission(...)`
+   `FileSystemHandle.requestPermission(...)`, and if picker automation is
+   required it returns a real OPFS-backed `FileSystemDirectoryHandle`
 5. verifies the restored workspace becomes active as `Local Git`, the shell
    stays interactive, and browser storage updates to the local workspace
 
