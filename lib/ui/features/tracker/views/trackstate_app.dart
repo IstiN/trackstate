@@ -281,6 +281,36 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  Future<TrackStateRepository> _openWorkspaceRepository(
+    WorkspaceProfile workspace,
+  ) async {
+    if (!workspace.isLocal) {
+      return _openHostedRepository(
+        repository: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    if (!kIsWeb) {
+      return _openLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+    }
+    final repository = await widget.openBrowserLocalRepository(
+      repositoryPath: workspace.target,
+      defaultBranch: workspace.defaultBranch,
+      writeBranch: workspace.writeBranch,
+    );
+    if (repository != null) {
+      return repository;
+    }
+    throw StateError(
+      'Saved local workspace access is unavailable until the folder is reselected in this browser.',
+    );
+  }
+
   Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
@@ -433,11 +463,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on Object {
@@ -540,17 +566,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
   }) async {
     try {
-      final repository = workspace.isLocal
-          ? await _openLocalRepository(
-              repositoryPath: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            )
-          : await _openHostedRepository(
-              repository: workspace.target,
-              defaultBranch: workspace.defaultBranch,
-              writeBranch: workspace.writeBranch,
-            );
+      final repository = await _openWorkspaceRepository(workspace);
       final nextViewModel = _createViewModel(
         repository: repository,
         previous: previousViewModel,
@@ -912,18 +928,23 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace,
   ) async {
     try {
-      final repository = await _openLocalRepository(
-        repositoryPath: workspace.target,
-        defaultBranch: workspace.defaultBranch,
-        writeBranch: workspace.writeBranch,
-      );
+      final repository = await _openWorkspaceRepository(workspace);
       await repository.loadSnapshot();
       return true;
     } on UnsupportedError {
       return true;
     } on Object catch (error) {
+      if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        return true;
+      }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
     }
+  }
+
+  bool _isUnavailableBrowserLocalWorkspaceAccess(Object error) {
+    return _normalizeWorkspaceFailureReason(
+      error,
+    ).toLowerCase().contains('reselected in this browser');
   }
 
   bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {
@@ -7229,25 +7250,24 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child:
-                    kIsWeb && !_canSaveWorkspace
-                        ? _WorkspaceSwitcherDisabledFooterButton(
-                            buttonKey: const ValueKey('workspace-add-button'),
-                            label: l10n.workspaceSaveAndSwitch,
-                            semanticsIdentifier: _workspaceSwitcherSaveFocusId,
-                          )
-                        : browser_focusable_control.BrowserFocusableControl(
-                            label: l10n.workspaceSaveAndSwitch,
-                            onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                            focusTargetId: _workspaceSwitcherSaveFocusId,
-                            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                            focusableWhenDisabled: true,
-                            child: FilledButton(
-                              key: const ValueKey('workspace-add-button'),
-                              onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                              child: Text(l10n.workspaceSaveAndSwitch),
-                            ),
-                          ),
+                child: kIsWeb && !_canSaveWorkspace
+                    ? _WorkspaceSwitcherDisabledFooterButton(
+                        buttonKey: const ValueKey('workspace-add-button'),
+                        label: l10n.workspaceSaveAndSwitch,
+                        semanticsIdentifier: _workspaceSwitcherSaveFocusId,
+                      )
+                    : browser_focusable_control.BrowserFocusableControl(
+                        label: l10n.workspaceSaveAndSwitch,
+                        onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                        focusTargetId: _workspaceSwitcherSaveFocusId,
+                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                        focusableWhenDisabled: true,
+                        child: FilledButton(
+                          key: const ValueKey('workspace-add-button'),
+                          onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                          child: Text(l10n.workspaceSaveAndSwitch),
+                        ),
+                      ),
               ),
             ),
           ],
@@ -7724,10 +7744,7 @@ class _WorkspaceSwitcherDisabledFooterButton extends StatelessWidget {
           ),
           child: DecoratedBox(
             key: buttonKey,
-            decoration: ShapeDecoration(
-              color: backgroundColor,
-              shape: shape,
-            ),
+            decoration: ShapeDecoration(color: backgroundColor, shape: shape),
             child: Padding(
               padding: padding,
               child: Text(
