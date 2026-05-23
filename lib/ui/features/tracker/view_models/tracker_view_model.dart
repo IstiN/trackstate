@@ -35,6 +35,8 @@ enum HostedRepositoryAccessMode {
   attachmentRestricted,
 }
 
+const Duration _startupAccessRestoreTimeout = Duration(seconds: 10);
+
 enum TrackerMessageTone { info, error }
 
 enum TrackerMessageKind {
@@ -546,12 +548,12 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       await _loadSnapshotAndSearch();
-      Future<void>? deferredAccessRestore;
+      Future<void> Function()? deferredAccessRestore;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
-        deferredAccessRestore = _restoreLocalHostedAccess();
+        deferredAccessRestore = _restoreLocalHostedAccess;
       } else if (supportsGitHubAuth) {
-        deferredAccessRestore = _restoreGitHubConnection();
+        deferredAccessRestore = _restoreGitHubConnection;
       }
       if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
@@ -562,7 +564,7 @@ class TrackerViewModel extends ChangeNotifier {
         _section = TrackerSection.settings;
       }
       if (!deferAccessRestore && deferredAccessRestore != null) {
-        await deferredAccessRestore;
+        await deferredAccessRestore();
       }
       _configureWorkspaceSync();
       if (deferAccessRestore && deferredAccessRestore != null) {
@@ -593,12 +595,11 @@ class TrackerViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _finishDeferredAccessRestore(Future<void> restore) async {
-    await restore;
-    if (_disposed) {
-      return;
-    }
-    notifyListeners();
+  Future<void> _finishDeferredAccessRestore(
+    Future<void> Function() restore,
+  ) async {
+    await Future<void>.microtask(() {});
+    unawaited(restore());
   }
 
   Future<void> retryStartupRecovery() async {
@@ -1816,35 +1817,46 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
-      final user = await _repository.connect(
-        GitHubConnection(
-          repository: target.repository,
-          branch: target.branch,
-          token: storedToken,
+      await _runAutomaticRepositoryConnectionRestore(
+        connect: () => _repository.connect(
+          GitHubConnection(
+            repository: target.repository,
+            branch: target.branch,
+            token: storedToken,
+          ),
         ),
+        onSuccess: (user) async {
+          _connectedUser = user;
+          _isConnected = true;
+          if (callbackToken != null) {
+            await _authStore.saveToken(
+              callbackToken,
+              repository: _workspaceId == null ? target.repository : null,
+              workspaceId: _workspaceId,
+            );
+          }
+          await _resumeStartupRecoveryAfterAuthentication();
+          if (callbackToken != null) {
+            _message = TrackerMessage.githubConnected(
+              login: user.login,
+              repository: target.repository,
+            );
+          }
+        },
+        onError: (error) async {
+          _message = TrackerMessage.storedGitHubTokenInvalid(error);
+          await _authStore.clearToken(
+            repository: _workspaceId == null ? target.repository : null,
+            workspaceId: _workspaceId,
+          );
+        },
+        onFinally: () async {
+          _bindProviderSession();
+        },
       );
-      _connectedUser = user;
-      _isConnected = true;
-      if (callbackToken != null) {
-        await _authStore.saveToken(
-          callbackToken,
-          repository: _workspaceId == null ? target.repository : null,
-          workspaceId: _workspaceId,
-        );
-      }
-      await _resumeStartupRecoveryAfterAuthentication();
-      _message = TrackerMessage.githubConnected(
-        login: user.login,
-        repository: target.repository,
-      );
-    } on Object catch (error) {
-      _message = TrackerMessage.storedGitHubTokenInvalid(error);
-      await _authStore.clearToken(
-        repository: _workspaceId == null ? target.repository : null,
-        workspaceId: _workspaceId,
-      );
-    } finally {
+    } on Object catch (_) {
       _bindProviderSession();
+      rethrow;
     }
   }
 
@@ -1878,19 +1890,78 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
-      _connectedUser = await _repository.connect(
-        RepositoryConnection(
-          repository: target.repository,
-          branch: target.branch,
-          token: storedToken,
+      await _runAutomaticRepositoryConnectionRestore(
+        connect: () => _repository.connect(
+          RepositoryConnection(
+            repository: target.repository,
+            branch: target.branch,
+            token: storedToken,
+          ),
         ),
+        onSuccess: (user) async {
+          _connectedUser = user;
+          _isConnected = true;
+          _hasLocalHostedAccessSession = true;
+        },
+        onError: (_) async {
+          _hasLocalHostedAccessSession = false;
+        },
+        onFinally: () async {
+          _bindProviderSession();
+        },
       );
-      _isConnected = true;
-      _hasLocalHostedAccessSession = true;
     } on Object {
       _hasLocalHostedAccessSession = false;
-    } finally {
       _bindProviderSession();
+      rethrow;
+    }
+  }
+
+  Future<void> _runAutomaticRepositoryConnectionRestore({
+    required Future<RepositoryUser> Function() connect,
+    required Future<void> Function(RepositoryUser user) onSuccess,
+    required Future<void> Function(Object error) onError,
+    required Future<void> Function() onFinally,
+  }) async {
+    var settled = false;
+
+    Future<void> finishSuccess(RepositoryUser user) async {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await onSuccess(user);
+      await onFinally();
+      if (_disposed) {
+        return;
+      }
+      notifyListeners();
+    }
+
+    Future<void> finishError(Object error) async {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await onError(error);
+      await onFinally();
+      if (_disposed) {
+        return;
+      }
+      notifyListeners();
+    }
+
+    final connectionFuture = connect();
+    unawaited(
+      connectionFuture.then<void>(
+        finishSuccess,
+        onError: (Object error, StackTrace _) => finishError(error),
+      ),
+    );
+    try {
+      await connectionFuture.timeout(_startupAccessRestoreTimeout);
+    } on TimeoutException {
+      return;
     }
   }
 

@@ -6,6 +6,9 @@ import 'package:http/http.dart' as http;
 import '../../../domain/models/trackstate_models.dart';
 import '../foundation_compat.dart' show kIsWeb;
 import '../trackstate_provider.dart';
+import 'github_auth_probe_stub.dart'
+    if (dart.library.js_interop) 'github_auth_probe_web.dart'
+    as github_auth_probe;
 
 class GitHubTrackStateProvider
     implements
@@ -82,7 +85,13 @@ class GitHubTrackStateProvider
       );
     }
     final userJson =
-        await _getGitHubJson('/user', token: connection.token)
+        (kIsWeb
+                ? await github_auth_probe.fetchGitHubAuthProbeJson(
+                    _githubUri('/user'),
+                    headers: _githubHeaders(connection.token),
+                    client: _client,
+                  )
+                : await _getGitHubJson('/user', token: connection.token))
             as Map<String, Object?>;
     _connection = connection;
     return RepositoryUser(
