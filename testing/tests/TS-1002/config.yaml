@@ -8,5 +8,7 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with preloaded local and hosted workspace profiles plus stored GitHub token state.
   - Delays the hosted startup bootstrap fetch for DEMO/project.json by 31 seconds and arms a 1-second GitHub /user probe if the live startup flow reaches it.
+  - Fails fast unless the live startup flow both starts and releases the GitHub /user probe within the first 5 seconds, so the linked-bug prompt-auth precondition is enforced in code instead of reported only as diagnostics.
   - Waits past the linked 11-second timeout window before asserting so the automation checks the deployed global startup behavior for a non-auth critical-path probe.
+  - Covers the linked startup regression chain from TS-992, TS-996, TS-1012, TS-1013, and TS-1014 by requiring both the prompt /user probe path and the 11-second shell fallback while DEMO/project.json is still pending.
   - Verifies the visible shell, TopBar workspace trigger, and TrackState branding from the user perspective at the timeout checkpoint and after any eventual late recovery.
