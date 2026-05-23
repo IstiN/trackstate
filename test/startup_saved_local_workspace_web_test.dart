@@ -23,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup issues the provider-backed /user probe and waits for it before exposing the shell when the saved local workspace needs browser reselection',
+    'web startup clears an unavailable saved local workspace and returns to landing instead of keeping it active',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -100,10 +100,6 @@ void main() {
       );
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
       expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
-      expect(
-        savedStateBeforeProbe.unavailableLocalWorkspaceIds,
-        contains(activeLocalWorkspaceId),
-      );
 
       delayedRepository.completeUserProbe();
       await tester.pump();
@@ -113,15 +109,12 @@ void main() {
         find.bySemanticsLabel(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
-      );
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Add workspace'), findsOneWidget);
       final savedStateAfterProbe = await workspaceProfiles.loadState();
-      expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateAfterProbe.activeWorkspaceId, isNull);
       expect(
         savedStateAfterProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),

@@ -172,6 +172,12 @@ class _RetryMigrationWorkspaceProfileService
   }
 
   @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    _state = _state.copyWith(activeWorkspaceId: null);
+    return _state;
+  }
+
+  @override
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId) async =>
       throw UnimplementedError();
 
