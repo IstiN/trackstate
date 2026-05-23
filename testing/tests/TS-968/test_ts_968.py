@@ -33,7 +33,9 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Modify the accessibility validation script or its local environment to trigger an 'AssertionError' (e.g., simulate a missing mandatory step).",
@@ -44,9 +46,14 @@ EXPECTED_RESULT = (
     "The script returns exit code 1, ensuring that the CI workflow step is accurately "
     "marked as a failure instead of reporting success."
 )
+REWORK_FIXES = [
+    "Relaxed the control precondition so it checks for a clean passing baseline via exit code `0`, `# fail 0`, and no `not ok` lines instead of hardcoding the current pass count.",
+    "Restricted `bug_description.md` generation to the real product-defect path where the baseline passed, the disposable workflow mutation succeeded, the expected assertion failure surfaced, and only the exit-code propagation stayed broken.",
+]
 ASSERTION_PATTERN = re.compile(r"AssertionError", re.IGNORECASE)
 FAIL_COUNT_PATTERN = re.compile(r"# fail\s+1", re.IGNORECASE)
-PASS_COUNT_PATTERN = re.compile(r"# pass\s+3", re.IGNORECASE)
+ZERO_FAIL_COUNT_PATTERN = re.compile(r"# fail\s+0", re.IGNORECASE)
+NOT_OK_PATTERN = re.compile(r"^\s*not ok\b", re.IGNORECASE | re.MULTILINE)
 
 
 def main() -> None:
@@ -132,9 +139,13 @@ def _evaluate_control_run(
             "the unmodified repository did not preserve a passing control run before the "
             f"failure simulation; observed exit code was `{observation.control_run.exit_code}`."
         )
-    if not PASS_COUNT_PATTERN.search(control_output):
+    if not ZERO_FAIL_COUNT_PATTERN.search(control_output):
         step_failures.append(
-            "the control run did not report all three subtests passing."
+            "the control run did not report a zero-failure TAP summary."
+        )
+    if NOT_OK_PATTERN.search(control_output):
+        step_failures.append(
+            "the control run still emitted a failing `not ok` TAP record."
         )
 
     if step_failures:
@@ -164,7 +175,7 @@ def _evaluate_control_run(
         "confirmed the current workflow still passes before simulating the failure.\n"
         f"Command: {observation.requested_command_text}\n"
         f"Observed exit code: {observation.control_run.exit_code}\n"
-        f"Observed summary: {_extract_summary_line(control_output, '# pass')}"
+        f"Observed summary: {_extract_summary_line(control_output, '# fail')}"
     )
     _record_step(
         result,
@@ -327,6 +338,7 @@ def _record_human_verification(
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies(result, passed=True)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -406,6 +418,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     )
 
     markdown_lines = [
+        "## Rework Summary",
+        "",
+        *[f"- {fix}" for fix in REWORK_FIXES],
+        "",
         "## Test Automation Result",
         "",
         "**Status:** ✅ PASSED",
@@ -461,6 +477,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error_message = _as_text(result.get("error")) or "AssertionError: TS-968 failed"
+    _write_review_replies(result, passed=False)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -486,6 +503,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     trace_text = _as_text(result.get("traceback"))
     node_version = _as_text(result.get("node_version"))
     command = _as_text(result.get("command"))
+    bug_is_product_gap = _should_write_bug_description(recorded_steps)
     environment_text = (
         f"Repository: IstiN/trackstate\n"
         f"Working directory: {REPO_ROOT}\n"
@@ -552,6 +570,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     ]
 
     markdown_lines = [
+        "## Rework Summary",
+        "",
+        *[f"- {fix}" for fix in REWORK_FIXES],
+        "",
         "## Test Automation Result",
         "",
         "**Status:** ❌ FAILED",
@@ -599,7 +621,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    if bug_is_product_gap:
+        BUG_DESCRIPTION_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _observation_to_dict(
@@ -680,6 +705,15 @@ def _step_observed(steps: list[object], step_number: int) -> str:
     return "Observed: no step-specific observation was recorded."
 
 
+def _should_write_bug_description(steps: list[object]) -> bool:
+    return (
+        _step_status(steps, 0) == "passed"
+        and _step_status(steps, 1) == "passed"
+        and _step_status(steps, 2) == "passed"
+        and _step_status(steps, 3) == "failed"
+    )
+
+
 def _combine_output(result: CliCommandResult) -> str:
     parts = [result.stdout.strip(), result.stderr.strip()]
     return "\n".join(part for part in parts if part).strip()
@@ -707,6 +741,75 @@ def _as_text(value: object) -> str:
 
 def jira_inline(value: str) -> str:
     return f"{{{{{value}}}}}"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(thread=thread, result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    thread: dict[str, object],
+    result: dict[str, object],
+    passed: bool,
+) -> str:
+    root_comment_id = thread.get("rootCommentId")
+    if root_comment_id == 3291696660:
+        return (
+            "Fixed: the control precondition no longer hardcodes `# pass 3`. It now "
+            "requires a clean baseline run with exit code `0`, a `# fail 0` TAP "
+            "summary, and no `not ok` lines, so legitimate future subtest additions "
+            "won't break TS-968."
+        )
+
+    if root_comment_id == 3291696699:
+        if passed:
+            return (
+                "Fixed: `bug_description.md` is no longer emitted for every exception. "
+                "The test now writes it only when the run reaches the real product-defect "
+                "boundary: baseline pass, successful disposable mutation, visible expected "
+                "assertion failure, and a wrong propagated exit code."
+            )
+        return (
+            "Fixed: `bug_description.md` is now gated behind the real product-defect "
+            "path only. This run still failed, but automation/setup failures no longer "
+            "produce downstream product-bug payloads."
+        )
+
+    status = "passed" if passed else "failed"
+    return (
+        f"Addressed in TS-968 rework; the updated automation has been rerun and the new "
+        f"status is `{status}`."
+    )
 
 
 if __name__ == "__main__":
