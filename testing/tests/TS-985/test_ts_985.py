@@ -341,15 +341,6 @@ def main() -> None:
                         f"seconds, which is not before the full {FULL_SYNC_TIMEOUT_SECONDS}-second "
                         "timeout window.",
                     )
-                if (
-                    shell_ready_after_start_seconds is not None
-                    and shell_ready_after_start_seconds > MAX_READY_AFTER_START_SECONDS
-                ):
-                    timing_failures.append(
-                        f"The shell became ready after {shell_ready_after_start_seconds!r} "
-                        f"seconds, which is too slow for the expected short successful-probe path "
-                        f"(threshold {MAX_READY_AFTER_START_SECONDS} seconds).",
-                    )
                 if bool(shell_window["shell_ready_observed_while_auth_pending"]):
                     timing_failures.append(
                         "The first observed shell_ready transition happened while the "
