@@ -1,0 +1,11 @@
+test_id: TS-982
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Seeds a hosted workspace into browser storage and injects a one-time HTTP 500 on the second repository metadata request so the workspace-sync bootstrap path fails without blocking initial shell data hydration.
+  - Uses the ticket viewport of 1440x900 and waits for the async startup-sync failure message before asserting the desktop shell state.
+  - Verifies the top bar, sidebar navigation, and workspace switcher remain usable while the hosted workspace stays visible in a failure-state fallback instead of a terminal blank surface.
