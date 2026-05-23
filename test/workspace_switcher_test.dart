@@ -247,9 +247,10 @@ void main() {
   );
 
   testWidgets(
-    'startup restore keeps the saved active local workspace selected when the local repository is missing',
+    'startup restore falls back to a healthy workspace when the saved active local repository is missing',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/missing@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -262,7 +263,7 @@ void main() {
               writeBranch: 'main',
             ),
             WorkspaceProfile(
-              id: 'hosted:stable/repo@main',
+              id: hostedWorkspaceId,
               displayName: 'stable/repo',
               targetType: WorkspaceProfileTargetType.hosted,
               target: 'stable/repo',
@@ -306,7 +307,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(service.state.activeWorkspaceId, hostedWorkspaceId);
 
       await tester.tap(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
@@ -317,13 +318,13 @@ void main() {
         const ValueKey('workspace-local:/tmp/missing@main'),
       );
       final hostedRow = find.byKey(
-        const ValueKey('workspace-hosted:stable/repo@main'),
+        const ValueKey('workspace-$hostedWorkspaceId'),
       );
       expect(activeRow, findsOneWidget);
       expect(hostedRow, findsOneWidget);
       expect(
         find.descendant(of: activeRow, matching: find.text('Active')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.descendant(of: activeRow, matching: find.text('Unavailable')),
@@ -331,15 +332,16 @@ void main() {
       );
       expect(
         find.descendant(of: hostedRow, matching: find.text('Active')),
-        findsNothing,
+        findsOneWidget,
       );
     },
   );
 
   testWidgets(
-    'refresh preserves the saved local unavailable state and skips auto-restoring local data until a manual workspace action occurs',
+    'refresh preserves the saved local unavailable state and falls back to another saved workspace until a manual retry occurs',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/guarded@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
       final service = SharedPreferencesWorkspaceProfileService(
         authStore: _MemoryAuthStore(),
       );
@@ -385,21 +387,27 @@ void main() {
 
       Future<void> expectUnavailableLocalWorkspace() async {
         await openWorkspaceSwitcher();
-        final activeRow = find.byKey(
+        final localRow = find.byKey(
           const ValueKey('workspace-local:/tmp/guarded@main'),
         );
-        expect(activeRow, findsOneWidget);
+        final hostedRow = find.byKey(const ValueKey('workspace-$hostedWorkspaceId'));
+        expect(localRow, findsOneWidget);
+        expect(hostedRow, findsOneWidget);
         expect(
-          find.descendant(of: activeRow, matching: find.text('Active')),
-          findsOneWidget,
-        );
-        expect(
-          find.descendant(of: activeRow, matching: find.text('Unavailable')),
-          findsOneWidget,
-        );
-        expect(
-          find.descendant(of: activeRow, matching: find.text('Local Git')),
+          find.descendant(of: localRow, matching: find.text('Active')),
           findsNothing,
+        );
+        expect(
+          find.descendant(of: localRow, matching: find.text('Unavailable')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: localRow, matching: find.text('Local Git')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: hostedRow, matching: find.text('Active')),
+          findsOneWidget,
         );
       }
 
@@ -465,7 +473,7 @@ void main() {
       await pumpApp();
       expect(
         (await service.loadState()).activeWorkspaceId,
-        activeLocalWorkspaceId,
+        hostedWorkspaceId,
       );
       await expectUnavailableLocalWorkspace();
 
@@ -477,19 +485,10 @@ void main() {
       await pumpApp();
       expect(
         (await service.loadState()).activeWorkspaceId,
-        activeLocalWorkspaceId,
+        hostedWorkspaceId,
       );
-      expect(openedLocalRepositories, ['/tmp/guarded']);
+      expect(openedLocalRepositories, isEmpty);
       await expectUnavailableLocalWorkspace();
-
-      final hostedRow = find.byKey(
-        const ValueKey('workspace-hosted:stable/repo@main'),
-      );
-      expect(hostedRow, findsOneWidget);
-      await tester.tap(
-        find.byKey(const ValueKey('workspace-open-hosted:stable/repo@main')),
-      );
-      await tester.pumpAndSettle();
 
       await openWorkspaceSwitcher();
       final localRow = find.byKey(
@@ -507,7 +506,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(openedLocalRepositories, ['/tmp/guarded', '/tmp/guarded']);
+      expect(openedLocalRepositories, ['/tmp/guarded']);
       expect(directoryPickerCalls, 1);
       expect(
         (await service.loadState()).unavailableLocalWorkspaceIds,
@@ -1241,7 +1240,7 @@ void main() {
   );
 
   testWidgets(
-    'startup restore keeps a permanently unavailable active local workspace selected after revalidation retries exhaust',
+    'startup restore falls back after active local revalidation retries exhaust',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       final service = _MemoryWorkspaceProfileService(
@@ -1313,7 +1312,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
 
       expect(localOpenAttempts, greaterThan(5));
-      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(service.state.activeWorkspaceId, 'hosted:stable/repo@main');
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
@@ -1335,7 +1334,7 @@ void main() {
       expect(hostedRow, findsOneWidget);
       expect(
         find.descendant(of: activeRow, matching: find.text('Active')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.descendant(of: activeRow, matching: find.text('Unavailable')),
@@ -1343,7 +1342,7 @@ void main() {
       );
       expect(
         find.descendant(of: hostedRow, matching: find.text('Active')),
-        findsNothing,
+        findsOneWidget,
       );
     },
   );
@@ -1761,7 +1760,7 @@ void main() {
   );
 
   testWidgets(
-    'startup restore keeps the active local workspace visible when every saved workspace is invalid',
+    'startup restore opens onboarding when every saved workspace is invalid',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/missing@main';
       final service = _MemoryWorkspaceProfileService(
@@ -1830,41 +1829,18 @@ void main() {
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
-
-      await tester.tap(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-      );
-      await tester.pumpAndSettle();
-
-      final activeRow = find.byKey(
-        const ValueKey('workspace-local:/tmp/missing@main'),
-      );
-      final hostedRow = find.byKey(
-        const ValueKey(
-          'workspace-hosted:broken/repo@definitely-missing-branch',
-        ),
-      );
-      expect(activeRow, findsOneWidget);
-      expect(hostedRow, findsOneWidget);
-      expect(
-        find.descendant(of: activeRow, matching: find.text('Active')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: activeRow, matching: find.text('Unavailable')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: hostedRow, matching: find.text('Active')),
         findsNothing,
       );
+      expect(
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+        findsOneWidget,
+      );
+      expect(find.text('Project Settings'), findsNothing);
     },
   );
 
   testWidgets(
-    'saved workspace recovery skips hosted validation when the saved active local workspace is unavailable',
+    'saved workspace recovery attempts hosted validation when the saved active local workspace is unavailable',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/missing@main';
       final service = _MemoryWorkspaceProfileService(
@@ -1932,23 +1908,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
-      expect(hostedValidationAttempts, 0);
-
-      await tester.tap(
+      expect(hostedValidationAttempts, 1);
+      expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-      );
-      await tester.pumpAndSettle();
-
-      final activeRow = find.byKey(
-        const ValueKey('workspace-local:/tmp/missing@main'),
-      );
-      expect(activeRow, findsOneWidget);
-      expect(
-        find.descendant(of: activeRow, matching: find.text('Active')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
-        find.descendant(of: activeRow, matching: find.text('Unavailable')),
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
         findsOneWidget,
       );
     },
