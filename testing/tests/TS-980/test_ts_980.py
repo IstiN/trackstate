@@ -111,6 +111,7 @@ class Ts980RestorePersistenceRuntime(PlaywrightStoredTokenWebAppRuntime):
                 workspace_token_profile_ids=self._workspace_token_profile_ids,
             ),
         )
+        self._context.add_init_script(script=_restorable_directory_picker_script())
         self._context.add_init_script(script=_manual_reauth_probe_script())
         self._page.on("console", self._record_console_event)
         self._page.on("pageerror", self._record_page_error)
@@ -324,6 +325,9 @@ def main() -> None:
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
+                result["manual_directory_picker_state_before_action"] = (
+                    _read_restorable_directory_picker_state(tracker_page)
+                )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
                 result["manual_restore_action_label"] = exact_action_label
 
@@ -358,12 +362,17 @@ def main() -> None:
                 result["manual_reauth_probe_after_action"] = restore_attempt_observation[
                     "probe"
                 ]
+                result["manual_directory_picker_state_after_action"] = (
+                    restore_attempt_observation["directory_picker_state"]
+                )
                 if not callback_observed:
                     message = (
                         "The manual unavailable-workspace action never triggered a "
                         "directory-access callback and never restored the workspace.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
                     _record_request_steps_precondition_failure(result, message)
@@ -376,6 +385,8 @@ def main() -> None:
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
                     _record_request_steps_precondition_failure(result, message)
@@ -396,7 +407,9 @@ def main() -> None:
                     message = (
                         "The directory-access callback was observed, but the workspace never "
                         "completed the Local Git restore flow.\n"
-                        f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}"
+                        f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}\n"
+                        "Observed injected picker state:\n"
+                        f"{json.dumps(_read_restorable_directory_picker_state(tracker_page), indent=2)}"
                     )
                     _record_request_steps_precondition_failure(result, message)
                     raise AssertionError(f"Precondition failed: {message}")
@@ -1259,6 +1272,156 @@ def _manual_reauth_probe_script() -> str:
     """
 
 
+def _restorable_directory_picker_script() -> str:
+    expected_directory_name = Path(LOCAL_TARGET).name
+    statuses_json = json.dumps(
+        [
+            {"id": "todo", "name": "To Do", "category": "new"},
+            {
+                "id": "in-progress",
+                "name": "In Progress",
+                "category": "indeterminate",
+            },
+            {"id": "done", "name": "Done", "category": "done"},
+        ],
+    )
+    workflows_json = json.dumps(
+        {
+            "default": {
+                "name": "Default Workflow",
+                "statuses": ["todo", "in-progress", "done"],
+                "transitions": [
+                    {
+                        "id": "start-progress",
+                        "name": "Start progress",
+                        "from": "todo",
+                        "to": "in-progress",
+                    },
+                    {
+                        "id": "finish-work",
+                        "name": "Finish work",
+                        "from": "in-progress",
+                        "to": "done",
+                    },
+                ],
+            },
+        },
+    )
+    issue_types_json = json.dumps(
+        [
+            {
+                "id": "story",
+                "name": "Story",
+                "workflowId": "default",
+                "hierarchyLevel": 0,
+            },
+        ],
+    )
+    fields_json = json.dumps(
+        [
+            {"id": "summary", "name": "Summary", "type": "string", "required": True},
+            {
+                "id": "description",
+                "name": "Description",
+                "type": "markdown",
+                "required": False,
+            },
+            {
+                "id": "priority",
+                "name": "Priority",
+                "type": "option",
+                "required": False,
+                "options": [
+                    {"id": "high", "name": "High"},
+                    {"id": "medium", "name": "Medium"},
+                ],
+            },
+        ],
+    )
+    issue_markdown = "\n".join(
+        [
+            "---",
+            "key: DEMO-1",
+            "project: DEMO",
+            "issueType: story",
+            "status: in-progress",
+            "priority: high",
+            "summary: TS-980 seeded local workspace issue",
+            "assignee: ts980-user",
+            "reporter: ts980-user",
+            "updated: 2026-05-22T00:00:00Z",
+            "---",
+            "",
+            "# Description",
+            "",
+            "Seeded local workspace content for TS-980 restore validation.",
+            "",
+        ],
+    )
+    return f"""
+    (() => {{
+      const state = window.__ts980RestorableDirectoryPickerState = {{
+        calls: [],
+        selectedDirectoryName: null,
+        seededPaths: [],
+        errors: [],
+      }};
+      const expectedDirectoryName = {json.dumps(expected_directory_name)};
+      const normalizeArgs = (args) => {{
+        try {{
+          return JSON.parse(JSON.stringify(args));
+        }} catch (_) {{
+          return Array.from(args, (value) => String(value));
+        }}
+      }};
+      const seedFile = async (directory, relativePath, content) => {{
+        const parts = relativePath.split('/').filter((segment) => segment.length > 0);
+        if (parts.length === 0) {{
+          return;
+        }}
+        let current = directory;
+        for (const segment of parts.slice(0, -1)) {{
+          current = await current.getDirectoryHandle(segment, {{ create: true }});
+        }}
+        const fileHandle = await current.getFileHandle(parts.at(-1), {{ create: true }});
+        const writable = await fileHandle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        state.seededPaths.push(relativePath);
+      }};
+      const ensureRestorableDirectory = async () => {{
+        const root = await navigator.storage.getDirectory();
+        const directory = await root.getDirectoryHandle(expectedDirectoryName, {{ create: true }});
+        await seedFile(directory, '.git/HEAD', 'ref: refs/heads/main\\n');
+        await seedFile(
+          directory,
+          '.git/config',
+          '[core]\\n  repositoryformatversion = 0\\n  filemode = true\\n  bare = false\\n',
+        );
+        await seedFile(directory, 'DEMO/config/statuses.json', {json.dumps(statuses_json + chr(10))});
+        await seedFile(directory, 'DEMO/config/workflows.json', {json.dumps(workflows_json + chr(10))});
+        await seedFile(directory, 'DEMO/config/issue-types.json', {json.dumps(issue_types_json + chr(10))});
+        await seedFile(directory, 'DEMO/config/fields.json', {json.dumps(fields_json + chr(10))});
+        await seedFile(directory, 'DEMO/DEMO-1/main.md', {json.dumps(issue_markdown)});
+        state.selectedDirectoryName = directory.name || null;
+        return directory;
+      }};
+      globalThis.showDirectoryPicker = async (...args) => {{
+        state.calls.push({{
+          callNumber: state.calls.length + 1,
+          args: normalizeArgs(args),
+        }});
+        try {{
+          return await ensureRestorableDirectory();
+        }} catch (error) {{
+          state.errors.push(String(error));
+          throw error;
+        }}
+      }};
+    }})();
+    """
+
+
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
@@ -1319,6 +1482,38 @@ def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
     }
 
 
+def _read_restorable_directory_picker_state(tracker_page) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const state = window.__ts980RestorableDirectoryPickerState || {};
+          return {
+            calls: Array.isArray(state.calls) ? state.calls : [],
+            selectedDirectoryName:
+              typeof state.selectedDirectoryName === 'string'
+                ? state.selectedDirectoryName
+                : null,
+            seededPaths: Array.isArray(state.seededPaths) ? state.seededPaths : [],
+            errors: Array.isArray(state.errors) ? state.errors : [],
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "calls": [],
+            "selectedDirectoryName": None,
+            "seededPaths": [],
+            "errors": [],
+        }
+    return {
+        "calls": list(payload.get("calls", [])),
+        "selectedDirectoryName": payload.get("selectedDirectoryName"),
+        "seededPaths": list(payload.get("seededPaths", [])),
+        "errors": list(payload.get("errors", [])),
+    }
+
+
 def _observe_manual_restore_attempt(
     *,
     tracker_page,
@@ -1326,14 +1521,19 @@ def _observe_manual_restore_attempt(
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
     probe = _read_manual_reauth_probe(tracker_page)
+    directory_picker_state = _read_restorable_directory_picker_state(tracker_page)
     trigger = _safe_trigger_payload(page)
     return {
         "probe": probe,
+        "directory_picker_state": directory_picker_state,
         "body_text": body_text,
         "trigger": trigger,
         "failure_message": _extract_workspace_open_failure_message(body_text),
         "directory_access_callback_observed": bool(
-            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
+            probe["showDirectoryPickerCalls"]
+            or probe["requestPermissionCalls"]
+            or directory_picker_state["calls"]
+            or directory_picker_state.get("selectedDirectoryName")
         ),
     }
 
