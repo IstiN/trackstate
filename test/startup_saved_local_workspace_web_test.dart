@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
@@ -23,7 +24,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup clears an unavailable saved local workspace after the delayed /user probe crosses the startup timeout',
+    'web startup exposes the shell with restricted access before the delayed /user probe completes when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -85,22 +86,26 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(seconds: 11));
+      await tester.pump(const Duration(milliseconds: 750));
 
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
-      expect(find.text('Add workspace'), findsOneWidget);
+      expect(find.text('Add workspace'), findsNothing);
+      expect(delayedRepository.session, isNotNull);
+      expect(delayedRepository.session?.canRead, isTrue);
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
-      expect(savedStateBeforeProbe.activeWorkspaceId, isNull);
+      expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateBeforeProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -111,15 +116,23 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
-        findsNothing,
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
-      expect(find.text('Add workspace'), findsOneWidget);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
       final savedStateAfterProbe = await workspaceProfiles.loadState();
-      expect(savedStateAfterProbe.activeWorkspaceId, isNull);
+      expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),

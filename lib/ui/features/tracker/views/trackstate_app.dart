@@ -105,6 +105,19 @@ bool shouldShowWorkspaceOnboardingForStartup({
   return !isWeb && !hasRepository && !hasProfiles;
 }
 
+@visibleForTesting
+bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
+  required bool isWeb,
+  required bool isActive,
+  required bool showOpenAction,
+  required bool hasSelectionAction,
+}) {
+  if (!hasSelectionAction) {
+    return false;
+  }
+  return !(isWeb && !isActive && showOpenAction);
+}
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -530,14 +543,16 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
+      final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
+          kIsWeb &&
+          workspace.id == activeWorkspaceId &&
+          workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
-            allowFallbackFromActive &&
-            workspace.id == activeWorkspaceId &&
-            workspace.isLocal,
+            preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId &&
             workspace.isLocal,
@@ -986,6 +1001,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       return true;
     } on Object catch (error) {
       if (_isUnavailableBrowserLocalWorkspaceAccess(error)) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
         return true;
       }
       return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
@@ -7339,19 +7355,22 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase),
-                    child: browser_focusable_control.BrowserFocusableControl(
+                    child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeHosted,
-                      onPressed: () => setState(
-                        () => _targetType = WorkspaceProfileTargetType.hosted,
-                      ),
-                      focusTargetId: _workspaceSwitcherTargetTypeHostedFocusId,
-                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                      child: _SettingsProviderButton(
+                      child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeHosted,
-                        selected:
-                            _targetType == WorkspaceProfileTargetType.hosted,
                         onPressed: () => setState(
                           () => _targetType = WorkspaceProfileTargetType.hosted,
+                        ),
+                        focusTargetId: _workspaceSwitcherTargetTypeHostedFocusId,
+                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                        child: _SettingsProviderButton(
+                          label: l10n.workspaceTargetTypeHosted,
+                          selected:
+                              _targetType == WorkspaceProfileTargetType.hosted,
+                          onPressed: () => setState(
+                            () => _targetType = WorkspaceProfileTargetType.hosted,
+                          ),
                         ),
                       ),
                     ),
@@ -7361,19 +7380,22 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 Expanded(
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(addWorkspaceOrderBase + 1),
-                    child: browser_focusable_control.BrowserFocusableControl(
+                    child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeLocal,
-                      onPressed: () => setState(
-                        () => _targetType = WorkspaceProfileTargetType.local,
-                      ),
-                      focusTargetId: _workspaceSwitcherTargetTypeLocalFocusId,
-                      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                      child: _SettingsProviderButton(
+                      child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeLocal,
-                        selected:
-                            _targetType == WorkspaceProfileTargetType.local,
                         onPressed: () => setState(
                           () => _targetType = WorkspaceProfileTargetType.local,
+                        ),
+                        focusTargetId: _workspaceSwitcherTargetTypeLocalFocusId,
+                        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                        child: _SettingsProviderButton(
+                          label: l10n.workspaceTargetTypeLocal,
+                          selected:
+                              _targetType == WorkspaceProfileTargetType.local,
+                          onPressed: () => setState(
+                            () => _targetType = WorkspaceProfileTargetType.local,
+                          ),
                         ),
                       ),
                     ),
@@ -7404,16 +7426,20 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
               alignment: Alignment.centerRight,
               child: FocusTraversalOrder(
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
-                child: browser_focusable_control.BrowserFocusableControl(
+                child: _WorkspaceSwitcherExplicitControlSemantics(
                   label: l10n.workspaceSaveAndSwitch,
-                  onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                  focusTargetId: _workspaceSwitcherSaveFocusId,
-                  panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-                  focusableWhenDisabled: true,
-                  child: FilledButton(
-                    key: const ValueKey('workspace-add-button'),
+                  enabled: _canSaveWorkspace,
+                  child: browser_focusable_control.BrowserFocusableControl(
+                    label: l10n.workspaceSaveAndSwitch,
                     onPressed: _canSaveWorkspace ? _saveWorkspace : null,
-                    child: Text(l10n.workspaceSaveAndSwitch),
+                    focusTargetId: _workspaceSwitcherSaveFocusId,
+                    panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+                    focusableWhenDisabled: true,
+                    child: FilledButton(
+                      key: const ValueKey('workspace-add-button'),
+                      onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                      child: Text(l10n.workspaceSaveAndSwitch),
+                    ),
                   ),
                 ),
               ),
@@ -7461,6 +7487,30 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
 
   @override
   State<_WorkspaceSwitcherRow> createState() => _WorkspaceSwitcherRowState();
+}
+
+class _WorkspaceSwitcherExplicitControlSemantics extends StatelessWidget {
+  const _WorkspaceSwitcherExplicitControlSemantics({
+    required this.label,
+    required this.child,
+    this.enabled = true,
+  });
+
+  final String label;
+  final Widget child;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: label,
+      button: true,
+      enabled: enabled,
+      child: child,
+    );
+  }
 }
 
 class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
@@ -7525,6 +7575,13 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final detailText = workspace.defaultBranch == workspace.writeBranch
         ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
         : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
+    final browserSummaryActivatesSelection =
+        shouldActivateBrowserWorkspaceSwitcherRowSummary(
+          isWeb: kIsWeb,
+          isActive: isActive,
+          showOpenAction: widget.showOpenAction,
+          hasSelectionAction: onSelect != null,
+        );
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -7596,7 +7653,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-            onPressed: onSelect,
+            onPressed: browserSummaryActivatesSelection ? onSelect : null,
             focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
             ),

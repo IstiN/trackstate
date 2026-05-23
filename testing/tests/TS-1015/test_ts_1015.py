@@ -317,7 +317,6 @@ def main() -> None:
                         f"monitor_hidden_after_visible={monitor_after_click.ever_hidden_after_visible if monitor_after_click else None}"
                     ),
                 )
-
                 try:
                     if step4_error is not None:
                         raise AssertionError(
