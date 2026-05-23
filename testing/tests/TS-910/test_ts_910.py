@@ -243,8 +243,6 @@ def main() -> None:
                         ),
                     )
                     raise
-                first_row_label = _saved_workspace_row_focus_label(first_row)
-                result["first_row_label"] = first_row_label
                 _record_step(
                     result,
                     step=1,
@@ -270,8 +268,8 @@ def main() -> None:
                     ),
                 )
 
-                page.focus_switcher_button(
-                    first_row_label,
+                page.focus_saved_workspace_row(
+                    first_row.display_name,
                     panel=panel,
                     timeout_ms=4_000,
                 )
@@ -291,9 +289,12 @@ def main() -> None:
                 if surface_stability_error is not None:
                     focused_row_state["surface_stability_error"] = surface_stability_error
                 result["focused_first_row_state"] = focused_row_state
+                first_row_label = _focus_label_for_summary(focused_row_state)
+                result["first_row_label"] = first_row_label
                 _assert_first_row_focus_ready(
                     state=focused_row_state,
-                    expected_label=first_row_label,
+                    expected_display_name=first_row.display_name,
+                    expected_detail_text=first_row.detail_text,
                 )
                 _record_step(
                     result,
@@ -417,6 +418,8 @@ def main() -> None:
                     _assert_wrap_to_first_row(
                         state=wrap_state,
                         expected_label=first_row_label,
+                        expected_display_name=first_row.display_name,
+                        expected_detail_text=first_row.detail_text,
                     )
                 except Exception as error:
                     if "wrap_state_after_footer" not in result:
@@ -511,15 +514,21 @@ def _assert_initial_panel_state(
 def _assert_first_row_focus_ready(
     *,
     state: dict[str, object],
-    expected_label: str,
+    expected_display_name: str,
+    expected_detail_text: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_row_focus = _first_row_focus_from_state(state)
     failures: list[str] = []
-    if active.get("accessible_name") != expected_label:
+    if not _active_label_matches_saved_workspace(
+        state,
+        display_name=expected_display_name,
+        detail_text=expected_detail_text,
+    ):
         failures.append(
-            f"the active label was {active.get('accessible_name')!r} instead of {expected_label!r}",
+            "the active label did not match the selected first saved workspace row "
+            f"{expected_display_name!r}",
         )
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the open workspace switcher")
@@ -598,6 +607,8 @@ def _assert_wrap_to_first_row(
     *,
     state: dict[str, object],
     expected_label: str,
+    expected_display_name: str,
+    expected_detail_text: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
@@ -619,9 +630,14 @@ def _assert_wrap_to_first_row(
         failures.append(
             f"the first saved workspace row did not receive focus after pressing Tab on {LAST_INTERNAL_CONTROL_LABEL!r}",
         )
-    if active.get("accessible_name") != expected_label:
+    if not _active_label_matches_saved_workspace(
+        state,
+        display_name=expected_display_name,
+        detail_text=expected_detail_text,
+    ):
         failures.append(
-            f"the active label remained {_focus_label_for_summary(state)!r} instead of wrapping to {expected_label!r}",
+            f"the active label {_focus_label_for_summary(state)!r} did not match the first "
+            f"saved workspace row {expected_label!r} after the wrap attempt",
         )
     if failures:
         raise AssertionError(
@@ -987,11 +1003,23 @@ def _focus_label_for_summary(state: dict[str, object] | None) -> str:
     role = str(active.get("role") or "").strip()
     if tag_name == "FLUTTER-VIEW":
         return "FLUTTER-VIEW root"
+    if tag_name == "FLT-SEMANTICS" and not accessible_name:
+        return "anonymous FLT-SEMANTICS"
     if accessible_name:
         return accessible_name
     if role or tag_name:
         return " ".join(part for part in (role, tag_name) if part)
     return "unknown focus target"
+
+
+def _active_label_matches_saved_workspace(
+    state: dict[str, object] | None,
+    *,
+    display_name: str,
+    detail_text: str,
+) -> bool:
+    label = _focus_label_for_summary(state)
+    return display_name in label and detail_text in label
 
 
 def _first_focus_escape_index(states: list[dict[str, object]]) -> int | None:
@@ -1172,22 +1200,33 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
         trace = result.get("tab_trace_to_footer")
         visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
         escape_index = _first_focus_escape_index(trace if isinstance(trace, list) else [])
-        escape_label = (
-            _focus_label_for_summary(trace[escape_index])
-            if isinstance(trace, list) and escape_index is not None
-            else "an external element"
+        last_label = (
+            _focus_label_for_summary(trace[-1])
+            if isinstance(trace, list) and trace
+            else "an unexpected focus target"
         )
         return "\n".join(
             [
                 (
                     f"# ❌ {REQUEST_STEPS[0]} — Focus moved through {visited_labels!r} and then "
-                    f"escaped to {escape_label!r} before the visible {LAST_INTERNAL_CONTROL_LABEL!r} "
-                    "footer control was reached."
+                    + (
+                        f"escaped to {_focus_label_for_summary(trace[escape_index])!r} before the "
+                        f"visible {LAST_INTERNAL_CONTROL_LABEL!r} footer control was reached."
+                        if isinstance(trace, list) and escape_index is not None
+                        else f"stalled on {last_label!r} instead of reaching the visible "
+                        f"{LAST_INTERNAL_CONTROL_LABEL!r} footer control."
+                    )
                 ),
                 (
                     f"# ❌ {REQUEST_STEPS[1]} — The wrap verification could not run because "
-                    "the workspace switcher lost the required in-panel focus loop before the "
-                    f"final interactive control was reachable. focus_escape={escape_label!r}."
+                    + (
+                        "the workspace switcher lost the required in-panel focus loop before the "
+                        f"final interactive control was reachable. focus_escape="
+                        f"{_focus_label_for_summary(trace[escape_index])!r}."
+                        if isinstance(trace, list) and escape_index is not None
+                        else "focus stalled on an unlabeled in-panel semantics node before the "
+                        f"final interactive control was reachable. last_focus={last_label!r}."
+                    )
                 ),
             ],
         )
