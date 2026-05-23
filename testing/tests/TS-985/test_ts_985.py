@@ -21,13 +21,10 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
-from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # noqa: E402
-    DelayedAuthWorkspaceProfilesRuntime,
-)
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
-    ShellReadyTransitionTracker,
-    build_annotated_steps,
-    build_workspace_state,
+   ShellReadyTransitionTracker,
+   build_annotated_steps,
+   build_workspace_state,
     format_human_lines,
     format_step_lines,
     observe_live_startup_shell_window,
@@ -42,6 +39,9 @@ from testing.tests.support.live_startup_case_support import (  # noqa: E402
     trigger_payload,
     try_observe_trigger,
     write_test_automation_result,
+)
+from testing.tests.support.ts984_delayed_auth_probe_runtime import (  # noqa: E402
+    Ts984DelayedAuthProbeRuntime,
 )
 
 TICKET_KEY = "TS-985"
@@ -108,7 +108,7 @@ def main() -> None:
 
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
-    runtime = DelayedAuthWorkspaceProfilesRuntime(
+    runtime = Ts984DelayedAuthProbeRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
@@ -152,15 +152,40 @@ def main() -> None:
                 )
 
                 transition_tracker = ShellReadyTransitionTracker()
+                auth_probe_started = runtime.wait_for_auth_probe_start(
+                    timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
+                )
+                pending_shell_sample_observed = False
+                pending_shell_window: dict[str, Any] | None = None
+                if auth_probe_started:
+                    _, pending_shell_window = poll_until(
+                        probe=lambda: _observe_shell_window(
+                            tracker_page=tracker_page,
+                            page=page,
+                            runtime=runtime,
+                            startup_started_at_monotonic=startup_started_at_monotonic,
+                            transition_tracker=transition_tracker,
+                            poll_timeout_ms=25,
+                        ),
+                        is_satisfied=lambda observation: (
+                            int(observation["observed_pending_shell_samples"] or 0) >= 1
+                            or not bool(observation["auth_pending"])
+                        ),
+                        timeout_seconds=SIMULATED_PROBE_DELAY_SECONDS + 2,
+                        interval_seconds=0.05,
+                    )
+                    pending_shell_sample_observed = (
+                        int(pending_shell_window["observed_pending_shell_samples"] or 0) >= 1
+                    )
+                    result["pending_shell_window_observation"] = pending_shell_window
                 shell_ready, shell_window = poll_until(
-                    probe=lambda: observe_live_startup_shell_window(
+                    probe=lambda: _observe_shell_window(
                         tracker_page=tracker_page,
                         page=page,
                         runtime=runtime,
                         startup_started_at_monotonic=startup_started_at_monotonic,
-                        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
-                        branding_texts=(BRANDING_TEXT, "TrackState.AI"),
                         transition_tracker=transition_tracker,
+                        poll_timeout_ms=250,
                     ),
                     is_satisfied=lambda observation: (
                         observation["auth_probe_started_after_start_seconds"] is not None
@@ -212,6 +237,35 @@ def main() -> None:
                     raise AssertionError(
                         "Step 1 failed: the deployed app never started the delayed "
                         "GitHub `/user` startup probe needed for TS-985.\n"
+                        f"Observed body text:\n{tracker_page.body_text()}",
+                    )
+                if auth_probe_started_after_start_seconds >= FULL_SYNC_TIMEOUT_SECONDS:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=(
+                            "The delayed GitHub `/user` startup probe did not begin until "
+                            "well after the startup window, so the successful-probe path "
+                            "was not exercised during application startup.\n"
+                            f"auth_probe_started_after_start_seconds="
+                            f"{auth_probe_started_after_start_seconds!r}; "
+                            f"auth_probe_released_after_start_seconds="
+                            f"{auth_probe_released_after_start_seconds!r}; "
+                            f"delayed_request_urls={runtime.delayed_request_urls!r}; "
+                            f"Observed body text:\n{tracker_page.body_text()}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=2)
+                    raise AssertionError(
+                        "Step 1 failed: the delayed GitHub `/user` startup probe started "
+                        "too late to exercise the successful startup-probe path.\n"
+                        f"auth_probe_started_after_start_seconds="
+                        f"{auth_probe_started_after_start_seconds!r}; "
+                        f"auth_probe_released_after_start_seconds="
+                        f"{auth_probe_released_after_start_seconds!r}; "
+                        f"delayed_request_urls={runtime.delayed_request_urls!r}\n"
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
 
@@ -295,8 +349,31 @@ def main() -> None:
                 _assert_interactive_shell(shell_window)
 
                 shell_ready_after_start_seconds = shell_window["shell_ready_after_start_seconds"]
+                probe_recorded_shell_ready_after_start_seconds = shell_window[
+                    "probe_recorded_shell_ready_after_start_seconds"
+                ]
+                authoritative_shell_ready_after_start_seconds = (
+                    probe_recorded_shell_ready_after_start_seconds
+                    if probe_recorded_shell_ready_after_start_seconds is not None
+                    else shell_ready_after_start_seconds
+                )
+                authoritative_shell_ready_after_probe_release_seconds = (
+                    None
+                    if (
+                        authoritative_shell_ready_after_start_seconds is None
+                        or auth_probe_released_after_start_seconds is None
+                    )
+                    else round(
+                        authoritative_shell_ready_after_start_seconds
+                        - auth_probe_released_after_start_seconds,
+                        2,
+                    )
+                )
                 shell_ready_after_probe_release_seconds = shell_window[
                     "shell_ready_after_probe_release_seconds"
+                ]
+                observed_pending_shell_samples = shell_window[
+                    "observed_pending_shell_samples"
                 ]
 
                 timing_failures: list[str] = []
@@ -304,9 +381,13 @@ def main() -> None:
                     timing_failures.append(
                         "The delayed startup probe release time could not be measured.",
                     )
-                if shell_ready_after_start_seconds is None:
+                if (
+                    shell_ready_after_start_seconds is None
+                    and probe_recorded_shell_ready_after_start_seconds is None
+                ):
                     timing_failures.append(
-                        "The shell_ready transition time could not be measured.",
+                        "The shell_ready transition time could not be measured by either "
+                        "the Python observer or the page-side probe.",
                     )
                 auth_probe_release_after_auth_start_seconds = shell_window[
                     "auth_probe_release_after_auth_start_seconds"
@@ -324,20 +405,48 @@ def main() -> None:
                         f"{SIMULATED_PROBE_DELAY_SECONDS} seconds.",
                     )
                 if (
+                    (observed_pending_shell_samples is None or int(observed_pending_shell_samples) < 1)
+                    and probe_recorded_shell_ready_after_start_seconds is None
+                ):
+                    timing_failures.append(
+                        "The observation loop never captured the app while the delayed "
+                        "startup probe was still pending, and no page-side first "
+                        "`shell_ready` transition timestamp was recorded either, so the "
+                        "test cannot prove the causal timing relationship.\n"
+                        f"Observed observed_pending_shell_samples="
+                        f"{observed_pending_shell_samples!r}; "
+                        f"probe_recorded_shell_ready_after_start_seconds="
+                        f"{probe_recorded_shell_ready_after_start_seconds!r}."
+                    )
+                if (
+                    not pending_shell_sample_observed
+                    and probe_recorded_shell_ready_after_start_seconds is None
+                ):
+                    timing_failures.append(
+                        "The focused pending-window sampler did not capture an in-flight "
+                        "Python observation before the delayed startup probe finished, "
+                        "and there was no page-side first-transition timestamp to use as "
+                        "the equivalent proof.\n"
+                        f"Observed pending_shell_window_observation="
+                        f"{json.dumps(result.get('pending_shell_window_observation'), indent=2)}"
+                    )
+                if (
                     auth_probe_released_after_start_seconds is not None
-                    and shell_ready_after_start_seconds is not None
-                    and shell_ready_after_start_seconds
+                    and authoritative_shell_ready_after_start_seconds is not None
+                    and authoritative_shell_ready_after_start_seconds
                     < auth_probe_released_after_start_seconds
                 ):
                     timing_failures.append(
-                        "The shell reported ready before the delayed startup probe was released.",
+                        "The first authoritative shell_ready transition happened before "
+                        "the delayed startup probe was released.",
                     )
                 if (
-                    shell_ready_after_start_seconds is not None
-                    and shell_ready_after_start_seconds >= FULL_SYNC_TIMEOUT_SECONDS
+                    authoritative_shell_ready_after_start_seconds is not None
+                    and authoritative_shell_ready_after_start_seconds >= FULL_SYNC_TIMEOUT_SECONDS
                 ):
                     timing_failures.append(
-                        f"The shell became ready only after {shell_ready_after_start_seconds!r} "
+                        f"The shell became ready only after "
+                        f"{authoritative_shell_ready_after_start_seconds!r} "
                         f"seconds, which is not before the full {FULL_SYNC_TIMEOUT_SECONDS}-second "
                         "timeout window.",
                     )
@@ -347,14 +456,14 @@ def main() -> None:
                         "delayed startup probe was still pending.",
                     )
                 if (
-                    shell_ready_after_probe_release_seconds is not None
-                    and shell_ready_after_probe_release_seconds
+                    authoritative_shell_ready_after_probe_release_seconds is not None
+                    and authoritative_shell_ready_after_probe_release_seconds
                     > MAX_READY_AFTER_RELEASE_SECONDS
                 ):
                     timing_failures.append(
                         "The shell did not become interactive soon enough after the startup "
                         f"probe completed. Observed delay after release: "
-                        f"{shell_ready_after_probe_release_seconds!r} seconds; allowed "
+                        f"{authoritative_shell_ready_after_probe_release_seconds!r} seconds; allowed "
                         f"threshold: {MAX_READY_AFTER_RELEASE_SECONDS} seconds.",
                     )
 
@@ -363,12 +472,22 @@ def main() -> None:
                         "The startup probe completed, but the live app did not prove the "
                         "expected immediate shell-ready behavior.\n"
                         f"shell_ready_after_start_seconds={shell_ready_after_start_seconds!r}; "
+                        f"probe_recorded_shell_ready_after_start_seconds="
+                        f"{probe_recorded_shell_ready_after_start_seconds!r}; "
+                        f"authoritative_shell_ready_after_start_seconds="
+                        f"{authoritative_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
                         f"{auth_probe_released_after_start_seconds!r}; "
                         f"shell_ready_after_probe_release_seconds="
                         f"{shell_ready_after_probe_release_seconds!r}; "
+                        f"authoritative_shell_ready_after_probe_release_seconds="
+                        f"{authoritative_shell_ready_after_probe_release_seconds!r}; "
                         f"auth_probe_release_after_auth_start_seconds="
                         f"{auth_probe_release_after_auth_start_seconds!r}; "
+                        f"observed_pending_shell_samples="
+                        f"{observed_pending_shell_samples!r}; "
+                        f"observed_shell_samples="
+                        f"{shell_window['observed_shell_samples']!r}; "
                         f"visible_navigation_labels="
                         f"{shell_window['shell_observation']['visible_navigation_labels']!r}; "
                         f"trigger={(shell_window['trigger'] or {}).get('semantic_label')!r}; "
@@ -393,12 +512,22 @@ def main() -> None:
                         "The live shell became interactive shortly after the delayed startup "
                         "probe completed, not after the full timeout window.\n"
                         f"shell_ready_after_start_seconds={shell_ready_after_start_seconds!r}; "
+                        f"probe_recorded_shell_ready_after_start_seconds="
+                        f"{probe_recorded_shell_ready_after_start_seconds!r}; "
+                        f"authoritative_shell_ready_after_start_seconds="
+                        f"{authoritative_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
                         f"{auth_probe_released_after_start_seconds!r}; "
                         f"shell_ready_after_probe_release_seconds="
                         f"{shell_ready_after_probe_release_seconds!r}; "
+                        f"authoritative_shell_ready_after_probe_release_seconds="
+                        f"{authoritative_shell_ready_after_probe_release_seconds!r}; "
                         f"auth_probe_release_after_auth_start_seconds="
                         f"{auth_probe_release_after_auth_start_seconds!r}; "
+                        f"observed_pending_shell_samples="
+                        f"{observed_pending_shell_samples!r}; "
+                        f"observed_shell_samples="
+                        f"{shell_window['observed_shell_samples']!r}; "
                         f"visible_navigation_labels="
                         f"{shell_window['shell_observation']['visible_navigation_labels']!r}; "
                         f"trigger={(shell_window['trigger'] or {}).get('semantic_label')!r}; "
@@ -414,9 +543,13 @@ def main() -> None:
                         "appeared promptly after the delayed startup probe finished."
                     ),
                     observed=(
-                        f"shell_ready_after_start_seconds={shell_ready_after_start_seconds!r}; "
-                        f"shell_ready_after_probe_release_seconds="
-                        f"{shell_ready_after_probe_release_seconds!r}; "
+                        f"authoritative_shell_ready_after_start_seconds="
+                        f"{authoritative_shell_ready_after_start_seconds!r}; "
+                        f"authoritative_shell_ready_after_probe_release_seconds="
+                        f"{authoritative_shell_ready_after_probe_release_seconds!r}; "
+                        f"observed_pending_shell_samples="
+                        f"{observed_pending_shell_samples!r}; "
+                        f"observed_shell_samples={shell_window['observed_shell_samples']!r}; "
                         f"trigger_label={(shell_window['trigger'] or {}).get('semantic_label')!r}; "
                         f"branding_visible={shell_window['branding_visible']!r}"
                     ),
@@ -488,17 +621,27 @@ def _observe_shell_window(
     *,
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
-    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    runtime: Ts984DelayedAuthProbeRuntime,
     startup_started_at_monotonic: float,
+    transition_tracker: ShellReadyTransitionTracker | None = None,
+    poll_timeout_ms: int = 1_000,
 ) -> dict[str, Any]:
-    return observe_live_startup_shell_window(
+    shell_window = observe_live_startup_shell_window(
         tracker_page=tracker_page,
         page=page,
         runtime=runtime,
         startup_started_at_monotonic=startup_started_at_monotonic,
         shell_navigation_labels=SHELL_NAVIGATION_LABELS,
         branding_texts=(BRANDING_TEXT, "TrackState.AI"),
+        transition_tracker=transition_tracker,
+        poll_timeout_ms=poll_timeout_ms,
     )
+    shell_probe_state = runtime.read_shell_probe_state()
+    shell_window["shell_probe_state"] = shell_probe_state
+    shell_window["probe_recorded_shell_ready_after_start_seconds"] = shell_probe_state[
+        "first_shell_ready_after_launch_seconds"
+    ]
+    return shell_window
 
 
 def _elapsed_between(
