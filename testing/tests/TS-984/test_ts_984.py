@@ -47,7 +47,6 @@ BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 11
 SIMULATED_SYNC_DELAY_SECONDS = 31
 TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
-TIMEOUT_PROOF_TOLERANCE_SECONDS = 0.5
 TIMEOUT_RENDER_GRACE_SECONDS = 1.5
 OBSERVATION_INTERVAL_SECONDS = 0.1
 LINKED_BUGS = ["TS-996", "TS-973", "TS-971"]
@@ -55,7 +54,8 @@ REWORK_SUMMARY = (
     "Added a live startup regression for TS-984 that delays the initial GitHub "
     "`/user` probe beyond 30 seconds and now requires the first recorded "
     "shell_ready transition to happen only after the hanging probe has started "
-    "and the explicit 11-second timeout checkpoint has been reached."
+    "and the explicit 11-second timeout checkpoint has been reached, using the "
+    "in-page shell-ready probe timestamp as the authoritative proof."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -306,6 +306,14 @@ def main() -> None:
                 auth_probe_release_after_auth_start_seconds = final_shell_window[
                     "auth_probe_release_after_auth_start_seconds"
                 ]
+                timeout_proof_shell_ready_after_start_seconds = (
+                    probe_recorded_shell_ready_after_start_seconds
+                    if probe_recorded_shell_ready_after_start_seconds is not None
+                    else first_shell_ready_after_start_seconds
+                )
+                result["shell_transition_tracker"][
+                    "timeout_proof_shell_ready_after_start_seconds"
+                ] = timeout_proof_shell_ready_after_start_seconds
                 if first_shell_ready_after_start_seconds is None:
                     step_two_error = (
                         "Step 2 failed: the deployed app never reached shell_ready during "
@@ -321,12 +329,14 @@ def main() -> None:
                         observed=step_two_error,
                     )
                 elif (
-                    first_shell_ready_after_start_seconds is not None
-                    and first_shell_ready_after_start_seconds > TIMEOUT_ASSERTION_SECONDS
+                    timeout_proof_shell_ready_after_start_seconds is not None
+                    and timeout_proof_shell_ready_after_start_seconds
+                    > TIMEOUT_ASSERTION_SECONDS
                 ):
                     step_two_error = (
                         "Step 2 failed: the deployed app first exposed shell_ready only "
-                        f"after {first_shell_ready_after_start_seconds!r} seconds from launch, "
+                        f"after {timeout_proof_shell_ready_after_start_seconds!r} seconds "
+                        "from launch, "
                         f"which exceeds the {TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
                         f"Observed shell window:\n{json.dumps(final_shell_window, indent=2)}"
                     )
@@ -348,7 +358,9 @@ def main() -> None:
                             "The deployed app exposed shell_ready during the delayed `/user` "
                             "startup probe sequence.\n"
                             f"initial_trigger={json.dumps(_trigger_payload(initial_trigger), ensure_ascii=True)}; "
-                            f"shell_ready_after_start_seconds="
+                            f"timeout_proof_shell_ready_after_start_seconds="
+                            f"{timeout_proof_shell_ready_after_start_seconds!r}; "
+                            f"first_observed_shell_ready_after_start_seconds="
                             f"{first_shell_ready_after_start_seconds!r}; "
                             f"probe_recorded_shell_ready_after_start_seconds="
                             f"{probe_recorded_shell_ready_after_start_seconds!r}; "
@@ -387,27 +399,40 @@ def main() -> None:
                         f"{auth_probe_started_after_start_seconds!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_assertion_window, indent=2)}"
                     )
-                elif first_shell_ready_after_start_seconds < auth_probe_started_after_start_seconds:
+                elif (
+                    timeout_proof_shell_ready_after_start_seconds is None
+                ):
+                    step_three_error = (
+                        "Step 3 failed: the test could not capture an authoritative "
+                        "shell_ready timestamp to prove when the timeout fallback made "
+                        "the shell available.\n"
+                        f"Observed shell_ready_after_start_seconds="
+                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"probe_recorded_shell_ready_after_start_seconds="
+                        f"{probe_recorded_shell_ready_after_start_seconds!r}\n"
+                        f"Observed shell window:\n{json.dumps(timeout_assertion_window, indent=2)}"
+                    )
+                elif (
+                    timeout_proof_shell_ready_after_start_seconds
+                    < auth_probe_started_after_start_seconds
+                ):
                     step_three_error = (
                         "Step 3 failed: the shell became visible before the delayed `/user` "
                         "probe had started, so the timeout fallback path was not what made "
                         "the shell appear.\n"
-                        f"Observed shell_ready_after_start_seconds="
-                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"Observed timeout_proof_shell_ready_after_start_seconds="
+                        f"{timeout_proof_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{auth_probe_started_after_start_seconds!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_assertion_window, indent=2)}"
                     )
-                elif (
-                    first_shell_ready_after_start_seconds
-                    < TIMEOUT_ASSERTION_SECONDS - TIMEOUT_PROOF_TOLERANCE_SECONDS
-                ):
+                elif timeout_proof_shell_ready_after_start_seconds < TIMEOUT_ASSERTION_SECONDS:
                     step_three_error = (
                         "Step 3 failed: the shell became visible before the explicit "
                         f"{TIMEOUT_ASSERTION_SECONDS}-second timeout checkpoint, so the test "
                         "did not prove the timeout fallback caused the transition.\n"
-                        f"Observed shell_ready_after_start_seconds="
-                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"Observed timeout_proof_shell_ready_after_start_seconds="
+                        f"{timeout_proof_shell_ready_after_start_seconds!r}; "
                         f"probe_recorded_shell_ready_after_start_seconds="
                         f"{probe_recorded_shell_ready_after_start_seconds!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_assertion_window, indent=2)}"
@@ -444,14 +469,15 @@ def main() -> None:
                     )
                 elif (
                     auth_probe_released_after_start_seconds is not None
-                    and first_shell_ready_after_start_seconds >= auth_probe_released_after_start_seconds
+                    and timeout_proof_shell_ready_after_start_seconds
+                    >= auth_probe_released_after_start_seconds
                 ):
                     step_three_error = (
                         "Step 3 failed: the shell became observable only after the delayed "
                         "`/user` probe released, so the timeout fallback path did not prove "
                         "the shell was available during the hanging startup request.\n"
-                        f"Observed first_shell_ready_after_start_seconds="
-                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"Observed timeout_proof_shell_ready_after_start_seconds="
+                        f"{timeout_proof_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
                         f"{auth_probe_released_after_start_seconds!r}; "
                         f"auth_probe_release_after_auth_start_seconds="
@@ -470,7 +496,9 @@ def main() -> None:
                             f"{timeout_assertion_window['elapsed_since_start_seconds']!r} "
                             "seconds from launch while the delayed `/user` probe was still "
                             "pending and the shell was already ready.\n"
-                            f"Recorded shell_ready_after_start_seconds="
+                            f"Recorded timeout_proof_shell_ready_after_start_seconds="
+                            f"{timeout_proof_shell_ready_after_start_seconds!r}; "
+                            f"first_observed_shell_ready_after_start_seconds="
                             f"{first_shell_ready_after_start_seconds!r}; "
                             f"probe_recorded_shell_ready_after_start_seconds="
                             f"{probe_recorded_shell_ready_after_start_seconds!r}; "
@@ -504,15 +532,16 @@ def main() -> None:
                 if (
                     step_three_error is not None
                     and step_four_error is None
-                    and first_shell_ready_after_start_seconds is not None
-                    and float(first_shell_ready_after_start_seconds) > TIMEOUT_ASSERTION_SECONDS
+                    and timeout_proof_shell_ready_after_start_seconds is not None
+                    and float(timeout_proof_shell_ready_after_start_seconds)
+                    > TIMEOUT_ASSERTION_SECONDS
                 ):
                     step_four_error = (
                         "Step 4 failed: the top bar and branding were only observable after "
                         "the expected "
                         f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
-                        f"Observed first_shell_ready_after_start_seconds="
-                        f"{first_shell_ready_after_start_seconds!r}; "
+                        f"Observed timeout_proof_shell_ready_after_start_seconds="
+                        f"{timeout_proof_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
                         f"{auth_probe_released_after_start_seconds!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_assertion_window, indent=2)}"
@@ -576,6 +605,8 @@ def main() -> None:
                         f"auth_released={auth_released!r}; "
                         f"shell_ready_after_start_seconds="
                         f"{first_shell_ready_after_start_seconds!r}; "
+                        f"timeout_proof_shell_ready_after_start_seconds="
+                        f"{timeout_proof_shell_ready_after_start_seconds!r}; "
                         f"probe_recorded_shell_ready_after_start_seconds="
                         f"{probe_recorded_shell_ready_after_start_seconds!r}; "
                         f"auth_probe_started_after_start_seconds="
