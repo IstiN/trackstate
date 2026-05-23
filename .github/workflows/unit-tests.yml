@@ -69,6 +69,10 @@ jobs:
         if: steps.changes.outputs.flutter == 'true'
         run: dart run tool/check_theme_tokens.dart
 
+      - name: Check web safety
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_web_safety.dart
+
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
         run: flutter test --coverage

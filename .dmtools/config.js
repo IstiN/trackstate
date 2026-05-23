@@ -40,14 +40,15 @@ const FLUTTER_FEEDBACK = {
     policyGates: {
         enabled: true,
         gates: [
-            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 }
+            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 },
+            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 }
         ]
     }
 };
 
 module.exports = {
     // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
-    smMaxWorkflows: 4,
+    smMaxWorkflows: 8,
 
     repository: {
         owner: 'IstiN',
