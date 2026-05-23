@@ -41,7 +41,10 @@ const FLUTTER_FEEDBACK = {
         enabled: true,
         gates: [
             { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 },
-            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 }
+            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 },
+            { name: 'dead-imports-lint', command: 'dart run tool/check_dead_imports.dart', maxAttempts: 2 },
+            { name: 'semantics-label-lint', command: 'dart run tool/check_semantics_labels.dart', maxAttempts: 2 },
+            { name: 'async-notify-lint', command: 'dart run tool/check_async_notify.dart', maxAttempts: 2 }
         ]
     }
 };
