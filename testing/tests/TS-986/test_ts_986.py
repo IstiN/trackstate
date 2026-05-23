@@ -55,6 +55,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts986_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts986_failure.png"
 
@@ -208,6 +209,7 @@ def main() -> None:
 
                 candidate_local_row = _find_seeded_local_row(switcher)
                 result["candidate_local_row"] = _row_payload(candidate_local_row)
+                refreshed_switcher: WorkspaceSwitcherObservation | None = None
                 try:
                     local_row = page.observe_saved_workspace_row(
                         display_name=LOCAL_DISPLAY_NAME,
@@ -218,9 +220,13 @@ def main() -> None:
                         timeout_ms=20_000,
                     )
                     result["local_row"] = _row_payload(local_row)
+                    refreshed_switcher = page.observe_open_switcher(timeout_ms=5_000)
+                    refreshed_local_row = _find_seeded_local_row(refreshed_switcher)
+                    result["refreshed_switcher_observation"] = _switcher_payload(
+                        refreshed_switcher,
+                    )
+                    result["refreshed_local_row"] = _row_payload(refreshed_local_row)
                     _assert_unavailable_transition(
-                        switcher=switcher,
-                        candidate_local_row=candidate_local_row,
                         local_row=local_row,
                     )
                 except AssertionError as error:
@@ -234,7 +240,9 @@ def main() -> None:
                             "`Unavailable` recovery state.\n"
                             f"candidate_local_row={json.dumps(result.get('candidate_local_row'), indent=2)}\n"
                             f"local_row={json.dumps(result.get('local_row'), indent=2)}\n"
+                            f"refreshed_local_row={json.dumps(result.get('refreshed_local_row'), indent=2)}\n"
                             f"switcher={json.dumps(result['switcher_observation'], indent=2)}\n"
+                            f"refreshed_switcher={json.dumps(result.get('refreshed_switcher_observation'), indent=2)}\n"
                             f"error={error}"
                         ),
                     )
@@ -247,7 +255,9 @@ def main() -> None:
                         observed=(
                             f"candidate_row={json.dumps(result.get('candidate_local_row'), ensure_ascii=True)}; "
                             f"local_row={json.dumps(result.get('local_row'), ensure_ascii=True)}; "
-                            f"switcher_text={switcher.switcher_text!r}"
+                            f"refreshed_local_row={json.dumps(result.get('refreshed_local_row'), ensure_ascii=True)}; "
+                            f"switcher_text={switcher.switcher_text!r}; "
+                            f"refreshed_switcher_text={getattr(refreshed_switcher, 'switcher_text', None)!r}"
                         ),
                     )
                     raise
@@ -260,7 +270,8 @@ def main() -> None:
                         "The mismatched local workspace row rendered with the explicit "
                         "`Unavailable` state instead of falling back to the persisted "
                         "`Active` / `Local Git` state.\n"
-                        f"local_row={json.dumps(result['local_row'], indent=2)}"
+                        f"local_row={json.dumps(result['local_row'], indent=2)}\n"
+                        f"refreshed_local_row={json.dumps(result['refreshed_local_row'], indent=2)}"
                     ),
                 )
                 _record_human_verification(
@@ -272,7 +283,8 @@ def main() -> None:
                     observed=(
                         f"row_visible_text={local_row.visible_text!r}; "
                         f"row_actions={json.dumps(list(local_row.action_labels), ensure_ascii=True)}; "
-                        f"switcher_text={switcher.switcher_text!r}"
+                        f"refreshed_row={json.dumps(result['refreshed_local_row'], ensure_ascii=True)}; "
+                        f"switcher_text={refreshed_switcher.switcher_text!r}"
                     ),
                 )
             except Exception:
@@ -342,21 +354,8 @@ def _cleanup_local_workspace() -> None:
 
 def _assert_unavailable_transition(
     *,
-    switcher: WorkspaceSwitcherObservation,
-    candidate_local_row: WorkspaceSwitcherRowObservation | None,
     local_row: WorkspaceSwitcherRowObservation,
 ) -> None:
-    if switcher.row_count <= 0:
-        raise AssertionError(
-            "Step 4 failed: Workspace switcher opened without any visible workspace rows.\n"
-            f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
-        )
-    if candidate_local_row is None:
-        raise AssertionError(
-            "Step 4 failed: the opened Workspace switcher did not expose the seeded broken "
-            "local workspace row.\n"
-            f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
-        )
     if local_row.display_name != LOCAL_DISPLAY_NAME or LOCAL_TARGET not in local_row.detail_text:
         raise AssertionError(
             "Step 4 failed: the observed Workspace switcher row did not match the seeded "
@@ -369,19 +368,18 @@ def _assert_unavailable_transition(
             "`Unavailable` status label.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if candidate_local_row.selected or "Active" in candidate_local_row.visible_text:
+    if local_row.selected or "Active" in local_row.visible_text:
         raise AssertionError(
             "Step 4 failed: the mismatched local workspace still appeared selected as "
-            "`Active` after startup hydration.\n"
-            f"Observed candidate row: {json.dumps(_row_payload(candidate_local_row), indent=2)}"
+            "`Active` in the awaited post-wait row observation.\n"
+            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if "Local Git" in candidate_local_row.visible_text or "Local Git" in (
-        candidate_local_row.semantics_label or ""
-    ):
+    if "Local Git" in local_row.visible_text or "Local Git" in (local_row.semantics_label or ""):
         raise AssertionError(
             "Step 4 failed: the mismatched local workspace still showed `Local Git` instead "
-            "of the expected `Unavailable` state.\n"
-            f"Observed candidate row: {json.dumps(_row_payload(candidate_local_row), indent=2)}"
+            "of the expected `Unavailable` state in the awaited post-wait row "
+            "observation.\n"
+            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
     if not any(
         label in ACCEPTED_RECOVERY_ACTION_LABELS for label in local_row.action_labels
@@ -516,6 +514,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies()
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -537,6 +536,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies()
     if result.get("failure_kind") == "product":
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -633,19 +633,32 @@ def _build_pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "Startup hydration reached the interactive shell, Workspace switcher opened, "
-            "and the broken local workspace row was shown as `Unavailable` instead of "
-            "the stale `Active` / `Local Git` state.\n"
+    status = "PASSED" if passed else "FAILED"
+    lines = [
+        f"h3. {TICKET_KEY} rework {status}",
+        "",
+        "*Fixes applied*",
+        "* Step 4 now bases the final `not Active` / `not Local Git` verdict on the awaited unavailable row observation instead of the stale pre-wait snapshot.",
+        "* Added the required PR review reply artifact for the addressed thread.",
+        "",
+        "*New test result*",
+        (
+            "* PASSED — startup hydration reached the interactive shell and the awaited broken local workspace row stayed in the `Unavailable` recovery state."
+            if passed
+            else f"* FAILED — {result.get('error', 'The deployed app did not expose the expected unavailable workspace state.')}"
+        ),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ],
         )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The deployed app did not expose the expected unavailable workspace state.')}\n"
-    )
+    return "\n".join(lines) + "\n"
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
@@ -736,7 +749,7 @@ def _find_seeded_local_row(
 
 def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
     if passed:
-        local_row = result.get("local_row")
+        local_row = result.get("refreshed_local_row", result.get("local_row"))
         return (
             "Startup hydration finished in the interactive shell, Workspace switcher opened, "
             "and the seeded broken local workspace row rendered as `Unavailable` with a "
@@ -806,6 +819,29 @@ def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, objec
         "action_labels": list(row.action_labels),
         "button_labels": list(row.button_labels),
     }
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3292383398,
+                        "threadId": "PRRT_kwDOSU6Gf86ESPy8",
+                        "reply": (
+                            "Fixed: Step 4 now waits for the unavailable row and bases the "
+                            "final `not Active` / `not Local Git` assertions on that awaited "
+                            "post-wait row observation instead of the stale pre-wait "
+                            "`open_and_observe()` snapshot."
+                        ),
+                    },
+                ],
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
