@@ -309,17 +309,20 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
     String? workspaceId,
+    Uri Function()? currentUriProvider,
   }) : _repository = repository,
        _issueMutationService =
            issueMutationService ?? IssueMutationService(repository: repository),
        _authStore = authStore,
-       _workspaceId = workspaceId {
+       _workspaceId = workspaceId,
+       _currentUriProvider = currentUriProvider ?? (() => Uri.base) {
     _bindProviderSession();
   }
 
   final TrackStateRepository _repository;
   final IssueMutationService _issueMutationService;
   final TrackStateAuthStore _authStore;
+  final Uri Function() _currentUriProvider;
   String? _workspaceId;
   ProviderSession? _boundProviderSession;
 
@@ -1779,7 +1782,7 @@ class TrackerViewModel extends ChangeNotifier {
         queryParameters: {
           ...Uri.parse(_githubAuthProxyUrl).queryParameters,
           'repository': project.repository,
-          'redirect_uri': Uri.base.removeFragment().toString(),
+          'redirect_uri': _currentUriProvider().removeFragment().toString(),
         },
       );
       await launchUrl(proxyUri, webOnlyWindowName: '_self');
@@ -1788,7 +1791,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (_githubAppClientId.isNotEmpty) {
       final authorizeUri = Uri.https('github.com', '/login/oauth/authorize', {
         'client_id': _githubAppClientId,
-        'redirect_uri': Uri.base.removeFragment().toString(),
+        'redirect_uri': _currentUriProvider().removeFragment().toString(),
         'scope': 'repo',
         'state': project.repository,
       });
@@ -1812,6 +1815,9 @@ class TrackerViewModel extends ChangeNotifier {
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
         _message = TrackerMessage.githubAuthorizationCodeReturned();
+        if (!_isLoading && !_disposed) {
+          notifyListeners();
+        }
       }
       return;
     }
@@ -2432,11 +2438,11 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   String? _callbackToken() {
-    final fragment = Uri.splitQueryString(Uri.base.fragment);
+    final fragment = Uri.splitQueryString(_currentUriProvider().fragment);
     return fragment['trackstate_token'] ?? fragment['access_token'];
   }
 
-  String? _callbackCode() => Uri.base.queryParameters['code'];
+  String? _callbackCode() => _currentUriProvider().queryParameters['code'];
 
   int _beginSearchRequest() {
     _searchRequestSerial += 1;

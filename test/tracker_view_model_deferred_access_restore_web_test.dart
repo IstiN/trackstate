@@ -58,6 +58,36 @@ void main() {
       expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
     },
   );
+
+  test(
+    'deferred access restore notifies listeners when only an authorization code is returned',
+    () async {
+      final notifications = <TrackerMessageKind?>[];
+      final viewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+        authStore: _EmptyAuthStore(),
+        currentUriProvider: () =>
+            Uri.parse('https://trackstate.example/?code=oauth-code'),
+      );
+      addTearDown(viewModel.dispose);
+      viewModel.addListener(() {
+        notifications.add(viewModel.message?.kind);
+      });
+
+      await viewModel.load(deferAccessRestore: true);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.githubAuthorizationCodeReturned,
+      );
+      expect(
+        notifications,
+        contains(TrackerMessageKind.githubAuthorizationCodeReturned),
+      );
+    },
+  );
 }
 
 class _DelayedConnectRepository extends DemoTrackStateRepository {
@@ -107,6 +137,34 @@ class _FixedAuthStore implements TrackStateAuthStore {
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async =>
       'github-token';
+
+  @override
+  Future<void> saveToken(
+    String token, {
+    String? repository,
+    String? workspaceId,
+  }) async {}
+}
+
+class _EmptyAuthStore implements TrackStateAuthStore {
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {}
+
+  @override
+  Future<String?> migrateLegacyRepositoryToken({
+    required String repository,
+    required String workspaceId,
+  }) async => null;
+
+  @override
+  Future<void> moveToken({
+    required String fromWorkspaceId,
+    required String toWorkspaceId,
+  }) async {}
+
+  @override
+  Future<String?> readToken({String? repository, String? workspaceId}) async =>
+      null;
 
   @override
   Future<void> saveToken(
