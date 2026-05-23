@@ -71,18 +71,21 @@ AUTH_OBSERVATION_WAIT_SECONDS = 5
 SECONDARY_PROBE_START_WAIT_SECONDS = 60
 EVENTUAL_SHELL_WAIT_SECONDS = SECONDARY_PROBE_DELAY_SECONDS + 90
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-996"]
+LINKED_BUGS = ["TS-1014", "TS-1013", "TS-1012", "TS-996", "TS-992"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996. Its deployed fix made the `/user` startup timeout non-blocking "
-    "after 11 seconds, so this test waits past that window and delays a different "
-    "startup artifact (`DEMO/project.json`) to verify the timeout behavior applies "
-    "beyond the auth probe."
+    "Reviewed the linked startup bug chain from input/TS-1002/linked_bugs.md. "
+    "TS-996 and TS-1013 require the shell to become interactive by the global "
+    "11-second timeout, TS-1012 extends that guarantee to secondary critical-path "
+    "probes such as `DEMO/project.json`, and TS-992 plus TS-1014 require the live "
+    "startup flow to exercise the `/user` probe path promptly instead of skipping or "
+    "deferring it. This test therefore keeps the `/user` delay short, delays the "
+    "secondary probe for 31 seconds, and samples the live page at the 12-second "
+    "checkpoint while that secondary probe is still pending."
 )
 REWORK_SUMMARY = (
-    "Reworked the TS-1002 startup regression so the 11-second checkpoint is sampled "
-    "inside the live page while the delayed `DEMO/project.json` probe is still "
-    "pending, kept `/user` and secondary-probe timings separate, and added the "
-    "ticket README."
+    "Reused the approved TS-1002 live startup regression, kept the timeout-window "
+    "sampling inside the browser while `DEMO/project.json` was still pending, and "
+    "refreshed the linked-bug context for the current re-automation run."
 )
 CHECKPOINT_SAMPLE_TOLERANCE_SECONDS = 1.0
 

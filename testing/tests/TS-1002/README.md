@@ -13,6 +13,11 @@ secondary critical-path probe.
 4. Verifies whether the full shell, TopBar workspace trigger, and branding are
    visible within the required timeout window.
 
+The automation also reflects the current linked startup bug chain for this
+ticket: the live app must still exercise the GitHub `/user` probe promptly, and
+the global 11-second fallback must make the shell interactive even while
+`DEMO/project.json` remains delayed.
+
 ## Install dependencies
 
 ```bash
