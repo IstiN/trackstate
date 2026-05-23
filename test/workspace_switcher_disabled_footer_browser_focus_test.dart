@@ -159,7 +159,7 @@ void main() {
     );
 
     test(
-      'Shift+Tab from the selected row still wraps to disabled Save and switch when the footer bridge appears earlier in DOM order',
+      'workspace switcher keeps the disabled footer as the wrap target when it appears earlier in DOM order',
       () {
         final subscription =
             createBrowserWorkspaceSwitcherFocusMonitorSubscription(
@@ -169,12 +169,27 @@ void main() {
             );
         addTearDown(subscription.cancel);
 
+        while (panel.lastChild != null) {
+          panel.removeChild(panel.lastChild!);
+        }
+        final domEarlierActiveRow = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          tabIndex: 0,
+          selectedRow: true,
+        );
         final saveDomConfig = resolveBrowserFocusableControlDomConfig(
           enabled: false,
           focusableWhenDisabled: true,
           explicitTabIndex: null,
         );
-        final reverseWrapSaveButton = _appendButton(
+        final domEarlierSaveButton = _appendButton(
           panel,
           label: 'Save and switch',
           focusId: _saveFocusId,
@@ -187,7 +202,7 @@ void main() {
           ariaDisabled: saveDomConfig.ariaDisabled,
         );
 
-        final reverseWrapRepositoryInput = _appendInput(
+        final domEarlierRepositoryInput = _appendInput(
           panel,
           label: 'Repository',
           left: 0,
@@ -195,7 +210,7 @@ void main() {
           width: 220,
           height: 36,
         );
-        final reverseWrapBranchInput = _appendInput(
+        final domEarlierBranchInput = _appendInput(
           panel,
           label: 'Branch',
           left: 0,
@@ -204,13 +219,18 @@ void main() {
           height: 36,
         );
 
-        expect(reverseWrapSaveButton.tabIndex, 0);
-        expect(reverseWrapSaveButton.getAttribute('aria-disabled'), 'true');
+        expect(panel.children.length, 4);
+        expect(panel.children.item(0), same(domEarlierActiveRow));
+        expect(panel.children.item(1), same(domEarlierSaveButton));
+        expect(panel.children.item(2), same(domEarlierRepositoryInput));
+        expect(panel.children.item(3), same(domEarlierBranchInput));
+        expect(domEarlierSaveButton.tabIndex, 0);
+        expect(domEarlierSaveButton.getAttribute('aria-disabled'), 'true');
 
-        activeRow.focus();
-        expect(web.document.activeElement, same(activeRow));
+        domEarlierActiveRow.focus();
+        expect(web.document.activeElement, same(domEarlierActiveRow));
 
-        final event = web.KeyboardEvent(
+        final reverseEvent = web.KeyboardEvent(
           'keydown',
           web.KeyboardEventInit(
             key: 'Tab',
@@ -219,21 +239,41 @@ void main() {
             cancelable: true,
           ),
         );
-        web.window.dispatchEvent(event);
+        web.window.dispatchEvent(reverseEvent);
 
-        expect(event.defaultPrevented, isTrue);
-        final activeElement = web.document.activeElement;
+        expect(reverseEvent.defaultPrevented, isTrue);
         expect(
-          activeElement?.getAttribute('aria-label'),
-          'Save and switch',
+          web.document.activeElement,
+          same(domEarlierSaveButton),
           reason:
               'Reverse tab should use the visual workspace-switcher order, so '
               'the disabled footer remains the wrap target even if its bridge '
               'button is earlier than Repository and Branch in DOM order.',
         );
-        expect(activeElement?.getAttribute('aria-disabled'), 'true');
-        expect(activeElement, isNot(same(reverseWrapBranchInput)));
-        expect(activeElement, isNot(same(reverseWrapRepositoryInput)));
+        expect(
+          web.document.activeElement?.getAttribute('aria-disabled'),
+          'true',
+        );
+
+        final orderedFocusTargets = <web.HTMLElement>[
+          domEarlierActiveRow,
+          domEarlierSaveButton,
+          domEarlierRepositoryInput,
+          domEarlierBranchInput,
+          searchIssuesInput,
+        ];
+
+        domEarlierBranchInput.focus();
+        expect(web.document.activeElement, same(domEarlierBranchInput));
+
+        _pressTab(orderedFocusTargets);
+        expect(
+          web.document.activeElement,
+          same(domEarlierActiveRow),
+          reason:
+              'Forward tab should still treat the DOM-last Branch field as the '
+              'handoff boundary and wrap back to the selected row.',
+        );
       },
     );
   });

@@ -81,7 +81,7 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
 int _lastInPanelControlIndex(
   List<BrowserWorkspaceSwitcherTabStopSnapshot> stops,
 ) {
-  return _lastMatchingIndex(
+  return _lastVisuallyOrderedMatchingIndex(
     stops,
     matches: (stop) =>
         stop.isFocusable &&
@@ -121,17 +121,18 @@ int _lastPostRowControlIndex(
   List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
   required int startIndex,
 }) {
-  return _lastMatchingIndex(
-    stops,
-    startIndex: startIndex,
-    matches: (stop) =>
-        stop.isFocusable &&
+  for (var index = stops.length - 1; index >= startIndex; index -= 1) {
+    final stop = stops[index];
+    if (stop.isFocusable &&
         stop.isWithinWorkspaceSwitcher &&
-        !stop.isWithinWorkspaceRow,
-  );
+        !stop.isWithinWorkspaceRow) {
+      return index;
+    }
+  }
+  return -1;
 }
 
-int _lastMatchingIndex(
+int _lastVisuallyOrderedMatchingIndex(
   List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
   int startIndex = 0,
   required bool Function(BrowserWorkspaceSwitcherTabStopSnapshot stop) matches,
