@@ -1048,6 +1048,15 @@ def _review_reply_text(
             "failures and removes any stale bug artifact for test/setup failures, so "
             f"rework-only regressions do not create false downstream bugs. {rerun_summary}"
         )
+    if comment_id == 3292445901:
+        return (
+            "Fixed: `_should_write_bug_description()` no longer defaults to `True` for "
+            "generic assertion/setup failures. TS-990 now emits `bug_description.md` only "
+            "for confirmed product-visible failures (for example, the hosted shell landing "
+            "in `Needs sign-in` / `Connect GitHub`, missing the post-timeout interactive "
+            "shell, never resolving the delayed probe, or destabilizing the shell after the "
+            f"late release). {rerun_summary}"
+        )
     return (
         "Fixed: updated TS-990 to start from the hosted workspace, set the required "
         "viewport before launch, gate `bug_description.md` to confirmed product "
@@ -1056,12 +1065,63 @@ def _review_reply_text(
 
 
 def _should_write_bug_description(result: dict[str, Any]) -> bool:
+    return _bug_description_reason(result) is not None
+
+
+def _bug_description_reason(result: dict[str, Any]) -> str | None:
     error = str(result.get("error", ""))
     if error.startswith("RuntimeError: TS-990 requires GH_TOKEN or GITHUB_TOKEN"):
-        return False
+        return None
     if error.startswith("ModuleNotFoundError:"):
-        return False
-    return True
+        return None
+
+    failed_steps = {
+        int(step.get("step")): step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    }
+    step_one_observed = str(failed_steps.get(1, {}).get("observed", ""))
+    step_two_observed = str(failed_steps.get(2, {}).get("observed", ""))
+    step_three_observed = str(failed_steps.get(3, {}).get("observed", ""))
+    step_four_observed = str(failed_steps.get(4, {}).get("observed", ""))
+
+    if "never rendered beyond the bare startup title" in step_one_observed:
+        return "startup-surface-never-rendered"
+    if (
+        "never started the delayed GitHub `/user` startup probe" in step_one_observed
+        and _hosted_sign_in_gap_visible(result)
+    ):
+        return "hosted-workspace-auth-probe-missing"
+    if (
+        "still had not reached shell_ready" in step_two_observed
+        or "did not expose the full interactive shell navigation" in step_two_observed
+        or "did not expose the header workspace trigger" in step_two_observed
+        or "did not expose visible TrackState branding" in step_two_observed
+        or "still looked like the startup Sync issue surface" in step_two_observed
+    ):
+        return "shell-not-interactive-after-timeout"
+    if "never resolved within the observation window" in step_three_observed:
+        return "startup-probe-never-resolved"
+    if step_four_observed and not step_four_observed.startswith("Not reached because step "):
+        return "late-probe-resolution-destabilized-shell"
+    return None
+
+
+def _hosted_sign_in_gap_visible(result: dict[str, Any]) -> bool:
+    observed_fragments = [
+        str(result.get("error", "")),
+        str(result.get("startup_observation_after_render", "")),
+        str(result.get("startup_observation_initial", "")),
+        str(result.get("timeout_window_observation", "")),
+        str(result.get("final_stability_observation", "")),
+    ]
+    observed_fragments.extend(
+        str(step.get("observed", ""))
+        for step in result.get("steps", [])
+        if isinstance(step, dict)
+    )
+    combined_text = "\n".join(observed_fragments)
+    return "Needs sign-in" in combined_text and "Connect GitHub" in combined_text
 
 
 def _error_summary(result: dict[str, Any]) -> str:
