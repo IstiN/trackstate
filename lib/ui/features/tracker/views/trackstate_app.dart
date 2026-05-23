@@ -105,6 +105,19 @@ bool shouldShowWorkspaceOnboardingForStartup({
   return !isWeb && !hasRepository && !hasProfiles;
 }
 
+@visibleForTesting
+bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
+  required bool isWeb,
+  required bool isActive,
+  required bool showOpenAction,
+  required bool hasSelectionAction,
+}) {
+  if (!hasSelectionAction) {
+    return false;
+  }
+  return !(isWeb && !isActive && showOpenAction);
+}
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -7562,6 +7575,13 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final detailText = workspace.defaultBranch == workspace.writeBranch
         ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
         : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
+    final browserSummaryActivatesSelection =
+        shouldActivateBrowserWorkspaceSwitcherRowSummary(
+          isWeb: kIsWeb,
+          isActive: isActive,
+          showOpenAction: widget.showOpenAction,
+          hasSelectionAction: onSelect != null,
+        );
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -7633,7 +7653,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
-            onPressed: onSelect,
+            onPressed: browserSummaryActivatesSelection ? onSelect : null,
             focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
             ),
