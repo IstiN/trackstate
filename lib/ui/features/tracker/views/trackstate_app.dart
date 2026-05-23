@@ -377,6 +377,14 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
           workspace.id == viewModel.workspaceId) {
+        if (_shouldMarkActiveLocalWorkspaceUnavailableFromSync(workspace)) {
+          workspaceState = await _saveLocalWorkspaceAvailability(
+            workspace.id,
+            isAvailable: false,
+          );
+          localWorkspaceAvailability[workspace.id] = false;
+          continue;
+        }
         localWorkspaceAvailability[workspace.id] = !workspaceState
             .unavailableLocalWorkspaceIds
             .contains(workspace.id);
@@ -403,6 +411,22 @@ class _TrackStateAppState extends State<TrackStateApp>
         ),
       );
     });
+  }
+
+  bool _shouldMarkActiveLocalWorkspaceUnavailableFromSync(
+    WorkspaceProfile workspace,
+  ) {
+    if (!workspace.isLocal || !viewModel.usesLocalPersistence) {
+      return false;
+    }
+    final status = viewModel.workspaceSyncStatus;
+    final latestError = status.latestError?.trim();
+    if (status.health != WorkspaceSyncHealth.attentionNeeded ||
+        latestError == null ||
+        latestError.isEmpty) {
+      return false;
+    }
+    return !_isUnsupportedActiveLocalStartupAccess(latestError);
   }
 
   Future<bool> _validateLocalWorkspaceAvailability(
