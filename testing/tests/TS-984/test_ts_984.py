@@ -279,16 +279,16 @@ def main() -> None:
                     )
                 elif (
                     not bool(timeout_window["auth_pending"])
-                    and timeout_window["auth_probe_released_after_start_seconds"] is not None
-                    and float(timeout_window["auth_probe_released_after_start_seconds"])
+                    and timeout_window["auth_probe_release_after_auth_start_seconds"] is not None
+                    and float(timeout_window["auth_probe_release_after_auth_start_seconds"])
                     > TIMEOUT_ASSERTION_SECONDS
                 ):
                     step_three_error = (
                         "Step 3 failed: the page only became observable after the delayed "
                         "startup probe released, so the shell was not available by the "
                         f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
-                        f"Observed auth_probe_released_after_start_seconds="
-                        f"{timeout_window['auth_probe_released_after_start_seconds']!r}; "
+                        f"Observed auth_probe_release_after_auth_start_seconds="
+                        f"{timeout_window['auth_probe_release_after_auth_start_seconds']!r}; "
                         f"shell_ready_after_start_seconds="
                         f"{timeout_window['shell_ready_after_start_seconds']!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
@@ -338,16 +338,16 @@ def main() -> None:
                 if (
                     step_three_error is not None
                     and step_four_error is None
-                    and timeout_window["auth_probe_released_after_start_seconds"] is not None
-                    and float(timeout_window["auth_probe_released_after_start_seconds"])
+                    and timeout_window["auth_probe_release_after_auth_start_seconds"] is not None
+                    and float(timeout_window["auth_probe_release_after_auth_start_seconds"])
                     > TIMEOUT_ASSERTION_SECONDS
                 ):
                     step_four_error = (
                         "Step 4 failed: the top bar and branding were only observable after "
                         "the delayed startup probe released, not by the expected "
                         f"{TIMEOUT_ASSERTION_SECONDS}-second timeout window.\n"
-                        f"Observed auth_probe_released_after_start_seconds="
-                        f"{timeout_window['auth_probe_released_after_start_seconds']!r}; "
+                        f"Observed auth_probe_release_after_auth_start_seconds="
+                        f"{timeout_window['auth_probe_release_after_auth_start_seconds']!r}; "
                         f"shell_ready_after_start_seconds="
                         f"{timeout_window['shell_ready_after_start_seconds']!r}\n"
                         f"Observed shell window:\n{json.dumps(timeout_window, indent=2)}"
@@ -574,7 +574,14 @@ def _observe_shell_window(
     startup_observation = _startup_surface_payload(tracker_page)
     trigger = _safe_trigger_payload(page)
     body_text = str(shell_observation.get("body_text", ""))
-    title = str(startup_observation.get("title", ""))
+    visible_shell_text = "\n".join(
+        text
+        for text in (
+            body_text,
+            str(startup_observation.get("body_text", "")),
+        )
+        if text
+    )
     shell_ready_after_start_seconds = _relative_startup_event_seconds(
         startup_started_at_monotonic,
         time.monotonic() if bool(shell_observation.get("shell_ready")) else None,
@@ -583,7 +590,10 @@ def _observe_shell_window(
         "shell_observation": shell_observation,
         "startup_observation": startup_observation,
         "trigger": trigger,
-        "branding_visible": BRANDING_TEXT in body_text or "TrackState" in body_text or "TrackState" in title,
+        "branding_visible": any(
+            branding_text in visible_shell_text
+            for branding_text in (BRANDING_TEXT, "TrackState.AI")
+        ),
         "auth_pending": runtime.auth_probe_pending,
         "auth_probe_started_after_start_seconds": _relative_startup_event_seconds(
             startup_started_at_monotonic,
@@ -591,6 +601,10 @@ def _observe_shell_window(
         ),
         "auth_probe_released_after_start_seconds": _relative_startup_event_seconds(
             startup_started_at_monotonic,
+            runtime.auth_probe_released_at_monotonic,
+        ),
+        "auth_probe_release_after_auth_start_seconds": _relative_event_seconds(
+            runtime.auth_probe_started_at_monotonic,
             runtime.auth_probe_released_at_monotonic,
         ),
         "elapsed_since_auth_start_seconds": _elapsed_since(runtime.auth_probe_started_at_monotonic),
@@ -611,6 +625,15 @@ def _relative_startup_event_seconds(
     if event_monotonic is None:
         return None
     return round(event_monotonic - startup_started_at_monotonic, 2)
+
+
+def _relative_event_seconds(
+    started_at_monotonic: float | None,
+    event_monotonic: float | None,
+) -> float | None:
+    if started_at_monotonic is None or event_monotonic is None:
+        return None
+    return round(event_monotonic - started_at_monotonic, 2)
 
 
 def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
