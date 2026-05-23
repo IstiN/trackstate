@@ -486,8 +486,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_sample_labels": (
                     runtime_accessibility_sample_labels
                 ),
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
@@ -1018,24 +1018,71 @@ class GitHubAccessibilityPullRequestGateProbeService:
     @staticmethod
     def _extract_probe_semantic_label(probe_source: str) -> str | None:
         match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
-        if match is None:
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"label:\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
+        )
+        if variable_match is None:
             return None
-        return match.group("label")
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
-        del probe_source
+        if "final lowContrastColor = colorScheme.surface;" in " ".join(probe_source.split()):
+            return (
+                "Uses `colorScheme.surface` text on `colorScheme.surface` to guarantee a "
+                "WCAG contrast failure while remaining theme-token-safe."
+            )
+        if "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source:
+            return (
+                "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+                "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            )
         return (
             "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            "`colorScheme.surface` or an equivalent theme-token-safe low-contrast signal."
         )
 
     @staticmethod
     def _extract_probe_visible_text(probe_source: str) -> str | None:
         match = re.search(r"Text\(\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
-        if match is None:
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"Text\(\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
+        )
+        if variable_match is None:
             return None
-        return match.group("label")
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
+
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
+        )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         if not run_log_text.strip():
@@ -1284,6 +1331,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
     def _probe_source() -> str:
         return """import 'package:flutter/material.dart';
 
+import 'ui/features/tracker/services/accessibility_probe_signal.dart';
+
 class Ts908ProbeSurface extends StatelessWidget {
   const Ts908ProbeSurface({super.key});
 
@@ -1291,18 +1340,26 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
+    const probeText = 'Sync issue';
+    const semanticsLabel = 'button';
+
+    publishAccessibilityContrastProbeSignal(
+      text: probeText,
+      semanticsLabel: semanticsLabel,
+      foreground: lowContrastColor,
+      background: colorScheme.surface,
+    );
 
     return Semantics(
-      container: true,
-      label: 'button',
+      label: semanticsLabel,
       button: true,
       child: ExcludeSemantics(
         child: Container(
           color: colorScheme.surface,
           padding: const EdgeInsets.all(12),
           child: Text(
-            'Sync issue',
+            probeText,
             style: textStyle?.copyWith(color: lowContrastColor) ??
                 TextStyle(color: lowContrastColor),
           ),

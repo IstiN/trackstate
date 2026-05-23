@@ -102,7 +102,7 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
             "probe_visible_text": "Sync issue",
-            "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
+            "probe_contrast_technique": "Uses surface text on surface.",
             "cleanup_closed_pull_request": True,
             "cleanup_deleted_branch": True,
         }
@@ -251,6 +251,18 @@ jobs:
         self.assertFalse(observation.run_log_mentions_accessibility)
         self.assertTrue(observation.cleanup_closed_pull_request)
         self.assertTrue(observation.cleanup_deleted_branch)
+
+    def test_probe_source_publishes_runtime_contrast_signal(self) -> None:
+        probe_source = _StubProbeService._probe_source()  # noqa: SLF001
+
+        self.assertIn(
+            "import 'ui/features/tracker/services/accessibility_probe_signal.dart';",
+            probe_source,
+        )
+        self.assertIn("publishAccessibilityContrastProbeSignal(", probe_source)
+        self.assertIn("foreground: lowContrastColor", probe_source)
+        self.assertIn("background: colorScheme.surface", probe_source)
+        self.assertIn("ExcludeSemantics(", probe_source)
 
     def test_find_accessibility_status_check_uses_actual_check_surface(self) -> None:
         probe = _StubProbeService(self.config)
@@ -455,11 +467,18 @@ void main() {
         self.assertIn("return MaterialApp(", patched)
         self.assertIn("Ts908ProbeSurface()", patched)
 
-    def test_probe_source_excludes_visible_text_from_semantics(self) -> None:
+    def test_probe_source_preserves_variable_based_label_and_text_extraction(self) -> None:
         probe_source = _StubProbeService._probe_source()  # noqa: SLF001
 
-        self.assertIn("ExcludeSemantics(", probe_source)
-        self.assertIn("label: 'button'", probe_source)
+        self.assertEqual(
+            _StubProbeService._extract_probe_semantic_label(probe_source),  # noqa: SLF001
+            "button",
+        )
+        self.assertEqual(
+            _StubProbeService._extract_probe_visible_text(probe_source),  # noqa: SLF001
+            "Sync issue",
+        )
+        self.assertTrue(_StubProbeService._probe_has_low_contrast_indicator(probe_source))  # noqa: SLF001
 
 
 if __name__ == "__main__":
