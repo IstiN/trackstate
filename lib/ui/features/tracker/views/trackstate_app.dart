@@ -1236,20 +1236,11 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    var prepared = await _prepareWorkspaceSwitch(
+    final prepared = await _prepareWorkspaceSwitch(
       nextWorkspace,
       previousViewModel: previousViewModel,
       showFailureMessage: false,
     );
-    if (prepared == null &&
-        _isUnsupportedActiveLocalStartupAccess(
-          _workspaceValidationFailureReason(nextWorkspace),
-        )) {
-      prepared = await _preserveActiveLocalWorkspaceSelection(
-        nextWorkspace,
-        previousViewModel,
-      );
-    }
     if (prepared != null) {
       var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
