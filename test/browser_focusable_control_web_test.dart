@@ -202,6 +202,12 @@ void main() {
         findsWidgets,
       );
       expect(find.text('Dashboard'), findsWidgets);
+      final savedStateAfterConnect = await workspaceProfiles.loadState();
+      expect(savedStateAfterConnect.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateAfterConnect.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
     },
   );
 }

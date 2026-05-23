@@ -98,6 +98,12 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
+      final savedStateBeforeProbe = await workspaceProfiles.loadState();
+      expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateBeforeProbe.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
 
       delayedRepository.completeUserProbe();
       await tester.pump();
@@ -113,6 +119,12 @@ void main() {
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
+      );
+      final savedStateAfterProbe = await workspaceProfiles.loadState();
+      expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateAfterProbe.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
     },
   );
