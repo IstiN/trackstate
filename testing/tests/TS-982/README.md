@@ -11,9 +11,9 @@ The automation:
 3. waits for the visible failure message instead of asserting immediately
 4. verifies the shell still exposes the desktop navigation and workspace
    switcher trigger
-5. opens the workspace switcher and confirms the saved hosted workspace remains
-   available in a visible fallback state rather than leaving the app stuck on a
-   terminal error surface
+5. opens the workspace switcher and confirms the saved hosted workspace shows
+   the exact `Sync issue` recovery state rather than an auth/sign-in fallback
+   or terminal error surface
 
 ## Install dependencies
 
@@ -40,10 +40,10 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-982/test_ts_982.py
 ```text
 Pass: the one-time 500 error surfaces as a visible startup-sync failure while
 the desktop shell stays interactive, the top bar and sidebar remain available,
-and Workspace switcher still opens with the hosted workspace shown in a visible
-fallback state.
+and Workspace switcher still opens with the hosted workspace shown in the exact
+`Sync issue` recovery state.
 
 Fail: startup collapses to a blank or terminal error surface, the desktop shell
 never becomes interactive, or Workspace switcher cannot expose the saved hosted
-workspace after the synthetic 500 failure.
+workspace with the required `Sync issue` state after the synthetic 500 failure.
 ```

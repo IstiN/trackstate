@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Seeds a hosted workspace into browser storage and injects a one-time HTTP 500 on the second repository metadata request so the workspace-sync bootstrap path fails without blocking initial shell data hydration.
   - Uses the ticket viewport of 1440x900 and waits for the async startup-sync failure message before asserting the desktop shell state.
-  - Verifies the top bar, sidebar navigation, and workspace switcher remain usable while the hosted workspace stays visible in a failure-state fallback instead of a terminal blank surface.
+  - Verifies the top bar, sidebar navigation, and workspace switcher remain usable while the hosted workspace shows the exact Sync issue recovery state instead of an auth/sign-in fallback or terminal blank surface.

@@ -45,20 +45,19 @@ LINKED_BUGS = ["TS-977"]
 INJECTED_FAILURE_STATUS_CODE = 500
 INJECTED_FAILURE_ATTEMPT = 2
 FAILURE_MESSAGE_FRAGMENTS = (
-    "Stored GitHub token is no longer valid",
     "GitHub connection failed (500)",
     "Internal Server Error",
-)
-ACCEPTED_SWITCHER_FALLBACK_STATES = (
-    "Needs sign-in",
     "Sync issue",
-    "Sync unavailable",
-    "Attention needed",
 )
+AUTH_FALLBACK_FRAGMENTS = (
+    "Stored GitHub token is no longer valid",
+    "Needs sign-in",
+)
+REQUIRED_SWITCHER_STATE = "Sync issue"
 REWORK_SUMMARY = (
-    "Reproduces the startup workspace-sync failure with a one-time synthetic 500 "
-    "on the second repository metadata request, then proves the live desktop "
-    "shell and workspace switcher stay usable."
+    "Tightens TS-982 so it only passes when the injected startup workspace-sync "
+    "500 keeps the shell mounted and the Workspace switcher shows the exact "
+    "`Sync issue` recovery state."
 )
 REQUEST_STEPS = [
     "Launch the TrackState application.",
@@ -178,11 +177,12 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
-                        "The startup sync failure surfaced after the shell began mounting, "
-                        "and the page exposed the failure message instead of collapsing to a "
-                        "terminal error screen.\n"
+                        "The startup sync request was blocked after the shell began mounting, "
+                        "and the page stayed on the interactive shell observation path long "
+                        "enough to inspect the Workspace switcher recovery state.\n"
                         f"blocked_request={json.dumps(safe_mode_observation['blocked_request'], ensure_ascii=True)}\n"
-                        f"failure_fragments={json.dumps(safe_mode_observation['visible_failure_fragments'], ensure_ascii=True)}"
+                        f"visible_failure_fragments={json.dumps(safe_mode_observation['visible_failure_fragments'], ensure_ascii=True)}\n"
+                        f"visible_auth_fragments={json.dumps(safe_mode_observation['visible_auth_fragments'], ensure_ascii=True)}"
                     ),
                 )
             else:
@@ -257,12 +257,12 @@ def main() -> None:
                 )
                 result["switcher_observation"] = _switcher_payload(switcher)
                 result["panel_observation"] = _panel_payload(panel)
-                fallback_row = _find_fallback_row(switcher)
-                result["fallback_row"] = _row_payload(fallback_row)
+                sync_issue_row = _find_sync_issue_row(switcher)
+                result["fallback_row"] = _row_payload(sync_issue_row)
                 _assert_workspace_switcher_fallback(
                     switcher=switcher,
                     panel=panel,
-                    fallback_row=fallback_row,
+                    sync_issue_row=sync_issue_row,
                     latest_window=safe_mode_observation,
                 )
                 _record_step(
@@ -272,8 +272,8 @@ def main() -> None:
                     action=REQUEST_STEPS[3],
                     observed=(
                         "Workspace switcher stayed open and exposed the saved hosted "
-                        "workspace in a visible fallback state instead of a blank error "
-                        "surface.\n"
+                        f"workspace with the exact `{REQUIRED_SWITCHER_STATE}` recovery "
+                        "state instead of an auth/sign-in fallback.\n"
                         f"fallback_row={json.dumps(result['fallback_row'], ensure_ascii=True)}\n"
                         f"panel={json.dumps(result['panel_observation'], ensure_ascii=True)}"
                     ),
@@ -305,6 +305,7 @@ def main() -> None:
                 observed=(
                     f"visible_navigation_labels={json.dumps(result.get('shell_observation', {}).get('visible_navigation_labels', []), ensure_ascii=True)}; "
                     f"failure_fragments={json.dumps(safe_mode_observation.get('visible_failure_fragments', []), ensure_ascii=True)}; "
+                    f"auth_fragments={json.dumps(safe_mode_observation.get('visible_auth_fragments', []), ensure_ascii=True)}; "
                     f"body_preview={safe_mode_observation.get('body_preview')!r}"
                 ),
             )
@@ -393,6 +394,9 @@ def _observe_safe_mode_window(
     visible_failure_fragments = [
         fragment for fragment in FAILURE_MESSAGE_FRAGMENTS if fragment in body_text
     ]
+    visible_auth_fragments = [
+        fragment for fragment in AUTH_FALLBACK_FRAGMENTS if fragment in body_text
+    ]
     blocked_request = (
         _blocked_request_payload(observation.blocked_requests[0])
         if observation.blocked_requests
@@ -403,6 +407,7 @@ def _observe_safe_mode_window(
         "blocked_request_count": len(observation.blocked_requests),
         "blocked_was_exercised": observation.blocked_was_exercised,
         "visible_failure_fragments": visible_failure_fragments,
+        "visible_auth_fragments": visible_auth_fragments,
         "failure_message_visible": bool(visible_failure_fragments),
         "body_preview": body_text[:500],
         "body_text": body_text,
@@ -415,7 +420,7 @@ def _observe_safe_mode_window(
 def _safe_mode_window_reached(observation: dict[str, Any]) -> bool:
     return bool(
         observation.get("blocked_was_exercised")
-        and observation.get("failure_message_visible")
+        and observation.get("shell_observation", {}).get("shell_ready")
     )
 
 
@@ -450,12 +455,12 @@ def _assert_shell_is_interactive(
         )
 
 
-def _find_fallback_row(
+def _find_sync_issue_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
     for row in switcher.rows:
         state_label = (row.state_label or "").strip()
-        if state_label in ACCEPTED_SWITCHER_FALLBACK_STATES:
+        if state_label == REQUIRED_SWITCHER_STATE:
             return row
     return None
 
@@ -464,7 +469,7 @@ def _assert_workspace_switcher_fallback(
     *,
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
-    fallback_row: WorkspaceSwitcherRowObservation | None,
+    sync_issue_row: WorkspaceSwitcherRowObservation | None,
     latest_window: dict[str, Any],
 ) -> None:
     if switcher.row_count < 1:
@@ -483,21 +488,31 @@ def _assert_workspace_switcher_fallback(
             "startup sync failure.\n"
             f"Observed switcher text: {switcher.switcher_text!r}"
         )
-    if fallback_row is None:
+    if sync_issue_row is None:
         raise AssertionError(
-            "None of the visible workspace rows exposed an accepted fallback state.\n"
-            f"Accepted states: {ACCEPTED_SWITCHER_FALLBACK_STATES}\n"
+            "Workspace switcher did not expose the exact required `Sync issue` row.\n"
             f"Observed switcher: {json.dumps(_switcher_payload(switcher), ensure_ascii=True)}"
+        )
+    if sync_issue_row.state_label != REQUIRED_SWITCHER_STATE:
+        raise AssertionError(
+            "Workspace switcher exposed a row, but it was not labeled with the exact "
+            f"required `{REQUIRED_SWITCHER_STATE}` state.\n"
+            f"Observed row: {json.dumps(_row_payload(sync_issue_row), ensure_ascii=True)}"
         )
     if panel.width <= 0 or panel.height <= 0:
         raise AssertionError(
             "Workspace switcher panel was not visibly rendered.\n"
             f"Observed panel: {json.dumps(_panel_payload(panel), ensure_ascii=True)}"
         )
-    if not latest_window.get("failure_message_visible"):
+    if REQUIRED_SWITCHER_STATE not in switcher.switcher_text:
         raise AssertionError(
-            "The startup sync failure was not still visible when the workspace switcher "
-            "panel was inspected.\n"
+            "Workspace switcher text never exposed the exact `Sync issue` recovery copy.\n"
+            f"Observed switcher: {json.dumps(_switcher_payload(switcher), ensure_ascii=True)}"
+        )
+    if latest_window.get("visible_auth_fragments"):
+        raise AssertionError(
+            "The startup flow still exposed auth/sign-in fallback copy instead of only the "
+            "required sync-issue recovery state.\n"
             f"Observed failure window: {json.dumps(latest_window, ensure_ascii=True)}"
         )
 
@@ -590,9 +605,9 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         "* Seeded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
-        "* Injected a one-time HTTP 500 into the startup workspace-sync metadata path and waited for the async failure to surface before asserting.",
+        "* Injected a one-time HTTP 500 into the startup workspace-sync metadata path and waited for the shell to stay mounted before inspecting the recovery UI.",
         "* Verified the desktop navigation and workspace switcher trigger stayed visible instead of the app getting stuck on a terminal error surface.",
-        "* Opened Workspace switcher and checked that the saved hosted workspace remained visible in a fallback state while the error stayed on screen.",
+        "* Opened Workspace switcher and required the saved hosted workspace to show the exact `Sync issue` recovery state, not an auth/sign-in fallback.",
         "",
         "h4. Automation checks",
         *_step_lines(result, jira=True),
@@ -636,9 +651,9 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "",
         "## What was automated",
         "- Seeded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
-        "- Injected a one-time HTTP 500 into the startup workspace-sync metadata path and waited for the async failure message before asserting.",
+        "- Injected a one-time HTTP 500 into the startup workspace-sync metadata path and waited for the shell to stay mounted before asserting the recovery UI.",
         "- Verified the desktop shell, navigation, and workspace switcher trigger stayed usable instead of collapsing to a blank startup surface.",
-        "- Opened Workspace switcher and verified the saved hosted workspace remained visible in a fallback state.",
+        "- Opened Workspace switcher and required the saved hosted workspace to show the exact `Sync issue` recovery state instead of an auth/sign-in fallback.",
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
@@ -675,8 +690,8 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
             f"{REWORK_SUMMARY}\n\n"
             "The synthetic 500 surfaced during startup sync, but the deployed app still "
             "mounted the desktop shell, kept the navigation and workspace switcher "
-            "interactive, and showed the saved hosted workspace in the switcher with a "
-            f"fallback state of `{fallback_row.get('state_label')}`.\n"
+            "interactive, and showed the saved hosted workspace in the switcher with the "
+            f"exact `{fallback_row.get('state_label')}` recovery state.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
@@ -749,7 +764,7 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
         return (
             "After the synthetic startup-sync 500 was triggered, the app kept the desktop "
             "shell interactive, showed the sync failure on screen, and left the hosted "
-            "workspace available in Workspace switcher with the fallback state "
+            "workspace available in Workspace switcher with the recovery state "
             f"`{fallback_row.get('state_label')}`. Blocked request: {blocked_request}."
         )
     return str(
