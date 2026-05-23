@@ -16,6 +16,7 @@ if str(TEST_DIR) not in sys.path:
     sys.path.insert(0, str(TEST_DIR))
 
 from support.ts1002_secondary_probe_delay_runtime import (  # noqa: E402
+    STARTUP_SAMPLE_GLOBAL,
     Ts1002SecondaryProbeDelayRuntime,
     Ts1002SecondaryProbeObservation,
 )
@@ -78,11 +79,12 @@ LINKED_BUG_NOTES = (
     "beyond the auth probe."
 )
 REWORK_SUMMARY = (
-    "Added a live startup regression for TS-1002 that delays the hosted bootstrap "
-    "fetch for `DEMO/project.json` past the 11-second synchronization window while "
-    "arming a 1-second `/user` probe, then verifies whether the deployed shell still "
-    "renders on time for a non-auth startup block."
+    "Reworked the TS-1002 startup regression so the 11-second checkpoint is sampled "
+    "inside the live page while the delayed `DEMO/project.json` probe is still "
+    "pending, kept `/user` and secondary-probe timings separate, and added the "
+    "ticket README."
 )
+CHECKPOINT_SAMPLE_TOLERANCE_SECONDS = 1.0
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -166,6 +168,7 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
                 page.set_viewport(**DESKTOP_VIEWPORT)
+                startup_started_at_epoch_seconds = time.time()
                 startup_started_at_monotonic = time.monotonic()
                 tracker_page.open_entrypoint()
                 result["startup_observation_initial"] = startup_surface_payload(
@@ -291,7 +294,9 @@ def main() -> None:
                         tracker_page=tracker_page,
                         page=page,
                         runtime=runtime,
+                        startup_started_at_epoch_seconds=startup_started_at_epoch_seconds,
                         startup_started_at_monotonic=startup_started_at_monotonic,
+                        checkpoint_target_epoch_seconds=None,
                     )
                 else:
                     timeout_deadline = (
@@ -306,11 +311,16 @@ def main() -> None:
                         tracker_page=tracker_page,
                         page=page,
                         runtime=runtime,
+                        startup_started_at_epoch_seconds=startup_started_at_epoch_seconds,
                         startup_started_at_monotonic=startup_started_at_monotonic,
+                        checkpoint_target_epoch_seconds=(
+                            observation.secondary_probe_started_at_epoch_seconds
+                            + TIMEOUT_ASSERTION_SECONDS
+                            if observation.secondary_probe_started_at_epoch_seconds is not None
+                            else None
+                        ),
                     )
                 result["timeout_window_observation"] = timeout_window
-                tracker_page.screenshot(str(TIMEOUT_SCREENSHOT_PATH))
-                result["screenshot"] = str(TIMEOUT_SCREENSHOT_PATH)
 
                 eventual_shell_ready, shell_ready_observation = poll_until(
                     probe=lambda: _observe_secondary_shell_window(
@@ -357,7 +367,7 @@ def main() -> None:
                             f"shell_ready_after_start_seconds="
                             f"{shell_ready_observation['shell_ready_after_start_seconds']!r}; "
                             f"secondary_probe_released_after_start_seconds="
-                            f"{shell_ready_observation['auth_probe_released_after_start_seconds']!r}; "
+                            f"{shell_ready_observation['secondary_probe_released_after_start_seconds']!r}; "
                             f"auth_probe_started_after_start_seconds="
                             f"{result['armed_auth_probe_started_after_start_seconds']!r}; "
                             f"trigger={json.dumps(shell_ready_observation['trigger'], ensure_ascii=True)}"
@@ -385,6 +395,28 @@ def main() -> None:
                         "checkpoint for the delayed secondary startup probe.\n"
                         f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
                     )
+                elif timeout_window.get("checkpoint_source") != "page_sampler":
+                    step_three_error = (
+                        "Step 3 failed: the test could not recover a trustworthy timeout-"
+                        "window snapshot from the live page while the delayed secondary "
+                        "probe was pending.\n"
+                        f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+                    )
+                elif abs(
+                    float(timeout_window.get("checkpoint_sample_offset_seconds", 0.0)),
+                ) > CHECKPOINT_SAMPLE_TOLERANCE_SECONDS:
+                    step_three_error = (
+                        "Step 3 failed: the recovered timeout-window snapshot drifted too "
+                        "far from the intended 11-second checkpoint to be trustworthy.\n"
+                        f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+                    )
+                elif not bool(timeout_window["secondary_probe_pending"]):
+                    step_three_error = (
+                        "Step 3 failed: the recovered timeout-window snapshot was taken "
+                        "after the delayed secondary probe had already been released, so "
+                        "it cannot prove the 11-second startup behavior.\n"
+                        f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+                    )
                 elif not bool(timeout_window["shell_observation"]["shell_ready"]):
                     step_three_error = (
                         "Step 3 failed: after waiting through the 11-second timeout window "
@@ -406,7 +438,10 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[2],
                         observed=(
-                            f"Waited {timeout_window['elapsed_since_auth_start_seconds']!r} "
+                            f"Recovered a checkpoint sample "
+                            f"{timeout_window['checkpoint_sample_offset_seconds']!r} seconds "
+                            "from the intended 11-second mark and "
+                            f"{timeout_window['elapsed_since_secondary_probe_start_seconds']!r} "
                             "seconds from the delayed secondary probe start. The probe was "
                             f"still pending and the shell already exposed "
                             f"{json.dumps(timeout_window['shell_observation']['visible_navigation_labels'], ensure_ascii=True)}."
@@ -448,7 +483,7 @@ def main() -> None:
                         f"shell_ready_after_start_seconds="
                         f"{shell_ready_observation['shell_ready_after_start_seconds']!r}; "
                         f"secondary_probe_released_after_start_seconds="
-                        f"{shell_ready_observation['auth_probe_released_after_start_seconds']!r}; "
+                        f"{shell_ready_observation['secondary_probe_released_after_start_seconds']!r}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{result['armed_auth_probe_started_after_start_seconds']!r}"
                     ),
@@ -560,10 +595,47 @@ def _observe_timeout_checkpoint(
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
     runtime: Ts1002SecondaryProbeDelayRuntime,
+    startup_started_at_epoch_seconds: float,
     startup_started_at_monotonic: float,
+    checkpoint_target_epoch_seconds: float | None,
 ) -> dict[str, Any]:
     del page
-    body_text = tracker_page.body_text()
+    sample = _select_startup_sample(
+        tracker_page,
+        checkpoint_target_epoch_seconds=checkpoint_target_epoch_seconds,
+    )
+    if sample is None:
+        body_text = tracker_page.body_text()
+        checkpoint_source = "live_read"
+        checkpoint_sample_epoch_seconds = None
+        checkpoint_sample_offset_seconds = None
+        title = "TrackState.AI"
+        location_href = tracker_page.app_url
+        location_hash = ""
+        location_pathname = (
+            "/trackstate-setup/" if "trackstate-setup" in tracker_page.app_url else "/"
+        )
+    else:
+        body_text = str(sample.get("bodyText", ""))
+        checkpoint_source = "page_sampler"
+        checkpoint_sample_epoch_seconds = round(float(sample["epochMs"]) / 1_000, 2)
+        checkpoint_sample_offset_seconds = (
+            None
+            if checkpoint_target_epoch_seconds is None
+            else round(
+                checkpoint_sample_epoch_seconds - checkpoint_target_epoch_seconds,
+                2,
+            )
+        )
+        title = str(sample.get("title", "TrackState.AI"))
+        location_href = str(sample.get("locationHref", tracker_page.app_url))
+        location_hash = str(sample.get("locationHash", ""))
+        location_pathname = str(
+            sample.get(
+                "locationPathname",
+                "/trackstate-setup/" if "trackstate-setup" in tracker_page.app_url else "/",
+            ),
+        )
     normalized_lines = [
         " ".join(line.split())
         for line in body_text.splitlines()
@@ -577,12 +649,10 @@ def _observe_timeout_checkpoint(
         label for label in SHELL_NAVIGATION_LABELS if label in body_text
     ]
     startup_observation = {
-        "title": "TrackState.AI",
-        "location_href": tracker_page.app_url,
-        "location_hash": "",
-        "location_pathname": (
-            "/trackstate-setup/" if "trackstate-setup" in tracker_page.app_url else "/"
-        ),
+        "title": title,
+        "location_href": location_href,
+        "location_hash": location_hash,
+        "location_pathname": location_pathname,
         "body_text": body_text,
         "button_labels": [
             label
@@ -598,7 +668,16 @@ def _observe_timeout_checkpoint(
             if label in body_text
         ],
     }
+    sample_epoch_seconds = checkpoint_sample_epoch_seconds
     return {
+        "checkpoint_source": checkpoint_source,
+        "checkpoint_target_epoch_seconds": (
+            round(checkpoint_target_epoch_seconds, 2)
+            if checkpoint_target_epoch_seconds is not None
+            else None
+        ),
+        "checkpoint_sample_epoch_seconds": checkpoint_sample_epoch_seconds,
+        "checkpoint_sample_offset_seconds": checkpoint_sample_offset_seconds,
         "shell_observation": {
             "body_text": body_text,
             "visible_navigation_labels": visible_navigation_labels,
@@ -613,27 +692,44 @@ def _observe_timeout_checkpoint(
             else None
         ),
         "branding_visible": BRANDING_TEXT in body_text or "TrackState.AI" in body_text,
-        "auth_pending": runtime.secondary_probe_pending,
+        "auth_pending": _request_pending_at_epoch(
+            started_at_epoch_seconds=runtime.observation.auth_probe_started_at_epoch_seconds,
+            released_at_epoch_seconds=runtime.observation.auth_probe_released_at_epoch_seconds,
+            sample_epoch_seconds=sample_epoch_seconds,
+        ),
         "auth_probe_started_after_start_seconds": relative_startup_event_seconds(
             startup_started_at_monotonic,
-            runtime.observation.secondary_probe_started_at_monotonic,
+            runtime.observation.auth_probe_started_at_monotonic,
         ),
         "auth_probe_released_after_start_seconds": relative_startup_event_seconds(
             startup_started_at_monotonic,
-            runtime.observation.secondary_probe_released_at_monotonic,
+            runtime.observation.auth_probe_released_at_monotonic,
         ),
         "auth_probe_release_after_auth_start_seconds": relative_event_seconds(
-            runtime.observation.secondary_probe_started_at_monotonic,
-            runtime.observation.secondary_probe_released_at_monotonic,
+            runtime.observation.auth_probe_started_at_monotonic,
+            runtime.observation.auth_probe_released_at_monotonic,
         ),
-        "elapsed_since_auth_start_seconds": elapsed_since(
-            runtime.observation.secondary_probe_started_at_monotonic,
+        "elapsed_since_auth_start_seconds": _relative_epoch_seconds(
+            runtime.observation.auth_probe_started_at_epoch_seconds,
+            sample_epoch_seconds,
         ),
-        "shell_ready_after_start_seconds": None,
+        "shell_ready_after_start_seconds": (
+            _relative_epoch_seconds(
+                startup_started_at_epoch_seconds,
+                sample_epoch_seconds,
+            )
+            if sample_epoch_seconds is not None
+            and len(visible_navigation_labels) == len(SHELL_NAVIGATION_LABELS)
+            else None
+        ),
         "shell_ready_after_probe_release_seconds": None,
         "observed_pending_shell_samples": None,
         "shell_ready_observed_while_auth_pending": None,
-        "actual_auth_probe_pending": runtime.auth_probe_pending,
+        "actual_auth_probe_pending": _request_pending_at_epoch(
+            started_at_epoch_seconds=runtime.observation.auth_probe_started_at_epoch_seconds,
+            released_at_epoch_seconds=runtime.observation.auth_probe_released_at_epoch_seconds,
+            sample_epoch_seconds=sample_epoch_seconds,
+        ),
         "actual_auth_probe_started_after_start_seconds": (
             relative_startup_event_seconds(
                 startup_started_at_monotonic,
@@ -646,7 +742,15 @@ def _observe_timeout_checkpoint(
                 runtime.observation.auth_probe_released_at_monotonic,
             )
         ),
-        "secondary_probe_pending": runtime.secondary_probe_pending,
+        "secondary_probe_pending": _request_pending_at_epoch(
+            started_at_epoch_seconds=(
+                runtime.observation.secondary_probe_started_at_epoch_seconds
+            ),
+            released_at_epoch_seconds=(
+                runtime.observation.secondary_probe_released_at_epoch_seconds
+            ),
+            sample_epoch_seconds=sample_epoch_seconds,
+        ),
         "secondary_probe_started_after_start_seconds": (
             relative_startup_event_seconds(
                 startup_started_at_monotonic,
@@ -659,10 +763,67 @@ def _observe_timeout_checkpoint(
                 runtime.observation.secondary_probe_released_at_monotonic,
             )
         ),
-        "elapsed_since_secondary_probe_start_seconds": elapsed_since(
-            runtime.observation.secondary_probe_started_at_monotonic,
+        "elapsed_since_secondary_probe_start_seconds": _relative_epoch_seconds(
+            runtime.observation.secondary_probe_started_at_epoch_seconds,
+            sample_epoch_seconds,
         ),
     }
+
+
+def _select_startup_sample(
+    tracker_page: TrackStateTrackerPage,
+    *,
+    checkpoint_target_epoch_seconds: float | None,
+) -> dict[str, Any] | None:
+    raw_samples = tracker_page.session.evaluate(
+        "({ key }) => globalThis[key] || []",
+        arg={"key": STARTUP_SAMPLE_GLOBAL},
+    )
+    if not isinstance(raw_samples, list):
+        return None
+    samples = [
+        sample
+        for sample in raw_samples
+        if isinstance(sample, dict) and isinstance(sample.get("epochMs"), (int, float))
+    ]
+    if not samples:
+        return None
+    if checkpoint_target_epoch_seconds is None:
+        return dict(samples[-1])
+    return dict(
+        min(
+            samples,
+            key=lambda sample: abs(
+                (float(sample["epochMs"]) / 1_000) - checkpoint_target_epoch_seconds,
+            ),
+        ),
+    )
+
+
+def _relative_epoch_seconds(
+    started_at_epoch_seconds: float | None,
+    event_epoch_seconds: float | None,
+) -> float | None:
+    if started_at_epoch_seconds is None or event_epoch_seconds is None:
+        return None
+    return round(event_epoch_seconds - started_at_epoch_seconds, 2)
+
+
+def _request_pending_at_epoch(
+    *,
+    started_at_epoch_seconds: float | None,
+    released_at_epoch_seconds: float | None,
+    sample_epoch_seconds: float | None,
+) -> bool:
+    if (
+        started_at_epoch_seconds is None
+        or sample_epoch_seconds is None
+        or sample_epoch_seconds < started_at_epoch_seconds
+    ):
+        return False
+    if released_at_epoch_seconds is None:
+        return True
+    return sample_epoch_seconds < released_at_epoch_seconds
 
 
 def _record_step(

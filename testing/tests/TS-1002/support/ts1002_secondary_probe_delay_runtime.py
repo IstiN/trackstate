@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -11,6 +12,10 @@ from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
 )
 
+STARTUP_SAMPLE_GLOBAL = "__ts1002StartupSamples"
+STARTUP_SAMPLE_INTERVAL_MS = 250
+STARTUP_SAMPLE_LIMIT = 1_200
+
 
 @dataclass
 class Ts1002SecondaryProbeObservation:
@@ -21,8 +26,12 @@ class Ts1002SecondaryProbeObservation:
     delayed_secondary_request_urls: list[str] = field(default_factory=list)
     auth_probe_started_at_monotonic: float | None = None
     auth_probe_released_at_monotonic: float | None = None
+    auth_probe_started_at_epoch_seconds: float | None = None
+    auth_probe_released_at_epoch_seconds: float | None = None
     secondary_probe_started_at_monotonic: float | None = None
     secondary_probe_released_at_monotonic: float | None = None
+    secondary_probe_started_at_epoch_seconds: float | None = None
+    secondary_probe_released_at_epoch_seconds: float | None = None
 
 
 class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
@@ -56,6 +65,15 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
         self._secondary_request_started = threading.Event()
         self._secondary_request_released = threading.Event()
 
+    def __enter__(self):
+        session = super().__enter__()
+        if self._context is None:
+            raise RuntimeError(
+                "Ts1002SecondaryProbeDelayRuntime expected a browser context.",
+            )
+        self._context.add_init_script(script=_build_startup_sampler_script())
+        return session
+
     def wait_for_auth_probe_start(self, *, timeout_seconds: float) -> bool:
         return self._auth_request_started.wait(timeout_seconds)
 
@@ -75,7 +93,7 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
     @property
     def auth_pending(self) -> bool:
         with self._delay_lock:
-            return self._pending_secondary_requests > 0
+            return self._pending_auth_requests > 0
 
     @property
     def auth_probe_pending(self) -> bool:
@@ -89,11 +107,11 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
 
     @property
     def auth_probe_started_at_monotonic(self) -> float | None:
-        return self._observation.secondary_probe_started_at_monotonic
+        return self._observation.auth_probe_started_at_monotonic
 
     @property
     def auth_probe_released_at_monotonic(self) -> float | None:
-        return self._observation.secondary_probe_released_at_monotonic
+        return self._observation.auth_probe_released_at_monotonic
 
     def _handle_github_api_route(self, route: Route) -> None:
         request_url = route.request.url
@@ -114,6 +132,7 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
             self._pending_auth_requests += 1
             if self._observation.auth_probe_started_at_monotonic is None:
                 self._observation.auth_probe_started_at_monotonic = time.monotonic()
+                self._observation.auth_probe_started_at_epoch_seconds = time.time()
             self._auth_request_started.set()
         try:
             time.sleep(self._auth_delay_seconds)
@@ -122,6 +141,7 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
                 self._pending_auth_requests -= 1
                 if self._pending_auth_requests == 0:
                     self._observation.auth_probe_released_at_monotonic = time.monotonic()
+                    self._observation.auth_probe_released_at_epoch_seconds = time.time()
                     self._auth_request_released.set()
         self._continue_github_api_route(route)
 
@@ -132,6 +152,7 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
             self._pending_secondary_requests += 1
             if self._observation.secondary_probe_started_at_monotonic is None:
                 self._observation.secondary_probe_started_at_monotonic = time.monotonic()
+                self._observation.secondary_probe_started_at_epoch_seconds = time.time()
             self._secondary_request_started.set()
         try:
             time.sleep(self._secondary_delay_seconds)
@@ -142,6 +163,9 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
                     self._observation.secondary_probe_released_at_monotonic = (
                         time.monotonic()
                     )
+                    self._observation.secondary_probe_released_at_epoch_seconds = (
+                        time.time()
+                    )
                     self._secondary_request_released.set()
         self._continue_github_api_route(route)
 
@@ -150,3 +174,32 @@ class Ts1002SecondaryProbeDelayRuntime(StoredWorkspaceProfilesRuntime):
             f"/contents/{secondary_path}" in request_url
             for secondary_path in self._secondary_paths
         )
+
+
+def _build_startup_sampler_script() -> str:
+    return (
+        "(() => {"
+        f"const key = {json.dumps(STARTUP_SAMPLE_GLOBAL)};"
+        f"const limit = {STARTUP_SAMPLE_LIMIT};"
+        "const root = globalThis;"
+        "const record = () => {"
+        "  const samples = Array.isArray(root[key]) ? root[key] : [];"
+        "  samples.push({"
+        "    epochMs: Date.now(),"
+        "    title: document.title,"
+        "    locationHref: location.href,"
+        "    locationHash: location.hash,"
+        "    locationPathname: location.pathname,"
+        "    bodyText: document.body?.innerText ?? '',"
+        "  });"
+        "  if (samples.length > limit) {"
+        "    samples.splice(0, samples.length - limit);"
+        "  }"
+        "  root[key] = samples;"
+        "};"
+        "record();"
+        "document.addEventListener('readystatechange', record);"
+        "window.addEventListener('load', record);"
+        f"window.setInterval(record, {STARTUP_SAMPLE_INTERVAL_MS});"
+        "})();"
+    )
