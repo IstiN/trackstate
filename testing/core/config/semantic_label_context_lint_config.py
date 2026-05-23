@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class SemanticLabelContextLintConfig:
     flutter_version: str
+    source_git_ref: str
     target_relative_path: Path
     localization_relative_path: Path
     semantic_label_localization_key: str
@@ -31,6 +32,11 @@ class SemanticLabelContextLintConfig:
                 env_prefixes=env_prefixes,
                 default="3.35.3",
             ),
+            source_git_ref=_read_env(
+                "SOURCE_GIT_REF",
+                env_prefixes=env_prefixes,
+                default="origin/main",
+            ),
             target_relative_path=Path(
                 _read_env(
                     "TARGET_PATH",
@@ -53,12 +59,12 @@ class SemanticLabelContextLintConfig:
             required_source_snippet=_read_env(
                 "REQUIRED_SOURCE_SNIPPET",
                 env_prefixes=env_prefixes,
-                default=").workspaceSyncAttentionNeededSemanticLabel;",
+                default="_l10n.workspaceSyncAttentionNeededSemanticLabel,",
             ),
             replacement_source_snippet=_read_env(
                 "REPLACEMENT_SOURCE_SNIPPET",
                 env_prefixes=env_prefixes,
-                default=").workspaceSyncAttentionNeededVisibleLabel;",
+                default="_l10n.workspaceSyncAttentionNeededVisibleLabel,",
             ),
             required_semantic_label=_read_env(
                 "REQUIRED_SEMANTIC_LABEL",
