@@ -19,7 +19,7 @@ void main() {
   });
 
   testWidgets(
-    'startup exposes the shell with restricted capabilities after the deferred auth timeout in web-style restore flow',
+    'startup clears the unavailable active local workspace after the deferred auth timeout in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -93,18 +93,20 @@ void main() {
         find.bySemanticsLabel(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        findsNothing,
       );
-      final fallbackSession =
-          delayedRepository.session ??
-          (throw StateError('Expected a repository session after startup.'));
-      expect(fallbackSession.canWrite, isFalse);
-      expect(fallbackSession.canCreateBranch, isFalse);
+      expect(find.text('Add workspace'), findsOneWidget);
+      final timeoutState = await service.loadState();
+      expect(timeoutState.activeWorkspaceId, isNull);
+      expect(
+        timeoutState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
 
       delayedRepository.completeConnect();
       await tester.pump();
@@ -114,18 +116,16 @@ void main() {
         find.bySemanticsLabel(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Add workspace'), findsOneWidget);
+      final savedState = await service.loadState();
+      expect(savedState.activeWorkspaceId, isNull);
       expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        savedState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
-      final connectedSession =
-          delayedRepository.session ??
-          (throw StateError('Expected a connected repository session.'));
-      expect(connectedSession.canWrite, isTrue);
-      expect(connectedSession.canCreateBranch, isTrue);
     },
   );
 }

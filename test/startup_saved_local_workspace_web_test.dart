@@ -23,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup exposes the shell with restricted capabilities after the delayed /user probe crosses the startup timeout',
+    'web startup clears an unavailable saved local workspace after the delayed /user probe crosses the startup timeout',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -90,21 +90,21 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Unavailable',
-        ),
-        findsOneWidget,
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        findsNothing,
       );
-      final fallbackSession =
-          delayedRepository.session ??
-          (throw StateError('Expected a provider session after timeout.'));
-      expect(fallbackSession.canWrite, isFalse);
-      expect(fallbackSession.canCreateBranch, isFalse);
+      expect(find.text('Add workspace'), findsOneWidget);
+      final savedStateBeforeProbe = await workspaceProfiles.loadState();
+      expect(savedStateBeforeProbe.activeWorkspaceId, isNull);
+      expect(
+        savedStateBeforeProbe.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
 
       delayedRepository.completeUserProbe();
       await tester.pump();
@@ -112,20 +112,18 @@ void main() {
 
       expect(
         find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Unavailable',
+          'Workspace switcher: Active local workspace, Local, Local Git',
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Add workspace'), findsOneWidget);
+      final savedStateAfterProbe = await workspaceProfiles.loadState();
+      expect(savedStateAfterProbe.activeWorkspaceId, isNull);
       expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        savedStateAfterProbe.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
       );
-      final connectedSession =
-          delayedRepository.session ??
-          (throw StateError('Expected a provider session after probe release.'));
-      expect(connectedSession.canWrite, isTrue);
-      expect(connectedSession.canCreateBranch, isTrue);
     },
   );
 }
