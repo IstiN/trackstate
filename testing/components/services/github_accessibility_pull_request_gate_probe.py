@@ -711,9 +711,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         deadline = time.time() + self._config.pull_request_timeout_seconds
         latest: dict[str, Any] | None = None
         while time.time() < deadline:
-            latest = self._read_json_object(
+            latest = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if latest is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             head_sha = self._optional_string(((latest.get("head") or {}).get("sha")))
             if head_sha:
                 return latest
@@ -742,9 +745,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         }
 
         while time.time() < deadline:
-            pull_request = self._read_json_object(
+            pull_request = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if pull_request is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             sha = self._optional_string(((pull_request.get("head") or {}).get("sha"))) or head_sha
             mergeable_state = self._optional_string(pull_request.get("mergeable_state"))
             status_state = self._read_check_runs_state(sha) if sha else None
@@ -1092,6 +1098,16 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         )
 
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
+        )
+
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
         for line in self._extract_matching_log_lines(
             run_log_text,
@@ -1284,6 +1300,20 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         return payload
 
+    def _try_read_json_object(
+        self,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        field_args: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._read_json_object(endpoint, method=method, field_args=field_args)
+        except GitHubAccessibilityPullRequestGateError as error:
+            if "HTTP 404" in str(error):
+                return None
+            raise
+
     def _read_json_array(self, endpoint: str) -> list[Any]:
         payload = self._read_json(endpoint)
         if not isinstance(payload, list):
@@ -1369,11 +1399,30 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        probe_import = f"import '{Path(self._config.probe_path).name}';"
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
         ):
+            if probe_import in source:
+                return source
+
+            updated_source, replacements = re.subn(
+                r"^import '[^']+_probe_surface\.dart';\n",
+                f"{probe_import}\n",
+                source,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if replacements > 0:
+                return updated_source
+
+            source = source.replace(
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n",
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n"
+                f"{probe_import}\n",
+            )
             return source
 
         if "package:flutter/material.dart" not in source:
@@ -1384,7 +1433,6 @@ class Ts908ProbeSurface extends StatelessWidget {
         if "package:flutter/material.dart" not in source:
             source = "import 'package:flutter/material.dart';\n\n" + source.lstrip()
 
-        probe_import = f"import '{Path(self._config.probe_path).name}';"
         if probe_import not in source:
             source = source.replace(
                 "import 'ui/features/tracker/views/trackstate_app.dart';\n",
