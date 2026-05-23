@@ -53,8 +53,9 @@ LINKED_BUGS = ["TS-996", "TS-977", "TS-971", "TS-958"]
 REWORK_SUMMARY = (
     "Reworked the live startup regression to anchor its timeout-boundary sample to "
     f"{SYNC_TIMEOUT_SECONDS} seconds after the delayed GitHub `/user` startup probe "
-    "begins, and to require that same startup snapshot while the probe is still "
-    "pending or no later than its release."
+    "begins, to require that same startup snapshot while the probe is still "
+    "pending or no later than its release, and to fail fast when the delayed "
+    "probe never starts so setup misses are not misreported as product failures."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -142,6 +143,36 @@ def main() -> None:
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
+                auth_probe_started = runtime.wait_for_auth_probe_start(
+                    timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
+                )
+                result["auth_probe_started_after_start_seconds"] = (
+                    _relative_startup_event_seconds(
+                        startup_started_at_monotonic,
+                        runtime.auth_probe_started_at_monotonic,
+                    )
+                )
+                result["github_request_urls"] = list(runtime.github_request_urls)
+                result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+                if not auth_probe_started or runtime.auth_probe_started_at_monotonic is None:
+                    startup_probe_miss_error = (
+                        "Step 1 failed: the delayed GitHub `/user` startup probe never "
+                        "started, so TS-967 did not exercise the intended timeout scenario.\n"
+                        f"Observed startup surface:\n"
+                        f"{json.dumps(result['startup_observation_initial'], indent=2)}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}\n"
+                        f"GitHub requests seen: {json.dumps(result['github_request_urls'], ensure_ascii=True)}\n"
+                        f"Delayed requests seen: {json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
+                    )
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=startup_probe_miss_error,
+                    )
+                    _record_not_reached_steps(result, starting_step=2)
+                    raise AssertionError(startup_probe_miss_error)
                 _record_step(
                     result,
                     step=1,
@@ -152,7 +183,10 @@ def main() -> None:
                         "GitHub token, a preloaded active hosted workspace plus local "
                         "fallback workspace profile, and an "
                         f"injected {SIMULATED_SYNC_DELAY_SECONDS}-second delay on the "
-                        "initial GitHub `/user` startup probe."
+                        "initial GitHub `/user` startup probe.\n"
+                        f"auth_probe_started_after_start_seconds="
+                        f"{result['auth_probe_started_after_start_seconds']!r}; "
+                        f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
                     ),
                 )
 
@@ -238,10 +272,6 @@ def main() -> None:
                 )
 
                 auth_probe_started = runtime.auth_probe_started_at_monotonic is not None
-                if not auth_probe_started:
-                    auth_probe_started = runtime.wait_for_auth_probe_start(
-                        timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
-                    )
                 result["auth_probe_started_after_start_seconds"] = (
                     _relative_startup_event_seconds(
                         startup_started_at_monotonic,
@@ -711,16 +741,10 @@ def _capture_timeout_window_observation(
         last_observation = observation
         return observation
 
-    auth_probe_started = runtime.auth_probe_started_at_monotonic is not None
-    if not auth_probe_started:
-        auth_probe_started = runtime.wait_for_auth_probe_start(
-            timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
+    if runtime.auth_probe_started_at_monotonic is None:
+        raise RuntimeError(
+            "TS-967 precondition failed: delayed GitHub `/user` startup probe did not start.",
         )
-    if not auth_probe_started or runtime.auth_probe_started_at_monotonic is None:
-        observation = probe()
-        if last_observation is None:
-            raise RuntimeError("TS-967 did not capture any startup observations.")
-        return False, observation
 
     timeout_boundary_monotonic = (
         runtime.auth_probe_started_at_monotonic + TIMEOUT_ASSERTION_SECONDS
@@ -1028,7 +1052,10 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    if _should_write_bug_description(result):
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     _write_review_replies(result, passed=False)
 
 
@@ -1242,6 +1269,17 @@ def _human_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
     return lines
 
 
+def _should_write_bug_description(result: dict[str, Any]) -> bool:
+    error = str(result.get("error", ""))
+    if error.startswith("RuntimeError: TS-967 requires GH_TOKEN or GITHUB_TOKEN"):
+        return False
+    if error.startswith("ModuleNotFoundError:"):
+        return False
+    if "Step 1 failed: the delayed GitHub `/user` startup probe never started" in error:
+        return False
+    return True
+
+
 def _write_review_replies(result: dict[str, Any], *, passed: bool) -> None:
     replies = [
         {
@@ -1270,6 +1308,7 @@ def _discussion_threads() -> list[dict[str, Any]]:
         thread
         for thread in threads
         if isinstance(thread, dict)
+        and thread.get("resolved") is False
         and thread.get("rootCommentId") is not None
         and thread.get("threadId") is not None
     ]
@@ -1282,6 +1321,17 @@ def _review_reply_text(
     passed: bool,
 ) -> str:
     root_comment_id = thread.get("rootCommentId")
+    if root_comment_id == 3292802748:
+        rerun_summary = (
+            f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+            if passed
+            else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', 'AssertionError'))}`."
+        )
+        return (
+            "Fixed: TS-967 now treats the delayed `/user` probe as a Step 1 precondition. "
+            "If that probe never starts, the test fails immediately and marks later steps as "
+            f"not reached instead of misreporting a setup miss as a timeout-window product regression. {rerun_summary}"
+        )
     if root_comment_id in {3292588355, 3292787878}:
         if passed:
             return (
