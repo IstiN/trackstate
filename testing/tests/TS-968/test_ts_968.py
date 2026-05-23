@@ -12,16 +12,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.components.services.accessibility_log_validation_exit_code_probe import (  # noqa: E402
-    AccessibilityLogValidationExitCodeProbeService,
-)
 from testing.core.config.accessibility_log_validation_exit_code_config import (  # noqa: E402
     AccessibilityLogValidationExitCodeConfig,
+)
+from testing.core.interfaces.accessibility_log_validation_exit_code_probe import (  # noqa: E402
+    AccessibilityLogValidationExitCodeProbe,
 )
 from testing.core.models.accessibility_log_validation_exit_code_result import (  # noqa: E402
     AccessibilityLogValidationExitCodeObservation,
 )
 from testing.core.models.cli_command_result import CliCommandResult  # noqa: E402
+from testing.tests.support.accessibility_log_validation_exit_code_probe_factory import (  # noqa: E402
+    create_accessibility_log_validation_exit_code_probe,
+)
 
 TICKET_KEY = "TS-968"
 TEST_CASE_TITLE = "Accessibility validation failure - runner returns non-zero exit code"
@@ -50,6 +53,7 @@ REWORK_FIXES = [
     "Relaxed the control precondition so it checks for a clean passing baseline via exit code `0`, `# fail 0`, and no `not ok` lines instead of hardcoding the current pass count.",
     "Restricted `bug_description.md` generation to the real product-defect path where the baseline passed, the disposable workflow mutation succeeded, the expected assertion failure surfaced, and only the exit-code propagation stayed broken.",
     "Relaxed the Step 2 TAP-summary assertion so it now accepts any failing summary plus a visible `not ok` record instead of pinning the mutated run to exactly `# fail 1`.",
+    "Moved TS-968 onto the standard testing architecture by depending on a `core/interfaces` probe contract and obtaining the concrete implementation through a `testing/tests/support` factory.",
 ]
 ASSERTION_PATTERN = re.compile(r"AssertionError", re.IGNORECASE)
 FAILING_SUMMARY_PATTERN = re.compile(r"# fail\s+[1-9]\d*", re.IGNORECASE)
@@ -60,7 +64,9 @@ NOT_OK_PATTERN = re.compile(r"^\s*not ok\b", re.IGNORECASE | re.MULTILINE)
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     config = AccessibilityLogValidationExitCodeConfig.from_file(CONFIG_PATH)
-    probe = AccessibilityLogValidationExitCodeProbeService(REPO_ROOT)
+    probe: AccessibilityLogValidationExitCodeProbe = (
+        create_accessibility_log_validation_exit_code_probe(REPO_ROOT)
+    )
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -474,10 +480,27 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             "```",
         ]
     )
+    response_lines = [
+        "h3. 🔧 Test Rework Completed",
+        "",
+        "*Re-run result:* ✅ *PASSED*",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
+        "",
+        "h4. Fixed",
+        *[f"* {fix}" for fix in REWORK_FIXES],
+        "",
+        "h4. New result",
+        (
+            "* Re-ran {code}node testing/accessibility/log_validation.node.test.js{code} "
+            "through the TS-968 automation flow and confirmed the mutated disposable "
+            "run still surfaces the expected assertion failure with exit code "
+            f"{{code}}{result.get('mutated_exit_code')}{{code}}."
+        ),
+    ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(response_lines) + "\n", encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -622,10 +645,27 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         _compact_text(mutated_output),
         "```",
     ]
+    response_lines = [
+        "h3. 🔧 Test Rework Completed",
+        "",
+        "*Re-run result:* ❌ *FAILED*",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
+        "",
+        "h4. Fixed",
+        *[f"* {fix}" for fix in REWORK_FIXES],
+        "",
+        "h4. New result",
+        (
+            "* The rerun still failed with {code}"
+            f"{error_message}"
+            "{code}. "
+            "See {code}outputs/bug_description.md{code} for the product-gap payload when applicable."
+        ),
+    ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(response_lines) + "\n", encoding="utf-8")
     if bug_is_product_gap:
         BUG_DESCRIPTION_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     else:
@@ -816,6 +856,15 @@ def _review_reply_text(
             "the expected failing subtest and assertion message, a failing TAP summary, "
             "and at least one visible `not ok` record, so future mutation-sensitive "
             "subtests will not create false negatives."
+        )
+
+    if root_comment_id == 3291721424:
+        return (
+            "Fixed: TS-968 no longer imports or instantiates the concrete "
+            "`AccessibilityLogValidationExitCodeProbeService` from the test. It now "
+            "depends on a `testing/core/interfaces` probe contract and gets the "
+            "implementation through a `testing/tests/support` factory, matching the "
+            "existing accessibility probe pattern."
         )
 
     status = "passed" if passed else "failed"
