@@ -551,15 +551,22 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     Future<void> Function()? deferredAccessRestore;
     var startedDeferredAccessRestore = false;
+    var waitedForDeferredAccessRestore = false;
 
-    void startDeferredAccessRestoreIfNeeded() {
-      if (!deferAccessRestore ||
-          deferredAccessRestore == null ||
-          startedDeferredAccessRestore) {
+    Future<void> startDeferredAccessRestoreIfNeeded({
+      required bool waitForCompletion,
+    }) async {
+      final restore = deferredAccessRestore;
+      if (restore == null || startedDeferredAccessRestore) {
         return;
       }
       startedDeferredAccessRestore = true;
-      unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+      if (waitForCompletion) {
+        waitedForDeferredAccessRestore = true;
+        await restore();
+        return;
+      }
+      unawaited(_finishDeferredAccessRestore(restore));
     }
 
     try {
@@ -567,7 +574,9 @@ class TrackerViewModel extends ChangeNotifier {
           !usesLocalPersistence &&
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
-        startDeferredAccessRestoreIfNeeded();
+        if (deferAccessRestore) {
+          await startDeferredAccessRestoreIfNeeded(waitForCompletion: true);
+        }
       }
       await _loadSnapshotAndSearch();
       if (usesLocalPersistence) {
@@ -585,11 +594,13 @@ class TrackerViewModel extends ChangeNotifier {
         _section = TrackerSection.settings;
       }
       if (!deferAccessRestore && deferredAccessRestore != null) {
-        await deferredAccessRestore();
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: true);
       }
       _configureWorkspaceSync();
-      if (deferAccessRestore && deferredAccessRestore != null) {
-        startDeferredAccessRestoreIfNeeded();
+      if (deferAccessRestore &&
+          deferredAccessRestore != null &&
+          !waitedForDeferredAccessRestore) {
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: false);
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);

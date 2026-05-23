@@ -3,6 +3,7 @@ library;
 
 import 'dart:js_interop';
 
+import 'package:http/http.dart' as http;
 import 'package:web/web.dart' as web;
 
 class GitHubAuthProbeResponse {
@@ -17,6 +18,13 @@ Future<GitHubAuthProbeResponse> fetchGitHubAuthProbeResponse(
   required Map<String, String> headers,
   Object? client,
 }) async {
+  if (client case final http.Client httpClient) {
+    final response = await httpClient.get(uri, headers: headers);
+    return GitHubAuthProbeResponse(
+      statusCode: response.statusCode,
+      body: response.body,
+    );
+  }
   final requestHeaders = web.Headers();
   headers.forEach((key, value) {
     requestHeaders.set(key, value);

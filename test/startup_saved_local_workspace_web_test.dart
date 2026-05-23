@@ -2,10 +2,14 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
@@ -19,7 +23,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup begins hosted auth restore immediately when the saved local workspace needs browser reselection',
+    'web startup issues the provider-backed /user probe and waits for it before exposing the shell when the saved local workspace needs browser reselection',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -48,7 +52,7 @@ void main() {
         workspaceId: activeLocalWorkspaceId,
       );
 
-      final delayedRepository = _DelayedConnectRepository(
+      final delayedRepository = _DelayedGitHubProbeRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
       );
 
@@ -83,16 +87,37 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 750));
 
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsOneWidget);
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+      expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(
+        delayedRepository.requestedPaths,
+        contains('/repos/stable/repo/branches/main'),
+      );
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
+      expect(find.text('Dashboard'), findsNothing);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsNothing,
+      );
 
-      delayedRepository.completeConnect();
+      delayedRepository.completeUserProbe();
       await tester.pump();
       await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
     },
   );
-
 }
 
 Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
@@ -123,25 +148,89 @@ Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
   );
 }
 
-class _DelayedConnectRepository extends DemoTrackStateRepository {
-  _DelayedConnectRepository({required super.snapshot});
+class _DelayedGitHubProbeRepository extends ProviderBackedTrackStateRepository {
+  _DelayedGitHubProbeRepository({required TrackerSnapshot snapshot})
+    : this._(snapshot: snapshot, harness: _DelayedGitHubProbeHarness());
 
-  final Completer<RepositoryUser> _connectCompleter =
-      Completer<RepositoryUser>();
-  int connectCalls = 0;
+  _DelayedGitHubProbeRepository._({
+    required TrackerSnapshot snapshot,
+    required _DelayedGitHubProbeHarness harness,
+  }) : _snapshotOverride = snapshot,
+       _harness = harness,
+       super(
+         provider: GitHubTrackStateProvider(
+           client: MockClient(harness.handle),
+           repositoryName: 'stable/repo',
+           dataRef: 'main',
+           sourceRef: 'main',
+         ),
+       );
 
-  @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) {
-    connectCalls += 1;
-    return _connectCompleter.future;
+  final TrackerSnapshot _snapshotOverride;
+  final _DelayedGitHubProbeHarness _harness;
+
+  List<String> get requestedPaths => _harness.requestedPaths;
+  int get userProbeRequestCount => _harness.userProbeRequestCount;
+
+  void completeUserProbe() {
+    _harness.completeUserProbe();
   }
 
-  void completeConnect() {
-    if (_connectCompleter.isCompleted) {
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
+  }
+}
+
+class _DelayedGitHubProbeHarness {
+  final Completer<void> _userProbeCompleter = Completer<void>();
+  final List<String> requestedPaths = <String>[];
+  int userProbeRequestCount = 0;
+
+  Future<http.Response> handle(http.Request request) async {
+    requestedPaths.add(request.url.path);
+    switch (request.url.path) {
+      case '/repos/stable/repo':
+        return http.Response(
+          jsonEncode({
+            'full_name': 'stable/repo',
+            'permissions': <String, Object?>{
+              'pull': true,
+              'push': true,
+              'admin': false,
+            },
+          }),
+          200,
+        );
+      case '/repos/stable/repo/branches/main':
+        return http.Response(
+          jsonEncode({
+            'name': 'main',
+            'commit': <String, Object?>{'sha': 'mock-revision'},
+          }),
+          200,
+        );
+      case '/user':
+        userProbeRequestCount += 1;
+        await _userProbeCompleter.future;
+        return http.Response(
+          jsonEncode({
+            'login': 'demo-user',
+            'name': 'Demo User',
+            'id': 1,
+            'email': 'demo@example.com',
+          }),
+          200,
+        );
+    }
+    throw StateError('Unexpected request: ${request.method} ${request.url}');
+  }
+
+  void completeUserProbe() {
+    if (_userProbeCompleter.isCompleted) {
       return;
     }
-    _connectCompleter.complete(
-      const RepositoryUser(login: 'demo-user', displayName: 'Demo User'),
-    );
+    _userProbeCompleter.complete();
   }
 }

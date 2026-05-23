@@ -94,7 +94,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup keeps the shell visible while delayed hosted auth is still pending and the active local workspace has no browser handle',
+    'web startup waits for delayed hosted auth before exposing the shell when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -171,13 +171,13 @@ void main() {
 
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
       expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
       expect(delayedRepository.connectCalled, isTrue);
       expect(delayedRepository.connectCompleted, isFalse);
@@ -192,6 +192,16 @@ void main() {
       delayedRepository.completeConnect();
       await tester.pump();
       await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
     },
   );
 }
