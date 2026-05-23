@@ -201,6 +201,9 @@ module.exports = {
         bug_creation: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/product/trackstate_domain_knowledge.md'
+        ],
+        df_manager: [
+            './.dmtools/instructions/agents/df_manager_watchlist.md'
         ]
     },
 
