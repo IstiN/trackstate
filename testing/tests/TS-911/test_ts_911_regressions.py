@@ -126,6 +126,75 @@ class Ts911RegressionsTest(unittest.TestCase):
         ):
             _LIVE_TEST_MODULE._assert_reverse_wrap(state)
 
+    def test_expected_reverse_target_uses_footer_reached_by_forward_tab_trace(self) -> None:
+        target = _LIVE_TEST_MODULE._expected_reverse_target_from_forward_trace(
+            [
+                {
+                    "active": {
+                        "accessible_name": "Repository",
+                        "text": "",
+                        "role": None,
+                        "tag_name": "INPUT",
+                        "tabindex": None,
+                        "outer_html": "<input aria-label='Repository'>",
+                    },
+                    "focus": {
+                        "focus_owned_by_switcher": True,
+                        "active_within_switcher": True,
+                        "active_on_trigger": False,
+                    },
+                    "monitor": {
+                        "ever_hidden_after_visible": False,
+                    },
+                },
+                {
+                    "active": {
+                        "accessible_name": "Save and switch",
+                        "text": "",
+                        "role": "button",
+                        "tag_name": "FLT-SEMANTICS",
+                        "tabindex": "0",
+                        "outer_html": "<flt-semantics>Save and switch</flt-semantics>",
+                    },
+                    "focus": {
+                        "focus_owned_by_switcher": True,
+                        "active_within_switcher": True,
+                        "active_on_trigger": False,
+                    },
+                    "monitor": {
+                        "ever_hidden_after_visible": False,
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual(target["label"], "Save and switch")
+        self.assertEqual(target["tag_name"], "FLT-SEMANTICS")
+
+    def test_expected_reverse_target_requires_footer_to_be_reached(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError,
+            "never reached the visible 'Save and switch' footer control",
+        ):
+            _LIVE_TEST_MODULE._expected_reverse_target_from_forward_trace(
+                [
+                    {
+                        "active": {
+                            "accessible_name": "Repository",
+                            "text": "",
+                        },
+                        "focus": {
+                            "focus_owned_by_switcher": True,
+                            "active_within_switcher": True,
+                            "active_on_trigger": False,
+                        },
+                        "monitor": {
+                            "ever_hidden_after_visible": False,
+                        },
+                    },
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
