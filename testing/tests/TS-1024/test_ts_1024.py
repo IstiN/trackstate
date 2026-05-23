@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import json
 import platform
 import sys
-import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ if str(TEST_DIR) not in sys.path:
 
 from testing.components.pages.live_startup_recovery_page import (  # noqa: E402
     LiveStartupRecoveryPage,
+    StartupRecoveryStateObservation,
 )
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
@@ -44,18 +44,15 @@ INITIAL_FAILURE_STATUS_CODE = 403
 RETRY_FAILURE_STATUS_CODE = 500
 OBSERVATION_WINDOW_SECONDS = 5.0
 OBSERVATION_INTERVAL_SECONDS = 0.25
-SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 RECOVERY_ACTION_LABELS = ("Retry", "Sync issue")
 RECOVERY_MARKERS = ("Retry", "Sync issue", "Connect GitHub")
 DISALLOWED_VISIBLE_TEXT = ("Saved workspaces", "Add workspace", "Save and switch")
 LINKED_BUGS = ["TS-1018"]
 REWORK_SUMMARY = (
-    "Added a live retry-failure regression that forces the startup recovery fetch "
-    "to enter the real recoverable Sync issue state first and then forces the "
-    "Retry request to fail with HTTP 500 while sampling the visible recovery "
-    "surface for 5 "
-    "seconds after clicking Retry so partial workspace rows or footer actions "
-    "cannot slip through as transient async flickers."
+    "Moved recovery-state probing and retry-window monitoring into "
+    "`LiveStartupRecoveryPage`, then switched TS-1024 to use page-level polling "
+    "instead of raw DOM access and a manual sleep loop while preserving the same "
+    "live retry-failure coverage."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -79,18 +76,6 @@ EXPECTED_RESULT = (
     "(Add workspace or Save and switch) are partially rendered or exposed to the "
     "user, preventing an inconsistent UI state."
 )
-
-
-@dataclass(frozen=True)
-class RecoverySnapshot:
-    body_text: str
-    surface_text: str
-    visible_button_labels: tuple[str, ...]
-    visible_action_label: str | None
-    visible_navigation_labels: tuple[str, ...]
-    connect_github_visible: bool
-    recovery_markers: tuple[str, ...]
-    disallowed_visible_text: tuple[str, ...]
 
 
 def main() -> None:
@@ -149,8 +134,15 @@ def main() -> None:
                 page.set_viewport(**DESKTOP_VIEWPORT)
 
                 initial_ready, initial_snapshot = poll_until(
-                    probe=lambda: _observe_recovery_snapshot(tracker_page),
-                    is_satisfied=_is_consistent_recovery_state,
+                    probe=lambda: startup_page.observe_recovery_state(
+                        accepted_action_labels=RECOVERY_ACTION_LABELS,
+                        recovery_markers=RECOVERY_MARKERS,
+                        disallowed_visible_text=DISALLOWED_VISIBLE_TEXT,
+                    ),
+                    is_satisfied=lambda snapshot: not startup_page.recovery_state_failures(
+                        snapshot,
+                        phase="initial recovery",
+                    ),
                     timeout_seconds=120,
                     interval_seconds=0.5,
                 )
@@ -216,7 +208,13 @@ def main() -> None:
                     probe=lambda: {
                         "retry_request_count": len(runtime.retry_failed_requests),
                         "requests": [asdict(request) for request in runtime.requests],
-                        "snapshot": _snapshot_payload(_observe_recovery_snapshot(tracker_page)),
+                        "snapshot": _snapshot_payload(
+                            startup_page.observe_recovery_state(
+                                accepted_action_labels=RECOVERY_ACTION_LABELS,
+                                recovery_markers=RECOVERY_MARKERS,
+                                disallowed_visible_text=DISALLOWED_VISIBLE_TEXT,
+                            )
+                        ),
                     },
                     is_satisfied=lambda observation: int(observation["retry_request_count"]) >= 1,
                     timeout_seconds=30,
@@ -256,18 +254,19 @@ def main() -> None:
                     ),
                 )
 
-                retry_window_samples = _capture_recovery_window(
-                    tracker_page,
+                retry_window = startup_page.monitor_recovery_state(
                     duration_seconds=OBSERVATION_WINDOW_SECONDS,
                     interval_seconds=OBSERVATION_INTERVAL_SECONDS,
+                    phase="during retry observation window",
+                    accepted_action_labels=RECOVERY_ACTION_LABELS,
+                    recovery_markers=RECOVERY_MARKERS,
+                    disallowed_visible_text=DISALLOWED_VISIBLE_TEXT,
                 )
+                retry_window_samples = list(retry_window.samples)
                 result["retry_window_samples"] = [
                     _snapshot_payload(sample) for sample in retry_window_samples
                 ]
-                retry_window_failures = _window_failures(
-                    retry_window_samples,
-                    phase="during retry observation window",
-                )
+                retry_window_failures = list(retry_window.failure_messages)
                 if retry_window_failures:
                     _record_step(
                         result,
@@ -291,12 +290,12 @@ def main() -> None:
                         ),
                     )
 
-                final_snapshot = retry_window_samples[-1]
+                final_snapshot = retry_window.final_snapshot
                 result["final_recovery_snapshot"] = _snapshot_payload(final_snapshot)
-                final_failures = _snapshot_failures(
+                final_failures = list(startup_page.recovery_state_failures(
                     final_snapshot,
                     phase="after the failed retry completed",
-                )
+                ))
                 if final_failures:
                     _record_step(
                         result,
@@ -379,183 +378,7 @@ def _initial_workspace_state() -> dict[str, object]:
     }
 
 
-def _observe_recovery_snapshot(tracker_page) -> RecoverySnapshot:
-    payload = tracker_page.session.evaluate(
-        r"""
-        ({ acceptedActionLabels, recoveryMarkers, navigationLabels }) => {
-          const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
-          const isVisible = (element) => {
-            if (!element) {
-              return false;
-            }
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-            return rect.width > 0
-              && rect.height > 0
-              && style.visibility !== 'hidden'
-              && style.display !== 'none';
-          };
-          const buttonSelector = 'flt-semantics[role="button"],button,[role="button"]';
-          const visibleButtons = Array.from(document.querySelectorAll(buttonSelector))
-            .filter(isVisible)
-            .map((candidate) => normalize(
-              candidate.getAttribute?.('aria-label')
-                || candidate.innerText
-                || candidate.textContent
-                || '',
-            ))
-            .filter((label) => label.length > 0);
-          const bodyText = normalize(document.body?.innerText ?? '');
-          const visibleNavigationLabels = navigationLabels.filter((label) => bodyText.includes(label));
-          const visibleActionLabel =
-            acceptedActionLabels.find((label) => visibleButtons.includes(label)) ?? null;
-          const visibleElements = [document.body, ...Array.from(document.body?.querySelectorAll('*') ?? [])]
-            .filter((element) => !!element && isVisible(element));
-          const candidates = visibleElements
-            .map((element) => {
-              const text = normalize(element.innerText || element.textContent || '');
-              const buttons = [element, ...Array.from(element.querySelectorAll(buttonSelector))]
-                .filter(isVisible)
-                .map((candidate) => normalize(
-                  candidate.getAttribute?.('aria-label')
-                    || candidate.innerText
-                    || candidate.textContent
-                    || '',
-                ))
-                .filter((label) => label.length > 0);
-              const connectGitHubVisible =
-                buttons.includes('Connect GitHub') || text.includes('Connect GitHub');
-              const matchingActionLabel =
-                acceptedActionLabels.find((label) => buttons.includes(label)) ?? null;
-              if (!connectGitHubVisible) {
-                return null;
-              }
-              const rect = element.getBoundingClientRect();
-              return {
-                text,
-                area: rect.width * rect.height,
-                bodyPenalty: element === document.body ? 1 : 0,
-                connectGitHubVisible,
-                matchingActionLabel,
-              };
-            })
-            .filter((candidate) => candidate !== null)
-            .sort((left, right) => {
-              if (left.bodyPenalty !== right.bodyPenalty) {
-                return left.bodyPenalty - right.bodyPenalty;
-              }
-              if (left.area !== right.area) {
-                return left.area - right.area;
-              }
-              return left.text.length - right.text.length;
-            });
-          const best = candidates[0] ?? null;
-          return {
-            bodyText,
-            surfaceText: best?.text ?? bodyText,
-            visibleButtonLabels: visibleButtons,
-            visibleActionLabel: visibleActionLabel ?? best?.matchingActionLabel ?? null,
-            visibleNavigationLabels,
-            connectGitHubVisible: best?.connectGitHubVisible ?? bodyText.includes('Connect GitHub'),
-            recoveryMarkers: recoveryMarkers.filter(
-              (marker) => bodyText.includes(marker) || visibleButtons.includes(marker),
-            ),
-          };
-        }
-        """,
-        arg={
-            "acceptedActionLabels": list(RECOVERY_ACTION_LABELS),
-            "recoveryMarkers": list(RECOVERY_MARKERS),
-            "navigationLabels": list(SHELL_NAVIGATION_LABELS),
-        },
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "The deployed app did not expose a readable recovery snapshot.\n"
-            f"Observed body text:\n{tracker_page.body_text()}",
-        )
-    body_text = str(payload.get("bodyText", ""))
-    return RecoverySnapshot(
-        body_text=body_text,
-        surface_text=str(payload.get("surfaceText", body_text)),
-        visible_button_labels=tuple(
-            str(item) for item in payload.get("visibleButtonLabels", [])
-        ),
-        visible_action_label=(
-            str(payload["visibleActionLabel"])
-            if payload.get("visibleActionLabel") is not None
-            else None
-        ),
-        visible_navigation_labels=tuple(
-            str(item) for item in payload.get("visibleNavigationLabels", [])
-        ),
-        connect_github_visible=bool(payload.get("connectGitHubVisible")),
-        recovery_markers=tuple(str(item) for item in payload.get("recoveryMarkers", [])),
-        disallowed_visible_text=tuple(
-            text for text in DISALLOWED_VISIBLE_TEXT if text in body_text
-        ),
-    )
-
-
-def _capture_recovery_window(
-    tracker_page,
-    *,
-    duration_seconds: float,
-    interval_seconds: float,
-) -> list[RecoverySnapshot]:
-    deadline = time.monotonic() + duration_seconds
-    samples: list[RecoverySnapshot] = []
-    while True:
-        samples.append(_observe_recovery_snapshot(tracker_page))
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return samples
-        time.sleep(min(interval_seconds, remaining))
-
-
-def _is_consistent_recovery_state(snapshot: RecoverySnapshot) -> bool:
-    return not _snapshot_failures(snapshot, phase="initial recovery")
-
-
-def _snapshot_failures(snapshot: RecoverySnapshot, *, phase: str) -> list[str]:
-    failures: list[str] = []
-    if not snapshot.recovery_markers:
-        failures.append(
-            f"{phase}: the visible page stopped exposing recovery copy or controls.\n"
-            f"Snapshot:\n{json.dumps(_snapshot_payload(snapshot), indent=2)}"
-        )
-    if snapshot.visible_navigation_labels:
-        failures.append(
-            f"{phase}: the shell navigation became visible even though the startup "
-            "recovery state should still own the screen.\n"
-            f"Visible navigation labels: {list(snapshot.visible_navigation_labels)!r}\n"
-            f"Snapshot:\n{json.dumps(_snapshot_payload(snapshot), indent=2)}"
-        )
-    if snapshot.disallowed_visible_text:
-        failures.append(
-            f"{phase}: the recovery view exposed forbidden workspace text.\n"
-            f"Forbidden text: {list(snapshot.disallowed_visible_text)!r}\n"
-            f"Snapshot:\n{json.dumps(_snapshot_payload(snapshot), indent=2)}"
-        )
-    return failures
-
-
-def _window_failures(
-    samples: list[RecoverySnapshot],
-    *,
-    phase: str,
-) -> list[str]:
-    failures: list[str] = []
-    for index, sample in enumerate(samples, start=1):
-        sample_failures = _snapshot_failures(
-            sample,
-            phase=f"{phase} sample {index}",
-        )
-        failures.extend(sample_failures)
-    return failures
-
-
-def _snapshot_payload(snapshot: RecoverySnapshot) -> dict[str, object]:
+def _snapshot_payload(snapshot: StartupRecoveryStateObservation) -> dict[str, object]:
     return {
         "body_text": snapshot.body_text,
         "surface_text": snapshot.surface_text,

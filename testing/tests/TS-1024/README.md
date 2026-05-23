@@ -29,11 +29,12 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1024/test_ts_1024.py
 
 ## Test notes
 
-- Reuses the live startup recovery page object and scopes recovery assertions to
-  the recovery surface instead of document-wide text only.
-- Samples the visible page state repeatedly for 5 seconds after the retry
-  request is sent so async regressions still fail even if the UI only flickers
-  into a partial-render state.
+- Reuses the live startup recovery page object for both recovery-surface
+  probing and retry-window monitoring so the ticket test stays within the
+  `tests -> components -> frameworks -> core` layering.
+- Polls the visible recovery state for 5 seconds after the retry request is
+  sent so async regressions still fail even if the UI only flickers into a
+  partial-render state.
 
 ## Expected result
 
