@@ -13,7 +13,7 @@ The automation:
    immediately
 4. verifies the TopBar trigger, sidebar navigation, and branding stay hidden and
    absent from the shell DOM markers while the probe is pending
-5. confirms the real deployed shell becomes interactive shortly after the probe
+5. confirms the real deployed shell becomes interactive after the probe
    is released
 
 ## Install dependencies

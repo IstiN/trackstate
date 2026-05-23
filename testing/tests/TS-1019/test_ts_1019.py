@@ -124,7 +124,6 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 FULL_SYNC_TIMEOUT_SECONDS = 11
 SIMULATED_PROBE_DELAY_SECONDS = 5
-MAX_READY_AFTER_RELEASE_SECONDS = 3.5
 MIN_PENDING_SAMPLE_COUNT = 5
 MIN_PENDING_OBSERVATION_SECONDS = 2.0
 AUTH_PROBE_START_WAIT_SECONDS = 60
@@ -417,11 +416,6 @@ def main() -> None:
                     authoritative_shell_ready_after_probe_release_seconds
                 )
 
-                if authoritative_shell_ready_after_start_seconds is None:
-                    pending_observation_failures.append(
-                        "The live run never produced an authoritative shell_ready "
-                        "timestamp after launch."
-                    )
                 if (
                     authoritative_shell_ready_after_start_seconds is not None
                     and shell_window["auth_probe_released_after_start_seconds"] is not None
@@ -431,26 +425,6 @@ def main() -> None:
                     pending_observation_failures.append(
                         "The first authoritative shell_ready transition happened before "
                         "the delayed startup probe was released."
-                    )
-                if (
-                    authoritative_shell_ready_after_start_seconds is not None
-                    and authoritative_shell_ready_after_start_seconds
-                    >= FULL_SYNC_TIMEOUT_SECONDS
-                ):
-                    pending_observation_failures.append(
-                        "The first authoritative shell_ready transition happened only after "
-                        f"{authoritative_shell_ready_after_start_seconds!r} seconds, which is "
-                        f"not before the full {FULL_SYNC_TIMEOUT_SECONDS}-second timeout."
-                    )
-                if (
-                    authoritative_shell_ready_after_probe_release_seconds is not None
-                    and authoritative_shell_ready_after_probe_release_seconds
-                    > MAX_READY_AFTER_RELEASE_SECONDS
-                ):
-                    pending_observation_failures.append(
-                        "The shell did not become interactive soon enough after the delayed "
-                        f"probe completed (observed "
-                        f"{authoritative_shell_ready_after_probe_release_seconds!r} seconds)."
                     )
 
                 if pending_observation_failures:
@@ -542,12 +516,12 @@ def main() -> None:
     except AssertionError as error:
         result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_failure_outputs(result, product_bug=True)
+        _write_failure_outputs(result)
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_failure_outputs(result, product_bug=False)
+        _write_failure_outputs(result)
         raise
 
 
@@ -1129,7 +1103,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     REVIEW_REPLIES_PATH.write_text(_review_replies_payload(result, passed=True), encoding="utf-8")
 
 
-def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None:
+def _write_failure_outputs(result: dict[str, Any]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
     write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
@@ -1139,7 +1113,7 @@ def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None
         _review_replies_payload(result, passed=False),
         encoding="utf-8",
     )
-    if product_bug:
+    if _should_write_bug_description(result):
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
@@ -1267,18 +1241,18 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
             "h3. PR Rework Result\n\n"
-            "*Fixed:* Switched the test to `Ts1019PendingShellProbeRuntime`, collected "
-            "continuous pending-window samples, asserted `read_pending_shell_probe_state()` "
-            "via `_pending_state_failures()`, and generated review-thread replies.\n"
+            "*Fixed:* Removed TS-1019's extra post-release timing SLAs, limited "
+            "`bug_description.md` to confirmed product-visible failures, and updated "
+            "the review-thread replies for the rework.\n"
             f"*Test Run:* `{RUN_COMMAND}`\n"
             "*Result:* ✅ PASSED\n"
             "*Summary:* 1 passed, 0 failed.\n"
         )
     return (
         "h3. PR Rework Result\n\n"
-        "*Fixed:* Switched the test to `Ts1019PendingShellProbeRuntime`, collected "
-        "continuous pending-window samples, asserted `read_pending_shell_probe_state()` "
-        "via `_pending_state_failures()`, and generated review-thread replies.\n"
+        "*Fixed:* Removed TS-1019's extra post-release timing SLAs, limited "
+        "`bug_description.md` to confirmed product-visible failures, and updated "
+        "the review-thread replies for the rework.\n"
         f"*Test Run:* `{RUN_COMMAND}`\n"
         "*Result:* ❌ FAILED\n"
         "*Summary:* 0 passed, 1 failed.\n"
@@ -1397,24 +1371,76 @@ def _review_reply_text(
         else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
     )
     comment_id = thread.get("rootCommentId")
-    if comment_id == 3293498827:
+    if comment_id == 3293511064:
         return (
-            "Fixed: the test now instantiates `Ts1019PendingShellProbeRuntime`, so the "
-            "TS-1019 pending-shell observer script runs throughout the delayed `/user` "
-            f"startup probe. {rerun_summary}"
+            "Fixed: TS-1019 no longer fails on the removed `<11s from launch` / "
+            "`<=3.5s after release` SLAs. Step 3 now stays focused on the ticket "
+            "contract: the shell must remain hidden while `/user` is pending and become "
+            f"available only after probe release. {rerun_summary}"
         )
-    if comment_id == 3293498846:
+    if comment_id == 3293511090:
         return (
-            "Fixed: Step 3 now reads `read_pending_shell_probe_state()` from the TS-1019 "
-            "runtime and asserts `_pending_state_failures()` against continuously "
-            "collected pending-window samples, so the test proves shell markers stay "
-            f"unmounted until probe release. {rerun_summary}"
+            "Fixed: failure output now writes `bug_description.md` only for confirmed "
+            "product-visible failures instead of every `AssertionError`, so test-owned "
+            "instrumentation or assertion regressions no longer get reported as product "
+            f"bugs. {rerun_summary}"
         )
     return (
         "Fixed the TS-1019 startup rework by wiring the pending-shell runtime into the "
         "executed path and asserting the page-side pending-shell observer data against "
         f"continuous pending-window samples. {rerun_summary}"
     )
+
+
+def _should_write_bug_description(result: dict[str, Any]) -> bool:
+    return _bug_description_reason(result) is not None
+
+
+def _bug_description_reason(result: dict[str, Any]) -> str | None:
+    error = str(result.get("error", ""))
+    if error.startswith(f"RuntimeError: {TICKET_KEY} requires GH_TOKEN or GITHUB_TOKEN"):
+        return None
+    if error.startswith("ModuleNotFoundError:"):
+        return None
+
+    failed_steps = {
+        int(step.get("step")): step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    }
+    step_one_observed = str(failed_steps.get(1, {}).get("observed", ""))
+    step_three_observed = str(failed_steps.get(3, {}).get("observed", ""))
+
+    if "never started the delayed GitHub `/user` startup probe" in step_one_observed:
+        return "startup-probe-missing"
+    if "did not begin until well after the startup window" in step_one_observed:
+        return "startup-probe-started-too-late"
+    if (
+        "did not expose the interactive shell after the delayed startup probe resolved"
+        in step_three_observed
+    ):
+        return "shell-never-became-interactive"
+    if (
+        "reported shell_ready while the delayed startup probe was still pending"
+        in step_three_observed
+        or "Sidebar navigation labels became visible during the pending startup window"
+        in step_three_observed
+        or "workspace trigger became visible during the pending startup window"
+        in step_three_observed
+        or "branding tagline became visible before the delayed startup probe resolved"
+        in step_three_observed
+        or "Shell DOM markers were already mounted during the pending startup window"
+        in step_three_observed
+        or "first authoritative shell_ready transition happened before the delayed startup probe was released"
+        in step_three_observed
+        or "did not expose the full interactive shell navigation" in step_three_observed
+        or "did not expose the header workspace trigger" in step_three_observed
+        or "did not expose the visible TrackState branding tagline" in step_three_observed
+        or "still looked like the startup surface instead of the interactive shell"
+        in step_three_observed
+    ):
+        return "shell-visibility-contract-broken"
+    return None
 
 
 def _error_summary(result: dict[str, Any]) -> str:

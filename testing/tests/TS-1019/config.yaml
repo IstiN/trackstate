@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored signed-in GitHub token and a preloaded active local workspace plus hosted fallback workspace.
   - Delays the initial GitHub /user startup probe by 5 seconds to keep startup synchronization pending long enough to verify the shell stays hidden.
-  - Waits through the pending window before asserting, then confirms the live shell becomes interactive only after the delayed probe resolves.
+  - Waits through the pending window before asserting, then confirms the live shell becomes interactive after the delayed probe resolves.
