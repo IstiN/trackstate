@@ -761,6 +761,20 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     if (loadedState.hasProfiles) {
+      if (kIsWeb) {
+        if (loadedState.activeWorkspace case final activeWorkspace?) {
+          viewModel.updateWorkspaceScope(activeWorkspace.id);
+        }
+        final initialLoad = viewModel.load(deferAccessRestore: true);
+        if (mounted) {
+          setState(() {
+            _workspaceProfilesReady = true;
+          });
+        }
+        _scheduleWebStartupRefresh();
+        unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
+        return;
+      }
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
         if (mounted) {
@@ -796,6 +810,33 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
+  }
+
+  Future<void> _finishWebStartupWorkspaceRestore(
+    WorkspaceProfilesState loadedState,
+    Future<void> initialLoad,
+  ) async {
+    await initialLoad;
+    final restored = await _restoreWorkspaceFromSavedState(loadedState);
+    _scheduleWebStartupRefresh();
+    if (restored || !mounted) {
+      return;
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
+  }
+
+  void _scheduleWebStartupRefresh() {
+    if (!kIsWeb) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    });
   }
 
   Future<void> _awaitActiveLocalWorkspaceRevalidation(
@@ -11739,7 +11780,7 @@ class _PrimaryButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       focusable: enabled,
-      expanded: expanded,
+      expanded: kIsWeb ? null : expanded,
       identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
@@ -11915,14 +11956,26 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         ? null
         : controlsNodes!.first;
     if (kIsWeb) {
-      return browser_focusable_control.BrowserFocusableControl(
-        label: summary.semanticLabel,
-        onPressed: onPressed,
-        focusTargetId: semanticsIdentifier,
-        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-        controlsId: controlsId,
-        expanded: expanded,
-        child: constrainedButton,
+      return MergeSemantics(
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          focusable: enabled,
+          identifier: semanticsIdentifier,
+          label: summary.semanticLabel,
+          sortKey: _semanticsSortKey(semanticsSortOrder),
+          controlsNodes: controlsNodes,
+          onTap: enabled ? onPressed : null,
+          child: browser_focusable_control.BrowserFocusableControl(
+            label: summary.semanticLabel,
+            onPressed: onPressed,
+            focusTargetId: semanticsIdentifier,
+            panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+            controlsId: controlsId,
+            expanded: expanded,
+            child: constrainedButton,
+          ),
+        ),
       );
     }
     return MergeSemantics(
