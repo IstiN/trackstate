@@ -77,6 +77,7 @@ class Ts1019PendingShellProbeRuntime(Ts984DelayedAuthProbeRuntime):
                 firstAnyShellMarkerVisibleAtMs: state.firstAnyShellMarkerVisibleAtMs,
                 firstTriggerLabel: state.firstTriggerLabel,
                 firstNavigationLabels: state.firstNavigationLabels,
+                samples: state.samples,
               };
             }
             """,
@@ -89,7 +90,10 @@ class Ts1019PendingShellProbeRuntime(Ts984DelayedAuthProbeRuntime):
                 "first_any_shell_marker_visible_after_launch_seconds": None,
                 "first_trigger_label": "",
                 "first_navigation_labels": [],
+                "sample_count": 0,
+                "samples": [],
             }
+        normalized_samples = _normalize_pending_probe_samples(payload.get("samples", []))
         return {
             "first_navigation_visible_after_launch_seconds": _ms_to_seconds(
                 payload.get("firstNavigationVisibleAtMs"),
@@ -107,6 +111,8 @@ class Ts1019PendingShellProbeRuntime(Ts984DelayedAuthProbeRuntime):
             "first_navigation_labels": [
                 str(label) for label in payload.get("firstNavigationLabels", [])
             ],
+            "sample_count": len(normalized_samples),
+            "samples": normalized_samples,
         }
 
 TICKET_KEY = "TS-1019"
@@ -126,6 +132,7 @@ FULL_SYNC_TIMEOUT_SECONDS = 11
 SIMULATED_PROBE_DELAY_SECONDS = 5
 MIN_PENDING_SAMPLE_COUNT = 5
 MIN_PENDING_OBSERVATION_SECONDS = 2.0
+PENDING_SAMPLE_WINDOW_TOLERANCE_SECONDS = 0.25
 AUTH_PROBE_START_WAIT_SECONDS = 60
 PENDING_WINDOW_WAIT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 6
 SHELL_READY_WAIT_SECONDS = FULL_SYNC_TIMEOUT_SECONDS + 8
@@ -287,29 +294,9 @@ def main() -> None:
                 )
 
                 transition_tracker = ShellReadyTransitionTracker()
-                pending_samples: list[dict[str, Any]] = []
-                pending_shell_sample_observed = False
-                pending_shell_window: dict[str, Any] | None = None
                 if auth_probe_started:
-                    _, pending_shell_window = poll_until(
-                        probe=lambda: _collect_pending_sample(
-                            tracker_page=tracker_page,
-                            page=page,
-                            runtime=runtime,
-                            startup_started_at_monotonic=startup_started_at_monotonic,
-                            transition_tracker=transition_tracker,
-                            pending_samples=pending_samples,
-                        ),
-                        is_satisfied=lambda observation: not bool(observation["auth_pending"]),
+                    runtime.wait_for_auth_probe_release(
                         timeout_seconds=PENDING_WINDOW_WAIT_SECONDS,
-                        interval_seconds=0.05,
-                    )
-                    pending_shell_sample_observed = bool(pending_samples)
-                    result["pending_shell_window_observation"] = _pending_sample_payload(
-                        pending_shell_window,
-                    )
-                    result["pending_window_samples"] = _sampled_pending_window_payloads(
-                        pending_samples,
                     )
 
                 shell_ready, shell_window = poll_until(
@@ -337,23 +324,71 @@ def main() -> None:
                 result["auth_probe_released_after_start_seconds"] = (
                     auth_probe_released_after_start_seconds
                 )
+                pending_probe_state = shell_window["pending_shell_probe_state"]
+                pending_samples = _pending_window_samples_from_probe_state(
+                    pending_probe_state=pending_probe_state,
+                    auth_probe_started_after_start_seconds=auth_probe_started_after_start_seconds,
+                    auth_probe_released_after_start_seconds=auth_probe_released_after_start_seconds,
+                )
+                pending_shell_sample_observed = bool(pending_samples)
                 result["pending_shell_sample_observed"] = pending_shell_sample_observed
+                result["pending_probe_observed_sample_count"] = pending_probe_state.get(
+                    "sample_count",
+                )
 
-                pending_window_duration_seconds = _pending_window_duration_seconds(
+                pending_window_sampled_duration_seconds = _pending_window_duration_seconds(
                     pending_samples,
                 )
+                result["pending_window_sampled_duration_seconds"] = (
+                    pending_window_sampled_duration_seconds
+                )
+                pending_window_duration_seconds = pending_window_sampled_duration_seconds
                 if pending_window_duration_seconds is None:
                     pending_window_duration_seconds = (
-                        (pending_shell_window or shell_window).get(
+                        shell_window.get(
                             "auth_probe_release_after_auth_start_seconds",
                         )
                     )
                 result["pending_window_duration_seconds"] = pending_window_duration_seconds
                 result["pending_window_pending_sample_count"] = len(pending_samples)
-                result["pending_shell_probe_state"] = shell_window.get(
-                    "pending_shell_probe_state",
-                    {},
+                result["pending_shell_probe_state"] = pending_probe_state
+                result["pending_shell_window_observation"] = (
+                    _pending_sample_payload(pending_samples[-1]) if pending_samples else None
                 )
+                result["pending_window_samples"] = _sampled_pending_window_payloads(
+                    pending_samples,
+                )
+
+                step_two_failures = _pending_sample_coverage_failures(
+                    pending_samples=pending_samples,
+                    pending_window_sampled_duration_seconds=pending_window_sampled_duration_seconds,
+                )
+                if step_two_failures:
+                    observed = (
+                        "The test did not capture enough in-flight pending-window coverage "
+                        "to verify the requested immediate inspection while the delayed "
+                        "GitHub `/user` probe was still pending.\n"
+                        f"pending_shell_sample_observed={pending_shell_sample_observed!r}; "
+                        f"pending_sample_count={len(pending_samples)!r}; "
+                        f"pending_window_sampled_duration_seconds="
+                        f"{pending_window_sampled_duration_seconds!r}; "
+                        f"auth_probe_started_after_start_seconds="
+                        f"{auth_probe_started_after_start_seconds!r}; "
+                        f"auth_probe_released_after_start_seconds="
+                        f"{auth_probe_released_after_start_seconds!r}; "
+                        f"pending_probe_observed_sample_count="
+                        f"{pending_probe_state.get('sample_count')!r}\n"
+                        + "\n".join(step_two_failures)
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=observed,
+                    )
+                    _record_not_reached_steps(result, starting_step=3)
+                    raise AssertionError(f"Step 2 failed: {observed}")
 
                 _record_step(
                     result,
@@ -361,10 +396,13 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
-                        "Waited through the delayed `/user` startup probe window before "
-                        "asserting the shell state.\n"
+                        "Captured focused in-flight pending-window samples while the delayed "
+                        "`/user` startup probe was still pending, then asserted the shell "
+                        "state after probe release.\n"
                         f"pending_shell_sample_observed={pending_shell_sample_observed!r}; "
                         f"pending_sample_count={len(pending_samples)!r}; "
+                        f"pending_window_sampled_duration_seconds="
+                        f"{pending_window_sampled_duration_seconds!r}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{auth_probe_started_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds="
@@ -372,9 +410,8 @@ def main() -> None:
                         f"pending_window_duration_seconds={pending_window_duration_seconds!r}"
                     ),
                 )
-
                 pending_observation_failures: list[str] = []
-                pending_probe_state = shell_window["pending_shell_probe_state"]
+                pending_observation_failures: list[str] = []
                 pending_observation_failures.extend(
                     _pending_state_failures(
                         pending_samples=pending_samples,
@@ -464,6 +501,7 @@ def main() -> None:
                         f"{authoritative_shell_ready_after_start_seconds!r}; "
                         f"authoritative_shell_ready_after_probe_release_seconds="
                         f"{authoritative_shell_ready_after_probe_release_seconds!r}; "
+                        f"pending_sample_count={len(pending_samples)!r}; "
                         f"pending_shell_sample_observed={pending_shell_sample_observed!r}; "
                         f"pending_window_duration_seconds={pending_window_duration_seconds!r}"
                     ),
@@ -477,11 +515,12 @@ def main() -> None:
                         "showing the top bar, sidebar, or branding."
                     ),
                     observed=(
+                        f"pending_sample_count={len(pending_samples)!r}; "
                         f"pending_shell_sample_observed={pending_shell_sample_observed!r}; "
                         f"pending_window_duration_seconds={pending_window_duration_seconds!r}; "
                         f"pending_window_excerpt="
-                        f"{_snippet((pending_shell_window or shell_window)['shell_observation']['body_text'])!r}; "
-                        f"pending_trigger={(pending_shell_window or shell_window).get('trigger')!r}"
+                        f"{_first_pending_excerpt(pending_samples)!r}; "
+                        f"pending_trigger={(pending_samples[-1] if pending_samples else shell_window).get('trigger')!r}"
                     ),
                 )
                 _record_human_verification(
@@ -673,6 +712,128 @@ def _pending_window_duration_seconds(
     return round(float(last_elapsed) - float(first_elapsed), 2)
 
 
+def _pending_sample_coverage_failures(
+    *,
+    pending_samples: list[dict[str, Any]],
+    pending_window_sampled_duration_seconds: float | None,
+) -> list[str]:
+    failures: list[str] = []
+    if len(pending_samples) < MIN_PENDING_SAMPLE_COUNT:
+        failures.append(
+            "The focused pending-window sampler did not capture enough in-flight samples "
+            "to prove the UI was inspected while startup synchronization was still "
+            f"pending. Expected at least {MIN_PENDING_SAMPLE_COUNT} samples but captured "
+            f"{len(pending_samples)}."
+        )
+    if (
+        pending_window_sampled_duration_seconds is None
+        or pending_window_sampled_duration_seconds < MIN_PENDING_OBSERVATION_SECONDS
+    ):
+        failures.append(
+            "The focused pending-window sampler did not observe the delayed startup probe "
+            "for long enough to count as a meaningful live inspection. Expected at least "
+            f"{MIN_PENDING_OBSERVATION_SECONDS} seconds of in-flight coverage but captured "
+            f"{pending_window_sampled_duration_seconds!r}."
+        )
+    return failures
+
+
+def _pending_window_samples_from_probe_state(
+    *,
+    pending_probe_state: dict[str, Any],
+    auth_probe_started_after_start_seconds: float | None,
+    auth_probe_released_after_start_seconds: float | None,
+) -> list[dict[str, Any]]:
+    samples = pending_probe_state.get("samples", [])
+    if not isinstance(samples, list):
+        return []
+
+    pending_samples: list[dict[str, Any]] = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        observed_after_launch_seconds = sample.get("observed_after_launch_seconds")
+        if not isinstance(observed_after_launch_seconds, (int, float)):
+            continue
+        if (
+            auth_probe_started_after_start_seconds is not None
+            and float(observed_after_launch_seconds)
+            < float(auth_probe_started_after_start_seconds)
+            - PENDING_SAMPLE_WINDOW_TOLERANCE_SECONDS
+        ):
+            continue
+        if (
+            auth_probe_released_after_start_seconds is not None
+            and float(observed_after_launch_seconds)
+            > float(auth_probe_released_after_start_seconds)
+            + PENDING_SAMPLE_WINDOW_TOLERANCE_SECONDS
+        ):
+            continue
+        visible_navigation_labels = [
+            str(label) for label in sample.get("visible_navigation_labels", [])
+        ]
+        trigger_label = str(sample.get("trigger_label", ""))
+        branding_visible = bool(sample.get("branding_visible"))
+        navigation_dom_markers = [
+            str(label) for label in sample.get("dom_navigation_labels", [])
+        ]
+        workspace_switcher_dom_markers = [
+            str(label) for label in sample.get("dom_workspace_switcher_labels", [])
+        ]
+        branding_dom_markers = [
+            str(label) for label in sample.get("dom_branding_labels", [])
+        ]
+        pending_samples.append(
+            {
+                "elapsed_since_start_seconds": round(float(observed_after_launch_seconds), 2),
+                "auth_pending": True,
+                "auth_probe_started_after_start_seconds": (
+                    auth_probe_started_after_start_seconds
+                ),
+                "auth_probe_released_after_start_seconds": (
+                    auth_probe_released_after_start_seconds
+                ),
+                "shell_ready_after_start_seconds": None,
+                "shell_ready_after_probe_release_seconds": None,
+                "shell_ready_observed_while_auth_pending": bool(
+                    sample.get("shell_ready"),
+                ),
+                "trigger": (
+                    {"semantic_label": trigger_label}
+                    if trigger_label or bool(sample.get("trigger_visible"))
+                    else None
+                ),
+                "startup_observation": {
+                    "title": "TrackState.AI",
+                    "location_hash": "",
+                    "body_text": str(sample.get("body_excerpt", "")),
+                    "button_labels": [],
+                },
+                "shell_observation": {
+                    "body_text": str(sample.get("body_excerpt", "")),
+                    "visible_navigation_labels": visible_navigation_labels,
+                    "fatal_banner_visible": False,
+                    "connect_github_visible": False,
+                    "shell_ready": bool(sample.get("shell_ready")),
+                },
+                "branding_visible": branding_visible,
+                "dom_markers": {
+                    "navigation_labels": navigation_dom_markers,
+                    "workspace_switcher_labels": workspace_switcher_dom_markers,
+                    "branding_labels": branding_dom_markers,
+                    "sampled_labels": (
+                        navigation_dom_markers
+                        + workspace_switcher_dom_markers
+                        + branding_dom_markers
+                    ),
+                },
+                "shell_probe_state": {},
+                "pending_shell_probe_state": {},
+            },
+        )
+    return pending_samples
+
+
 def _pending_state_failures(
     *,
     pending_samples: list[dict[str, Any]],
@@ -853,6 +1014,45 @@ def _ms_to_seconds(value: Any) -> float | None:
     return round(float(value) / 1000, 2)
 
 
+def _normalize_pending_probe_samples(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list):
+        return []
+    samples: list[dict[str, Any]] = []
+    for sample in payload:
+        if not isinstance(sample, dict):
+            continue
+        visible_navigation_labels = [
+            str(label) for label in sample.get("visibleNavigationLabels", [])
+        ]
+        dom_navigation_labels = [
+            str(label) for label in sample.get("domNavigationLabels", [])
+        ]
+        dom_workspace_switcher_labels = [
+            str(label) for label in sample.get("domWorkspaceSwitcherLabels", [])
+        ]
+        dom_branding_labels = [
+            str(label) for label in sample.get("domBrandingLabels", [])
+        ]
+        samples.append(
+            {
+                "observed_after_launch_seconds": _ms_to_seconds(
+                    sample.get("observedAtMs"),
+                ),
+                "visible_navigation_labels": visible_navigation_labels,
+                "trigger_visible": bool(sample.get("triggerVisible")),
+                "trigger_label": str(sample.get("triggerLabel", "")),
+                "branding_visible": bool(sample.get("brandingVisible")),
+                "shell_ready": bool(sample.get("shellReady")),
+                "dom_navigation_labels": dom_navigation_labels,
+                "dom_workspace_switcher_labels": dom_workspace_switcher_labels,
+                "dom_branding_labels": dom_branding_labels,
+                "has_any_shell_marker": bool(sample.get("hasAnyShellMarker")),
+                "body_excerpt": str(sample.get("bodyExcerpt", "")),
+            },
+        )
+    return samples
+
+
 def _sampled_pending_window_payloads(
     pending_samples: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -912,6 +1112,8 @@ def _pending_probe_state_coverage_failures(
 def _pending_shell_probe_script() -> str:
     return """
 (() => {
+  const MAX_SAMPLES = 300;
+  const SAMPLE_INTERVAL_MS = 100;
   const state = {
     firstNavigationVisibleAtMs: null,
     firstTriggerVisibleAtMs: null,
@@ -919,6 +1121,7 @@ def _pending_shell_probe_script() -> str:
     firstAnyShellMarkerVisibleAtMs: null,
     firstTriggerLabel: '',
     firstNavigationLabels: [],
+    samples: [],
   };
   window.__ts1019PendingShellProbeState = state;
 
@@ -975,8 +1178,40 @@ def _pending_shell_probe_script() -> str:
     updateFirstAny();
   };
 
+  const captureSample = () => {
+    const bodyText = normalize(document.body?.innerText ?? document.body?.textContent ?? '');
+    const texts = semanticTexts();
+    const visibleNavigationLabels = readyLabels.filter(
+      (label) => bodyText.includes(label) || texts.includes(label),
+    );
+    const triggerLabel = texts.find((text) => text.includes('Workspace switcher:')) || '';
+    const brandingVisible = bodyText.includes(brandingLabel)
+      || texts.some((text) => text.includes(brandingLabel));
+    const domNavigationLabels = texts.filter((text) => readyLabels.includes(text));
+    const domWorkspaceSwitcherLabels = texts.filter((text) => text.includes('Workspace switcher:'));
+    const domBrandingLabels = texts.filter((text) => text.includes(brandingLabel));
+    const hasAnyShellMarker = visibleNavigationLabels.length > 0 || !!triggerLabel || brandingVisible;
+    state.samples.push({
+      observedAtMs: performance.now(),
+      visibleNavigationLabels,
+      triggerVisible: !!triggerLabel,
+      triggerLabel,
+      brandingVisible,
+      shellReady: visibleNavigationLabels.length === readyLabels.length,
+      domNavigationLabels,
+      domWorkspaceSwitcherLabels,
+      domBrandingLabels,
+      hasAnyShellMarker,
+      bodyExcerpt: bodyText.slice(0, 240),
+    });
+    if (state.samples.length > MAX_SAMPLES) {
+      state.samples.splice(0, state.samples.length - MAX_SAMPLES);
+    }
+  };
+
   const attachObserver = () => {
     observe();
+    captureSample();
     if (!document.documentElement) {
       requestAnimationFrame(attachObserver);
       return;
@@ -990,6 +1225,10 @@ def _pending_shell_probe_script() -> str:
   };
 
   attachObserver();
+  window.setInterval(() => {
+    observe();
+    captureSample();
+  }, SAMPLE_INTERVAL_MS);
   window.addEventListener('load', () => observe(), { once: false });
 })();
 """
@@ -1119,9 +1358,35 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
+def _pending_sample_count(result: dict[str, Any]) -> int:
+    value = result.get("pending_window_pending_sample_count", 0)
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _pending_sampled_duration_seconds(result: dict[str, Any]) -> float | None:
+    value = result.get("pending_window_sampled_duration_seconds")
+    return round(float(value), 2) if isinstance(value, (int, float)) else None
+
+
+def _pending_coverage_summary(result: dict[str, Any]) -> str:
+    pending_sample_count = _pending_sample_count(result)
+    pending_sampled_duration_seconds = _pending_sampled_duration_seconds(result)
+    if pending_sample_count == 0 and pending_sampled_duration_seconds is None:
+        return (
+            "Current rerun did not reach Step 2 because the live app never started the "
+            "delayed startup probe."
+        )
+    return (
+        f"Current run captured {pending_sample_count} in-flight pending samples across "
+        f"{pending_sampled_duration_seconds!r} seconds."
+    )
+
+
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
     status_icon = "✅" if passed else "❌"
     status_word = "PASSED" if passed else "FAILED"
+    pending_sample_count = _pending_sample_count(result)
+    pending_sampled_duration_seconds = _pending_sampled_duration_seconds(result)
     lines = [
         "h3. Test Automation Result",
         "",
@@ -1136,8 +1401,16 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         "",
         "h4. What automation checked",
         "* Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
-        "* Delayed the live GitHub {/user} startup probe by 5 seconds and kept sampling the live page throughout that pending window instead of asserting immediately.",
-        "* Verified the TopBar trigger, sidebar navigation labels, and branding tagline stayed hidden with no shell DOM markers while the probe was pending.",
+        (
+            "* Delayed the live GitHub {/user} startup probe by 5 seconds and collected "
+            f"{pending_sample_count} in-flight pending-window samples across "
+            f"{pending_sampled_duration_seconds!r} seconds before asserting."
+            if passed
+            else "* Delayed the live GitHub {/user} startup probe by 5 seconds and failed "
+            "the run whenever the focused pending-window sampler did not capture enough "
+            "in-flight coverage."
+        ),
+        "* Verified the TopBar trigger, sidebar navigation labels, and branding tagline stayed hidden with no shell DOM markers in the captured pending samples.",
         "* Confirmed the interactive shell appeared only after the delayed probe resolved.",
         "",
         "h4. Automation checks",
@@ -1182,6 +1455,8 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
+    pending_sample_count = _pending_sample_count(result)
+    pending_sampled_duration_seconds = _pending_sampled_duration_seconds(result)
     lines = [
         "## Test Automation Result",
         "",
@@ -1191,10 +1466,14 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "## What was automated",
         f"- Ran the live deployed app at `{result.get('app_url')}` in {result.get('browser')} on {result.get('os')}.",
         f"- Used the required desktop viewport `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`.",
-        f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and sampled the full pending window before asserting.",
+        (
+            f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and collected `{pending_sample_count}` in-flight pending samples across `{pending_sampled_duration_seconds!r}` seconds before asserting."
+            if passed
+            else f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and failed the run if the focused pending-window sampler did not meet the `{MIN_PENDING_SAMPLE_COUNT}` sample / `{MIN_PENDING_OBSERVATION_SECONDS}` second minimum."
+        ),
         f"- Considered linked bug {', '.join(LINKED_BUG_KEYS)} and coupled the assertions to the delayed probe timing.",
-        "- Wired the TS-1019 pending-shell runtime into the executed path and asserted the page-side pending-shell observer data against continuous pending-window samples.",
-        "- Checked the user-visible shell trigger, navigation, branding, and shell DOM markers during the pending window and after release.",
+        "- Wired the TS-1019 pending-shell runtime into the executed path and asserted the page-side pending-shell observer data against the captured pending-window samples.",
+        "- Checked the user-visible shell trigger, navigation, branding, and shell DOM markers during the pending window and after release, without publishing success text for zero-sample runs.",
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
@@ -1241,18 +1520,18 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
             "h3. PR Rework Result\n\n"
-            "*Fixed:* Removed TS-1019's extra post-release timing SLAs, limited "
-            "`bug_description.md` to confirmed product-visible failures, and updated "
-            "the review-thread replies for the rework.\n"
+            "*Fixed:* Enforced TS-1019's pending-window coverage minimums so Step 2 now "
+            "fails when no in-flight samples are captured, and updated the pass reporting "
+            "to publish the real sampled coverage.\n"
             f"*Test Run:* `{RUN_COMMAND}`\n"
             "*Result:* ✅ PASSED\n"
             "*Summary:* 1 passed, 0 failed.\n"
         )
     return (
         "h3. PR Rework Result\n\n"
-        "*Fixed:* Removed TS-1019's extra post-release timing SLAs, limited "
-        "`bug_description.md` to confirmed product-visible failures, and updated "
-        "the review-thread replies for the rework.\n"
+        "*Fixed:* Enforced TS-1019's pending-window coverage minimums so Step 2 fails "
+        "instead of reporting zero-sample runs as a pass, and updated the reporting to "
+        "reflect the real sampled coverage.\n"
         f"*Test Run:* `{RUN_COMMAND}`\n"
         "*Result:* ❌ FAILED\n"
         "*Summary:* 0 passed, 1 failed.\n"
@@ -1305,11 +1584,15 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 
 def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
+        pending_sample_count = _pending_sample_count(result)
+        pending_sampled_duration_seconds = _pending_sampled_duration_seconds(result)
         return (
-            "During the delayed 5-second GitHub `/user` startup probe, the deployed app "
-            "kept the TopBar trigger, sidebar navigation, and branding hidden with no shell "
-            "DOM markers in the pending samples. After the probe resolved, the page reached "
-            f"shell_ready in {result.get('authoritative_shell_ready_after_start_seconds')!r} "
+            f"Across {pending_sample_count} in-flight pending samples collected over "
+            f"{pending_sampled_duration_seconds!r} seconds during the delayed 5-second "
+            "GitHub `/user` startup probe, the deployed app kept the TopBar trigger, "
+            "sidebar navigation, and branding hidden with no shell DOM markers. After "
+            "the probe resolved, the page reached shell_ready in "
+            f"{result.get('authoritative_shell_ready_after_start_seconds')!r} "
             "seconds from launch and "
             f"{result.get('authoritative_shell_ready_after_probe_release_seconds')!r} seconds "
             "after probe release, showing the real interactive shell."
@@ -1370,7 +1653,22 @@ def _review_reply_text(
         if passed
         else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
     )
+    coverage_summary = _pending_coverage_summary(result)
     comment_id = thread.get("rootCommentId")
+    if comment_id == 3293526581:
+        return (
+            "Fixed: Step 2 now enforces the existing pending-window coverage minimums "
+            f"(`MIN_PENDING_SAMPLE_COUNT={MIN_PENDING_SAMPLE_COUNT}` and "
+            f"`MIN_PENDING_OBSERVATION_SECONDS={MIN_PENDING_OBSERVATION_SECONDS}`) "
+            "against the page-side in-flight samples, so zero-sample runs fail instead "
+            f"of passing. {coverage_summary} {rerun_summary}"
+        )
+    if comment_id == 3293526591:
+        return (
+            "Fixed: the generated success output now derives its pending-window wording "
+            "from the real sampled coverage, so it no longer claims evidence that was "
+            f"never captured. {coverage_summary} {rerun_summary}"
+        )
     if comment_id == 3293511064:
         return (
             "Fixed: TS-1019 no longer fails on the removed `<11s from launch` / "
@@ -1387,8 +1685,8 @@ def _review_reply_text(
         )
     return (
         "Fixed the TS-1019 startup rework by wiring the pending-shell runtime into the "
-        "executed path and asserting the page-side pending-shell observer data against "
-        f"continuous pending-window samples. {rerun_summary}"
+        "executed path, enforcing real pending-window coverage, and aligning the review "
+        f"artifacts with the captured samples. {coverage_summary} {rerun_summary}"
     )
 
 
