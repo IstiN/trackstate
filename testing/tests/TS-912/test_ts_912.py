@@ -42,7 +42,16 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts912-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-894", "TS-915", "TS-947"]
+LINKED_BUGS = [
+    "TS-894",
+    "TS-914",
+    "TS-915",
+    "TS-942",
+    "TS-947",
+    "TS-960",
+    "TS-974",
+    "TS-976",
+]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_TRIGGER_WAIT_SECONDS = 60
 
@@ -70,8 +79,9 @@ MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
     "Reworked the test to click the exact visible unavailable-workspace action and "
-    "record browser directory-access callbacks instead of using the generic "
-    "`Open` / `Save and switch` helper. Added `testing/tests/TS-912/README.md`."
+    "complete the browser directory-access grant through the live "
+    "`showDirectoryPicker(...)` boundary instead of using the generic `Open` / "
+    "`Save and switch` helper. Added `testing/tests/TS-912/README.md`."
 )
 
 
@@ -100,6 +110,7 @@ class Ts912ManualReauthRuntime(StoredWorkspaceProfilesRuntime):
                 "TS-912 manual re-auth runtime expected a browser context and page.",
             )
         self._context.add_init_script(script=_manual_reauth_probe_script())
+        self._context.add_init_script(script=_granted_directory_picker_script())
         self._page.on("console", self._record_console_event)
         self._page.on("pageerror", self._record_page_error)
         return session
@@ -315,6 +326,9 @@ def main() -> None:
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
+                result["simulated_directory_grant_before_action"] = _read_granted_directory_picker_state(
+                    tracker_page,
+                )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
                 result["manual_restore_action_label"] = exact_action_label
 
@@ -375,7 +389,22 @@ def main() -> None:
                 result["manual_reauth_probe_after_action"] = restore_attempt_observation[
                     "probe"
                 ]
+                result["simulated_directory_grant_after_action"] = _read_granted_directory_picker_state(
+                    tracker_page,
+                )
                 if not callback_observed:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "After pressing the visible Retry action, watched the live shell "
+                            "for a browser directory prompt or any switch to the local workspace."
+                        ),
+                        observed=(
+                            f"trigger_after_click={json.dumps(restore_attempt_observation['trigger'], ensure_ascii=True)}; "
+                            f"body_text={restore_attempt_observation['body_text']!r}; "
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=4,
@@ -396,6 +425,17 @@ def main() -> None:
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
                 if restore_attempt_observation["failure_message"] is not None:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "After pressing the visible Retry action, checked the page for the "
+                            "user-visible restore failure surfaced instead of a directory prompt."
+                        ),
+                        observed=(
+                            f"failure_message={restore_attempt_observation['failure_message']!r}; "
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=4,
@@ -1109,6 +1149,72 @@ def _manual_reauth_probe_script() -> str:
     """
 
 
+def _granted_directory_picker_script() -> str:
+    return f"""
+    (() => {{
+      const probe = window.__ts912ManualReauthProbe ||= {{
+        showDirectoryPickerCalls: [],
+        requestPermissionCalls: [],
+        queryPermissionCalls: [],
+        wrapErrors: [],
+      }};
+      const serialize = (value) => {{
+        try {{
+          return JSON.parse(JSON.stringify(value));
+        }} catch (error) {{
+          probe.wrapErrors.push(String(error));
+          return String(value);
+        }}
+      }};
+      const state = window.__ts912GrantedDirectoryPickerState = {{
+        installed: false,
+        selectedDirectoryName: null,
+        fallbackDirectoryName: {json.dumps(Path(LOCAL_TARGET).name)},
+      }};
+      globalThis.showDirectoryPicker = async (...args) => {{
+        probe.showDirectoryPickerCalls.push({{
+          callNumber: probe.showDirectoryPickerCalls.length + 1,
+          args: serialize(args),
+          simulatedGrant: true,
+        }});
+        const initialDirectory = args[0]?.initialDirectory;
+        const selectedDirectoryName =
+          typeof initialDirectory === 'string' && initialDirectory.trim().length > 0
+            ? initialDirectory.trim().split('/').filter(Boolean).at(-1) || state.fallbackDirectoryName
+            : state.fallbackDirectoryName;
+        state.selectedDirectoryName = selectedDirectoryName;
+        return {{ name: selectedDirectoryName }};
+      }};
+      state.installed = true;
+    }})();
+    """
+
+
+def _read_granted_directory_picker_state(tracker_page) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => window.__ts912GrantedDirectoryPickerState || {}
+        """,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "installed": False,
+            "selectedDirectoryName": None,
+            "fallbackDirectoryName": Path(LOCAL_TARGET).name,
+        }
+    return {
+        "installed": bool(payload.get("installed")),
+        "selectedDirectoryName": (
+            None
+            if payload.get("selectedDirectoryName") is None
+            else str(payload.get("selectedDirectoryName"))
+        ),
+        "fallbackDirectoryName": str(
+            payload.get("fallbackDirectoryName", Path(LOCAL_TARGET).name),
+        ),
+    }
+
+
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
@@ -1320,6 +1426,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
+    if not error.startswith(("AssertionError:", "RuntimeError:", "TypeError:", "ValueError:")):
+        error = f"AssertionError: {error}"
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1535,6 +1643,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
+    simulated_grant_after_action = result.get("simulated_directory_grant_after_action")
     manual_action_label = result.get("manual_restore_action_label")
     startup_observation = result.get("startup_observation")
     boundary_reached = bool(result.get("ticket_boundary_reached"))
@@ -1592,6 +1701,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
         f"- Manual action label: `{manual_action_label}`",
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
+        f"- Simulated directory grant state after action: `{json.dumps(simulated_grant_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
