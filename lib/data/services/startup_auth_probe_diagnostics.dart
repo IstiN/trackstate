@@ -26,14 +26,14 @@ class StartupAuthProbeDiagnostics {
   String? _authProbePath;
   Duration? _timeout;
   bool _awaitingShellReady = false;
-  bool _loggedShellReadyDiagnostic = false;
+  bool _loggedDiagnostic = false;
 
   void reset() {
     _authProbeStartedAt = null;
     _authProbePath = null;
     _timeout = null;
     _awaitingShellReady = false;
-    _loggedShellReadyDiagnostic = false;
+    _loggedDiagnostic = false;
   }
 
   void recordAuthProbeStart(String path) {
@@ -46,16 +46,33 @@ class StartupAuthProbeDiagnostics {
   }
 
   void recordTimeoutFallback({required Duration timeout}) {
-    if (_authProbeStartedAt == null || _loggedShellReadyDiagnostic) {
+    if (_authProbeStartedAt == null || _loggedDiagnostic) {
       return;
     }
     _timeout = timeout;
     _awaitingShellReady = true;
   }
 
+  void recordAuthProbeSuccess() {
+    if (_awaitingShellReady ||
+        _loggedDiagnostic ||
+        _authProbeStartedAt == null ||
+        _authProbePath == null) {
+      return;
+    }
+    final deltaSeconds =
+        _now().difference(_authProbeStartedAt!).inMilliseconds / 1000;
+    _logger(
+      'TrackState startup diagnostic: '
+      'auth probe ${_authProbePath!} started and completed successfully; '
+      'delta_seconds=${deltaSeconds.toStringAsFixed(2)}',
+    );
+    _loggedDiagnostic = true;
+  }
+
   void recordShellReady() {
     if (!_awaitingShellReady ||
-        _loggedShellReadyDiagnostic ||
+        _loggedDiagnostic ||
         _authProbeStartedAt == null ||
         _authProbePath == null) {
       return;
@@ -71,6 +88,6 @@ class StartupAuthProbeDiagnostics {
       'timeout_seconds=${timeoutSeconds.toStringAsFixed(2)}',
     );
     _awaitingShellReady = false;
-    _loggedShellReadyDiagnostic = true;
+    _loggedDiagnostic = true;
   }
 }

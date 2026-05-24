@@ -30,7 +30,8 @@ void main() {
         final panel = _appendPanel(host);
         final trigger = _appendButton(
           host,
-          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
           focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
           panelId: browserWorkspaceSwitcherSemanticsIdentifier,
           left: 24,
@@ -58,17 +59,20 @@ void main() {
           height: 36,
         );
 
-        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
-          onBrowserTab: () {},
-          onBrowserFocusOutside: () {},
-          onBrowserBoundaryKey: (_) {},
-        );
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
         addTearDown(subscription.cancel);
 
         trigger.focus();
-        final row = web.document.querySelector(
-          '[data-trackstate-browser-focus-row-id="${browserWorkspaceSwitcherRowSemanticsIdentifier('active')}"]',
-        ) as web.HTMLButtonElement;
+        final row =
+            web.document.querySelector(
+                  '[data-trackstate-browser-focus-row-id="${browserWorkspaceSwitcherRowSemanticsIdentifier('active')}"]',
+                )
+                as web.HTMLButtonElement;
         row.focus();
 
         final event = web.KeyboardEvent(
@@ -99,7 +103,8 @@ void main() {
         final panel = _appendPanel(host);
         _appendButton(
           host,
-          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
           focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
           panelId: browserWorkspaceSwitcherSemanticsIdentifier,
           left: 24,
@@ -138,11 +143,12 @@ void main() {
           tabIndex: 0,
         );
 
-        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
-          onBrowserTab: () {},
-          onBrowserFocusOutside: () {},
-          onBrowserBoundaryKey: (_) {},
-        );
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
         addTearDown(subscription.cancel);
 
         row.focus();
@@ -174,7 +180,8 @@ void main() {
         final panel = _appendPanel(host);
         final trigger = _appendButton(
           host,
-          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
           focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
           panelId: browserWorkspaceSwitcherSemanticsIdentifier,
           left: 24,
@@ -202,17 +209,20 @@ void main() {
           height: 36,
         );
 
-        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
-          onBrowserTab: () {},
-          onBrowserFocusOutside: () {},
-          onBrowserBoundaryKey: (_) {},
-        );
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
         addTearDown(subscription.cancel);
 
         trigger.focus();
-        final row = web.document.querySelector(
-          '[data-trackstate-browser-focus-row-id="${browserWorkspaceSwitcherRowSemanticsIdentifier('active')}"]',
-        ) as web.HTMLButtonElement;
+        final row =
+            web.document.querySelector(
+                  '[data-trackstate-browser-focus-row-id="${browserWorkspaceSwitcherRowSemanticsIdentifier('active')}"]',
+                )
+                as web.HTMLButtonElement;
         row.focus();
 
         final event = web.KeyboardEvent(
@@ -270,13 +280,14 @@ void main() {
         );
 
         var focusOutsideCalls = 0;
-        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
-          onBrowserTab: () {},
-          onBrowserFocusOutside: () {
-            focusOutsideCalls += 1;
-          },
-          onBrowserBoundaryKey: (_) {},
-        );
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+            );
         addTearDown(subscription.cancel);
 
         saveButton.focus();
@@ -301,7 +312,96 @@ void main() {
         expect(focusOutsideCalls, 1);
       },
     );
+
+    test(
+      'forward Tab from flutter-view fallback focus re-enters the open switcher at the selected row',
+      () {
+        final panel = _appendPanel(host);
+        final trigger = _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        final flutterView = _appendButton(
+          host,
+          label: 'flutter-view',
+          left: 760,
+          top: 40,
+          width: 220,
+          height: 36,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        flutterView.focus();
+        expect(web.document.activeElement, same(flutterView));
+
+        _pressTab([trigger, row, flutterView, externalInput]);
+
+        expect(
+          web.document.activeElement,
+          same(row),
+          reason:
+              'If the browser has fallen back to the flutter-view host while the '
+              'workspace switcher is open, the first forward Tab should still '
+              're-enter the switcher at the selected row.',
+        );
+      },
+    );
   });
+}
+
+void _pressTab(List<web.HTMLElement> orderedFocusTargets) {
+  final before = web.document.activeElement;
+  final event = web.KeyboardEvent(
+    'keydown',
+    web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+  );
+  web.window.dispatchEvent(event);
+
+  final after = web.document.activeElement;
+  if (after != before || event.defaultPrevented) {
+    return;
+  }
+
+  final currentIndex = orderedFocusTargets.indexWhere(
+    (target) => target == before || target.contains(before),
+  );
+  if (currentIndex == -1 || currentIndex == orderedFocusTargets.length - 1) {
+    return;
+  }
+  orderedFocusTargets[currentIndex + 1].focus();
 }
 
 web.HTMLElement _appendSemanticsNode(
