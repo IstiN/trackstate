@@ -69,9 +69,8 @@ LINKED_BUG_NOTES = (
     "for the startup diagnostic entry before evaluating the logs."
 )
 REWORK_SUMMARY = (
-    "Added a live Playwright startup regression for the normal-latency path that "
-    "captures browser-console diagnostics from the deployed app and compares the "
-    "reported timing delta with the observed `/user` auth-probe lifecycle."
+    "Restricted the success-path diagnostic matcher to the observed auth-probe "
+    "start->finish timing delta and added the missing TS-1035 README test artifact."
 )
 REQUEST_STEPS = [
     "Launch the TrackState application in an environment with normal network latency.",
@@ -288,7 +287,9 @@ def main() -> None:
                         "first_shell_ready_after_launch_seconds",
                     )
                     is not None
-                    and observation.get("auth_probe_released_after_start_seconds") is not None
+                    and observation.get("auth_probe_completed_after_start_seconds") is not None
+                    and float(observation.get("elapsed_since_auth_probe_completed_seconds") or 0.0)
+                    >= POLL_INTERVAL_SECONDS
                     and not bool(observation.get("auth_pending"))
                 ),
                 timeout_seconds=SUCCESS_WINDOW_WAIT_SECONDS,
@@ -303,9 +304,12 @@ def main() -> None:
             auth_probe_released_after_start_seconds = success_window.get(
                 "auth_probe_released_after_start_seconds",
             )
-            observed_probe_duration_seconds = _observed_delta_seconds(
-                start_seconds=auth_probe_started_after_start_seconds,
-                end_seconds=auth_probe_released_after_start_seconds,
+            auth_probe_completed_after_start_seconds = success_window.get(
+                "auth_probe_completed_after_start_seconds",
+            )
+            observed_probe_duration_seconds = _observed_monotonic_delta_seconds(
+                start_monotonic=runtime.auth_probe_started_at_monotonic,
+                end_monotonic=runtime.auth_probe_completed_at_monotonic,
             )
             observed_shell_ready_delta_seconds = _observed_delta_seconds(
                 start_seconds=auth_probe_started_after_start_seconds,
@@ -315,6 +319,9 @@ def main() -> None:
             result["shell_ready_after_launch_seconds"] = shell_ready_after_launch_seconds
             result["auth_probe_released_after_start_seconds"] = (
                 auth_probe_released_after_start_seconds
+            )
+            result["auth_probe_completed_after_start_seconds"] = (
+                auth_probe_completed_after_start_seconds
             )
             result["observed_probe_duration_seconds"] = observed_probe_duration_seconds
             result["observed_shell_ready_delta_seconds"] = observed_shell_ready_delta_seconds
@@ -333,7 +340,7 @@ def main() -> None:
                     "interactive shell transition.\n"
                     f"Observed window:\n{json.dumps(result['success_window_observation'], indent=2)}"
                 )
-            elif auth_probe_released_after_start_seconds is None:
+            elif auth_probe_completed_after_start_seconds is None:
                 step_two_error = (
                     "Step 2 failed: the GitHub `/user` startup auth probe did not finish "
                     "during the success-path observation window.\n"
@@ -388,6 +395,7 @@ def main() -> None:
                         "completed successfully.\n"
                         f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
                         f"auth_probe_released_after_start_seconds={auth_probe_released_after_start_seconds!r}; "
+                        f"auth_probe_completed_after_start_seconds={auth_probe_completed_after_start_seconds!r}; "
                         f"shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}; "
                         f"observed_probe_duration_seconds={observed_probe_duration_seconds!r}; "
                         f"observed_shell_ready_delta_seconds={observed_shell_ready_delta_seconds!r}; "
@@ -413,7 +421,8 @@ def main() -> None:
                         f"body_excerpt={snippet(success_window['shell_observation']['body_text'])!r}; "
                         f"shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}; "
                         f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
-                        f"auth_probe_released_after_start_seconds={auth_probe_released_after_start_seconds!r}"
+                        f"auth_probe_released_after_start_seconds={auth_probe_released_after_start_seconds!r}; "
+                        f"auth_probe_completed_after_start_seconds={auth_probe_completed_after_start_seconds!r}"
                     ),
                 )
                 record_not_reached_steps(
@@ -429,7 +438,6 @@ def main() -> None:
                 probe=lambda: _observe_diagnostics_window(
                     runtime=runtime,
                     expected_probe_duration_seconds=observed_probe_duration_seconds,
-                    expected_shell_ready_delta_seconds=observed_shell_ready_delta_seconds,
                 ),
                 is_satisfied=lambda observation: bool(observation["matching_entries"])
                 or float(observation["elapsed_since_probe_release_seconds"]) >= LOG_PROPAGATION_WAIT_SECONDS,
@@ -624,6 +632,13 @@ def _observe_success_window(
             startup_started_at_monotonic,
             runtime.auth_probe_released_at_monotonic,
         ),
+        "auth_probe_completed_after_start_seconds": relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            runtime.auth_probe_completed_at_monotonic,
+        ),
+        "elapsed_since_auth_probe_completed_seconds": _elapsed_since(
+            runtime.auth_probe_completed_at_monotonic,
+        ),
     }
 
 
@@ -640,6 +655,12 @@ def _success_window_payload(observation: dict[str, Any]) -> dict[str, Any]:
         "auth_probe_released_after_start_seconds": observation.get(
             "auth_probe_released_after_start_seconds",
         ),
+        "auth_probe_completed_after_start_seconds": observation.get(
+            "auth_probe_completed_after_start_seconds",
+        ),
+        "elapsed_since_auth_probe_completed_seconds": observation.get(
+            "elapsed_since_auth_probe_completed_seconds",
+        ),
     }
 
 
@@ -647,14 +668,12 @@ def _observe_diagnostics_window(
     *,
     runtime: Ts1025StartupDiagnosticsRuntime,
     expected_probe_duration_seconds: float | None,
-    expected_shell_ready_delta_seconds: float | None,
 ) -> dict[str, Any]:
     interesting_logs = _interesting_console_events(runtime.console_events)
     matching_entries = _diagnostic_console_events(
         interesting_logs=interesting_logs,
         page_errors=runtime.page_errors,
         expected_probe_duration_seconds=expected_probe_duration_seconds,
-        expected_shell_ready_delta_seconds=expected_shell_ready_delta_seconds,
     )
     elapsed_since_probe_release_seconds = _elapsed_since(runtime.auth_probe_released_at_monotonic)
     return {
@@ -692,6 +711,16 @@ def _observed_delta_seconds(
     return round(float(end_seconds) - float(start_seconds), 2)
 
 
+def _observed_monotonic_delta_seconds(
+    *,
+    start_monotonic: float | None,
+    end_monotonic: float | None,
+) -> float | None:
+    if start_monotonic is None or end_monotonic is None:
+        return None
+    return round(float(end_monotonic) - float(start_monotonic), 3)
+
+
 def _interesting_console_events(
     console_events: list[Ts1025ConsoleEvent],
 ) -> list[Ts1025ConsoleEvent]:
@@ -707,7 +736,6 @@ def _diagnostic_console_events(
     interesting_logs: list[Ts1025ConsoleEvent],
     page_errors: list[str],
     expected_probe_duration_seconds: float | None,
-    expected_shell_ready_delta_seconds: float | None,
 ) -> list[str]:
     matches: list[str] = []
     for text in _candidate_log_texts(interesting_logs, page_errors):
@@ -720,10 +748,7 @@ def _diagnostic_console_events(
             continue
         if not any(fragment in lowered for fragment in DELTA_LOG_FRAGMENTS) and not _contains_close_numeric_value(
             text,
-            expected_values=_expected_delta_values(
-                expected_probe_duration_seconds=expected_probe_duration_seconds,
-                expected_shell_ready_delta_seconds=expected_shell_ready_delta_seconds,
-            ),
+            expected_value=expected_probe_duration_seconds,
         ):
             continue
         matches.append(text)
@@ -737,25 +762,12 @@ def _candidate_log_texts(
     return [event.text for event in interesting_logs] + [str(error) for error in page_errors]
 
 
-def _expected_delta_values(
-    *,
-    expected_probe_duration_seconds: float | None,
-    expected_shell_ready_delta_seconds: float | None,
-) -> tuple[float, ...]:
-    values: list[float] = []
-    if expected_probe_duration_seconds is not None:
-        values.append(float(expected_probe_duration_seconds))
-    if expected_shell_ready_delta_seconds is not None:
-        values.append(float(expected_shell_ready_delta_seconds))
-    return tuple(values)
-
-
-def _contains_close_numeric_value(text: str, *, expected_values: tuple[float, ...]) -> bool:
-    if not expected_values:
+def _contains_close_numeric_value(text: str, *, expected_value: float | None) -> bool:
+    if expected_value is None:
         return False
     for match in re.finditer(r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)", text):
         value = float(match.group(1))
-        if any(abs(value - expected) <= DELTA_TOLERANCE_SECONDS for expected in expected_values):
+        if abs(value - float(expected_value)) <= DELTA_TOLERANCE_SECONDS:
             return True
     return False
 
