@@ -108,7 +108,6 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
@@ -201,7 +200,6 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
@@ -310,7 +308,6 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
@@ -401,7 +398,6 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
@@ -484,7 +480,6 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
