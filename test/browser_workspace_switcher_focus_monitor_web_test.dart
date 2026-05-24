@@ -235,6 +235,72 @@ void main() {
         );
       },
     );
+
+    test(
+      'recent pointer activity inside the switcher keeps focus ownership when the browser falls back to flutter-view',
+      () async {
+        final panel = _appendPanel(host);
+        final saveButton = _appendButton(
+          panel,
+          label: 'Save and switch',
+          focusId: 'trackstate-workspace-switcher-save',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 216,
+          width: 180,
+          height: 40,
+        );
+        saveButton.tabIndex = 0;
+        saveButton.setAttribute('aria-disabled', 'true');
+        final flutterView = _appendButton(
+          host,
+          label: 'flutter-view',
+          left: 760,
+          top: 40,
+          width: 220,
+          height: 36,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        var focusOutsideCalls = 0;
+        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+          onBrowserTab: () {},
+          onBrowserFocusOutside: () {
+            focusOutsideCalls += 1;
+          },
+          onBrowserBoundaryKey: (_) {},
+        );
+        addTearDown(subscription.cancel);
+
+        saveButton.focus();
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isTrue);
+
+        saveButton.dispatchEvent(
+          web.MouseEvent(
+            'mousedown',
+            web.MouseEventInit(bubbles: true, cancelable: true),
+          ),
+        );
+        flutterView.focus();
+
+        expect(focusOutsideCalls, 0);
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isTrue);
+
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isFalse);
+
+        externalInput.focus();
+        expect(focusOutsideCalls, 1);
+      },
+    );
   });
 }
 

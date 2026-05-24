@@ -21,6 +21,7 @@ from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
 @dataclass
 class ShellReadyTransitionTracker:
     first_shell_ready_at_monotonic: float | None = None
+    first_shell_ready_after_auth_pending_at_monotonic: float | None = None
     first_shell_ready_observed_while_auth_pending: bool | None = None
     observed_pending_samples: int = 0
     observed_samples: int = 0
@@ -35,7 +36,16 @@ class ShellReadyTransitionTracker:
         self.observed_samples += 1
         if auth_pending:
             self.observed_pending_samples += 1
-        if not shell_ready or self.first_shell_ready_at_monotonic is not None:
+        if not shell_ready:
+            return
+        if (
+            auth_pending
+            and self.first_shell_ready_after_auth_pending_at_monotonic is None
+        ):
+            self.first_shell_ready_after_auth_pending_at_monotonic = (
+                observed_at_monotonic
+            )
+        if self.first_shell_ready_at_monotonic is not None:
             return
         self.first_shell_ready_at_monotonic = observed_at_monotonic
         self.first_shell_ready_observed_while_auth_pending = auth_pending
@@ -48,11 +58,16 @@ def build_workspace_state(
     default_branch: str,
     local_display_name: str,
     hosted_display_name: str,
+    active_workspace: str = "local",
 ) -> dict[str, object]:
     local_id = f"local:{local_target}@{default_branch}"
     hosted_id = f"hosted:{repository.lower()}@{default_branch}"
+    if active_workspace not in {"local", "hosted"}:
+        raise ValueError(
+            "build_workspace_state active_workspace must be 'local' or 'hosted'.",
+        )
     return {
-        "activeWorkspaceId": local_id,
+        "activeWorkspaceId": hosted_id if active_workspace == "hosted" else local_id,
         "migrationComplete": True,
         "profiles": [
             {
@@ -182,13 +197,14 @@ def observe_live_startup_shell_window(
     shell_navigation_labels: tuple[str, ...],
     branding_texts: tuple[str, ...],
     transition_tracker: ShellReadyTransitionTracker | None = None,
+    poll_timeout_ms: int = 1_000,
 ) -> dict[str, Any]:
     shell_observation = tracker_page.observe_interactive_shell(
         shell_navigation_labels,
-        timeout_ms=1_000,
+        timeout_ms=poll_timeout_ms,
     )
     startup_observation = startup_surface_payload(tracker_page)
-    trigger = safe_trigger_payload(page)
+    trigger = safe_trigger_payload(page, timeout_ms=poll_timeout_ms)
     body_text = str(shell_observation.get("body_text", ""))
     visible_shell_text = "\n".join(
         text
@@ -228,6 +244,14 @@ def observe_live_startup_shell_window(
             runtime.auth_probe_released_at_monotonic,
         ),
         "elapsed_since_auth_start_seconds": elapsed_since(runtime.auth_probe_started_at_monotonic),
+        "probe_recorded_shell_ready_after_start_seconds": relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            (
+                transition_tracker.first_shell_ready_after_auth_pending_at_monotonic
+                if transition_tracker is not None
+                else (observed_at_monotonic if shell_ready and auth_pending else None)
+            ),
+        ),
         "shell_ready_after_start_seconds": relative_startup_event_seconds(
             startup_started_at_monotonic,
             shell_ready_event_monotonic,
@@ -240,6 +264,9 @@ def observe_live_startup_shell_window(
             transition_tracker.observed_pending_samples
             if transition_tracker is not None
             else None
+        ),
+        "observed_shell_samples": (
+            transition_tracker.observed_samples if transition_tracker is not None else None
         ),
         "shell_ready_observed_while_auth_pending": (
             transition_tracker.first_shell_ready_observed_while_auth_pending
@@ -287,9 +314,11 @@ def startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, An
 
 def safe_trigger_payload(
     page: LiveWorkspaceSwitcherPage,
+    *,
+    timeout_ms: int = 1_000,
 ) -> dict[str, Any] | None:
     try:
-        trigger = page.observe_trigger(timeout_ms=1_000)
+        trigger = page.observe_trigger(timeout_ms=timeout_ms)
     except (AssertionError, WebAppTimeoutError):
         return None
     return trigger_payload(trigger)

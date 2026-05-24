@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/github/github_trackstate_provider.dart';
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/jql_search_service.dart';
+import '../../../../data/services/startup_auth_probe_diagnostics.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
@@ -539,6 +541,11 @@ class TrackerViewModel extends ChangeNotifier {
       issues.where((issue) => issue.status == IssueStatus.inProgress).length;
 
   Future<void> load({bool deferAccessRestore = false}) async {
+    final previousStartupRecovery = startupRecovery;
+    final retainedStartupRecovery = _snapshot == null
+        ? previousStartupRecovery
+        : null;
+    startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
       maxResults: _searchPageSize,
@@ -546,17 +553,42 @@ class TrackerViewModel extends ChangeNotifier {
     _searchResults = const [];
     _hasLoadedInitialSearchResults = false;
     _message = null;
-    _startupRecovery = null;
+    _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
+    Future<void> Function()? deferredAccessRestore;
+    var startedDeferredAccessRestore = false;
+    var waitedForDeferredAccessRestore = false;
+
+    Future<void> startDeferredAccessRestoreIfNeeded({
+      required bool waitForCompletion,
+    }) async {
+      final restore = deferredAccessRestore;
+      if (restore == null || startedDeferredAccessRestore) {
+        return;
+      }
+      startedDeferredAccessRestore = true;
+      if (waitForCompletion) {
+        waitedForDeferredAccessRestore = true;
+        await restore();
+        return;
+      }
+      unawaited(_finishDeferredAccessRestore(restore));
+    }
+
     try {
+      if (_repository is ProviderBackedTrackStateRepository &&
+          !usesLocalPersistence &&
+          supportsGitHubAuth) {
+        deferredAccessRestore = _restoreGitHubConnection;
+      }
       await _loadSnapshotAndSearch();
-      Future<void> Function()? deferredAccessRestore;
+      _startupRecovery = _snapshot?.startupRecovery;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
         deferredAccessRestore = _restoreLocalHostedAccess;
       } else if (supportsGitHubAuth) {
-        deferredAccessRestore = _restoreGitHubConnection;
+        deferredAccessRestore ??= _restoreGitHubConnection;
       }
       if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
@@ -567,18 +599,20 @@ class TrackerViewModel extends ChangeNotifier {
         _section = TrackerSection.settings;
       }
       if (!deferAccessRestore && deferredAccessRestore != null) {
-        await deferredAccessRestore();
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: true);
       }
       _configureWorkspaceSync();
-      if (deferAccessRestore && deferredAccessRestore != null) {
-        unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+      if (deferAccessRestore &&
+          deferredAccessRestore != null &&
+          !waitedForDeferredAccessRestore) {
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: false);
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
-      if (recovery == null) {
+      if (recovery == null && previousStartupRecovery == null) {
         _message = TrackerMessage.dataLoadFailed(error);
       } else {
-        _startupRecovery = recovery;
+        _startupRecovery = recovery ?? previousStartupRecovery;
         if (supportsGitHubAuth) {
           await _restoreGitHubConnection();
         }
@@ -593,6 +627,7 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } finally {
       _isLoading = false;
+      startupAuthProbeDiagnostics.recordShellReady();
       notifyListeners();
     }
   }
@@ -1822,6 +1857,15 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
+      if (kIsWeb) {
+        final repository = _repository;
+        if (repository is ProviderBackedTrackStateRepository) {
+          final providerAdapter = repository.providerAdapter;
+          if (providerAdapter is GitHubTrackStateProvider) {
+            providerAdapter.startStartupAuthProbe(storedToken);
+          }
+        }
+      }
       await _runAutomaticRepositoryConnectionRestore(
         connect: () => _repository.connect(
           GitHubConnection(
@@ -1965,6 +2009,9 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
     } on TimeoutException {
+      startupAuthProbeDiagnostics.recordTimeoutFallback(
+        timeout: _startupAccessRestoreTimeout,
+      );
       return;
     }
   }

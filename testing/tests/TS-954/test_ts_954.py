@@ -310,7 +310,8 @@ def main() -> None:
                         ),
                     )
 
-                result["first_row_label"] = first_row.display_name
+                first_row_label = _saved_workspace_row_focus_label(first_row)
+                result["first_row_label"] = first_row_label
                 try:
                     traversal_result = _tab_to_footer_and_wrap(
                         page=page,
@@ -429,35 +430,14 @@ def _tab_to_footer_and_wrap(
     panel: WorkspaceSwitcherPanelObservation,
     first_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> dict[str, object]:
-    page.focus_saved_workspace_row(
-        first_row.display_name,
-        panel=panel,
-        timeout_ms=4_000,
-    )
-    _wait_for_switcher_stability_or_raise(
-        page=page,
-        before=None,
-        press_index=0,
-        key="Focus",
-        context=(
-            f"focusing the first saved workspace row {first_row.display_name!r}"
-        ),
-    )
-    panel = page.observe_open_panel(
-        expected_container_kinds=("anchored-panel", "surface"),
-        timeout_ms=4_000,
-    )
-    focused_row_state = _capture_tab_state(
+    first_row_label = _saved_workspace_row_focus_label(first_row)
+    initial_focus_state = _capture_tab_state(
         page=page,
         panel=panel,
         first_row_display_name=first_row.display_name,
         press_index=0,
         before=None,
         key="Initial focus",
-    )
-    _assert_first_row_focus_ready(
-        state=focused_row_state,
-        expected_display_name=first_row.display_name,
     )
 
     tab_trace: list[dict[str, object]] = []
@@ -530,11 +510,11 @@ def _tab_to_footer_and_wrap(
     )
     _assert_wrap_to_first_row(
         state=wrap_state,
-        expected_display_name=first_row.display_name,
+        expected_label=first_row_label,
     )
 
     return {
-        "focused_first_row_state": focused_row_state,
+        "initial_focus_state": initial_focus_state,
         "tab_trace_to_footer": tab_trace,
         "footer_state": footer_state,
         "footer_button_state": _button_state_payload(footer_button_state),
@@ -618,16 +598,15 @@ def _assert_save_button_disabled(
 def _assert_first_row_focus_ready(
     *,
     state: dict[str, object],
-    expected_display_name: str,
+    expected_label: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_row_focus = _first_row_focus_from_state(state)
     failures: list[str] = []
-    active_label = str(active.get("accessible_name") or "")
-    if expected_display_name not in active_label:
+    if active.get("accessible_name") != expected_label:
         failures.append(
-            f"the active label was {active_label!r} instead of a focus target containing {expected_display_name!r}",
+            f"the active label was {active.get('accessible_name')!r} instead of {expected_label!r}",
         )
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the open workspace switcher")
@@ -706,13 +685,12 @@ def _assert_traversal_reached_footer(
 def _assert_wrap_to_first_row(
     *,
     state: dict[str, object],
-    expected_display_name: str,
+    expected_label: str,
 ) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_row_focus = _first_row_focus_from_state(state)
     failures: list[str] = []
-    active_label = str(active.get("accessible_name") or "")
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the workspace switcher after the wrap attempt")
     if not bool(focus.get("active_within_switcher")):
@@ -725,9 +703,9 @@ def _assert_wrap_to_first_row(
         failures.append(
             f"the first saved workspace row did not receive focus after pressing Tab on {LAST_INTERNAL_CONTROL_LABEL!r}",
         )
-    if expected_display_name not in active_label:
+    if active.get("accessible_name") != expected_label:
         failures.append(
-            f"the active label remained {active_label!r} instead of wrapping to a focus target containing {expected_display_name!r}",
+            f"the active label remained {active.get('accessible_name')!r} instead of wrapping to {expected_label!r}",
         )
     if failures:
         raise AssertionError(
