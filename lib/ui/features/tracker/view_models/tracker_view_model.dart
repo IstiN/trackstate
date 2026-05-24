@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/github/github_trackstate_provider.dart';
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/jql_search_service.dart';
+import '../../../../data/services/startup_auth_probe_diagnostics.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
@@ -539,6 +541,8 @@ class TrackerViewModel extends ChangeNotifier {
       issues.where((issue) => issue.status == IssueStatus.inProgress).length;
 
   Future<void> load({bool deferAccessRestore = false}) async {
+    final previousStartupRecovery = startupRecovery;
+    startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
       maxResults: _searchPageSize,
@@ -601,10 +605,10 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
-      if (recovery == null) {
+      if (recovery == null && previousStartupRecovery == null) {
         _message = TrackerMessage.dataLoadFailed(error);
       } else {
-        _startupRecovery = recovery;
+        _startupRecovery = recovery ?? previousStartupRecovery;
         if (supportsGitHubAuth) {
           await _restoreGitHubConnection();
         }
@@ -619,6 +623,7 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } finally {
       _isLoading = false;
+      startupAuthProbeDiagnostics.recordShellReady();
       notifyListeners();
     }
   }
@@ -1848,6 +1853,15 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
+      if (kIsWeb) {
+        final repository = _repository;
+        if (repository is ProviderBackedTrackStateRepository) {
+          final providerAdapter = repository.providerAdapter;
+          if (providerAdapter is GitHubTrackStateProvider) {
+            providerAdapter.startStartupAuthProbe(storedToken);
+          }
+        }
+      }
       await _runAutomaticRepositoryConnectionRestore(
         connect: () => _repository.connect(
           GitHubConnection(
@@ -1991,6 +2005,9 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
     } on TimeoutException {
+      startupAuthProbeDiagnostics.recordTimeoutFallback(
+        timeout: _startupAccessRestoreTimeout,
+      );
       return;
     }
   }

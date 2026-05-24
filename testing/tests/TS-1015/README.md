@@ -7,7 +7,7 @@ The automation:
 1. preloads hosted workspace profiles with a current active workspace
 2. opens the deployed TrackState app at the required desktop viewport
 3. verifies a saved unauthorized workspace row is exposed with a non-focusable `tabindex="-1"` row surface
-4. clicks that row with a real pointer action and checks the switcher stays open
+4. clicks that row with a real pointer action and checks the switcher stays open while the saved-workspace rows remain visible through the required 1000 ms stability window
 
 ## Install dependencies
 

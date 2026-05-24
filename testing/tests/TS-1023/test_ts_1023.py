@@ -237,6 +237,7 @@ def main() -> None:
                     ),
                 )
 
+                successful_requests_before_click = len(runtime.successful_retry_requests)
                 shell_ready, shell_observation = poll_until(
                     probe=lambda: tracker_page.observe_interactive_shell(
                         SHELL_NAVIGATION_LABELS,
@@ -269,6 +270,14 @@ def main() -> None:
                         "Step 2 failed: Retry did not restore the interactive shell.\n"
                         f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}",
                     )
+                result["retry_request_telemetry_after_click"] = {
+                    "successful_requests_before_click": successful_requests_before_click,
+                    "successful_requests_after_click": len(runtime.successful_retry_requests),
+                    "captured_new_successful_request": (
+                        len(runtime.successful_retry_requests) > successful_requests_before_click
+                    ),
+                }
+
                 switcher_ready, switcher_observation = poll_until(
                     probe=lambda: _open_workspace_switcher(page),
                     is_satisfied=_switcher_populated_with_multiple_rows,
