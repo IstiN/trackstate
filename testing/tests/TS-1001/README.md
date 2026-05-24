@@ -17,6 +17,9 @@ The automation:
 6. records a real product failure when the live app still does not expose any
    public same-session surface for proving `canCreateBranch == false`
 
+Linked startup fixes reviewed for timing and gating behavior: TS-1022,
+TS-1014, TS-1013, TS-1012, TS-996, and TS-992.
+
 ## Install dependencies
 
 ```bash
