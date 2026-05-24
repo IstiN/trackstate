@@ -12,9 +12,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.components.pages.live_create_issue_gate_page import LiveCreateIssueGatePage  # noqa: E402
+from testing.components.pages.live_create_issue_gate_page import (  # noqa: E402
+    CreateIssueGateObservation,
+    LiveCreateIssueGatePage,
+)
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherObservation,
+    WorkspaceSwitcherRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
@@ -27,10 +32,13 @@ from testing.tests.support.delayed_auth_workspace_profiles_runtime import (  # n
     DelayedAuthWorkspaceProfilesRuntime,
 )
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
+    ShellReadyTransitionTracker,
     build_annotated_steps,
     build_workspace_state,
     format_human_lines,
     format_step_lines,
+    observe_live_startup_shell_window,
+    prepare_local_workspace_repository,
     record_human_verification,
     record_not_reached_steps,
     record_step,
@@ -40,9 +48,6 @@ from testing.tests.support.live_startup_case_support import (  # noqa: E402
     startup_surface_payload,
     trigger_payload,
     write_test_automation_result,
-)
-from testing.tests.support.ts1001_delayed_auth_session_probe_factory import (  # noqa: E402
-    create_ts1001_delayed_auth_session_probe,
 )
 
 TICKET_KEY = "TS-1001"
@@ -56,15 +61,36 @@ HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 11
-TIMEOUT_ASSERTION_SECONDS = 12
 SIMULATED_PROBE_DELAY_SECONDS = 30
-STARTUP_WAIT_SECONDS = 120
+TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS + 1
+AUTH_PROBE_START_WAIT_SECONDS = 60
+STARTUP_RENDER_WAIT_SECONDS = 60
+OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 10
 POLL_INTERVAL_SECONDS = 0.5
 LINKED_BUGS = ["TS-1022", "TS-1014", "TS-1013", "TS-1012", "TS-996", "TS-992"]
+REVIEW_THREADS = (
+    {"inReplyToId": 3293652659, "threadId": "PRRT_kwDOSU6Gf86EV9tK"},
+    {"inReplyToId": 3293652686, "threadId": "PRRT_kwDOSU6Gf86EV9tZ"},
+)
+WORKSPACE_PROFILE_STATE_KEYS = (
+    "trackstate.workspaceProfiles.state",
+    "flutter.trackstate.workspaceProfiles.state",
+)
 LINKED_BUG_NOTES = (
-    "Reviewed the linked startup bugs and kept the async wait explicit: the live browser "
-    "flow waits beyond the 11-second startup window, and the real production provider "
-    "probe delays GitHub `/user` by 30 seconds before asserting the restricted session flags."
+    "Reviewed TS-1022, TS-1014, TS-1013, TS-1012, TS-996, and TS-992. The linked "
+    "startup fixes all depend on real delayed `/user` timing, so this test waits "
+    "past the 11-second timeout, proves the live `/user` request actually started, "
+    "and samples the same browser session while that request is still pending."
+)
+REWORK_SUMMARY_ITEMS = (
+    "Started the live scenario from the local workspace so the delayed GitHub `/user` "
+    "startup probe is exercised deterministically, then switched into the hosted "
+    "workspace after `shell_ready` to inspect the fallback state.",
+    "Removed the synthetic Dart permission probe and now read the hosted workspace "
+    "access mode from the same live browser session that exercised the fallback UI.",
+    "Kept the rerun product-facing: if the live session still does not expose a "
+    "public same-session surface for `canCreateBranch`, the test fails as a real "
+    "product gap instead of proving a fixture-authored capability state.",
 )
 
 REQUEST_STEPS = [
@@ -104,6 +130,12 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    prepared_local_workspace = _prepare_local_workspace_repository()
+    expected_hosted_workspace_id = next(
+        str(profile["id"])
+        for profile in workspace_state["profiles"]
+        if isinstance(profile, dict) and profile.get("targetType") == "hosted"
+    )
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
         token=token,
@@ -111,7 +143,6 @@ def main() -> None:
         auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
         delayed_paths=("/user",),
     )
-    delayed_auth_probe = create_ts1001_delayed_auth_session_probe(REPO_ROOT)
 
     result: dict[str, Any] = {
         "ticket": TICKET_KEY,
@@ -127,12 +158,17 @@ def main() -> None:
         "linked_bugs": LINKED_BUGS,
         "linked_bug_notes": LINKED_BUG_NOTES,
         "sync_timeout_seconds": SYNC_TIMEOUT_SECONDS,
-        "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "simulated_probe_delay_seconds": SIMULATED_PROBE_DELAY_SECONDS,
+        "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "preloaded_workspace_state": workspace_state,
+        "prepared_local_workspace": prepared_local_workspace,
+        "expected_hosted_workspace_id": expected_hosted_workspace_id,
+        "auth_probe_observed": False,
+        "startup_probe_missing": False,
+        "startup_probe_late": False,
+        "product_failure": False,
         "steps": [],
         "human_verification": [],
-        "product_failure": False,
     }
 
     tracker_page: TrackStateTrackerPage | None = None
@@ -141,26 +177,26 @@ def main() -> None:
             tracker_page = TrackStateTrackerPage(session, config.app_url)
             switcher_page = LiveWorkspaceSwitcherPage(tracker_page)
             create_gate_page = LiveCreateIssueGatePage(tracker_page)
+            startup_started_at_monotonic = time.monotonic()
+            failures: list[str] = []
 
             switcher_page.set_viewport(**DESKTOP_VIEWPORT)
-            startup_started_at_monotonic = time.monotonic()
             tracker_page.open_entrypoint()
-            result["startup_observation_initial"] = startup_surface_payload(tracker_page)
+            result["startup_observation_initial"] = _startup_surface_payload(tracker_page)
 
-            shell_ready, shell_observation = poll_until(
-                probe=lambda: _observe_live_shell(tracker_page, switcher_page),
-                is_satisfied=_is_interactive_shell_observation,
-                timeout_seconds=STARTUP_WAIT_SECONDS,
+            startup_rendered, startup_surface = poll_until(
+                probe=lambda: _startup_surface_payload(tracker_page),
+                is_satisfied=_startup_surface_loaded,
+                timeout_seconds=STARTUP_RENDER_WAIT_SECONDS,
                 interval_seconds=POLL_INTERVAL_SECONDS,
             )
-            result["shell_ready_observation"] = _shell_payload(shell_observation)
-            if not shell_ready:
+            result["startup_observation_after_render"] = startup_surface
+            if not startup_rendered:
                 step_one_error = (
-                    "Step 1 failed: the deployed app never exposed the interactive shell "
-                    "needed for TS-1001.\n"
-                    f"Observed shell snapshot:\n{json.dumps(_shell_payload(shell_observation), indent=2)}"
+                    "Step 1 failed: the deployed app never rendered beyond the bare "
+                    "startup title before the delayed-auth fallback scenario began.\n"
+                    f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}"
                 )
-                result["product_failure"] = True
                 tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 _record_step(
@@ -174,19 +210,100 @@ def main() -> None:
                     result,
                     check=(
                         "Viewed the deployed page during startup and checked whether it "
-                        "rendered the full hosted shell with visible navigation."
+                        "moved beyond the bare title into a user-visible shell."
                     ),
                     observed=(
-                        f"shell_snapshot={json.dumps(_shell_payload(shell_observation), ensure_ascii=True)}; "
+                        f"startup_surface={json.dumps(startup_surface, ensure_ascii=True)}; "
                         f"screenshot={result['screenshot']!r}"
                     ),
                 )
-                _record_not_reached_steps(result, starting_step=2, request_steps=REQUEST_STEPS)
+                _record_not_reached_steps(result, starting_step=2)
                 raise AssertionError(step_one_error)
 
-            result["auth_probe_started_after_start_seconds"] = relative_startup_event_seconds(
+            if not runtime.wait_for_auth_probe_start(timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS):
+                late_surface = _startup_surface_payload(tracker_page)
+                trigger = _safe_trigger_payload(switcher_page)
+                result["startup_observation_late"] = late_surface
+                result["trigger_observation"] = trigger
+                result["github_request_urls"] = list(runtime.github_request_urls)
+                result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+                late_start_seconds = relative_startup_event_seconds(
+                    startup_started_at_monotonic,
+                    runtime.auth_probe_started_at_monotonic,
+                )
+                if runtime.delayed_request_urls or runtime.auth_probe_started_at_monotonic is not None:
+                    result["startup_probe_late"] = True
+                    result["product_failure"] = True
+                    step_one_error = (
+                        "Step 1 failed: the delayed GitHub `/user` request did not start "
+                        "within the startup observation window. It only appeared after the "
+                        "app had already issued other repository bootstrap requests, so the "
+                        "TS-1001 delayed-auth startup scenario was not exercised as a startup "
+                        "probe.\n"
+                        f"Observed GitHub requests:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
+                        f"Observed delayed requests:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
+                        f"auth_probe_started_after_start_seconds={late_start_seconds!r}\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
+                elif runtime.github_request_urls:
+                    result["startup_probe_missing"] = True
+                    result["product_failure"] = True
+                    step_one_error = (
+                        "Step 1 failed: the deployed app never issued the required GitHub "
+                        "`/user` startup auth probe. Startup only requested other GitHub "
+                        "endpoints, so the TS-1001 delayed-auth fallback scenario cannot be "
+                        "exercised from the current production surface.\n"
+                        f"Observed GitHub requests:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
+                        f"Observed delayed requests:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
+                else:
+                    step_one_error = (
+                        "Step 1 failed: the delayed GitHub `/user` startup probe never "
+                        "started, so the 11-second startup-timeout fallback scenario was not "
+                        "exercised.\n"
+                        f"Observed startup surface:\n{json.dumps(late_surface, indent=2)}\n"
+                        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+                        f"Observed body text:\n{tracker_page.body_text()}"
+                    )
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                _record_step(
+                    result,
+                    step=1,
+                    status="failed",
+                    action=REQUEST_STEPS[0],
+                    observed=step_one_error,
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the live startup shell like a user and checked whether the "
+                        "current production build ever issued the required delayed GitHub "
+                        "`/user` startup auth probe."
+                    ),
+                    observed=(
+                        f"github_request_urls={json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}; "
+                        f"trigger={json.dumps(trigger, ensure_ascii=True) if trigger else 'null'}; "
+                        f"body_excerpt={_snippet(tracker_page.body_text())!r}; "
+                        f"screenshot={result['screenshot']!r}"
+                    ),
+                )
+                _record_not_reached_steps(result, starting_step=2)
+                raise AssertionError(step_one_error)
+            result["auth_probe_observed"] = True
+
+            auth_probe_started_after_start_seconds = relative_startup_event_seconds(
                 startup_started_at_monotonic,
                 runtime.auth_probe_started_at_monotonic,
+            )
+            result["auth_probe_started_after_start_seconds"] = (
+                auth_probe_started_after_start_seconds
             )
             _record_step(
                 result,
@@ -194,30 +311,101 @@ def main() -> None:
                 status="passed",
                 action=REQUEST_STEPS[0],
                 observed=(
-                    "Opened the deployed TrackState app in the hosted workspace with a "
-                    "stored GitHub token and a 30-second delayed `/user` interception.\n"
-                    f"shell_snapshot={json.dumps(_shell_payload(shell_observation), ensure_ascii=True)}; "
-                    f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}"
+                    "Opened the deployed TrackState app with preloaded local and hosted "
+                    "workspaces, started from the local workspace, and delayed the GitHub "
+                    f"`/user` startup probe by {SIMULATED_PROBE_DELAY_SECONDS} seconds.\n"
+                    f"startup_surface={json.dumps(startup_surface, ensure_ascii=True)}; "
+                    f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
+                    f"delayed_request_urls={runtime.delayed_request_urls!r}"
                 ),
             )
 
-            timeout_reached, timeout_observation = poll_until(
-                probe=lambda: _observe_live_shell(tracker_page, switcher_page, startup_started_at_monotonic),
-                is_satisfied=lambda observation: observation["elapsed_since_start_seconds"]
-                >= TIMEOUT_ASSERTION_SECONDS,
-                timeout_seconds=STARTUP_WAIT_SECONDS,
+            transition_tracker = ShellReadyTransitionTracker()
+            timeout_reached, timeout_window = poll_until(
+                probe=lambda: _observe_timeout_window(
+                    tracker_page=tracker_page,
+                    page=switcher_page,
+                    runtime=runtime,
+                    startup_started_at_monotonic=startup_started_at_monotonic,
+                    transition_tracker=transition_tracker,
+                ),
+                is_satisfied=lambda observation: (
+                    observation["elapsed_since_auth_start_seconds"] is not None
+                    and float(observation["elapsed_since_auth_start_seconds"])
+                    >= TIMEOUT_ASSERTION_SECONDS
+                ),
+                timeout_seconds=OBSERVATION_TIMEOUT_SECONDS,
                 interval_seconds=POLL_INTERVAL_SECONDS,
             )
-            result["timeout_observation"] = _shell_payload(timeout_observation)
             result["github_request_urls"] = list(runtime.github_request_urls)
             result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+            result["timeout_window_observation"] = _sample_payload(timeout_window)
 
+            step_two_error: str | None = None
             if not timeout_reached:
                 step_two_error = (
                     "Step 2 failed: the test never reached the post-timeout observation "
-                    "window on the deployed app.\n"
-                    f"Observed timeout snapshot:\n{json.dumps(_shell_payload(timeout_observation), indent=2)}"
+                    "window while watching the delayed GitHub `/user` probe.\n"
+                    f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
                 )
+            elif not bool(timeout_window["auth_pending"]):
+                shell_ready_after_start_seconds = timeout_window.get(
+                    "shell_ready_after_start_seconds",
+                )
+                auth_probe_released_after_start_seconds = timeout_window.get(
+                    "auth_probe_released_after_start_seconds",
+                )
+                if (
+                    isinstance(shell_ready_after_start_seconds, (int, float))
+                    and isinstance(auth_probe_released_after_start_seconds, (int, float))
+                    and shell_ready_after_start_seconds > SYNC_TIMEOUT_SECONDS
+                    and shell_ready_after_start_seconds
+                    >= auth_probe_released_after_start_seconds
+                ):
+                    step_two_error = (
+                        "Step 2 failed: the delayed GitHub `/user` probe started, but the "
+                        "app did not enter `shell_ready` within the 11-second timeout "
+                        "window. Instead, the shell only became ready after the delayed "
+                        "auth probe was released, so the TS-996 timeout fallback regressed.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
+                else:
+                    step_two_error = (
+                        "Step 2 failed: by the time the timeout assertion ran, the delayed "
+                        "GitHub `/user` probe was no longer pending, so the unresolved-auth "
+                        "fallback state was not observed.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
+            elif not bool(timeout_window["shell_observation"]["shell_ready"]):
+                step_two_error = (
+                    "Step 2 failed: after waiting beyond the 11-second startup timeout, "
+                    "the live page still had not reached shell_ready.\n"
+                    f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                )
+            else:
+                try:
+                    _assert_interactive_shell(timeout_window)
+                except AssertionError as error:
+                    step_two_error = f"Step 2 failed: {error}"
+
+            if step_two_error is None:
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action=REQUEST_STEPS[1],
+                    observed=(
+                        f"Waited {timeout_window['elapsed_since_auth_start_seconds']!r} "
+                        "seconds from the delayed `/user` probe start, which is beyond "
+                        f"the {SYNC_TIMEOUT_SECONDS}-second startup timeout. The auth "
+                        "probe was still pending and the live app already exposed the "
+                        "interactive shell.\n"
+                        f"shell_ready_after_start_seconds={timeout_window['shell_ready_after_start_seconds']!r}; "
+                        f"trigger={json.dumps(timeout_window['trigger'], ensure_ascii=True)}"
+                    ),
+                )
+            else:
+                failures.append(step_two_error)
                 result["product_failure"] = True
                 _record_step(
                     result,
@@ -226,144 +414,180 @@ def main() -> None:
                     action=REQUEST_STEPS[1],
                     observed=step_two_error,
                 )
-                _record_not_reached_steps(result, starting_step=3, request_steps=REQUEST_STEPS)
-                raise AssertionError(step_two_error)
-
-            try:
-                _assert_timeout_fallback_shell(timeout_observation)
-            except AssertionError as error:
-                result["product_failure"] = True
-                _record_step(
-                    result,
-                    step=2,
-                    status="failed",
-                    action=REQUEST_STEPS[1],
-                    observed=str(error),
-                )
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the hosted shell after waiting past the 11-second window "
-                        "and compared the visible workspace state with the expected fallback."
+                        "Viewed the live shell after startup and compared the shell-ready "
+                        "timing against the delayed GitHub `/user` probe lifecycle."
                     ),
                     observed=(
-                        f"timeout_snapshot={json.dumps(_shell_payload(timeout_observation), ensure_ascii=True)}; "
-                        f"github_request_urls={json.dumps(result['github_request_urls'], ensure_ascii=True)}; "
-                        f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
+                        f"timeout_window={json.dumps(_sample_payload(timeout_window), ensure_ascii=True)}; "
+                        f"github_request_urls={json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}"
                     ),
                 )
-                _record_not_reached_steps(result, starting_step=3, request_steps=REQUEST_STEPS)
-                raise
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                _record_not_reached_steps(result, starting_step=3)
+                raise AssertionError(step_two_error)
 
-            _record_step(
-                result,
-                step=2,
-                status="passed",
-                action=REQUEST_STEPS[1],
-                observed=(
-                    f"Waited {timeout_observation['elapsed_since_start_seconds']!r} seconds "
-                    "after launch. The hosted shell stayed interactive, the workspace "
-                    "trigger still showed `Needs sign-in`, and the delayed auth request "
-                    f"remained non-blocking for the visible shell. delayed_request_urls={runtime.delayed_request_urls!r}"
-                ),
-            )
-
-            restricted_write_surface = _observe_restricted_write_surface(
-                tracker_page,
-                create_gate_page,
-            )
-            result["restricted_write_surface_observation"] = restricted_write_surface
             try:
-                _assert_restricted_write_surface(restricted_write_surface)
-            except AssertionError as error:
+                hosted_trigger = switcher_page.switch_to_workspace(
+                    display_name=HOSTED_DISPLAY_NAME,
+                    target_type_label="Hosted",
+                    detail_contains=service.repository,
+                    expected_state_label="Needs sign-in",
+                    timeout_ms=20_000,
+                )
+                trigger_observation = switcher_page.observe_trigger(timeout_ms=10_000)
+                switcher_observation = switcher_page.open_and_observe(timeout_ms=10_000)
+                active_row = _active_row(switcher_observation)
+                result["hosted_trigger_after_switch"] = _trigger_payload(hosted_trigger)
+                result["trigger_observation"] = _trigger_payload(trigger_observation)
+                result["switcher_observation"] = _switcher_payload(switcher_observation)
+                result["active_row_observation"] = _row_payload(active_row)
+                _assert_fallback_workspace_state(
+                    runtime=runtime,
+                    trigger=trigger_observation,
+                    active_row=active_row,
+                )
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=REQUEST_STEPS[2],
+                    observed=(
+                        "Switched from the local startup shell into the hosted workspace "
+                        "while the delayed auth probe was still unresolved. The workspace "
+                        "trigger and the selected hosted row both exposed the exact "
+                        "`Needs sign-in` fallback state.\n"
+                        f"trigger_label={trigger_observation.semantic_label!r}; "
+                        f"active_row={json.dumps(result['active_row_observation'], ensure_ascii=True)}"
+                    ),
+                )
+            except Exception as error:
+                step_three_error = (
+                    "Step 3 failed: the test could not switch into the hosted fallback "
+                    "workspace state while authentication was still unresolved.\n"
+                    f"error={error}\n"
+                    f"hosted_trigger_after_switch="
+                    f"{json.dumps(result.get('hosted_trigger_after_switch'), ensure_ascii=True)}\n"
+                    f"trigger_observation={json.dumps(result.get('trigger_observation'), ensure_ascii=True)}\n"
+                    f"switcher_observation={json.dumps(result.get('switcher_observation'), ensure_ascii=True)}"
+                )
+                failures.append(step_three_error)
                 result["product_failure"] = True
                 _record_step(
                     result,
                     step=3,
                     status="failed",
                     action=REQUEST_STEPS[2],
-                    observed=str(error),
+                    observed=step_three_error,
                 )
-                raise
-
-            _record_step(
-                result,
-                step=3,
-                status="passed",
-                action=REQUEST_STEPS[2],
-                observed=(
-                    "Opened the visible `Create issue` action and inspected the user-facing "
-                    "restricted write surface instead of an unrestricted write form.\n"
-                    f"surface={json.dumps(restricted_write_surface, ensure_ascii=True)}"
-                ),
-            )
-
-            probe_result = delayed_auth_probe.inspect(
-                repository=service.repository,
-                branch=DEFAULT_BRANCH,
-                token=token,
-                auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
-                timeout_assertion_seconds=TIMEOUT_ASSERTION_SECONDS,
-            )
-            result["delayed_auth_probe_analyze_output"] = probe_result.analyze_output
-            result["delayed_auth_probe_run_output"] = probe_result.run_output
-            result["delayed_auth_probe_observation"] = probe_result.observation_payload
 
             try:
-                _assert_delayed_auth_probe(probe_result.observation_payload, probe_result.succeeded)
-            except AssertionError as error:
-                observation = probe_result.observation_payload or {}
-                if observation.get("failureType") == "product":
+                create_gate_page.wait_for_create_trigger(timeout_ms=10_000)
+                create_gate_page.open_create_issue(timeout_ms=10_000)
+                gate_observation = create_gate_page.wait_for_access_gate(
+                    primary_action_label="Open settings",
+                    timeout_ms=10_000,
+                )
+                result["create_issue_gate_observation"] = _create_gate_payload(gate_observation)
+                _assert_write_gate(runtime=runtime, gate=gate_observation)
+                workspace_profile_state = _read_workspace_profile_state(
+                    tracker_page,
+                    expected_hosted_workspace_id=expected_hosted_workspace_id,
+                )
+                result["workspace_profile_state"] = workspace_profile_state
+                _assert_workspace_profile_state(
+                    runtime=runtime,
+                    observation=workspace_profile_state,
+                )
+                raise AssertionError(
+                    "The live fallback session still does not expose any public "
+                    "same-browser-session surface for `canCreateBranch`. The test "
+                    "confirmed the real fallback UI (`Open settings` gate) and the "
+                    "same-session hosted access mode (`hostedAccessMode=disconnected`), "
+                    "but there is no production-visible session metadata or branch-creation "
+                    "boundary tied to that browser session that proves `canCreateBranch=false` "
+                    "without using a synthetic fixture."
+                )
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action=REQUEST_STEPS[3],
+                    observed=(
+                        "Opened the user-visible Create issue action after the timeout and "
+                        "confirmed the live app kept write operations blocked instead of "
+                        "showing an editable create form. The same live browser session "
+                        "also persisted the hosted fallback workspace as "
+                        "`hostedAccessMode=disconnected`.\n"
+                        f"gate={json.dumps(result['create_issue_gate_observation'], ensure_ascii=True)}\n"
+                        f"workspace_profile_state={json.dumps(workspace_profile_state, ensure_ascii=True)}"
+                    ),
+                )
+            except Exception as error:
+                step_four_error = (
+                    "Step 4 failed: the live Create issue flow did not expose the "
+                    "expected restricted-capability state while auth remained unresolved.\n"
+                    f"error={error}\n"
+                    f"create_issue_gate_observation="
+                    f"{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}\n"
+                    f"workspace_profile_state="
+                    f"{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}\n"
+                    f"body_text={tracker_page.body_text()}"
+                )
+                failures.append(step_four_error)
+                error_text = str(error)
+                if result.get("auth_probe_observed") and not any(
+                    marker in error_text
+                    for marker in (
+                        "probe could not be analyzed",
+                        "did not return a structured payload",
+                        "did not expose the session payload",
+                    )
+                ):
                     result["product_failure"] = True
                 _record_step(
                     result,
                     step=4,
                     status="failed",
                     action=REQUEST_STEPS[3],
-                    observed=str(error),
+                    observed=step_four_error,
                 )
-                raise
-
-            _record_step(
-                result,
-                step=4,
-                status="passed",
-                action=REQUEST_STEPS[3],
-                observed=(
-                    "Ran a production delayed-auth provider probe that used the real "
-                    "GitHub provider and live GitHub API responses while delaying `/user` "
-                    f"for {SIMULATED_PROBE_DELAY_SECONDS} seconds. At the "
-                    f"{TIMEOUT_ASSERTION_SECONDS}-second checkpoint, the session metadata "
-                    "still reported `canWrite=false` and `canCreateBranch=false`.\n"
-                    f"probe_observation={json.dumps(probe_result.observation_payload, ensure_ascii=True)}"
-                ),
-            )
 
             _record_human_verification(
                 result,
                 check=(
-                    "Viewed the deployed hosted workspace like a user and confirmed the "
-                    "visible state labels, branding, and primary navigation after waiting "
-                    "past the startup timeout."
+                    "Viewed the deployed page after the timeout like a user and checked "
+                    "the visible shell, branding, navigation, and active hosted workspace state."
                 ),
                 observed=(
-                    f"timeout_snapshot={json.dumps(_shell_payload(timeout_observation), ensure_ascii=True)}; "
-                    f"screenshot={str(SUCCESS_SCREENSHOT_PATH)!r}"
+                    f"body_excerpt={_snippet(timeout_window['shell_observation']['body_text'])!r}; "
+                    f"branding_visible={timeout_window['branding_visible']!r}; "
+                    f"visible_navigation_labels={timeout_window['shell_observation']['visible_navigation_labels']!r}; "
+                    f"workspace_trigger_state={(result.get('trigger_observation') or {}).get('state_label')!r}"
                 ),
             )
-            _record_human_verification(
-                result,
-                check=(
-                    "Opened the visible Create issue action and confirmed the user sees "
-                    "the exact restricted recovery surface instead of an editable write flow."
-                ),
-                observed=(
-                    f"surface_body_excerpt={_snippet(str(restricted_write_surface.get('body_text', '')))!r}; "
-                    f"open_settings_button_count={restricted_write_surface.get('open_settings_button_count')!r}; "
-                    f"close_button_count={restricted_write_surface.get('close_button_count')!r}; "
-                    f"save_button_count={restricted_write_surface.get('save_button_count')!r}"
-                ),
-            )
+            if result.get("create_issue_gate_observation"):
+                gate_payload = result["create_issue_gate_observation"]
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Opened the visible Create issue action and confirmed the user sees "
+                        "a read-only recovery gate instead of an editable issue form."
+                    ),
+                    observed=(
+                        f"gate_panel_text={gate_payload.get('gate_panel_text')!r}; "
+                        f"open_settings_button_count={gate_payload.get('gate_open_settings_button_count')!r}; "
+                        f"summary_field_count={gate_payload.get('summary_field_count')!r}; "
+                        f"save_button_count={gate_payload.get('save_button_count')!r}"
+                    ),
+                )
+
+            if failures:
+                raise AssertionError("\n\n".join(failures))
 
             tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
             result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -398,231 +622,6 @@ def main() -> None:
         raise
 
 
-def _workspace_state(repository: str) -> dict[str, object]:
-    return build_workspace_state(
-        repository,
-        local_target=LOCAL_TARGET,
-        default_branch=DEFAULT_BRANCH,
-        local_display_name=LOCAL_DISPLAY_NAME,
-        hosted_display_name=HOSTED_DISPLAY_NAME,
-        active_workspace="hosted",
-    )
-
-
-def _observe_live_shell(
-    tracker_page: TrackStateTrackerPage,
-    switcher_page: LiveWorkspaceSwitcherPage,
-    startup_started_at_monotonic: float | None = None,
-) -> dict[str, Any]:
-    shell = tracker_page.observe_interactive_shell(SHELL_NAVIGATION_LABELS, timeout_ms=1_000)
-    trigger = safe_trigger_payload(switcher_page)
-    body_text = str(shell.get("body_text") or tracker_page.body_text())
-    return {
-        "shell_observation": {
-            **shell,
-            "body_text": body_text,
-        },
-        "trigger": trigger,
-        "branding_visible": BRANDING_TEXT in body_text or "TrackState.AI" in body_text,
-        "elapsed_since_start_seconds": (
-            round(time.monotonic() - startup_started_at_monotonic, 2)
-            if startup_started_at_monotonic is not None
-            else None
-        ),
-    }
-
-
-def _is_interactive_shell_observation(observation: dict[str, Any]) -> bool:
-    shell = observation["shell_observation"]
-    return (
-        observation["trigger"] is not None
-        and observation["branding_visible"]
-        and all(label in shell["visible_navigation_labels"] for label in SHELL_NAVIGATION_LABELS)
-    )
-
-
-def _assert_timeout_fallback_shell(observation: dict[str, Any]) -> None:
-    shell = observation["shell_observation"]
-    missing_navigation = [
-        label
-        for label in SHELL_NAVIGATION_LABELS
-        if label not in shell["visible_navigation_labels"]
-    ]
-    if missing_navigation:
-        raise AssertionError(
-            "Step 2 failed: after waiting beyond the 11-second timeout, the live shell "
-            f"was missing navigation labels {missing_navigation}.\n"
-            f"Observed timeout snapshot:\n{json.dumps(_shell_payload(observation), indent=2)}"
-        )
-    if not observation["branding_visible"]:
-        raise AssertionError(
-            "Step 2 failed: after waiting beyond the 11-second timeout, the live shell "
-            "did not show the TrackState branding.\n"
-            f"Observed timeout snapshot:\n{json.dumps(_shell_payload(observation), indent=2)}"
-        )
-    trigger = observation["trigger"]
-    if trigger is None:
-        raise AssertionError(
-            "Step 2 failed: the header workspace trigger was missing after the timeout "
-            "window.\n"
-            f"Observed timeout snapshot:\n{json.dumps(_shell_payload(observation), indent=2)}"
-        )
-    if trigger.get("workspace_type") != "Hosted":
-        raise AssertionError(
-            "Step 2 failed: the active workspace was not the hosted workspace expected "
-            f"by the ticket. Observed trigger: {json.dumps(trigger, indent=2)}"
-        )
-    if trigger.get("state_label") != "Needs sign-in":
-        raise AssertionError(
-            "Step 2 failed: after waiting beyond the 11-second timeout, the active "
-            "workspace did not expose the expected `Needs sign-in` fallback state.\n"
-            f"Observed trigger: {json.dumps(trigger, indent=2)}"
-        )
-
-
-def _observe_restricted_write_surface(
-    tracker_page: TrackStateTrackerPage,
-    create_gate_page: LiveCreateIssueGatePage,
-) -> dict[str, Any]:
-    create_gate_page.wait_for_create_trigger(timeout_ms=20_000)
-    create_gate_page.open_create_issue(timeout_ms=20_000)
-    observed, surface = poll_until(
-        probe=lambda: _restricted_write_surface_payload(tracker_page),
-        is_satisfied=lambda observation: (
-            (
-                observation["open_settings_button_count"] >= 1
-                and "GitHub write access is not connected" in observation["body_text"]
-            )
-            or (
-                "fell back to startup-safe repository defaults so the shell could open"
-                in observation["body_text"]
-                and "after 11 seconds" in observation["body_text"]
-                and observation["close_button_count"] >= 1
-            )
-        ),
-        timeout_seconds=20,
-        interval_seconds=0.5,
-    )
-    if not observed:
-        raise AssertionError(
-            "Step 3 failed: the Create issue surface never exposed the expected "
-            "restricted recovery surface.\n"
-            f"Observed surface snapshot:\n{json.dumps(surface, indent=2)}"
-        )
-    return surface
-
-
-def _restricted_write_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
-    body_text = tracker_page.body_text()
-    return {
-        "body_text": body_text,
-        "body_excerpt": _snippet(body_text),
-        "open_settings_button_count": tracker_page.session.count(
-            TrackStateTrackerPage.BUTTON_SELECTOR,
-            has_text="Open settings",
-        ),
-        "save_button_count": tracker_page.session.count(
-            TrackStateTrackerPage.BUTTON_SELECTOR,
-            has_text=TrackStateTrackerPage.SAVE_LABEL,
-        ),
-        "close_button_count": tracker_page.session.count(
-            TrackStateTrackerPage.BUTTON_SELECTOR,
-            has_text="Close",
-        ),
-    }
-
-
-def _assert_restricted_write_surface(surface: dict[str, Any]) -> None:
-    body_text = str(surface.get("body_text", ""))
-    open_settings_button_count = int(surface.get("open_settings_button_count", 0))
-    if "GitHub write access is not connected" in body_text:
-        if open_settings_button_count < 1:
-            raise AssertionError(
-                "Step 3 failed: the repository-access recovery surface was visible, but "
-                "it did not expose a visible `Open settings` action.\n"
-                f"Observed surface:\n{json.dumps(surface, indent=2)}"
-            )
-        if (
-            "Create, edit, comment, and status changes stay read-only"
-            not in body_text
-        ):
-            raise AssertionError(
-                "Step 3 failed: the repository-access recovery surface was visible, but "
-                "its read-only restriction copy was missing.\n"
-                f"Observed surface:\n{json.dumps(surface, indent=2)}"
-            )
-        return
-    if (
-        "fell back to startup-safe repository defaults so the shell could open"
-        not in body_text
-        or "Hosted startup deferred" not in body_text
-        or "after 11 seconds" not in body_text
-    ):
-        raise AssertionError(
-            "Step 3 failed: the Create issue action did not expose either the repository "
-            "access restriction copy or the startup-safe recovery callout expected after "
-            "the timeout fallback.\n"
-            f"Observed surface:\n{json.dumps(surface, indent=2)}"
-        )
-    if int(surface.get("close_button_count", 0)) < 1:
-        raise AssertionError(
-            "Step 3 failed: the startup-safe recovery callout was visible, but it did not "
-            "expose the visible `Close` dismissal action.\n"
-            f"Observed surface:\n{json.dumps(surface, indent=2)}"
-        )
-
-
-def _assert_delayed_auth_probe(
-    observation: dict[str, Any] | None,
-    execution_succeeded: bool,
-) -> None:
-    if not execution_succeeded:
-        raise AssertionError(
-            "Step 4 failed: the delayed-auth provider probe could not be analyzed or run, "
-            "so the session metadata contract was not verified."
-        )
-    if not isinstance(observation, dict):
-        raise AssertionError(
-            "Step 4 failed: the delayed-auth provider probe did not return a structured "
-            "observation payload."
-        )
-    if observation.get("status") != "passed":
-        raise AssertionError(
-            "Step 4 failed: the delayed-auth provider probe did not confirm the "
-            "restricted session flags.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-    checkpoint_session = observation.get("checkpointSession")
-    if not isinstance(checkpoint_session, dict):
-        raise AssertionError(
-            "Step 4 failed: the delayed-auth provider probe did not expose the "
-            "checkpoint session payload.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-    if checkpoint_session.get("connectionState") != "ProviderConnectionState.connecting":
-        raise AssertionError(
-            "Step 4 failed: the checkpoint session was not still connecting while `/user` "
-            "was delayed.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-    if checkpoint_session.get("canWrite") is not False:
-        raise AssertionError(
-            "Step 4 failed: `canWrite` was not false at the delayed-auth checkpoint.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-    if checkpoint_session.get("canCreateBranch") is not False:
-        raise AssertionError(
-            "Step 4 failed: `canCreateBranch` was not false at the delayed-auth checkpoint.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-    if observation.get("userRequestPendingAtCheckpoint") is not True:
-        raise AssertionError(
-            "Step 4 failed: the delayed `/user` probe was not still pending at the "
-            "checkpoint when session metadata was sampled.\n"
-            f"Probe observation:\n{json.dumps(observation, indent=2)}"
-        )
-
-
 def _record_step(
     result: dict[str, Any],
     *,
@@ -643,14 +642,347 @@ def _record_human_verification(
     record_human_verification(result, check=check, observed=observed)
 
 
-def _shell_payload(observation: dict[str, Any]) -> dict[str, Any]:
+def _record_not_reached_steps(result: dict[str, Any], *, starting_step: int) -> None:
+    record_not_reached_steps(result, starting_step=starting_step, request_steps=REQUEST_STEPS)
+
+
+def _workspace_state(repository: str) -> dict[str, object]:
+    return build_workspace_state(
+        repository,
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        local_display_name=LOCAL_DISPLAY_NAME,
+        hosted_display_name=HOSTED_DISPLAY_NAME,
+    )
+
+
+def _prepare_local_workspace_repository() -> dict[str, object]:
+    return prepare_local_workspace_repository(
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        marker_filename=".trackstate-ts1001-precondition.txt",
+        marker_contents="Prepared for TS-1001 delayed startup fallback validation.\n",
+        commit_author_name="TS-1001 Automation",
+        commit_author_email="ts1001@example.com",
+        commit_message="Prepare TS-1001 local workspace",
+    )
+
+
+def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
+    return startup_surface_payload(tracker_page)
+
+
+def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
+    body_text = str(observation.get("body_text", "")).strip()
+    title = str(observation.get("title", "")).strip()
+    button_labels = observation.get("button_labels", [])
+    return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
+
+
+def _observe_timeout_window(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    page: LiveWorkspaceSwitcherPage,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    startup_started_at_monotonic: float,
+    transition_tracker: ShellReadyTransitionTracker,
+) -> dict[str, Any]:
+    return observe_live_startup_shell_window(
+        tracker_page=tracker_page,
+        page=page,
+        runtime=runtime,
+        startup_started_at_monotonic=startup_started_at_monotonic,
+        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
+        branding_texts=(BRANDING_TEXT, "TrackState.AI"),
+        transition_tracker=transition_tracker,
+    )
+
+
+def _assert_interactive_shell(observation: dict[str, Any]) -> None:
+    shell = observation["shell_observation"]
+    missing_navigation = [
+        label
+        for label in SHELL_NAVIGATION_LABELS
+        if label not in shell["visible_navigation_labels"]
+    ]
+    if missing_navigation:
+        raise AssertionError(
+            "The timeout-window snapshot did not expose the full interactive shell "
+            f"navigation. Missing labels: {missing_navigation}.",
+        )
+    if observation["trigger"] is None:
+        raise AssertionError(
+            "The timeout-window snapshot did not expose the header workspace trigger.",
+        )
+    if not bool(observation["branding_visible"]):
+        raise AssertionError(
+            "The timeout-window snapshot did not expose visible TrackState branding.",
+        )
+
+
+def _active_row(
+    switcher_observation: WorkspaceSwitcherObservation,
+) -> WorkspaceSwitcherRowObservation | None:
+    return next(
+        (row for row in switcher_observation.rows if row.selected),
+        None,
+    )
+
+
+def _assert_fallback_workspace_state(
+    *,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    active_row: WorkspaceSwitcherRowObservation | None,
+) -> None:
+    if not runtime.auth_probe_pending:
+        raise AssertionError(
+            "The delayed auth probe was no longer pending while the fallback workspace "
+            "state was being inspected.",
+        )
+    if trigger.state_label != "Needs sign-in":
+        raise AssertionError(
+            "The active workspace trigger did not expose the expected `Needs sign-in` "
+            f"fallback state. Observed trigger state: {trigger.state_label!r}",
+        )
+    if active_row is None:
+        raise AssertionError(
+            "The workspace switcher did not expose a selected active workspace row.",
+        )
+    if active_row.target_type_label != "Hosted":
+        raise AssertionError(
+            "The selected active workspace row was not the hosted workspace expected by "
+            f"the test. Observed row: {active_row!r}",
+        )
+    if active_row.state_label != "Needs sign-in":
+        raise AssertionError(
+            "The selected hosted workspace row did not expose the expected "
+            f"`Needs sign-in` fallback state. Observed row: {active_row!r}",
+        )
+
+
+def _assert_write_gate(
+    *,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    gate: CreateIssueGateObservation,
+) -> None:
+    if not runtime.auth_probe_pending:
+        raise AssertionError(
+            "The delayed auth probe was no longer pending while the blocked write gate "
+            "was being inspected.",
+        )
+    if "GitHub write access is not connected" not in gate.gate_panel_text:
+        raise AssertionError(
+            "The Create issue gate did not show the expected disconnected write-access "
+            f"title. Observed gate: {gate.gate_panel_text!r}",
+        )
+    if "Create, edit, comment, and status changes stay read-only" not in gate.gate_panel_text:
+        raise AssertionError(
+            "The Create issue gate did not show the expected read-only write restriction "
+            f"message. Observed gate: {gate.gate_panel_text!r}",
+        )
+    if gate.summary_field_count != 0:
+        raise AssertionError(
+            "The Create issue gate still exposed an editable Summary field instead of a "
+            f"blocked write-access surface. Observed summary_field_count={gate.summary_field_count!r}",
+        )
+    if gate.save_button_count != 0:
+        raise AssertionError(
+            "The Create issue gate still exposed a Save action even though the fallback "
+            f"session should be write-blocked. Observed save_button_count={gate.save_button_count!r}",
+        )
+    if gate.gate_open_settings_button_count < 1:
+        raise AssertionError(
+            "The Create issue gate did not expose the expected `Open settings` recovery "
+            f"action. Observed gate={gate!r}",
+        )
+
+
+def _read_workspace_profile_state(
+    tracker_page: TrackStateTrackerPage,
+    *,
+    expected_hosted_workspace_id: str,
+) -> dict[str, Any]:
+    snapshot = tracker_page.snapshot_local_storage(WORKSPACE_PROFILE_STATE_KEYS)
+    raw_state = next(
+        (
+            raw_value
+            for key in WORKSPACE_PROFILE_STATE_KEYS
+            if (raw_value := snapshot.get(key))
+        ),
+        None,
+    )
+    parsed_state: dict[str, Any] | None = None
+    parse_error: str | None = None
+    if raw_state is not None:
+        try:
+            candidate = json.loads(raw_state)
+            if isinstance(candidate, dict):
+                parsed_state = candidate
+            else:
+                parse_error = (
+                    "Workspace profile storage did not deserialize to a JSON object. "
+                    f"Observed type: {type(candidate).__name__}."
+                )
+        except json.JSONDecodeError as error:
+            parse_error = f"{type(error).__name__}: {error}"
+
+    active_workspace_id = (
+        str(parsed_state.get("activeWorkspaceId"))
+        if isinstance(parsed_state, dict) and parsed_state.get("activeWorkspaceId") is not None
+        else None
+    )
+    hosted_profile: dict[str, Any] | None = None
+    raw_profiles = parsed_state.get("profiles") if isinstance(parsed_state, dict) else None
+    if isinstance(raw_profiles, list):
+        hosted_profile = next(
+            (
+                profile
+                for profile in raw_profiles
+                if isinstance(profile, dict)
+                and str(profile.get("id", "")).strip() == expected_hosted_workspace_id
+            ),
+            None,
+        )
+    return {
+        "snapshot": snapshot,
+        "raw_state": raw_state,
+        "parse_error": parse_error,
+        "active_workspace_id": active_workspace_id,
+        "hosted_profile": hosted_profile,
+        "hosted_access_mode": (
+            None
+            if hosted_profile is None
+            else str(hosted_profile.get("hostedAccessMode"))
+            if hosted_profile.get("hostedAccessMode") is not None
+            else None
+        ),
+    }
+
+
+def _assert_workspace_profile_state(
+    *,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    observation: dict[str, Any],
+) -> None:
+    if not runtime.auth_probe_pending:
+        raise AssertionError(
+            "The delayed auth probe was no longer pending while the same-session hosted "
+            "workspace access mode was being inspected.",
+        )
+    parse_error = observation.get("parse_error")
+    if parse_error:
+        raise AssertionError(
+            "The browser session did not expose a parseable workspace profile state "
+            f"snapshot in localStorage.\nobservation={json.dumps(observation, ensure_ascii=True)}",
+        )
+    active_workspace_id = observation.get("active_workspace_id")
+    if not active_workspace_id:
+        raise AssertionError(
+            "The live browser session did not persist an active workspace id while the "
+            "fallback state was visible.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
+        )
+    hosted_profile = observation.get("hosted_profile")
+    if not isinstance(hosted_profile, dict):
+        raise AssertionError(
+            "The same-session workspace profile state did not expose the hosted "
+            "workspace profile needed for fallback-state inspection.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
+        )
+    if observation.get("hosted_access_mode") != "disconnected":
+        raise AssertionError(
+            "The live browser session did not persist the hosted fallback workspace as "
+            "`hostedAccessMode=disconnected` while auth was unresolved.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
+        )
+    if active_workspace_id != str(hosted_profile.get("id", "")):
+        raise AssertionError(
+            "The same-session workspace profile state did not keep the hosted workspace "
+            "selected while the fallback surface was being inspected.\n"
+            f"observation={json.dumps(observation, ensure_ascii=True)}",
+        )
+
+
+def _sample_payload(observation: dict[str, Any]) -> dict[str, Any]:
+    trigger = observation.get("trigger")
+    startup = observation.get("startup_observation", {})
     shell = observation.get("shell_observation", {})
     return {
-        "elapsed_since_start_seconds": observation.get("elapsed_since_start_seconds"),
+        "auth_pending": observation.get("auth_pending"),
+        "elapsed_since_auth_start_seconds": observation.get("elapsed_since_auth_start_seconds"),
+        "auth_probe_started_after_start_seconds": observation.get(
+            "auth_probe_started_after_start_seconds",
+        ),
+        "auth_probe_released_after_start_seconds": observation.get(
+            "auth_probe_released_after_start_seconds",
+        ),
+        "shell_ready_after_start_seconds": observation.get("shell_ready_after_start_seconds"),
         "branding_visible": observation.get("branding_visible"),
+        "location_pathname": startup.get("location_pathname"),
+        "location_hash": startup.get("location_hash"),
+        "title": startup.get("title"),
+        "button_labels": list(startup.get("button_labels", [])),
         "visible_navigation_labels": list(shell.get("visible_navigation_labels", [])),
-        "trigger": observation.get("trigger"),
+        "shell_ready": shell.get("shell_ready"),
+        "trigger": trigger,
         "body_excerpt": _snippet(str(shell.get("body_text", ""))),
+    }
+
+
+def _safe_trigger_payload(
+    page: LiveWorkspaceSwitcherPage,
+) -> dict[str, Any] | None:
+    return safe_trigger_payload(page)
+
+
+def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, Any]:
+    return trigger_payload(trigger)
+
+
+def _switcher_payload(
+    switcher: WorkspaceSwitcherObservation,
+) -> dict[str, Any]:
+    return {
+        "body_text": switcher.body_text,
+        "switcher_text": switcher.switcher_text,
+        "row_count": switcher.row_count,
+        "rows": [_row_payload(row) for row in switcher.rows],
+    }
+
+
+def _row_payload(
+    row: WorkspaceSwitcherRowObservation | None,
+) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "display_name": row.display_name,
+        "target_type_label": row.target_type_label,
+        "state_label": row.state_label,
+        "detail_text": row.detail_text,
+        "visible_text": row.visible_text,
+        "selected": row.selected,
+        "semantics_label": row.semantics_label,
+        "icon_accessibility_label": row.icon_accessibility_label,
+        "action_labels": list(row.action_labels),
+        "button_labels": list(row.button_labels),
+    }
+
+
+def _create_gate_payload(gate: CreateIssueGateObservation) -> dict[str, Any]:
+    return {
+        "body_text": gate.body_text,
+        "gate_panel_text": gate.gate_panel_text,
+        "callout_semantics_label": gate.callout_semantics_label,
+        "create_heading_visible": gate.create_heading_visible,
+        "summary_field_count": gate.summary_field_count,
+        "create_button_count": gate.create_button_count,
+        "save_button_count": gate.save_button_count,
+        "open_settings_button_count": gate.open_settings_button_count,
+        "gate_open_settings_button_count": gate.gate_open_settings_button_count,
+        "gate_cta_center_x": gate.gate_cta_center_x,
+        "gate_cta_center_y": gate.gate_cta_center_y,
     }
 
 
@@ -660,20 +992,20 @@ def _snippet(text: str, *, limit: int = 240) -> str:
 
 def _write_pass_outputs(result: dict[str, Any]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
-    REVIEW_REPLIES_PATH.unlink(missing_ok=True)
     write_test_automation_result(RESULT_PATH, passed=True)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result)
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
-    REVIEW_REPLIES_PATH.unlink(missing_ok=True)
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
     write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies(result)
     if _should_write_bug_description(result):
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -692,9 +1024,9 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Linked Bugs Considered:* {', '.join(LINKED_BUGS)}",
         "",
         "h4. What was tested",
-        "* Opened the deployed hosted workspace in Chromium and waited beyond the 11-second startup window before asserting the visible fallback state.",
-        "* Checked the live shell, workspace switcher label, and the user-facing restricted recovery surface that appears after activating Create issue on the deployed app.",
-        "* Ran a production delayed-auth provider probe that used the real GitHub provider and delayed {/user} for 30 seconds before sampling session metadata.",
+        "* Started from the active local workspace so the delayed GitHub {/user} startup probe is exercised deterministically, then switched into the hosted workspace after the shell rendered.",
+        "* Waited beyond the 11-second timeout before asserting instead of checking immediately.",
+        "* Checked the hosted fallback workspace state, the user-facing Create issue gate, and the same-browser hosted access mode persisted in workspace storage.",
         "",
         "h4. Result",
         f"* {_actual_result_summary(result, passed=passed)}",
@@ -739,10 +1071,13 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
         f"**Linked Bugs Considered:** {', '.join(LINKED_BUGS)}",
         "",
+        "## Rework summary",
+        *[f"- {item}" for item in REWORK_SUMMARY_ITEMS],
+        "",
         "## What was automated",
-        "- Waited beyond the 11-second startup window on the deployed hosted workspace before asserting the visible fallback shell.",
-        "- Verified the active hosted workspace still showed `Needs sign-in` and the `Create issue` action opened a restricted recovery surface instead of an editable write flow.",
-        "- Verified hidden session metadata with a production delayed-auth provider probe instead of a fixture-authored capability state.",
+        "- Delayed the live GitHub `/user` startup probe by 30 seconds and exercised it from the local-active startup path before switching into the hosted workspace.",
+        "- Waited past the timeout before asserting the visible shell and fallback state.",
+        "- Verified the active hosted workspace state, the blocked Create issue flow, and the same-session hosted workspace access mode persisted in browser storage.",
         "",
         "## Result",
         f"- {_actual_result_summary(result, passed=passed)}",
@@ -773,6 +1108,10 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
+        "h3. Rework summary",
+        "",
+        *[f"* {item}" for item in REWORK_SUMMARY_ITEMS],
+        "",
         "h3. Latest result",
         "",
         f"*Status:* {'✅ PASSED' if passed else '❌ FAILED'}",
@@ -805,7 +1144,6 @@ def _should_write_bug_description(result: dict[str, Any]) -> bool:
 
 
 def _build_bug_description(result: dict[str, Any]) -> str:
-    probe_observation = result.get("delayed_auth_probe_observation")
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -828,15 +1166,18 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
         f"- Run command: `{RUN_COMMAND}`",
-        f"- Simulated delayed auth probe: GitHub `/user` delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
+        f"- Simulated delayed startup probe: GitHub `/user` delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
         "",
         "## Screenshots or logs",
         f"- Screenshot: `{result.get('screenshot')}`",
-        f"- GitHub requests seen in live browser: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
-        f"- Delayed requests seen in live browser: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
-        f"- Timeout observation: `{json.dumps(result.get('timeout_observation'), ensure_ascii=True)}`",
-        f"- Restricted write surface observation: `{json.dumps(result.get('restricted_write_surface_observation'), ensure_ascii=True)}`",
-        f"- Delayed auth probe observation: `{json.dumps(probe_observation, ensure_ascii=True)}`",
+        f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
+        f"- Delayed requests seen: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
+        f"- Timeout observation: `{json.dumps(result.get('timeout_window_observation'), ensure_ascii=True)}`",
+        f"- Hosted trigger after switch: `{json.dumps(result.get('hosted_trigger_after_switch'), ensure_ascii=True)}`",
+        f"- Trigger observation: `{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}`",
+        f"- Switcher observation: `{json.dumps(result.get('switcher_observation'), ensure_ascii=True)}`",
+        f"- Create issue gate observation: `{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}`",
+        f"- Workspace profile state: `{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}`",
     ]
     return "\n".join(lines) + "\n"
 
@@ -844,23 +1185,63 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
-            "After waiting beyond the 11-second startup window, the deployed hosted shell "
-            "stayed interactive, the workspace trigger still showed `Needs sign-in`, the "
-            "Create issue flow surfaced the startup-safe recovery callout instead of an "
-            "editable form, and the production delayed-auth provider probe confirmed "
-            "`canWrite=false` plus `canCreateBranch=false` while `/user` was still delayed."
+            "After the 11-second startup timeout elapsed with the delayed auth probe "
+            "still pending, the deployed app showed the interactive shell, the active "
+            "hosted workspace exposed `Needs sign-in`, Create issue stayed blocked "
+            "behind the visible `Open settings` recovery gate, and the same-session "
+            "workspace profile state persisted `hostedAccessMode=disconnected`."
         )
     return str(
         result.get(
             "error",
-            "The deployed app or the production delayed-auth provider session did not "
-            "match the restricted fallback state expected after the startup timeout.",
+            "The deployed app did not expose the restricted fallback session expected "
+            "after the delayed-auth startup timeout.",
         ),
     )
 
 
 def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
     return format_step_lines(result, jira=jira)
+
+
+def _write_review_replies(result: dict[str, Any]) -> None:
+    auth_probe_observed = bool(result.get("auth_probe_observed"))
+    timeout_window = result.get("timeout_window_observation")
+    startup_reply = (
+        "Fixed: Step 2 now proves the live delayed `/user` startup path ran in the same "
+        "browser session. The test waits for the real `/user` request to start, fails if "
+        "it never starts or starts too late, and records the timeout-window snapshot only "
+        "while that delayed request is still pending."
+        if auth_probe_observed
+        else "Fixed in code: Step 2 now waits for the real delayed `/user` startup request "
+        "before making the timeout assertion and fails if the request never starts. The "
+        "latest rerun still failed before the timeout snapshot because the production build "
+        "did not satisfy that delayed-startup precondition."
+    )
+    same_session_reply = (
+        "Fixed: removed the synthetic delayed-auth probe. Step 4 now uses only same-browser-"
+        "session evidence from the live app: the blocked `Create issue` gate plus the hosted "
+        "workspace storage state captured while the delayed `/user` request is still pending. "
+        "If the product still does not expose a public same-session surface for "
+        "`canCreateBranch=false`, the test stays failed as a real product gap."
+        if timeout_window
+        else "Fixed in code: removed the synthetic delayed-auth probe so Step 4 now depends "
+        "only on same-browser-session evidence from the live app. The latest rerun failed "
+        "earlier in the startup flow before that same-session capability check was reached."
+    )
+    payload = {
+        "replies": [
+            {
+                **REVIEW_THREADS[0],
+                "reply": startup_reply,
+            },
+            {
+                **REVIEW_THREADS[1],
+                "reply": same_session_reply,
+            },
+        ]
+    }
+    REVIEW_REPLIES_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

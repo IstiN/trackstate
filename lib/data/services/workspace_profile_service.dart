@@ -18,6 +18,7 @@ abstract interface class WorkspaceProfileService {
     bool select = true,
   });
   Future<WorkspaceProfilesState> selectProfile(String workspaceId);
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection();
   Future<WorkspaceProfilesState> saveHostedAccessMode(
     String workspaceId,
     HostedWorkspaceAccessMode? accessMode,
@@ -181,6 +182,19 @@ class SharedPreferencesWorkspaceProfileService
       migrationComplete: true,
       unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
+    await _writeState(preferences, nextState);
+    return nextState;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    await repairBrowserPreferencesStorage();
+    final preferences = await SharedPreferences.getInstance();
+    final state = _normalizeState(_readState(preferences));
+    if (state.activeWorkspaceId == null) {
+      return state;
+    }
+    final nextState = state.copyWith(activeWorkspaceId: null);
     await _writeState(preferences, nextState);
     return nextState;
   }
@@ -386,9 +400,11 @@ class SharedPreferencesWorkspaceProfileService
             writeBranch: previousActiveWorkspace.first.writeBranch,
           );
     final activeWorkspaceId =
-        normalizedProfiles.any(
-          (profile) => profile.id == normalizedActiveWorkspaceId,
-        )
+        normalizedActiveWorkspaceId == null || normalizedActiveWorkspaceId.isEmpty
+        ? null
+        : normalizedProfiles.any(
+            (profile) => profile.id == normalizedActiveWorkspaceId,
+          )
         ? normalizedActiveWorkspaceId
         : normalizedProfiles.isEmpty
         ? null
