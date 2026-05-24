@@ -647,42 +647,6 @@ class TrackerViewModel extends ChangeNotifier {
     await load();
   }
 
-  bool publishHostedStartupShellFallback() {
-    final repository = _repository;
-    if (repository is! ProviderBackedTrackStateRepository ||
-        repository.usesLocalPersistence ||
-        _snapshot != null) {
-      return false;
-    }
-    final snapshot = repository.buildHostedStartupFallbackSnapshot();
-    _snapshot = snapshot;
-    _startupRecovery = snapshot.startupRecovery;
-    if (_message == null && snapshot.loadWarnings.isNotEmpty) {
-      _message = TrackerMessage.repositoryConfigFallback(
-        snapshot.loadWarnings.first,
-      );
-    }
-    if (hasStartupRecovery) {
-      _section = TrackerSection.settings;
-    }
-    notifyListeners();
-    return true;
-  }
-
-  Future<void> restoreDeferredHostedAccessAfterStartupFallback() async {
-    if (_repository is! ProviderBackedTrackStateRepository ||
-        usesLocalPersistence ||
-        !supportsGitHubAuth) {
-      return;
-    }
-    await _primeStartupGitHubAuthProbe();
-    await _restoreGitHubConnection();
-    if (_snapshot != null) {
-      _configureWorkspaceSync();
-      notifyListeners();
-    }
-  }
-
   @override
   void dispose() {
     _disposed = true;

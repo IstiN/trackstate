@@ -713,16 +713,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   }) async {
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      final publishedHostedShellFallback =
-          deferAccessRestore &&
-          previousViewModel.publishHostedStartupShellFallback();
-      if (publishedHostedShellFallback) {
-        unawaited(
-          previousViewModel.restoreDeferredHostedAccessAfterStartupFallback(),
-        );
-      } else {
-        await previousViewModel.load(deferAccessRestore: deferAccessRestore);
-      }
+      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
