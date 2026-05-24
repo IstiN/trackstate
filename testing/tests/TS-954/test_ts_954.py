@@ -46,7 +46,21 @@ SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
-LINKED_BUGS = ["TS-948", "TS-958", "TS-963", "TS-973", "TS-975", "TS-997", "TS-998"]
+LINKED_BUGS = [
+    "TS-1041",
+    "TS-1039",
+    "TS-1021",
+    "TS-1018",
+    "TS-1010",
+    "TS-1009",
+    "TS-998",
+    "TS-997",
+    "TS-975",
+    "TS-973",
+    "TS-963",
+    "TS-958",
+    "TS-948",
+]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FOCUS_SETTLE_MS = 300
 MAX_TABS_TO_REACH_FOOTER = 8
