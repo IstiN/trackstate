@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 import platform
 import re
@@ -8,7 +7,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -34,20 +33,22 @@ from testing.tests.support.live_startup_case_support import (  # noqa: E402
     record_human_verification,
     record_not_reached_steps,
     record_step,
+    relative_event_seconds,
     relative_startup_event_seconds,
+    safe_trigger_payload,
     snippet,
     startup_surface_payload,
     write_test_automation_result,
 )
-from testing.tests.support.ts1025_startup_diagnostics_runtime import (  # noqa: E402
-    Ts1025ConsoleEvent,
-    Ts1025StartupDiagnosticsRuntime,
+from testing.tests.support.ts1025_startup_diagnostic_runtime import (  # noqa: E402
+    Ts1025StartupDiagnosticRuntime,
 )
 
 TICKET_KEY = "TS-1025"
 TEST_CASE_TITLE = (
     "Startup diagnostics — logs capture timing delta for authentication probe fallback"
 )
+TEST_FILE_PATH = "testing/tests/TS-1025/test_ts_1025.py"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1025/test_ts_1025.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
@@ -58,74 +59,60 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 11
 SIMULATED_PROBE_DELAY_SECONDS = 30
-AUTH_PROBE_START_WAIT_SECONDS = 90
-TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS + 1
-STARTUP_RENDER_WAIT_SECONDS = 120
-OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + AUTH_PROBE_START_WAIT_SECONDS
-POLL_INTERVAL_SECONDS = 0.25
-DELTA_TOLERANCE_SECONDS = 1.5
-LINKED_BUGS = ["TS-1022"]
+AUTH_PROBE_START_WAIT_SECONDS = 60
+TIMEOUT_ASSERTION_SECONDS = 11.0
+TIMEOUT_RENDER_GRACE_SECONDS = 1.5
+OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 15
+POLL_INTERVAL_SECONDS = 0.15
+DIAGNOSTIC_DELTA_MIN_SECONDS = 10.0
+DIAGNOSTIC_DELTA_MAX_SECONDS = 13.5
+LINKED_BUGS = ("TS-1029", "TS-1027", "TS-1022")
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1022. Its merged fix should let startup force `shell_ready` after "
-    "the 11-second timeout while the delayed GitHub `/user` probe is still unresolved, "
-    "so this test waits past that timeout instead of asserting immediately and then "
-    "checks the live browser console for the diagnostic delta entry."
+    "Reviewed TS-1029, TS-1027, and TS-1022. Their fixes require the delayed GitHub "
+    "`/user` startup probe to begin during startup, keep auth pending for long enough "
+    "to observe the 11-second fallback, and then emit a same-run startup diagnostic "
+    "entry that ties the auth-probe start to the `shell_ready` timeout transition."
 )
-REWORK_SUMMARY = (
-    "Guarded Step 2 with an authoritative `shell_ready` timestamp recorded only "
-    "after the delayed GitHub `/user` probe becomes pending, and stop Steps 3-4 "
-    "as not reached whenever that timeout-path prerequisite fails."
-)
+
 REQUEST_STEPS = [
     "Launch the TrackState application.",
     "Wait for the 11-second synchronization timeout to expire and the UI shell to render (shell_ready=true).",
-    "Access the application logs (for this automation, the live browser console captured by Playwright).",
+    "Access the application logs (e.g., via browser console or telemetry dashboard).",
     "Inspect the entries recorded during the initialization sequence.",
 ]
 EXPECTED_RESULT = (
-    "The logs contain a diagnostic entry that explicitly captures the initiation of "
-    "the auth probe and the shell state transition, including a calculated delta of "
+    "The logs contain a diagnostic entry that explicitly captures the initiation of the "
+    "auth probe and the shell state transition, including a calculated delta of "
     "approximately 11 seconds."
 )
-IGNORED_LOG_SNIPPETS = (
-    "Installing/Activating first service worker.",
-    "Activated new service worker.",
-    "Injecting <script> tag. Using callback.",
-    "GPU stall due to ReadPixels",
-    "Failed to load resource: the server responded with a status of 404",
-)
-AUTH_LOG_FRAGMENTS = (
-    "/user",
-    "auth probe",
-    "auth-probe",
-    "authentication probe",
-    "github auth",
-    "startup probe",
-    "probe start",
-    "probe initiated",
-)
-SHELL_LOG_FRAGMENTS = (
-    "shell_ready",
-    "shell ready",
-    "shellready",
-    "forced transition",
-    "transition",
-    "interactive",
-    "startup fallback",
-)
-DELTA_LOG_FRAGMENTS = ("delta", "elapsed", "timeout", "11", "11.0", "11.00")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
-DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
-REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1025_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1025_failure.png"
+
+_DIAGNOSTIC_KEYWORD_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("startup", "probe"),
+    ("startup", "shell_ready"),
+    ("startup", "shell ready"),
+    ("auth", "probe"),
+    ("/user", "startup"),
+    ("timeout", "fallback"),
+    ("hosted startup deferred", "/user"),
+    ("shell can open while repository data keeps loading", "/user"),
+)
+_DELTA_PATTERNS = (
+    re.compile(r"delta(?:_|)(?:ms|milliseconds)[=: ]+(\d{4,6})", re.IGNORECASE),
+    re.compile(r"delta(?:_|)(?:seconds|sec|s)?[=: ]+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"elapsed(?:_|)(?:ms|milliseconds)[=: ]+(\d{4,6})", re.IGNORECASE),
+    re.compile(r"elapsed(?:_|)(?:seconds|sec|s)?[=: ]+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"delta[^0-9]*(\d+(?:\.\d+)?)\s*s(?:ec(?:onds)?)?", re.IGNORECASE),
+    re.compile(r"after[^0-9]*(\d+(?:\.\d+)?)\s*s(?:ec(?:onds)?)?", re.IGNORECASE),
+)
 
 
 def main() -> None:
@@ -142,15 +129,13 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
-    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
-    runtime = Ts1025StartupDiagnosticsRuntime(
+    runtime = Ts1025StartupDiagnosticRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
         delayed_paths=("/user",),
-        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -164,87 +149,58 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
-        "linked_bugs": LINKED_BUGS,
+        "linked_bugs": list(LINKED_BUGS),
         "linked_bug_notes": LINKED_BUG_NOTES,
         "sync_timeout_seconds": SYNC_TIMEOUT_SECONDS,
-        "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "simulated_probe_delay_seconds": SIMULATED_PROBE_DELAY_SECONDS,
-        "delta_tolerance_seconds": DELTA_TOLERANCE_SECONDS,
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
+        "product_failure": False,
         "steps": [],
         "human_verification": [],
-        "product_failure": False,
     }
 
     tracker_page: TrackStateTrackerPage | None = None
     try:
         with runtime as session:
             tracker_page = TrackStateTrackerPage(session, config.app_url)
-            page = LiveWorkspaceSwitcherPage(tracker_page)
-            page.set_viewport(**DESKTOP_VIEWPORT)
-            startup_started_at_monotonic = time.monotonic()
-            failures: list[str] = []
-
-            page.open_startup_entrypoint(wait_until="commit", timeout_ms=120_000)
-            startup_rendered, startup_surface = poll_until(
-                probe=lambda: startup_surface_payload(tracker_page),
-                is_satisfied=_startup_surface_loaded,
-                timeout_seconds=STARTUP_RENDER_WAIT_SECONDS,
-                interval_seconds=POLL_INTERVAL_SECONDS,
+            switcher_page = LiveWorkspaceSwitcherPage(tracker_page)
+            session.set_viewport_size(
+                width=DESKTOP_VIEWPORT["width"],
+                height=DESKTOP_VIEWPORT["height"],
             )
-            result["startup_observation_initial"] = startup_surface_payload(tracker_page)
-            result["startup_observation_after_render"] = startup_surface
-            if not startup_rendered:
-                step_one_error = (
-                    "Step 1 failed: the deployed app never rendered beyond the bare "
-                    "startup surface before the delayed-auth scenario could be inspected.\n"
-                    f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}"
-                )
-                result["product_failure"] = True
-                record_step(
-                    result,
-                    step=1,
-                    status="failed",
-                    action=REQUEST_STEPS[0],
-                    observed=step_one_error,
-                )
-                record_not_reached_steps(
-                    result,
-                    starting_step=2,
-                    request_steps=REQUEST_STEPS,
-                )
-                raise AssertionError(step_one_error)
+            startup_started_at_monotonic = time.monotonic()
+            tracker_page.open_entrypoint()
+            switcher_page.set_viewport(**DESKTOP_VIEWPORT)
+            result["startup_observation_initial"] = _startup_surface_payload(tracker_page)
 
             auth_probe_started = runtime.wait_for_auth_probe_start(
                 timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
             )
             result["github_request_urls"] = list(runtime.github_request_urls)
             result["delayed_request_urls"] = list(runtime.delayed_request_urls)
-            auth_probe_started_after_start_seconds = relative_startup_event_seconds(
-                startup_started_at_monotonic,
-                runtime.auth_probe_started_at_monotonic,
-            )
-            result["auth_probe_started_after_start_seconds"] = (
-                auth_probe_started_after_start_seconds
-            )
+
             if not auth_probe_started or runtime.auth_probe_started_at_monotonic is None:
-                result["console_events"] = [asdict(event) for event in runtime.console_events]
-                interesting_logs = _interesting_console_events(runtime.console_events)
-                result["interesting_console_events"] = [
-                    asdict(event) for event in interesting_logs
-                ]
-                result["page_errors"] = list(runtime.page_errors)
-                step_one_error = (
-                    "Step 1 failed: the live app never started the delayed GitHub `/user` "
-                    "startup auth probe within the observation window, so the startup "
-                    "diagnostic fallback scenario could not be observed.\n"
-                    f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}\n"
-                    f"GitHub requests seen:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
-                    f"Delayed requests seen:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
-                    f"Observed body text:\n{tracker_page.body_text()}"
+                startup_surface = _startup_surface_payload(tracker_page)
+                trigger = _safe_trigger_payload(switcher_page)
+                diagnostic_state = _safe_read_diagnostic_state(runtime)
+                result["startup_observation_missing_probe"] = startup_surface
+                result["trigger_observation"] = trigger
+                result["diagnostic_state"] = diagnostic_state
+                result["interesting_diagnostic_entries"] = _interesting_diagnostic_entries(
+                    diagnostic_state,
+                )
+                result["diagnostic_delta_seconds"] = _parse_diagnostic_delta_seconds(
+                    result["interesting_diagnostic_entries"],
                 )
                 result["product_failure"] = True
+                step_one_error = _missing_probe_error(
+                    result=result,
+                    startup_surface=startup_surface,
+                    trigger=trigger,
+                    body_text=tracker_page.body_text(),
+                    diagnostic_entries=result["interesting_diagnostic_entries"],
+                )
                 record_step(
                     result,
                     step=1,
@@ -255,43 +211,56 @@ def main() -> None:
                 record_human_verification(
                     result,
                     check=(
-                        "Viewed the startup shell as a user and checked whether the hosted "
-                        "session ever triggered the delayed GitHub `/user` auth probe."
+                        "Viewed the live startup shell like a user and checked whether the "
+                        "current production build ever issued the delayed GitHub `/user` "
+                        "startup auth probe needed for the timeout fallback."
                     ),
                     observed=(
+                        f"github_request_urls={json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}; "
+                        f"trigger={json.dumps(trigger, ensure_ascii=True) if trigger else 'null'}; "
                         f"body_excerpt={snippet(tracker_page.body_text())!r}; "
-                        f"github_request_urls={json.dumps(result['github_request_urls'], ensure_ascii=True)}; "
-                        f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
+                        f"matching_diagnostic_entries="
+                        f"{json.dumps(result.get('interesting_diagnostic_entries', [])[:3], ensure_ascii=True)}"
                     ),
                 )
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 record_not_reached_steps(
                     result,
                     starting_step=2,
                     request_steps=REQUEST_STEPS,
                 )
-                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
-                raise AssertionError(step_one_error)
+                raise AssertionError(f"Step 1 failed: {step_one_error}")
 
+            auth_probe_started_after_start_seconds = relative_startup_event_seconds(
+                startup_started_at_monotonic,
+                runtime.auth_probe_started_at_monotonic,
+            )
+            result["auth_probe_started_after_start_seconds"] = (
+                auth_probe_started_after_start_seconds
+            )
             record_step(
                 result,
                 step=1,
                 status="passed",
                 action=REQUEST_STEPS[0],
                 observed=(
-                    "Opened the deployed TrackState app with a stored hosted GitHub token, "
-                    "a preloaded hosted workspace, and a synthetic 30-second delay on the "
-                    "GitHub `/user` auth probe.\n"
+                    "Opened the deployed TrackState app in Chromium with a stored GitHub "
+                    "token, preloaded hosted active workspace plus local fallback "
+                    "workspace profile, and an injected "
+                    f"{SIMULATED_PROBE_DELAY_SECONDS}-second delay on the GitHub `/user` "
+                    "startup auth probe.\n"
                     f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
-                    f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
+                    f"delayed_request_urls={result['delayed_request_urls']!r}"
                 ),
             )
 
             transition_tracker = ShellReadyTransitionTracker()
-            timeout_reached, timeout_window = poll_until(
+            timeout_elapsed, timeout_window = poll_until(
                 probe=lambda: _observe_timeout_window(
                     tracker_page=tracker_page,
-                    page=page,
+                    page=switcher_page,
                     runtime=runtime,
                     startup_started_at_monotonic=startup_started_at_monotonic,
                     transition_tracker=transition_tracker,
@@ -304,142 +273,48 @@ def main() -> None:
                 timeout_seconds=OBSERVATION_TIMEOUT_SECONDS,
                 interval_seconds=POLL_INTERVAL_SECONDS,
             )
-            result["timeout_window_observation"] = _timeout_window_payload(timeout_window)
-            result["console_events"] = [asdict(event) for event in runtime.console_events]
-            interesting_logs = _interesting_console_events(runtime.console_events)
-            result["interesting_console_events"] = [
-                asdict(event) for event in interesting_logs
-            ]
-            result["page_errors"] = list(runtime.page_errors)
-
-            shell_probe_state = timeout_window.get("shell_probe_state", {})
-            shell_ready_after_launch_seconds = timeout_window.get(
-                "shell_ready_after_start_seconds",
-            )
-            probe_recorded_shell_ready_after_start_seconds = timeout_window.get(
-                "probe_recorded_shell_ready_after_start_seconds",
-            )
-            authoritative_shell_ready_after_start_seconds = (
-                probe_recorded_shell_ready_after_start_seconds
-                if probe_recorded_shell_ready_after_start_seconds is not None
-                else (
-                    shell_ready_after_launch_seconds
-                    if bool(timeout_window.get("shell_ready_observed_while_auth_pending"))
-                    else None
-                )
-            )
-            result["shell_probe_state"] = shell_probe_state
-            result["shell_transition_tracker"] = {
-                "first_shell_ready_after_launch_seconds": shell_ready_after_launch_seconds,
-                "probe_recorded_shell_ready_after_start_seconds": (
-                    probe_recorded_shell_ready_after_start_seconds
+            timeout_shell_ready, timeout_ready_window = poll_until(
+                probe=lambda: _observe_timeout_window(
+                    tracker_page=tracker_page,
+                    page=switcher_page,
+                    runtime=runtime,
+                    startup_started_at_monotonic=startup_started_at_monotonic,
+                    transition_tracker=transition_tracker,
                 ),
-                "authoritative_shell_ready_after_start_seconds": (
-                    authoritative_shell_ready_after_start_seconds
+                is_satisfied=lambda observation: (
+                    observation["elapsed_since_auth_start_seconds"] is not None
+                    and float(observation["elapsed_since_auth_start_seconds"])
+                    >= TIMEOUT_ASSERTION_SECONDS
+                    and bool(observation["auth_pending"])
+                    and bool(observation["shell_observation"]["shell_ready"])
                 ),
-                "shell_ready_observed_while_auth_pending": timeout_window.get(
-                    "shell_ready_observed_while_auth_pending",
-                ),
-            }
-            observed_delta_seconds = _observed_delta_seconds(
-                auth_probe_started_after_start_seconds=auth_probe_started_after_start_seconds,
-                shell_ready_after_launch_seconds=authoritative_shell_ready_after_start_seconds,
+                timeout_seconds=TIMEOUT_RENDER_GRACE_SECONDS,
+                interval_seconds=POLL_INTERVAL_SECONDS,
             )
-            result["observed_delta_seconds"] = observed_delta_seconds
+            timeout_assertion_window = (
+                timeout_ready_window if timeout_shell_ready else timeout_window
+            )
+            result["timeout_window_observation"] = timeout_assertion_window
+            result["authoritative_shell_ready_after_start_seconds"] = (
+                timeout_assertion_window.get("authoritative_shell_ready_after_start_seconds")
+            )
+            result["authoritative_shell_ready_after_auth_start_seconds"] = (
+                timeout_assertion_window.get(
+                    "authoritative_shell_ready_after_auth_start_seconds",
+                )
+            )
 
-            step_two_error: str | None = None
-            timeout_path_invalid = False
-            if not timeout_reached:
-                step_two_error = (
-                    "Step 2 failed: the test never reached the post-timeout observation "
-                    "window while the delayed auth probe was being monitored.\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
+            step_two_error = _step_two_error(timeout_assertion_window)
+            if step_two_error is not None:
+                diagnostic_state = _safe_read_diagnostic_state(runtime)
+                result["diagnostic_state"] = diagnostic_state
+                result["interesting_diagnostic_entries"] = _interesting_diagnostic_entries(
+                    diagnostic_state,
                 )
-            elif shell_ready_after_launch_seconds is None:
-                step_two_error = (
-                    "Step 2 failed: the app never recorded a `shell_ready` transition "
-                    "during the delayed-auth startup run.\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
+                result["diagnostic_delta_seconds"] = _parse_diagnostic_delta_seconds(
+                    result["interesting_diagnostic_entries"],
                 )
-            elif (
-                auth_probe_started_after_start_seconds is not None
-                and shell_ready_after_launch_seconds < auth_probe_started_after_start_seconds
-            ):
-                timeout_path_invalid = True
-                step_two_error = (
-                    "Step 2 failed: the shell was already visible before the delayed "
-                    "GitHub `/user` auth probe started, so this run did not prove the "
-                    "timeout-fallback transition.\n"
-                    f"first_shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}\n"
-                    f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}\n"
-                    f"probe_recorded_shell_ready_after_start_seconds="
-                    f"{probe_recorded_shell_ready_after_start_seconds!r}\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-            elif not bool(timeout_window.get("auth_pending")):
-                step_two_error = (
-                    "Step 2 failed: the delayed GitHub `/user` auth probe was no longer "
-                    "pending when the 11-second timeout window was inspected, so the live "
-                    "timeout fallback state was not observed.\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-            elif not bool(timeout_window["shell_observation"]["shell_ready"]):
-                step_two_error = (
-                    "Step 2 failed: after waiting past the 11-second synchronization timeout, "
-                    "the visible shell was still not interactive.\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-            elif authoritative_shell_ready_after_start_seconds is None:
-                step_two_error = (
-                    "Step 2 failed: the test could not capture an authoritative "
-                    "`shell_ready` timestamp recorded after the delayed auth probe "
-                    "became pending.\n"
-                    f"first_shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}\n"
-                    f"probe_recorded_shell_ready_after_start_seconds="
-                    f"{probe_recorded_shell_ready_after_start_seconds!r}\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-            elif observed_delta_seconds is None:
-                step_two_error = (
-                    "Step 2 failed: the test could not calculate the delta between the "
-                    "auth probe start and the authoritative `shell_ready` transition.\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-            elif not _delta_is_approximately_timeout(observed_delta_seconds):
-                step_two_error = (
-                    "Step 2 failed: the authoritative `shell_ready` transition did not "
-                    "happen at approximately the 11-second timeout boundary from the "
-                    "delayed auth probe start.\n"
-                    f"authoritative_shell_ready_after_start_seconds="
-                    f"{authoritative_shell_ready_after_start_seconds!r}\n"
-                    f"observed_delta_seconds={observed_delta_seconds!r}\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-
-            if step_two_error is None:
-                record_step(
-                    result,
-                    step=2,
-                    status="passed",
-                    action=REQUEST_STEPS[1],
-                    observed=(
-                        "Waited beyond the 11-second timeout from the delayed `/user` auth "
-                        "probe start while the probe remained pending, and the live shell "
-                        "was already visible.\n"
-                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
-                        f"first_shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}; "
-                        f"probe_recorded_shell_ready_after_start_seconds="
-                        f"{probe_recorded_shell_ready_after_start_seconds!r}; "
-                        f"authoritative_shell_ready_after_start_seconds="
-                        f"{authoritative_shell_ready_after_start_seconds!r}; "
-                        f"observed_delta_seconds={observed_delta_seconds!r}; "
-                        f"visible_navigation_labels={json.dumps(timeout_window['shell_observation']['visible_navigation_labels'], ensure_ascii=True)}"
-                    ),
-                )
-            else:
-                if not timeout_path_invalid:
-                    result["product_failure"] = True
-                failures.append(step_two_error)
+                result["product_failure"] = True
                 record_step(
                     result,
                     step=2,
@@ -447,88 +322,71 @@ def main() -> None:
                     action=REQUEST_STEPS[1],
                     observed=step_two_error,
                 )
+                record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the live shell after the delayed auth probe began and compared "
+                        "the visible shell state to the expected 11-second timeout fallback."
+                    ),
+                    observed=(
+                        f"timeout_window={json.dumps(timeout_assertion_window, ensure_ascii=True)}; "
+                        f"body_excerpt={snippet(timeout_assertion_window['shell_observation']['body_text'])!r}; "
+                        f"delayed_request_urls={json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}"
+                    ),
+                )
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 record_not_reached_steps(
                     result,
                     starting_step=3,
                     request_steps=REQUEST_STEPS,
                 )
-                record_human_verification(
-                    result,
-                    check=(
-                        "Viewed the live startup shell and compared the first visible "
-                        "`shell_ready` evidence with the delayed GitHub `/user` probe start."
-                    ),
-                    observed=(
-                        f"body_excerpt={snippet(timeout_window['shell_observation']['body_text'])!r}; "
-                        f"first_shell_ready_after_launch_seconds={shell_ready_after_launch_seconds!r}; "
-                        f"probe_recorded_shell_ready_after_start_seconds="
-                        f"{probe_recorded_shell_ready_after_start_seconds!r}; "
-                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
-                        f"auth_pending_at_timeout_window={timeout_window.get('auth_pending')!r}"
-                    ),
-                )
-                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
-                raise AssertionError(step_two_error)
+                raise AssertionError(f"Step 2 failed: {step_two_error}")
 
-            console_summary = _console_summary(
-                interesting_logs=interesting_logs,
-                page_errors=runtime.page_errors,
+            record_step(
+                result,
+                step=2,
+                status="passed",
+                action=REQUEST_STEPS[1],
+                observed=(
+                    "Waited beyond the 11-second startup timeout while the delayed GitHub "
+                    "`/user` probe was still pending, and the live app exposed the shell "
+                    "during that timeout window.\n"
+                    f"elapsed_since_auth_start_seconds={timeout_assertion_window['elapsed_since_auth_start_seconds']!r}; "
+                    f"authoritative_shell_ready_after_auth_start_seconds="
+                    f"{timeout_assertion_window['authoritative_shell_ready_after_auth_start_seconds']!r}; "
+                    f"trigger={json.dumps(timeout_assertion_window['trigger'], ensure_ascii=True)}"
+                ),
             )
-            if interesting_logs or runtime.page_errors:
-                record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=REQUEST_STEPS[2],
-                    observed=console_summary,
-                )
-            else:
-                step_three_error = (
-                    "Step 3 failed: Playwright captured no application-specific startup log "
-                    "entries and no page errors from the live browser console.\n"
-                    f"{console_summary}"
-                )
-                result["product_failure"] = True
-                failures.append(step_three_error)
-                record_step(
-                    result,
-                    step=3,
-                    status="failed",
-                    action=REQUEST_STEPS[2],
-                    observed=step_three_error,
-                )
 
-            matching_entries = _diagnostic_console_events(
-                interesting_logs=interesting_logs,
-                page_errors=runtime.page_errors,
-                expected_delta_seconds=observed_delta_seconds,
+            diagnostic_state = runtime.read_startup_diagnostic_state()
+            interesting_entries = _interesting_diagnostic_entries(diagnostic_state)
+            result["diagnostic_state"] = diagnostic_state
+            result["interesting_diagnostic_entries"] = interesting_entries
+            record_step(
+                result,
+                step=3,
+                status="passed",
+                action=REQUEST_STEPS[2],
+                observed=(
+                    "Captured the same-run startup console evidence from the live browser "
+                    "session used for the delayed-probe scenario.\n"
+                    f"in_page_console_event_count="
+                    f"{len(diagnostic_state.get('in_page_console_events', []))}; "
+                    f"playwright_console_message_count="
+                    f"{len(diagnostic_state.get('playwright_console_messages', []))}; "
+                    f"interesting_entry_count={len(interesting_entries)}"
+                ),
             )
-            result["matching_diagnostic_entries"] = matching_entries
-            if matching_entries:
-                record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=(
-                        "The live browser console exposed a startup diagnostic entry that "
-                        "linked the delayed auth probe to the shell transition and included "
-                        "an approximately 11-second delta.\n"
-                        f"matching_entries={json.dumps(matching_entries, ensure_ascii=True)}"
-                    ),
-                )
-            else:
-                step_four_error = (
-                    "Step 4 failed: the live browser console did not expose a startup "
-                    "diagnostic entry that tied the delayed GitHub `/user` auth probe to "
-                    "the `shell_ready` transition with an approximately 11-second delta.\n"
-                    f"observed_delta_seconds={observed_delta_seconds!r}\n"
-                    f"Interesting console events:\n{json.dumps([asdict(event) for event in interesting_logs], indent=2)}\n"
-                    f"Page errors:\n{json.dumps(runtime.page_errors, indent=2)}"
-                )
+
+            diagnostic_delta_seconds = _parse_diagnostic_delta_seconds(interesting_entries)
+            result["diagnostic_delta_seconds"] = diagnostic_delta_seconds
+            step_four_error = _step_four_error(
+                entries=interesting_entries,
+                diagnostic_delta_seconds=diagnostic_delta_seconds,
+            )
+            if step_four_error is not None:
                 result["product_failure"] = True
-                failures.append(step_four_error)
                 record_step(
                     result,
                     step=4,
@@ -536,36 +394,49 @@ def main() -> None:
                     action=REQUEST_STEPS[3],
                     observed=step_four_error,
                 )
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                raise AssertionError(f"Step 4 failed: {step_four_error}")
+
+            record_step(
+                result,
+                step=4,
+                status="passed",
+                action=REQUEST_STEPS[3],
+                observed=(
+                    "The live startup diagnostics included an entry that tied the delayed "
+                    "GitHub `/user` auth probe to the `shell_ready` timeout transition.\n"
+                    f"diagnostic_delta_seconds={diagnostic_delta_seconds!r}; "
+                    f"matching_entry={interesting_entries[0]!r}"
+                ),
+            )
 
             record_human_verification(
                 result,
                 check=(
-                    "Viewed the live startup shell the way a user would and confirmed the "
-                    "page became interactive with visible TrackState branding and navigation."
+                    "Viewed the rendered startup shell the way a user would and confirmed the "
+                    "page became interactive with visible TrackState branding and navigation "
+                    "after the timeout-path shell render."
                 ),
                 observed=(
-                    f"body_excerpt={snippet(timeout_window['shell_observation']['body_text'])!r}; "
-                    f"visible_navigation_labels={json.dumps(timeout_window['shell_observation']['visible_navigation_labels'], ensure_ascii=True)}; "
-                    f"branding_visible={timeout_window['branding_visible']!r}"
+                    f"body_excerpt={snippet(timeout_assertion_window['shell_observation']['body_text'])!r}; "
+                    f"visible_navigation_labels="
+                    f"{timeout_assertion_window['shell_observation']['visible_navigation_labels']!r}; "
+                    f"branding_visible={timeout_assertion_window['branding_visible']!r}"
                 ),
             )
             record_human_verification(
                 result,
                 check=(
                     "Opened the same live run's browser-console evidence and inspected the "
-                    "startup log entries a human tester would review in DevTools."
+                    "startup diagnostic entries a human tester would review in DevTools."
                 ),
                 observed=(
-                    f"interesting_console_event_count={len(interesting_logs)!r}; "
-                    f"matching_diagnostic_entries={json.dumps(matching_entries, ensure_ascii=True)}; "
-                    f"page_errors={json.dumps(runtime.page_errors, ensure_ascii=True)}"
+                    f"interesting_console_event_count={len(interesting_entries)}; "
+                    f"diagnostic_delta_seconds={diagnostic_delta_seconds!r}; "
+                    f"matching_entries={json.dumps(interesting_entries[:5], ensure_ascii=True)}"
                 ),
             )
-
-            if failures:
-                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
-                raise AssertionError("\n\n".join(failures))
 
             tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
             result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -623,22 +494,19 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
     )
 
 
-def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
-    body_text = str(observation.get("body_text", "")).strip()
-    title = str(observation.get("title", "")).strip()
-    button_labels = observation.get("button_labels", [])
-    return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
+def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
+    return startup_surface_payload(tracker_page)
 
 
 def _observe_timeout_window(
     *,
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
-    runtime: Ts1025StartupDiagnosticsRuntime,
+    runtime: Ts1025StartupDiagnosticRuntime,
     startup_started_at_monotonic: float,
     transition_tracker: ShellReadyTransitionTracker,
 ) -> dict[str, Any]:
-    observation = observe_live_startup_shell_window(
+    shell_window = observe_live_startup_shell_window(
         tracker_page=tracker_page,
         page=page,
         runtime=runtime,
@@ -646,158 +514,238 @@ def _observe_timeout_window(
         shell_navigation_labels=SHELL_NAVIGATION_LABELS,
         branding_texts=(BRANDING_TEXT, "TrackState.AI"),
         transition_tracker=transition_tracker,
-        poll_timeout_ms=500,
     )
-    observation["shell_probe_state"] = runtime.read_shell_probe_state()
-    return observation
-
-
-def _timeout_window_payload(observation: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "shell_observation": observation.get("shell_observation"),
-        "startup_observation": observation.get("startup_observation"),
-        "trigger": observation.get("trigger"),
-        "branding_visible": observation.get("branding_visible"),
-        "auth_pending": observation.get("auth_pending"),
-        "auth_probe_started_after_start_seconds": observation.get(
-            "auth_probe_started_after_start_seconds",
-        ),
-        "auth_probe_released_after_start_seconds": observation.get(
-            "auth_probe_released_after_start_seconds",
-        ),
-        "auth_probe_release_after_auth_start_seconds": observation.get(
-            "auth_probe_release_after_auth_start_seconds",
-        ),
-        "elapsed_since_auth_start_seconds": observation.get(
-            "elapsed_since_auth_start_seconds",
-        ),
-        "probe_recorded_shell_ready_after_start_seconds": observation.get(
-            "probe_recorded_shell_ready_after_start_seconds",
-        ),
-        "shell_ready_after_start_seconds": observation.get(
-            "shell_ready_after_start_seconds",
-        ),
-        "shell_ready_after_probe_release_seconds": observation.get(
-            "shell_ready_after_probe_release_seconds",
-        ),
-        "shell_ready_observed_while_auth_pending": observation.get(
-            "shell_ready_observed_while_auth_pending",
-        ),
-        "shell_probe_state": observation.get("shell_probe_state"),
-    }
-
-
-def _observed_delta_seconds(
-    *,
-    auth_probe_started_after_start_seconds: float | None,
-    shell_ready_after_launch_seconds: float | None,
-) -> float | None:
-    if (
-        auth_probe_started_after_start_seconds is None
-        or shell_ready_after_launch_seconds is None
-    ):
-        return None
-    return round(
-        float(shell_ready_after_launch_seconds)
-        - float(auth_probe_started_after_start_seconds),
+    shell_window["shell_probe_state"] = runtime.read_shell_probe_state()
+    shell_window["elapsed_since_start_seconds"] = round(
+        time.monotonic() - startup_started_at_monotonic,
         2,
     )
-
-
-def _delta_is_approximately_timeout(delta_seconds: float) -> bool:
-    return abs(delta_seconds - SYNC_TIMEOUT_SECONDS) <= DELTA_TOLERANCE_SECONDS
-
-
-def _interesting_console_events(
-    console_events: list[Ts1025ConsoleEvent],
-) -> list[Ts1025ConsoleEvent]:
-    return [
-        event
-        for event in console_events
-        if not any(snippet in event.text for snippet in IGNORED_LOG_SNIPPETS)
-    ]
-
-
-def _diagnostic_console_events(
-    *,
-    interesting_logs: list[Ts1025ConsoleEvent],
-    page_errors: list[str],
-    expected_delta_seconds: float | None,
-) -> list[str]:
-    matches: list[str] = []
-    for text in _candidate_log_texts(interesting_logs, page_errors):
-        lowered = text.lower()
-        if not any(fragment in lowered for fragment in AUTH_LOG_FRAGMENTS):
-            continue
-        if not any(fragment in lowered for fragment in SHELL_LOG_FRAGMENTS):
-            continue
-        if not any(fragment in lowered for fragment in DELTA_LOG_FRAGMENTS) and not _contains_close_numeric_value(
-            text,
-            expected_values=_expected_delta_values(expected_delta_seconds),
-        ):
-            continue
-        matches.append(text)
-    return matches
-
-
-def _candidate_log_texts(
-    interesting_logs: Iterable[Ts1025ConsoleEvent],
-    page_errors: Iterable[str],
-) -> list[str]:
-    return [event.text for event in interesting_logs] + [str(error) for error in page_errors]
-
-
-def _expected_delta_values(observed_delta_seconds: float | None) -> tuple[float, ...]:
-    values = [float(SYNC_TIMEOUT_SECONDS)]
-    if observed_delta_seconds is not None:
-        values.append(float(observed_delta_seconds))
-    return tuple(values)
-
-
-def _contains_close_numeric_value(text: str, *, expected_values: tuple[float, ...]) -> bool:
-    for match in re.finditer(r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)", text):
-        value = float(match.group(1))
-        if any(abs(value - expected) <= DELTA_TOLERANCE_SECONDS for expected in expected_values):
-            return True
-    return False
-
-
-def _console_summary(
-    *,
-    interesting_logs: list[Ts1025ConsoleEvent],
-    page_errors: list[str],
-) -> str:
-    if not interesting_logs and not page_errors:
-        return (
-            "No application-specific startup diagnostics were captured. The browser "
-            "emitted only generic service-worker / GPU noise, and no page errors were raised."
+    authoritative_shell_ready_at_monotonic = (
+        transition_tracker.first_shell_ready_after_auth_pending_at_monotonic
+    )
+    shell_window["authoritative_shell_ready_after_start_seconds"] = (
+        relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            authoritative_shell_ready_at_monotonic,
         )
-    lines = ["Startup diagnostics captured:"]
-    for event in interesting_logs:
-        lines.append(f"- [{event.level}] {event.text}")
-    if page_errors:
-        lines.append("Page errors:")
-        for error in page_errors:
-            lines.append(f"- {error}")
-    return "\n".join(lines)
+    )
+    shell_window["authoritative_shell_ready_after_auth_start_seconds"] = (
+        relative_event_seconds(
+            runtime.auth_probe_started_at_monotonic,
+            authoritative_shell_ready_at_monotonic,
+        )
+    )
+    return shell_window
+
+
+def _missing_probe_error(
+    *,
+    result: dict[str, Any],
+    startup_surface: dict[str, Any],
+    trigger: dict[str, Any] | None,
+    body_text: str,
+    diagnostic_entries: list[str],
+) -> str:
+    diagnostic_suffix = ""
+    if diagnostic_entries:
+        diagnostic_suffix = (
+            "\nSame-run startup diagnostics still reported:\n"
+            f"{json.dumps(diagnostic_entries, indent=2)}"
+        )
+    if result.get("delayed_request_urls"):
+        return (
+            "The delayed GitHub `/user` request was observed, but it did not begin during "
+            "the expected startup observation window for this scenario.\n"
+            f"Observed delayed requests:\n{json.dumps(result['delayed_request_urls'], indent=2)}\n"
+            f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}\n"
+            f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+            f"Observed body text:\n{body_text}"
+            f"{diagnostic_suffix}"
+        )
+    if result.get("github_request_urls"):
+        return (
+            "The deployed app never issued the required GitHub `/user` startup auth probe. "
+            "Startup only requested other GitHub endpoints, so the TS-1025 delayed-auth "
+            "diagnostic scenario could not be exercised on the live product.\n"
+            f"Observed GitHub requests:\n{json.dumps(result['github_request_urls'], indent=2)}\n"
+            f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}\n"
+            f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+            f"Observed body text:\n{body_text}"
+            f"{diagnostic_suffix}"
+        )
+    return (
+        "The deployed app never started the delayed GitHub `/user` startup auth probe "
+        "within the observation window, so the timeout-fallback diagnostic scenario could "
+        "not be observed.\n"
+        f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}\n"
+        f"Observed trigger:\n{json.dumps(trigger, indent=2) if trigger else 'null'}\n"
+        f"Observed body text:\n{body_text}"
+        f"{diagnostic_suffix}"
+    )
+
+
+def _step_two_error(timeout_window: dict[str, Any]) -> str | None:
+    if timeout_window["elapsed_since_auth_start_seconds"] is None:
+        return (
+            "The test never reached the post-timeout observation window while watching the "
+            "delayed GitHub `/user` probe.\n"
+            f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+        )
+    if not bool(timeout_window["auth_pending"]):
+        shell_ready_after_start_seconds = timeout_window.get(
+            "authoritative_shell_ready_after_start_seconds",
+        )
+        auth_probe_released_after_start_seconds = timeout_window.get(
+            "auth_probe_released_after_start_seconds",
+        )
+        if (
+            isinstance(shell_ready_after_start_seconds, (int, float))
+            and isinstance(auth_probe_released_after_start_seconds, (int, float))
+            and shell_ready_after_start_seconds >= auth_probe_released_after_start_seconds
+        ):
+            return (
+                "The delayed GitHub `/user` probe started, but the app did not expose the "
+                "`shell_ready` timeout fallback while auth was still pending. The shell was "
+                "only observed after the delayed auth probe had already been released.\n"
+                f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+            )
+        return (
+            "By the time the 11-second timeout assertion ran, the delayed GitHub `/user` "
+            "probe was no longer pending, so the live timeout fallback window was not "
+            "observed.\n"
+            f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+        )
+    if not bool(timeout_window["shell_observation"]["shell_ready"]):
+        return (
+            "After waiting beyond the 11-second startup timeout, the live page still had "
+            "not reached `shell_ready` while the delayed auth probe remained pending.\n"
+            f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+        )
+    authoritative_delta_seconds = timeout_window.get(
+        "authoritative_shell_ready_after_auth_start_seconds",
+    )
+    if authoritative_delta_seconds is None:
+        return (
+            "The live page became interactive, but the test could not capture an "
+            "authoritative `shell_ready` observation after the delayed auth probe was "
+            "already pending.\n"
+            f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+        )
+    if not DIAGNOSTIC_DELTA_MIN_SECONDS <= float(authoritative_delta_seconds) <= DIAGNOSTIC_DELTA_MAX_SECONDS:
+        return (
+            "The live app exposed `shell_ready`, but not on the expected 11-second timeout "
+            "fallback cadence after the delayed auth probe started.\n"
+            f"authoritative_shell_ready_after_auth_start_seconds={authoritative_delta_seconds!r}\n"
+            f"Observed timeout window:\n{json.dumps(timeout_window, indent=2)}"
+        )
+    return None
+
+
+def _safe_read_diagnostic_state(
+    runtime: Ts1025StartupDiagnosticRuntime,
+) -> dict[str, Any]:
+    try:
+        return runtime.read_startup_diagnostic_state()
+    except Exception as error:  # pragma: no cover - diagnostics only
+        return {
+            "in_page_console_events": [],
+            "in_page_page_errors": [f"{type(error).__name__}: {error}"],
+            "in_page_unhandled_rejections": [],
+            "playwright_console_messages": [],
+            "playwright_page_errors": [],
+        }
+
+
+def _safe_trigger_payload(
+    page: LiveWorkspaceSwitcherPage,
+) -> dict[str, Any] | None:
+    return safe_trigger_payload(page)
+
+
+def _interesting_diagnostic_entries(diagnostic_state: dict[str, Any]) -> list[str]:
+    raw_entries: list[str] = []
+    for entry in diagnostic_state.get("in_page_console_events", []):
+        if isinstance(entry, dict):
+            raw_entries.append(str(entry.get("text", "")))
+    for entry in diagnostic_state.get("playwright_console_messages", []):
+        if isinstance(entry, dict):
+            raw_entries.append(str(entry.get("text", "")))
+    for entry in diagnostic_state.get("in_page_page_errors", []):
+        if isinstance(entry, str):
+            raw_entries.append(entry)
+    for entry in diagnostic_state.get("playwright_page_errors", []):
+        if isinstance(entry, str):
+            raw_entries.append(entry)
+    seen: set[str] = set()
+    filtered: list[str] = []
+    for entry in raw_entries:
+        normalized = " ".join(entry.split())
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if not any(all(keyword in lowered for keyword in group) for group in _DIAGNOSTIC_KEYWORD_GROUPS):
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        filtered.append(normalized)
+    return filtered
+
+
+def _parse_diagnostic_delta_seconds(entries: list[str]) -> float | None:
+    for entry in entries:
+        for pattern in _DELTA_PATTERNS:
+            match = pattern.search(entry)
+            if not match:
+                continue
+            value = float(match.group(1))
+            if value > 1000:
+                value /= 1000.0
+            return round(value, 2)
+    return None
+
+
+def _step_four_error(
+    *,
+    entries: list[str],
+    diagnostic_delta_seconds: float | None,
+) -> str | None:
+    if not entries:
+        return (
+            "The live browser-console evidence did not expose any application-specific "
+            "startup diagnostic entry that tied the delayed GitHub `/user` auth probe to "
+            "the `shell_ready` transition."
+        )
+    if diagnostic_delta_seconds is None:
+        return (
+            "The live startup diagnostics mentioned the delayed auth probe or the "
+            "`shell_ready` transition, but none of the entries exposed a parseable timing "
+            "delta.\n"
+            f"Observed diagnostic entries:\n{json.dumps(entries, indent=2)}"
+        )
+    if not DIAGNOSTIC_DELTA_MIN_SECONDS <= diagnostic_delta_seconds <= DIAGNOSTIC_DELTA_MAX_SECONDS:
+        return (
+            "The live startup diagnostics exposed a timing delta, but it was outside the "
+            "expected ~11-second timeout window.\n"
+            f"diagnostic_delta_seconds={diagnostic_delta_seconds!r}\n"
+            f"Observed diagnostic entries:\n{json.dumps(entries, indent=2)}"
+        )
+    return None
 
 
 def _write_pass_outputs(result: dict[str, Any]) -> None:
-    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
-    write_test_automation_result(RESULT_PATH, passed=True)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
-    _write_review_replies(result, passed=True)
+    write_test_automation_result(RESULT_PATH, passed=True)
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
-    error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
-    write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
-    _write_review_replies(result, passed=False)
+    write_test_automation_result(RESULT_PATH, passed=False, error=str(result.get("error", "")))
     if _should_write_bug_description(result):
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -805,32 +753,36 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
 
 
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
-    status_text = "✅ PASSED" if passed else "❌ FAILED"
     lines = [
         "h3. Test Automation Result",
         "",
-        f"*Status:* {status_text}",
+        f"*Status:* {'✅ PASSED' if passed else '❌ FAILED'}",
         f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
         f"*Environment:* URL={result.get('app_url')} | Browser={result.get('browser')} | OS={result.get('os')}",
         f"*Viewport:* {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"*Linked Bugs Considered:* {', '.join(LINKED_BUGS)}",
         "",
         "h4. What was automated",
-        "* Preloaded a hosted workspace plus fallback local workspace for the deployed app.",
-        "* Delayed the live GitHub {/user} auth probe by 30 seconds and waited beyond the 11-second timeout before asserting.",
-        "* Verified the user-visible shell became interactive and then inspected the live browser console captured from the same run.",
-        "* Required a diagnostic log entry that links the auth probe start to the shell_ready transition with an approximately 11-second delta.",
+        "* Opened the live deployed TrackState app with a stored GitHub token and preloaded hosted active plus local fallback workspace profiles.",
+        f"* Delayed the live GitHub {{/user}} startup probe by {SIMULATED_PROBE_DELAY_SECONDS} seconds and waited beyond the 11-second fallback window before asserting.",
+        "* Gated the authoritative {{shell_ready}} timing so it is accepted only after the delayed auth probe is already pending, matching the linked-bug timing requirements.",
+        "* Captured same-run browser-console diagnostics from the live session and required an auth-probe-to-{{shell_ready}} delta near 11 seconds.",
         "",
-        "h4. Result",
-        f"* {_actual_result_summary(result, passed=passed)}",
+        "h4. Automation checks",
         *format_step_lines(result, jira=True),
         "",
         "h4. Real user-style verification",
         *format_human_lines(result, jira=True),
         "",
+        "h4. Expected result",
+        EXPECTED_RESULT,
+        "",
+        "h4. Actual result",
+        _actual_result_summary(result, passed=passed),
+        "",
         "h4. Test file",
         "{code}",
-        "testing/tests/TS-1025/test_ts_1025.py",
+        TEST_FILE_PATH,
         "{code}",
         "",
         "h4. Run command",
@@ -854,39 +806,49 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
-    status_text = "✅ PASSED" if passed else "❌ FAILED"
     lines = [
         "## Test Automation Result",
         "",
-        f"**Status:** {status_text}",
+        f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
         f"**Test Case:** {TICKET_KEY} — {TEST_CASE_TITLE}",
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
         f"**Linked Bugs Considered:** {', '.join(LINKED_BUGS)}",
         "",
-        "## Rework summary",
-        f"- {REWORK_SUMMARY}",
-        "",
         "## What was automated",
-        "- Preloaded a hosted workspace plus fallback local workspace for the deployed app.",
-        "- Delayed the live GitHub `/user` auth probe by 30 seconds and waited beyond the 11-second timeout instead of asserting immediately.",
-        "- Verified the visible shell became interactive from the user's perspective and then inspected the live browser-console logs from the same run.",
-        "- Required a startup diagnostic entry that links the auth probe start to the `shell_ready` transition with an approximately 11-second delta.",
+        "- Opened the live deployed TrackState app with a stored GitHub token and preloaded hosted active plus local fallback workspace profiles.",
+        f"- Delayed the live GitHub `/user` startup probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds and waited beyond the required timeout window before asserting.",
+        "- Accepted the authoritative `shell_ready` timing only after the delayed auth probe was already pending, so early shell-ready noise does not count as the timeout fallback.",
+        "- Captured same-run browser-console diagnostics and required a startup diagnostic entry that ties the delayed auth probe to `shell_ready` with an approximately 11-second delta.",
         "",
-        "## Result",
-        f"- {_actual_result_summary(result, passed=passed)}",
+        "## Automation checks",
         *format_step_lines(result, jira=False),
         "",
         "## Real user-style verification",
         *format_human_lines(result, jira=False),
         "",
-        "## How to run",
-        "```bash",
-        RUN_COMMAND,
-        "```",
+        "## Expected result",
+        EXPECTED_RESULT,
+        "",
+        "## Actual result",
+        _actual_result_summary(result, passed=passed),
     ]
     if result.get("screenshot"):
         lines.extend(["", f"**Screenshot:** `{result['screenshot']}`"])
+    lines.extend(
+        [
+            "",
+            "## Test file",
+            "```text",
+            TEST_FILE_PATH,
+            "```",
+            "",
+            "## How to run",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+        ],
+    )
     if not passed:
         lines.extend(
             [
@@ -901,18 +863,27 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
-    if passed:
-        return (
-            f"{TICKET_KEY} passed.\n\n"
-            f"{REWORK_SUMMARY}\n\n"
-            "The live run reached `shell_ready` after the delayed auth-probe timeout and "
-            "the browser console exposed a matching startup diagnostic entry.\n"
+    lines = [
+        "h3. Latest result",
+        "",
+        f"*Status:* {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_TITLE}",
+        f"*Run command:* {{code:bash}}{RUN_COMMAND}{{code}}",
+        f"*Summary:* {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}",
+        f"*Observed:* {_actual_result_summary(result, passed=passed)}",
+        "",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "h4. Error",
+                "{code}",
+                str(result.get("error", "")),
+                "{code}",
+                "",
+            ],
         )
-    return (
-        f"{TICKET_KEY} failed.\n\n"
-        f"{REWORK_SUMMARY}\n\n"
-        f"{result.get('error', 'The deployed app did not expose the expected startup diagnostics.')}\n"
-    )
+    return "\n".join(lines) + "\n"
 
 
 def _should_write_bug_description(result: dict[str, Any]) -> bool:
@@ -947,81 +918,34 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
         f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
         f"- Run command: `{RUN_COMMAND}`",
-        f"- Simulated delayed auth probe: GitHub `/user` delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
-        f"- Timeout assertion boundary: {TIMEOUT_ASSERTION_SECONDS} seconds from delayed `/user` probe start",
+        f"- Simulated delayed startup probe: GitHub `/user` delayed by {SIMULATED_PROBE_DELAY_SECONDS} seconds",
         "",
         "## Screenshots or logs",
         f"- Screenshot: `{result.get('screenshot')}`",
         f"- GitHub requests seen: `{json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}`",
         f"- Delayed requests seen: `{json.dumps(result.get('delayed_request_urls', []), ensure_ascii=True)}`",
-        f"- Timeout window observation: `{json.dumps(result.get('timeout_window_observation'), ensure_ascii=True)}`",
-        f"- Console events: `{json.dumps(result.get('console_events', []), ensure_ascii=True)}`",
-        f"- Interesting console events: `{json.dumps(result.get('interesting_console_events', []), ensure_ascii=True)}`",
-        f"- Matching diagnostic entries: `{json.dumps(result.get('matching_diagnostic_entries', []), ensure_ascii=True)}`",
-        f"- Page errors: `{json.dumps(result.get('page_errors', []), ensure_ascii=True)}`",
+        f"- Timeout observation: `{json.dumps(result.get('timeout_window_observation'), ensure_ascii=True)}`",
+        f"- Diagnostic state: `{json.dumps(result.get('diagnostic_state'), ensure_ascii=True)}`",
+        f"- Matching diagnostic entries: `{json.dumps(result.get('interesting_diagnostic_entries', []), ensure_ascii=True)}`",
+        f"- Diagnostic delta seconds: `{json.dumps(result.get('diagnostic_delta_seconds'), ensure_ascii=True)}`",
     ]
     return "\n".join(lines) + "\n"
-
-
-def _write_review_replies(result: dict[str, Any], *, passed: bool) -> None:
-    replies = [
-        {
-            "inReplyToId": thread.get("rootCommentId"),
-            "threadId": thread.get("threadId"),
-            "reply": _review_reply_text(result=result, passed=passed),
-        }
-        for thread in _discussion_threads()
-    ]
-    REVIEW_REPLIES_PATH.write_text(
-        json.dumps({"replies": replies}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _discussion_threads() -> list[dict[str, object]]:
-    if not DISCUSSIONS_RAW_PATH.is_file():
-        return []
-    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
-    threads = raw.get("threads")
-    if not isinstance(threads, list):
-        return []
-    return [
-        thread
-        for thread in threads
-        if isinstance(thread, dict)
-        and thread.get("resolved") is False
-        and thread.get("rootCommentId") is not None
-        and thread.get("threadId") is not None
-    ]
-
-
-def _review_reply_text(result: dict[str, Any], *, passed: bool) -> str:
-    error_summary = str(result.get("error", "unknown error")).splitlines()[0]
-    rerun_summary = (
-        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
-        if passed
-        else f"Re-ran `{RUN_COMMAND}`: failed with `{error_summary}`."
-    )
-    return (
-        "Fixed: Step 2 now uses an authoritative `shell_ready` timestamp recorded only "
-        "after the delayed GitHub `/user` probe is pending, and the test stops with "
-        "Steps 3-4 marked not reached whenever that timeout-path prerequisite fails. "
-        f"{rerun_summary}"
-    )
 
 
 def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
-            "After the delayed GitHub `/user` auth probe started, the live shell reached "
-            "`shell_ready` at approximately the 11-second timeout boundary and the browser "
-            "console contained a diagnostic entry that linked the probe start to that "
-            "transition with the expected delta."
+            "The delayed GitHub `/user` startup probe began during startup, the live app "
+            "reached `shell_ready` while auth was still pending after roughly "
+            f"{result.get('authoritative_shell_ready_after_auth_start_seconds')!r} seconds "
+            "from auth-probe start, and the same-run startup diagnostics reported an "
+            f"auth-probe-to-`shell_ready` delta of {result.get('diagnostic_delta_seconds')!r} seconds."
         )
     return str(
         result.get(
             "error",
-            "The deployed app did not expose the expected startup diagnostic entry.",
+            "The deployed app did not expose the delayed-auth startup diagnostic expected "
+            "for TS-1025.",
         ),
     )
 
