@@ -5409,7 +5409,7 @@ _SyncPillSemanticLabel _workspaceSyncSemanticLabel(
       _workspaceSyncAttentionNeededSemanticLabel(l10n),
     );
   }
-  return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
+  return const _VisibleSyncPillSemanticLabel();
 }
 
 String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
@@ -14309,13 +14309,11 @@ final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
   String resolve(String visibleLabel) => value.value;
 }
 
-final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
-  const _PrefixedSyncPillSemanticLabel(this.prefix);
-
-  final String prefix;
+final class _VisibleSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _VisibleSyncPillSemanticLabel();
 
   @override
-  String resolve(String visibleLabel) => '$prefix, $visibleLabel';
+  String resolve(String visibleLabel) => visibleLabel;
 }
 
 final class _WorkspaceSyncAttentionNeededSemanticText {
