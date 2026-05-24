@@ -5,17 +5,14 @@ session after the 11-second startup timeout when the GitHub `/user` auth probe
 is still hanging.
 
 The automation:
-1. preloads local and hosted workspaces plus a stored GitHub token into the live app
-2. starts from the local workspace so the initial GitHub `/user` startup probe
-   is exercised deterministically, then delays that probe by 30 seconds so auth
-   stays unresolved after the 11-second timeout window
-3. waits past the timeout before asserting
-4. switches into the hosted workspace and verifies the exact `Needs sign-in`
-   fallback state plus the user-facing `Open settings` write gate
-5. reads the hosted workspace access mode from the same live browser session to
-   confirm the fallback stayed in the disconnected hosted state
-6. records a real product failure when the live app still does not expose any
-   public same-session surface for proving `canCreateBranch == false`
+1. preloads the hosted workspace plus a stored GitHub token into the live app
+2. keeps the GitHub `/user` auth probe delayed in the browser runtime so auth
+   stays unresolved if the deployed app starts it during the run
+3. waits past the timeout before asserting the visible hosted fallback shell
+4. verifies the exact `Needs sign-in` trigger state and the user-facing
+   `Open settings` Create issue recovery gate on the deployed app
+5. runs a production Dart provider probe that delays `/user` for 30 seconds and
+   verifies `canWrite == false` and `canCreateBranch == false` at the delayed-auth checkpoint
 
 ## Install dependencies
 
@@ -33,6 +30,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1001/test_ts_1001.py
 ## Required environment and config
 
 - Python 3.12+
+- Dart 3.9+
 - Playwright for Python with Chromium installed
 - `GH_TOKEN` or `GITHUB_TOKEN` with access to `IstiN/trackstate-setup`
 - network access to `https://istin.github.io/trackstate-setup/` and GitHub API

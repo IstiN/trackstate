@@ -1,0 +1,8 @@
+name: ts1001_delayed_auth_session_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http: ^1.5.0
