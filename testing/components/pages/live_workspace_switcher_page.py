@@ -1278,14 +1278,19 @@ class LiveWorkspaceSwitcherPage:
         self,
         label: str,
         *,
+        panel: WorkspaceSwitcherPanelObservation | None = None,
         timeout_ms: int = 30_000,
     ) -> WorkspaceSwitcherButtonFocusabilityObservation:
         try:
             payload = self._session.wait_for_function(
                 """
-                ({ heading, label }) => {
+                ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const displayNameHint = normalize(label.split(',')[0] || '');
+                  const hasPanelBounds =
+                    [panelLeft, panelTop, panelRight, panelBottom].every((value) =>
+                      typeof value === 'number' && Number.isFinite(value),
+                    );
                   const isVisible = (element) => {
                     if (!element) {
                       return false;
@@ -1298,8 +1303,8 @@ class LiveWorkspaceSwitcherPage:
                       && style.display !== 'none';
                   };
                   const isInsidePanel = (element) => {
-                    if (!element) {
-                      return false;
+                    if (!hasPanelBounds || !element) {
+                      return true;
                     }
                     const rect = element.getBoundingClientRect();
                     const centerX = rect.left + (rect.width / 2);
@@ -1323,11 +1328,11 @@ class LiveWorkspaceSwitcherPage:
                   let switcher = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
                   )
-                    .filter(isVisible)
+                    .filter((element) => isVisible(element) && isInsidePanel(element))
                     .find((element) => visibleText(element).includes(heading)) || null;
                   if (!switcher) {
                     const candidates = Array.from(document.querySelectorAll('*'))
-                      .filter(isVisible)
+                      .filter((element) => isVisible(element) && isInsidePanel(element))
                       .filter((element) => {
                         const text = visibleText(element);
                         return text.includes(heading)
@@ -1359,6 +1364,9 @@ class LiveWorkspaceSwitcherPage:
                     if (!element) {
                       return false;
                     }
+                    if (!isInsidePanel(element)) {
+                      return false;
+                    }
                     const panelId = element.getAttribute?.('data-trackstate-browser-focus-panel-id');
                     if (panelId === 'trackstate-workspace-switcher') {
                       return true;
@@ -1366,7 +1374,7 @@ class LiveWorkspaceSwitcherPage:
                     return switcher.contains(element);
                   };
                   const candidateMatches = Array.from(document.querySelectorAll('*'))
-                    .filter(isVisible)
+                    .filter((element) => isVisible(element) && isInsidePanel(element))
                     .map((element) => {
                       const elementLabel = labelFor(element);
                       const elementText = visibleText(element);
@@ -1444,7 +1452,14 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
-                arg={"heading": self._switcher_heading, "label": label},
+                arg={
+                    "heading": self._switcher_heading,
+                    "label": label,
+                    "panelLeft": panel.left if panel is not None else None,
+                    "panelTop": panel.top if panel is not None else None,
+                    "panelRight": (panel.left + panel.width) if panel is not None else None,
+                    "panelBottom": (panel.top + panel.height) if panel is not None else None,
+                },
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -1710,7 +1725,7 @@ class LiveWorkspaceSwitcherPage:
         try:
             self._session.wait_for_function(
                 """
-                ({ heading, label }) => {
+                ({ heading, label, panelLeft, panelTop, panelRight, panelBottom }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1749,11 +1764,11 @@ class LiveWorkspaceSwitcherPage:
                   let switcher = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
                   )
-                    .filter(isVisible)
+                    .filter((element) => isVisible(element) && isInsidePanel(element))
                     .find((element) => visibleText(element).includes(heading)) || null;
                   if (!switcher) {
                     const candidates = Array.from(document.querySelectorAll('*'))
-                      .filter(isVisible)
+                      .filter((element) => isVisible(element) && isInsidePanel(element))
                       .filter((element) => {
                         const text = visibleText(element);
                         return text.includes(heading)
@@ -1782,7 +1797,7 @@ class LiveWorkspaceSwitcherPage:
                     '[tabindex]:not([tabindex="-1"])',
                   ].join(',');
                   const candidateMatches = Array.from(switcher.querySelectorAll('*'))
-                    .filter(isVisible)
+                    .filter((element) => isVisible(element) && isInsidePanel(element))
                     .map((element) => {
                       const elementLabel = labelFor(element);
                       const elementText = visibleText(element);
@@ -1838,6 +1853,10 @@ class LiveWorkspaceSwitcherPage:
                 arg={
                     "heading": self._switcher_heading,
                     "label": label,
+                    "panelLeft": panel.left,
+                    "panelTop": panel.top,
+                    "panelRight": panel.left + panel.width,
+                    "panelBottom": panel.top + panel.height,
                 },
                 timeout_ms=timeout_ms,
             )
