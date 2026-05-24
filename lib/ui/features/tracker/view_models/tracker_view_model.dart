@@ -542,6 +542,9 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load({bool deferAccessRestore = false}) async {
     final previousStartupRecovery = startupRecovery;
+    final retainedStartupRecovery = _snapshot == null
+        ? previousStartupRecovery
+        : null;
     startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
@@ -550,7 +553,7 @@ class TrackerViewModel extends ChangeNotifier {
     _searchResults = const [];
     _hasLoadedInitialSearchResults = false;
     _message = null;
-    _startupRecovery = null;
+    _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
     Future<void> Function()? deferredAccessRestore;
@@ -580,6 +583,7 @@ class TrackerViewModel extends ChangeNotifier {
         deferredAccessRestore = _restoreGitHubConnection;
       }
       await _loadSnapshotAndSearch();
+      _startupRecovery = _snapshot?.startupRecovery;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
         deferredAccessRestore = _restoreLocalHostedAccess;
