@@ -570,6 +570,72 @@ void main() {
         );
       },
     );
+
+    test(
+      'forward Tab from the open trigger retries selected-row focus when the row bridge is not immediately focusable',
+      () async {
+        final trigger = _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+        final panel = _appendPanel(host);
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        row.style.display = 'none';
+
+        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+          onBrowserTab: () {},
+          onBrowserFocusOutside: () {},
+          onBrowserBoundaryKey: (_) {},
+        );
+        addTearDown(subscription.cancel);
+
+        Future<void>.delayed(const Duration(milliseconds: 32), () {
+          row.style.display = 'block';
+        });
+
+        trigger.focus();
+        expect(web.document.activeElement, same(trigger));
+
+        _pressTab([trigger, externalInput, row]);
+
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        expect(
+          web.document.activeElement,
+          same(row),
+          reason:
+              'If the selected row bridge cannot accept focus in the first '
+              'synchronous handoff attempt, the workspace switcher should keep '
+              'browser Tab trapped and retry until focus enters the row instead '
+              'of letting focus escape to external page chrome.',
+        );
+      },
+    );
   });
 }
 

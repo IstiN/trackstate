@@ -426,10 +426,10 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
             focusTargets: focusTargets,
             currentIndex: currentIndex,
           ))) {
-    if (_focusElement(focusTargets[selectedRowIndex].element)) {
-      return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
-    }
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+    final targetElement = focusTargets[selectedRowIndex].element;
+    _focusElement(targetElement);
+    _guardTabHandoffFocus(targetElement);
+    return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
   }
   if (currentIndex == null) {
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
