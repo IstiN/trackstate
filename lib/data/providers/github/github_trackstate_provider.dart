@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 
 import '../../../domain/models/trackstate_models.dart';
 import '../../services/startup_auth_probe_diagnostics.dart';
@@ -1049,12 +1050,6 @@ class GitHubTrackStateProvider
         'releases in $repository.',
       );
     }
-    if (response.statusCode == 422) {
-      throw TrackStateProviderException(
-        'GitHub release $releaseTag could not be created for issue $issueKey. '
-        'Resolve the existing tag or release conflict and try again.',
-      );
-    }
     if (response.statusCode != 201) {
       _throwGitHubResponseException(
         path: '/repos/$repository/releases',
@@ -1707,6 +1702,7 @@ _LfsPointerInfo? _parseLfsPointer(String content) {
   );
 }
 
+@immutable
 class _LfsPointerInfo {
   const _LfsPointerInfo({this.oid, this.sizeBytes});
 
@@ -1714,6 +1710,7 @@ class _LfsPointerInfo {
   final int? sizeBytes;
 }
 
+@immutable
 class _GitHubReleaseSummary {
   const _GitHubReleaseSummary({
     required this.id,
@@ -1728,6 +1725,7 @@ class _GitHubReleaseSummary {
   final List<_GitHubReleaseAsset> assets;
 }
 
+@immutable
 class _GitHubReleaseAsset {
   const _GitHubReleaseAsset({
     required this.id,

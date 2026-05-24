@@ -1349,6 +1349,214 @@ void main() {
     );
 
     test(
+      'local release-backed upload surfaces explicit GitHub release validation failures',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-local-release-validation.txt',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsString('release payload');
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          uploadException: const TrackStateProviderException(
+            'Could not create GitHub release trackstate-attachments-TRACK-1 '
+            'for issue TRACK-1 (422): '
+            '{"message":"Validation Failed","errors":[{"resource":"Release","field":"target_commitish","code":"invalid","message":"target_commitish is invalid"}]}',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          '/workspace/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'API_VALIDATION_FAILED');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          contains(
+            'Could not create GitHub release trackstate-attachments-TRACK-1',
+          ),
+        );
+        expect(error['message'], contains('(422)'));
+        expect(error['message'], contains('Validation Failed'));
+        expect(error['message'], contains('target_commitish'));
+        expect(details['reason'], error['message']);
+      },
+    );
+
+    test(
+      'local release-backed upload surfaces explicit GitHub release conflicts',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-local-release-conflict.txt',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsString('release payload');
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          uploadException: const TrackStateProviderException(
+            'Could not create GitHub release trackstate-attachments-TRACK-1 '
+            'for issue TRACK-1 (409): '
+            '{"message":"Conflict","errors":[{"resource":"Release","field":"tag_name","code":"already_exists","message":"tag already exists"}]}',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          '/workspace/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'RESOURCE_CONFLICT');
+        expect(error['category'], 'repository');
+        expect(
+          error['message'],
+          contains(
+            'Could not create GitHub release trackstate-attachments-TRACK-1',
+          ),
+        );
+        expect(error['message'], contains('(409)'));
+        expect(error['message'], contains('Conflict'));
+        expect(error['message'], contains('tag already exists'));
+        expect(details['reason'], error['message']);
+      },
+    );
+
+    test(
       'local release-backed upload without a git remote reports an explicit repository identity error',
       () async {
         final repo = await _createCliLocalRepository();
@@ -2381,6 +2589,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     RepositoryUser? connectedUser,
     this.downloadBytes = const <String, List<int>>{},
     this.downloadException,
+    this.uploadException,
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
     this.requiredUploadToken,
@@ -2399,6 +2608,7 @@ class _FakeSearchRepository implements TrackStateRepository {
   final RepositoryUser connectedUser;
   final Map<String, List<int>> downloadBytes;
   final TrackStateProviderException? downloadException;
+  final Object? uploadException;
   final String Function(String name)? uploadedAttachmentNameBuilder;
   final bool sortUploadedAttachmentsByName;
   final String? requiredUploadToken;
@@ -2483,6 +2693,10 @@ class _FakeSearchRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async {
+    final uploadException = this.uploadException;
+    if (uploadException != null) {
+      throw uploadException;
+    }
     final requiredUploadToken = this.requiredUploadToken;
     if (requiredUploadToken != null &&
         connection?.token != requiredUploadToken) {
