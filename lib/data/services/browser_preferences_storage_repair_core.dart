@@ -32,6 +32,7 @@ void _repairWorkspaceProfilesState(BrowserPreferencesStorage storage) {
     }
     return;
   }
+  storage.write(workspaceProfilesStorageKey, candidate);
   storage.write(prefixedKey, jsonEncode(candidate));
 }
 
