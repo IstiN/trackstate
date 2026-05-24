@@ -7848,6 +7848,22 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             onTap: onSelect,
             child: summaryControl,
           );
+    final summaryContent = kIsWeb
+        ? Stack(
+            children: [
+              interactiveSummaryControl,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _WorkspaceSwitcherRowBadgeSemanticsOverlay(
+                    typeLabel: typeLabel,
+                    stateLabel: stateLabel,
+                    active: isActive,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : interactiveSummaryControl;
     return Semantics(
       container: true,
       explicitChildNodes: true,
@@ -7868,7 +7884,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            interactiveSummaryControl,
+            summaryContent,
             const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.end,
@@ -7939,6 +7955,40 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                   ),
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceSwitcherRowBadgeSemanticsOverlay extends StatelessWidget {
+  const _WorkspaceSwitcherRowBadgeSemanticsOverlay({
+    required this.typeLabel,
+    required this.stateLabel,
+    required this.active,
+  });
+
+  final String typeLabel;
+  final String stateLabel;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: 0,
+      alwaysIncludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: [
+            const SizedBox(width: 32),
+            const SizedBox(width: 12),
+            const Expanded(child: SizedBox()),
+            const SizedBox(width: 12),
+            _WorkspaceStateBadge(label: typeLabel, active: active),
+            const SizedBox(width: 8),
+            _WorkspaceStateBadge(label: stateLabel, active: active),
           ],
         ),
       ),
