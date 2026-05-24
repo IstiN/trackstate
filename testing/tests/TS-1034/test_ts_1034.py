@@ -20,15 +20,17 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
     build_annotated_steps,
     build_workspace_state,
     format_human_lines,
     format_step_lines,
+    observe_live_startup_shell_window,
     prepare_local_workspace_repository,
     record_human_verification,
+    record_not_reached_steps,
     record_step,
-    safe_trigger_payload,
     snippet,
     startup_surface_payload,
     write_test_automation_result,
@@ -50,9 +52,14 @@ LOCAL_DISPLAY_NAME = "TS-1034 local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 LOADING_TEXT_FRAGMENTS = ("TrackState.AI", "Git-native. Jira-compatible. Team-proven.")
+DISALLOWED_TERMINAL_TEXT_FRAGMENTS = (
+    "Connect GitHub",
+    "TrackState data was not found",
+)
 MONITOR_WINDOW_SECONDS = 15.0
 MONITOR_INTERVAL_SECONDS = 0.25
 AUTH_PROBE_START_WINDOW_SECONDS = 15.0
+STARTUP_RENDER_WAIT_SECONDS = 30.0
 MIN_MONITOR_SAMPLES = 10
 LINKED_BUGS = ("TS-1029",)
 LINKED_BUG_NOTES = (
@@ -74,10 +81,13 @@ EXPECTED_RESULT = (
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 INITIAL_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1034_initial.png"
 FINAL_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1034_final.png"
@@ -101,6 +111,8 @@ class Ts1034StartupGuardRuntime(StoredWorkspaceProfilesRuntime):
         )
         self.console_events: list[str] = []
         self.page_errors: list[str] = []
+        self._startup_started_at_monotonic: float | None = None
+        self._auth_probe_started_at_monotonic: float | None = None
 
     def __enter__(self):
         session = super().__enter__()
@@ -163,7 +175,7 @@ class Ts1034StartupGuardRuntime(StoredWorkspaceProfilesRuntime):
         normalized_samples = _normalize_guard_samples(samples)
         first_started = _first_started_after_launch_seconds(auth_probe_requests)
         completed_count = _completed_auth_probe_request_count(auth_probe_requests)
-        return {
+        guard_state = {
             "auth_probe_request_count": _safe_len(auth_probe_requests),
             "completed_auth_probe_request_count": completed_count,
             "auth_probe_pending": bool(first_started is not None and completed_count == 0),
@@ -191,6 +203,31 @@ class Ts1034StartupGuardRuntime(StoredWorkspaceProfilesRuntime):
             "latest_sample": normalized_samples[-1] if normalized_samples else {},
             "samples": normalized_samples,
         }
+        if (
+            self._startup_started_at_monotonic is not None
+            and self._auth_probe_started_at_monotonic is None
+            and isinstance(first_started, (int, float))
+        ):
+            self._auth_probe_started_at_monotonic = (
+                self._startup_started_at_monotonic + float(first_started)
+            )
+        return guard_state
+
+    def mark_startup_started(self, startup_started_at_monotonic: float) -> None:
+        self._startup_started_at_monotonic = startup_started_at_monotonic
+
+    @property
+    def auth_probe_pending(self) -> bool:
+        return bool(self.read_guard_state().get("auth_probe_pending"))
+
+    @property
+    def auth_probe_started_at_monotonic(self) -> float | None:
+        self.read_guard_state()
+        return self._auth_probe_started_at_monotonic
+
+    @property
+    def auth_probe_released_at_monotonic(self) -> float | None:
+        return None
 
 
 def main() -> None:
@@ -246,32 +283,69 @@ def main() -> None:
             switcher_page.set_viewport(**DESKTOP_VIEWPORT)
 
             startup_started_at_monotonic = time.monotonic()
+            runtime.mark_startup_started(startup_started_at_monotonic)
             switcher_page.open_startup_entrypoint(wait_until="commit", timeout_ms=120_000)
 
-            startup_surface = _startup_surface_payload(tracker_page)
+            monitor_windows: list[dict[str, Any]] = []
+            startup_state_observed, startup_window = poll_until(
+                probe=lambda: _record_monitor_window_sample(
+                    samples=monitor_windows,
+                    tracker_page=tracker_page,
+                    switcher_page=switcher_page,
+                    runtime=runtime,
+                    startup_started_at_monotonic=startup_started_at_monotonic,
+                ),
+                is_satisfied=_startup_state_observed,
+                timeout_seconds=STARTUP_RENDER_WAIT_SECONDS,
+                interval_seconds=MONITOR_INTERVAL_SECONDS,
+            )
+            startup_surface = startup_window["startup_observation"]
             result["startup_surface_after_render"] = startup_surface
+            result["startup_window_initial"] = _sample_payload(startup_window)
             tracker_page.screenshot(str(INITIAL_SCREENSHOT_PATH))
             result["initial_screenshot"] = str(INITIAL_SCREENSHOT_PATH)
 
-            monitor_samples = _collect_monitor_samples(
-                tracker_page=tracker_page,
-                switcher_page=switcher_page,
-                runtime=runtime,
-                startup_started_at_monotonic=startup_started_at_monotonic,
-            )
+            last_elapsed_seconds = startup_window.get("elapsed_since_start_seconds")
+            monitor_complete = isinstance(last_elapsed_seconds, (int, float)) and float(
+                last_elapsed_seconds,
+            ) >= float(MONITOR_WINDOW_SECONDS)
+            final_window = startup_window
+            if not monitor_complete:
+                remaining_seconds = max(
+                    float(MONITOR_WINDOW_SECONDS)
+                    - (
+                        float(last_elapsed_seconds)
+                        if isinstance(last_elapsed_seconds, (int, float))
+                        else 0.0
+                    ),
+                    MONITOR_INTERVAL_SECONDS,
+                )
+                monitor_complete, final_window = poll_until(
+                    probe=lambda: _record_monitor_window_sample(
+                        samples=monitor_windows,
+                        tracker_page=tracker_page,
+                        switcher_page=switcher_page,
+                        runtime=runtime,
+                        startup_started_at_monotonic=startup_started_at_monotonic,
+                    ),
+                    is_satisfied=lambda window: (
+                        isinstance(window.get("elapsed_since_start_seconds"), (int, float))
+                        and float(window["elapsed_since_start_seconds"])
+                        >= float(MONITOR_WINDOW_SECONDS)
+                    ),
+                    timeout_seconds=remaining_seconds + 2.0,
+                    interval_seconds=MONITOR_INTERVAL_SECONDS,
+                )
+
             guard_state = runtime.read_guard_state()
             result["guard_state"] = guard_state
-            result["monitor_samples"] = [_sample_payload(sample) for sample in monitor_samples]
-            result["monitor_sample_count"] = len(monitor_samples)
+            result["monitor_samples"] = [_sample_payload(sample) for sample in monitor_windows]
+            result["monitor_sample_count"] = len(monitor_windows)
             result["monitored_duration_seconds"] = (
-                monitor_samples[-1]["elapsed_since_start_seconds"] if monitor_samples else None
+                monitor_windows[-1]["elapsed_since_start_seconds"] if monitor_windows else None
             )
             result["console_events"] = list(runtime.console_events)
             result["page_errors"] = list(runtime.page_errors)
-            startup_surface_visible_during_window = bool(
-                _looks_like_loading_surface(startup_surface)
-                or any(sample.get("loading_surface_visible") for sample in monitor_samples)
-            )
 
             step_failures: list[str] = []
 
@@ -285,7 +359,12 @@ def main() -> None:
                     action=REQUEST_STEPS[0],
                     observed=observed,
                 )
-                step_failures.append(f"Step 1 failed: {observed}")
+                record_not_reached_steps(
+                    result,
+                    starting_step=2,
+                    request_steps=REQUEST_STEPS,
+                )
+                raise AssertionError(f"Step 1 failed: {observed}")
             else:
                 record_step(
                     result,
@@ -301,8 +380,8 @@ def main() -> None:
                 )
 
             step2_failures = _startup_surface_failures(
-                startup_surface_visible_during_window=startup_surface_visible_during_window,
-                startup_surface=startup_surface,
+                startup_state_observed=startup_state_observed,
+                startup_window=startup_window,
             )
             if step2_failures:
                 observed = "\n".join(step2_failures)
@@ -313,7 +392,12 @@ def main() -> None:
                     action=REQUEST_STEPS[1],
                     observed=observed,
                 )
-                step_failures.append(f"Step 2 failed: {observed}")
+                record_not_reached_steps(
+                    result,
+                    starting_step=3,
+                    request_steps=REQUEST_STEPS,
+                )
+                raise AssertionError(f"Step 2 failed: {observed}")
             else:
                 record_step(
                     result,
@@ -327,7 +411,10 @@ def main() -> None:
                     ),
                 )
 
-            step3_failures = _monitor_window_failures(monitor_samples)
+            step3_failures = _monitor_window_failures(
+                monitor_windows=monitor_windows,
+                monitor_complete=monitor_complete,
+            )
             if step3_failures:
                 observed = "\n".join(step3_failures)
                 record_step(
@@ -347,13 +434,13 @@ def main() -> None:
                     observed=(
                         "Sampled the live startup surface across the full 15-second window "
                         "before asserting the result.\n"
-                        f"sample_count={len(monitor_samples)!r}; "
+                        f"sample_count={len(monitor_windows)!r}; "
                         f"monitored_duration_seconds={result['monitored_duration_seconds']!r}"
                     ),
                 )
 
             step4_failures = _visibility_guard_failures(
-                monitor_samples=monitor_samples,
+                monitor_windows=monitor_windows,
                 guard_state=guard_state,
             )
             if step4_failures:
@@ -380,7 +467,7 @@ def main() -> None:
                     ),
                 )
 
-            final_sample = monitor_samples[-1] if monitor_samples else {}
+            final_sample = final_window if monitor_windows else {}
             record_human_verification(
                 result,
                 check=(
@@ -389,7 +476,7 @@ def main() -> None:
                 ),
                 observed=(
                     f"title={startup_surface.get('title')!r}; "
-                    f"body_excerpt={snippet(str(final_sample.get('startup_body_text', '')))!r}; "
+                    f"body_excerpt={snippet(str(startup_surface.get('body_text', '')))!r}; "
                     f"initial_screenshot={str(INITIAL_SCREENSHOT_PATH)!r}"
                 ),
             )
@@ -478,29 +565,22 @@ def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, A
     }
 
 
-def _collect_monitor_samples(
+def _record_monitor_window_sample(
     *,
+    samples: list[dict[str, Any]],
     tracker_page: TrackStateTrackerPage,
     switcher_page: LiveWorkspaceSwitcherPage,
     runtime: Ts1034StartupGuardRuntime,
     startup_started_at_monotonic: float,
-) -> list[dict[str, Any]]:
-    samples: list[dict[str, Any]] = []
-    deadline = startup_started_at_monotonic + MONITOR_WINDOW_SECONDS
-    while True:
-        samples.append(
-            _observe_monitor_window(
-                tracker_page=tracker_page,
-                switcher_page=switcher_page,
-                runtime=runtime,
-                startup_started_at_monotonic=startup_started_at_monotonic,
-            ),
-        )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(MONITOR_INTERVAL_SECONDS, remaining))
-    return samples
+) -> dict[str, Any]:
+    window = _observe_monitor_window(
+        tracker_page=tracker_page,
+        switcher_page=switcher_page,
+        runtime=runtime,
+        startup_started_at_monotonic=startup_started_at_monotonic,
+    )
+    samples.append(window)
+    return window
 
 
 def _startup_surface_summary(startup_surface: dict[str, Any]) -> dict[str, Any]:
@@ -519,30 +599,39 @@ def _observe_monitor_window(
     runtime: Ts1034StartupGuardRuntime,
     startup_started_at_monotonic: float,
 ) -> dict[str, Any]:
-    guard_state = runtime.read_guard_state()
-    latest_guard_sample = guard_state.get("latest_sample", {})
-    startup_observation = _startup_surface_payload(tracker_page)
-    shell_observation = tracker_page.observe_interactive_shell(
-        SHELL_NAVIGATION_LABELS,
-        timeout_ms=250,
+    window = observe_live_startup_shell_window(
+        tracker_page=tracker_page,
+        page=switcher_page,
+        runtime=runtime,
+        startup_started_at_monotonic=startup_started_at_monotonic,
+        shell_navigation_labels=SHELL_NAVIGATION_LABELS,
+        branding_texts=LOADING_TEXT_FRAGMENTS,
+        poll_timeout_ms=250,
     )
-    trigger = safe_trigger_payload(switcher_page, timeout_ms=250)
-    return {
-        "elapsed_since_start_seconds": round(
-            time.monotonic() - startup_started_at_monotonic,
-            2,
-        ),
-        "startup_observation": startup_observation,
-        "shell_observation": shell_observation,
-        "trigger": trigger,
-        "guard_state": _guard_state_summary(guard_state),
-        "startup_body_text": str(startup_observation.get("body_text", "")),
-        "shell_body_text": str(shell_observation.get("body_text", "")),
-        "loading_surface_visible": bool(latest_guard_sample.get("loading_surface_visible"))
-        or _looks_like_loading_surface(startup_observation),
-        "visible_navigation_labels": list(shell_observation.get("visible_navigation_labels", [])),
-        "shell_ready": bool(shell_observation.get("shell_ready")),
-    }
+    startup_observation = window["startup_observation"]
+    shell_observation = window["shell_observation"]
+    guard_state = runtime.read_guard_state()
+    window["elapsed_since_start_seconds"] = round(
+        time.monotonic() - startup_started_at_monotonic,
+        2,
+    )
+    window["guard_state"] = _guard_state_summary(guard_state)
+    window["loading_surface_visible"] = _looks_like_loading_surface(
+        startup_observation=startup_observation,
+        shell_observation=shell_observation,
+    )
+    return window
+
+
+def _startup_state_observed(window: dict[str, Any]) -> bool:
+    shell_observation = window.get("shell_observation", {})
+    return bool(window.get("loading_surface_visible")) or bool(
+        shell_observation.get("shell_ready")
+        or shell_observation.get("connect_github_visible")
+        or shell_observation.get("fatal_banner_visible")
+        or window.get("trigger") is not None
+        or shell_observation.get("visible_navigation_labels")
+    )
 
 
 def _startup_guard_failures(guard_state: dict[str, Any]) -> list[str]:
@@ -576,31 +665,58 @@ def _startup_guard_failures(guard_state: dict[str, Any]) -> list[str]:
 
 def _startup_surface_failures(
     *,
-    startup_surface_visible_during_window: bool,
-    startup_surface: dict[str, Any],
+    startup_state_observed: bool,
+    startup_window: dict[str, Any],
 ) -> list[str]:
     failures: list[str] = []
-    if not startup_surface_visible_during_window:
+    shell_observation = startup_window.get("shell_observation", {})
+    startup_surface = startup_window.get("startup_observation", {})
+    if not startup_state_observed:
         failures.append(
-            "The deployed app never exposed the expected loading surface during the monitored "
-            "startup window.\n"
-            f"startup_surface={json.dumps(startup_surface, indent=2)}"
+            "The deployed app never exposed a readable startup state during the initial "
+            "render wait window.\n"
+            f"Observed sample:\n{json.dumps(_sample_payload(startup_window), indent=2)}"
+        )
+        return failures
+    if bool(shell_observation.get("connect_github_visible")):
+        failures.append(
+            "The startup flow fell to the `Connect GitHub` terminal state instead of "
+            "remaining on the loading surface.\n"
+            f"Observed sample:\n{json.dumps(_sample_payload(startup_window), indent=2)}"
+        )
+    if bool(shell_observation.get("fatal_banner_visible")):
+        failures.append(
+            "The startup flow showed the fatal `TrackState data was not found` banner "
+            "instead of remaining on the loading surface.\n"
+            f"Observed sample:\n{json.dumps(_sample_payload(startup_window), indent=2)}"
+        )
+    if not bool(startup_window.get("loading_surface_visible")):
+        failures.append(
+            "The deployed app did not expose the expected loading surface signature after "
+            "launch. TS-1034 now requires a button-free loading body and rejects alternate "
+            "terminal states, not just the page title.\n"
+            f"startup_surface={json.dumps(startup_surface, indent=2)}\n"
+            f"shell_observation={json.dumps(shell_observation, indent=2)}"
         )
     return failures
 
 
-def _monitor_window_failures(monitor_samples: list[dict[str, Any]]) -> list[str]:
+def _monitor_window_failures(
+    *,
+    monitor_windows: list[dict[str, Any]],
+    monitor_complete: bool,
+) -> list[str]:
     failures: list[str] = []
-    if len(monitor_samples) < MIN_MONITOR_SAMPLES:
+    if len(monitor_windows) < MIN_MONITOR_SAMPLES:
         failures.append(
-            f"Only {len(monitor_samples)} startup samples were collected; at least "
+            f"Only {len(monitor_windows)} startup samples were collected; at least "
             f"{MIN_MONITOR_SAMPLES} samples were expected over the 15-second window."
         )
-    if not monitor_samples:
+    if not monitor_windows:
         failures.append("No startup samples were collected during the monitoring window.")
         return failures
-    monitored_duration = monitor_samples[-1].get("elapsed_since_start_seconds")
-    if not isinstance(monitored_duration, (int, float)) or monitored_duration < 14.75:
+    monitored_duration = monitor_windows[-1].get("elapsed_since_start_seconds")
+    if not monitor_complete or not isinstance(monitored_duration, (int, float)) or monitored_duration < 14.75:
         failures.append(
             "The monitored startup window ended too early and did not cover the requested "
             "15-second observation period.\n"
@@ -611,11 +727,18 @@ def _monitor_window_failures(monitor_samples: list[dict[str, Any]]) -> list[str]
 
 def _visibility_guard_failures(
     *,
-    monitor_samples: list[dict[str, Any]],
+    monitor_windows: list[dict[str, Any]],
     guard_state: dict[str, Any],
 ) -> list[str]:
     failures: list[str] = []
-    first_shell_ready = next((sample for sample in monitor_samples if sample["shell_ready"]), None)
+    first_shell_ready = next(
+        (
+            sample
+            for sample in monitor_windows
+            if bool(sample.get("shell_observation", {}).get("shell_ready"))
+        ),
+        None,
+    )
     if first_shell_ready is not None:
         failures.append(
             "The page reached `shell_ready=true` even though the auth probe never resolved "
@@ -623,7 +746,11 @@ def _visibility_guard_failures(
             f"Observed sample:\n{json.dumps(_sample_payload(first_shell_ready), indent=2)}"
         )
     first_navigation = next(
-        (sample for sample in monitor_samples if sample["visible_navigation_labels"]),
+        (
+            sample
+            for sample in monitor_windows
+            if sample.get("shell_observation", {}).get("visible_navigation_labels")
+        ),
         None,
     )
     if first_navigation is not None:
@@ -631,14 +758,45 @@ def _visibility_guard_failures(
             "Sidebar navigation labels became visible during the blocked startup window.\n"
             f"Observed sample:\n{json.dumps(_sample_payload(first_navigation), indent=2)}"
         )
-    first_trigger = next((sample for sample in monitor_samples if sample["trigger"] is not None), None)
+    first_trigger = next(
+        (sample for sample in monitor_windows if sample.get("trigger") is not None),
+        None,
+    )
     if first_trigger is not None:
         failures.append(
             "The TopBar workspace switcher trigger became visible during the blocked startup "
             "window.\n"
             f"Observed sample:\n{json.dumps(_sample_payload(first_trigger), indent=2)}"
         )
-    final_sample = monitor_samples[-1] if monitor_samples else {}
+    first_connect_github = next(
+        (
+            sample
+            for sample in monitor_windows
+            if bool(sample.get("shell_observation", {}).get("connect_github_visible"))
+        ),
+        None,
+    )
+    if first_connect_github is not None:
+        failures.append(
+            "The startup flow reached the `Connect GitHub` terminal state during the "
+            "blocked startup window.\n"
+            f"Observed sample:\n{json.dumps(_sample_payload(first_connect_github), indent=2)}"
+        )
+    first_fatal_banner = next(
+        (
+            sample
+            for sample in monitor_windows
+            if bool(sample.get("shell_observation", {}).get("fatal_banner_visible"))
+        ),
+        None,
+    )
+    if first_fatal_banner is not None:
+        failures.append(
+            "The startup flow reached the fatal `TrackState data was not found` terminal "
+            "state during the blocked startup window.\n"
+            f"Observed sample:\n{json.dumps(_sample_payload(first_fatal_banner), indent=2)}"
+        )
+    final_sample = monitor_windows[-1] if monitor_windows else {}
     if not bool(final_sample.get("loading_surface_visible")):
         failures.append(
             "After 15 seconds, the page no longer looked like the loading surface.\n"
@@ -658,14 +816,28 @@ def _visibility_guard_failures(
     return failures
 
 
-def _looks_like_loading_surface(startup_surface: dict[str, Any]) -> bool:
-    text = " ".join(
-        [
-            str(startup_surface.get("title", "")),
-            str(startup_surface.get("body_text", "")),
-        ],
-    )
-    return any(fragment in text for fragment in LOADING_TEXT_FRAGMENTS)
+def _looks_like_loading_surface(
+    *,
+    startup_observation: dict[str, Any],
+    shell_observation: dict[str, Any],
+) -> bool:
+    body_text = _normalize_whitespace(str(startup_observation.get("body_text", "")))
+    button_labels = [
+        _normalize_whitespace(str(label))
+        for label in startup_observation.get("button_labels", [])
+        if _normalize_whitespace(str(label))
+    ]
+    if not body_text:
+        return False
+    if any(fragment in body_text for fragment in DISALLOWED_TERMINAL_TEXT_FRAGMENTS):
+        return False
+    if bool(shell_observation.get("connect_github_visible")) or bool(
+        shell_observation.get("fatal_banner_visible"),
+    ):
+        return False
+    if button_labels:
+        return False
+    return any(fragment in body_text for fragment in LOADING_TEXT_FRAGMENTS)
 
 
 def _sample_payload(sample: dict[str, Any]) -> dict[str, Any]:
@@ -679,9 +851,11 @@ def _sample_payload(sample: dict[str, Any]) -> dict[str, Any]:
         "button_labels": list(startup_observation.get("button_labels", [])),
         "visible_navigation_labels": list(shell_observation.get("visible_navigation_labels", [])),
         "shell_ready": shell_observation.get("shell_ready"),
+        "connect_github_visible": shell_observation.get("connect_github_visible"),
+        "fatal_banner_visible": shell_observation.get("fatal_banner_visible"),
         "trigger": trigger,
-        "startup_body_excerpt": snippet(str(sample.get("startup_body_text", ""))),
-        "shell_body_excerpt": snippet(str(sample.get("shell_body_text", ""))),
+        "startup_body_excerpt": snippet(str(startup_observation.get("body_text", ""))),
+        "shell_body_excerpt": snippet(str(shell_observation.get("body_text", ""))),
         "guard_state": sample.get("guard_state"),
     }
 
@@ -724,6 +898,10 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None:
@@ -732,6 +910,10 @@ def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     if product_bug:
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -850,34 +1032,21 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
     lines = [
-        f"# {TICKET_KEY} {status}",
+        "h3. PR Rework Result",
         "",
-        f"**Test case:** {TEST_CASE_TITLE}",
-        f"**Status:** {'passed' if passed else 'failed'}",
-        f"**App URL:** `{result.get('app_url')}`",
-        "",
-        "## Summary",
-        _actual_result_summary(result, passed=passed),
-        "",
-        "## Automation checks",
-        *format_step_lines(result, jira=False),
-        "",
-        "## Real user-style verification",
-        *format_human_lines(result, jira=False),
+        (
+            "*Fixed:* Replaced the ticket-local startup polling with the shared "
+            "`observe_live_startup_shell_window()` + `poll_until()` flow, and tightened "
+            "TS-1034 so it now rejects `Connect GitHub` / `TrackState data was not found` "
+            "terminal states instead of treating the page title as sufficient loading proof."
+        ),
+        f"*Test Run:* `{RUN_COMMAND}`",
+        f"*Result:* {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"*Summary:* {'1 passed, 0 failed.' if passed else '0 passed, 1 failed.'}",
     ]
     if not passed:
-        lines.extend(
-            [
-                "",
-                "## Assertion / error",
-                "",
-                "```text",
-                str(result.get("traceback", result.get("error", ""))),
-                "```",
-            ],
-        )
+        lines.append(f"*Error:* {_error_summary(result)}")
     return "\n".join(lines) + "\n"
 
 
@@ -968,8 +1137,77 @@ def _should_write_bug_description(result: dict[str, Any]) -> bool:
     return True
 
 
+def _review_replies_payload(result: dict[str, Any], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(thread=thread, result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, Any]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    thread: dict[str, Any],
+    result: dict[str, Any],
+    passed: bool,
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
+    )
+    comment_id = thread.get("rootCommentId")
+    if comment_id == 3293931834:
+        return (
+            "Fixed: TS-1034 no longer treats the `TrackState.AI` title as proof of the "
+            "loading surface. The test now fails on `connect_github_visible` and "
+            "`fatal_banner_visible`, and it only accepts a button-free loading-body "
+            f"snapshot as the blocked startup surface. {rerun_summary}"
+        )
+    if comment_id == 3293931849:
+        return (
+            "Fixed: the ticket-local sampling loop was removed. TS-1034 now reuses the "
+            "shared `observe_live_startup_shell_window()` helper with `poll_until()` for "
+            f"startup observation, trigger checks, and the timed 15-second window. {rerun_summary}"
+        )
+    return (
+        "Fixed the TS-1034 review findings by tightening the loading-surface assertions, "
+        f"reusing the shared startup observer, and rerunning the live test. {rerun_summary}"
+    )
+
+
+def _error_summary(result: dict[str, Any]) -> str:
+    error = str(result.get("error", "TS-1034 failed"))
+    return snippet(error, limit=400)
+
+
 def _safe_len(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
+
+
+def _normalize_whitespace(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _ms_to_seconds(value: Any) -> float | None:
@@ -1118,16 +1356,22 @@ def _startup_guard_script() -> str:
     || document.body?.textContent
     || '',
   );
-  const loadingSurfaceVisible = (bodyText) => LOADING_TEXTS.some((label) => bodyText.includes(label));
+  const loadingSurfaceVisible = (bodyText, labels) => (
+    LOADING_TEXTS.some((label) => bodyText.includes(label))
+      && !bodyText.includes('Connect GitHub')
+      && !bodyText.includes('TrackState data was not found')
+      && labels.length === 0
+  );
   const capture = () => {
     const bodyText = currentBodyText();
     const texts = semanticTexts();
+    const visibleButtonLabels = buttonLabels();
     const triggerLabel = texts.find((text) => text.includes('Workspace switcher:')) || '';
     const visibleNavigationLabels = READY_LABELS.filter(
       (label) => bodyText.includes(label) || texts.includes(label),
     );
     const shellReady = visibleNavigationLabels.length === READY_LABELS.length;
-    const loadingVisible = loadingSurfaceVisible(bodyText);
+    const loadingVisible = loadingSurfaceVisible(bodyText, visibleButtonLabels);
     if (state.firstNavigationVisibleAtMs === null && visibleNavigationLabels.length > 0) {
       state.firstNavigationVisibleAtMs = performance.now();
     }
@@ -1148,7 +1392,7 @@ def _startup_guard_script() -> str:
       triggerLabel,
       shellReady,
       title: document.title || '',
-      buttonLabels: buttonLabels(),
+      buttonLabels: visibleButtonLabels,
       bodyExcerpt: bodyText.slice(0, 240),
     });
     if (state.samples.length > MAX_SAMPLES) {
