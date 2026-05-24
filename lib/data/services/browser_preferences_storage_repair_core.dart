@@ -15,28 +15,103 @@ const String repositoryTokenStorageKeyPrefix = 'trackstate.githubToken.';
 const String workspaceTokenStorageKeyPrefix =
     'trackstate.githubToken.workspace.';
 
-void repairBrowserPreferencesStorageEntries(BrowserPreferencesStorage storage) {
-  _repairWorkspaceProfilesState(storage);
-  _repairStringPreferences(storage);
+enum BrowserPreferencesStorageRepairAction { normalized, removed }
+
+class BrowserPreferencesStorageRepairEntry {
+  const BrowserPreferencesStorageRepairEntry({
+    required this.key,
+    required this.action,
+    required this.description,
+  });
+
+  final String key;
+  final BrowserPreferencesStorageRepairAction action;
+  final String description;
 }
 
-void _repairWorkspaceProfilesState(BrowserPreferencesStorage storage) {
+class BrowserPreferencesStorageRepairReport {
+  BrowserPreferencesStorageRepairReport._(
+    List<BrowserPreferencesStorageRepairEntry> repairs,
+  ) : repairs = List.unmodifiable(repairs);
+
+  final List<BrowserPreferencesStorageRepairEntry> repairs;
+
+  bool get hasRepairs => repairs.isNotEmpty;
+
+  String toDiagnosticMessage({bool includePrefix = true}) {
+    final summary = hasRepairs
+        ? [
+            'storage schema repair detected malformed preloaded shared_preferences entries:',
+            for (final repair in repairs)
+              '${repair.action.name} ${repair.key} (${repair.description})',
+          ].join(' ')
+        : 'storage schema repair found no malformed preloaded shared_preferences entries.';
+
+    if (!includePrefix) {
+      return summary;
+    }
+    return 'TrackState startup diagnostic: $summary';
+  }
+}
+
+BrowserPreferencesStorageRepairReport repairBrowserPreferencesStorageEntries(
+  BrowserPreferencesStorage storage,
+) {
+  final repairs = <BrowserPreferencesStorageRepairEntry>[];
+  _repairWorkspaceProfilesState(storage, repairs);
+  _repairStringPreferences(storage, repairs);
+  return BrowserPreferencesStorageRepairReport._(repairs);
+}
+
+void _repairWorkspaceProfilesState(
+  BrowserPreferencesStorage storage,
+  List<BrowserPreferencesStorageRepairEntry> repairs,
+) {
   const prefixedKey = 'flutter.$workspaceProfilesStorageKey';
+  final prefixedValue = storage.read(prefixedKey);
+  final plainValue = storage.read(workspaceProfilesStorageKey);
   final candidate =
-      _normalizedWorkspaceState(storage.read(prefixedKey)) ??
-      _normalizedWorkspaceState(storage.read(workspaceProfilesStorageKey));
+      _normalizedWorkspaceState(prefixedValue) ??
+      _normalizedWorkspaceState(plainValue);
   if (candidate == null) {
-    final prefixedValue = storage.read(prefixedKey);
     if (_decodesToNonStringStructuredValue(prefixedValue)) {
       storage.remove(prefixedKey);
+      repairs.add(
+        const BrowserPreferencesStorageRepairEntry(
+          key: prefixedKey,
+          action: BrowserPreferencesStorageRepairAction.removed,
+          description:
+              'workspace preloaded storage contained an invalid structured value',
+        ),
+      );
     }
     return;
   }
+  _recordRepair(
+    repairs,
+    key: workspaceProfilesStorageKey,
+    previousValue: plainValue,
+    nextValue: candidate,
+    description:
+        'workspace storage was repaired to the normalized schema payload',
+  );
+  final normalizedPrefixedValue = jsonEncode(candidate);
+  _recordRepair(
+    repairs,
+    key: prefixedKey,
+    previousValue: prefixedValue,
+    nextValue: normalizedPrefixedValue,
+    description:
+        'workspace preloaded storage was normalized into the shared_preferences schema format',
+  );
   storage.write(workspaceProfilesStorageKey, candidate);
-  storage.write(prefixedKey, jsonEncode(candidate));
+  storage.write(prefixedKey, normalizedPrefixedValue);
 }
 
-void _repairStringPreferences(BrowserPreferencesStorage storage) {
+void _repairStringPreferences(
+  BrowserPreferencesStorage storage,
+  List<BrowserPreferencesStorageRepairEntry> repairs,
+) {
   final plainKeys = <String>{
     for (final keyPrefix in const [
       repositoryTokenStorageKeyPrefix,
@@ -52,18 +127,55 @@ void _repairStringPreferences(BrowserPreferencesStorage storage) {
 
   for (final plainKey in plainKeys) {
     final prefixedKey = 'flutter.$plainKey';
+    final plainValue = storage.read(plainKey);
+    final prefixedValue = storage.read(prefixedKey);
     final candidate =
-        _normalizedStringPreference(storage.read(prefixedKey)) ??
-        _normalizedStringPreference(storage.read(plainKey));
+        _normalizedStringPreference(prefixedValue) ??
+        _normalizedStringPreference(plainValue);
     if (candidate == null) {
-      final prefixedValue = storage.read(prefixedKey);
       if (_decodesToNonStringStructuredValue(prefixedValue)) {
         storage.remove(prefixedKey);
+        repairs.add(
+          BrowserPreferencesStorageRepairEntry(
+            key: prefixedKey,
+            action: BrowserPreferencesStorageRepairAction.removed,
+            description:
+                'token preloaded storage contained an invalid structured value',
+          ),
+        );
       }
       continue;
     }
-    storage.write(prefixedKey, jsonEncode(candidate));
+    final normalizedPrefixedValue = jsonEncode(candidate);
+    _recordRepair(
+      repairs,
+      key: prefixedKey,
+      previousValue: prefixedValue,
+      nextValue: normalizedPrefixedValue,
+      description:
+          'token preloaded storage was normalized into the shared_preferences schema format',
+    );
+    storage.write(prefixedKey, normalizedPrefixedValue);
   }
+}
+
+void _recordRepair(
+  List<BrowserPreferencesStorageRepairEntry> repairs, {
+  required String key,
+  required String? previousValue,
+  required String nextValue,
+  required String description,
+}) {
+  if (previousValue == nextValue) {
+    return;
+  }
+  repairs.add(
+    BrowserPreferencesStorageRepairEntry(
+      key: key,
+      action: BrowserPreferencesStorageRepairAction.normalized,
+      description: description,
+    ),
+  );
 }
 
 String? _normalizedWorkspaceState(String? rawValue) {

@@ -121,6 +121,46 @@ void main() {
       expect(storage.values[prefixedKey], jsonEncode('workspace-token'));
     },
   );
+
+  test(
+    'reports malformed preloaded browser storage repairs for startup diagnostics',
+    () {
+      final rawWorkspaceState = jsonEncode({
+        'activeWorkspaceId': 'hosted:istin/trackstate-setup@main',
+        'migrationComplete': true,
+        'profiles': [
+          {
+            'id': 'hosted:istin/trackstate-setup@main',
+            'displayName': '',
+            'targetType': 'hosted',
+            'target': 'IstiN/trackstate-setup',
+            'defaultBranch': 'main',
+            'writeBranch': 'main',
+          },
+        ],
+      });
+      final storage = _FakeBrowserPreferencesStorage({
+        'flutter.trackstate.workspaceProfiles.state': rawWorkspaceState,
+        'flutter.trackstate.githubToken.IstiN.trackstate-setup': 'test-token',
+      });
+
+      final dynamic repairReport =
+          (repairBrowserPreferencesStorageEntries as dynamic)(storage);
+
+      expect(repairReport, isNotNull);
+      expect(repairReport.hasRepairs, isTrue);
+
+      final diagnosticMessage =
+          repairReport.toDiagnosticMessage(includePrefix: false) as String;
+
+      expect(diagnosticMessage, contains('workspace'));
+      expect(diagnosticMessage, contains('storage'));
+      expect(diagnosticMessage, contains('schema'));
+      expect(diagnosticMessage, contains('shared_preferences'));
+      expect(diagnosticMessage, contains('malformed'));
+      expect(diagnosticMessage, contains('repair'));
+    },
+  );
 }
 
 class _FakeBrowserPreferencesStorage implements BrowserPreferencesStorage {
