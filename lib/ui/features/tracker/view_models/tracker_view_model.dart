@@ -2101,6 +2101,7 @@ class TrackerViewModel extends ChangeNotifier {
     bool allowHostedStartupFallback = false,
   }) async {
     final repository = _repository;
+    var deferInitialSearchUntilAfterShellReady = false;
     final snapshot = await (() async {
       if (allowHostedStartupFallback &&
           repository is ProviderBackedTrackStateRepository &&
@@ -2110,6 +2111,7 @@ class TrackerViewModel extends ChangeNotifier {
         try {
           return await loadFuture.timeout(repository.hostedStartupProbeTimeout);
         } on TimeoutException {
+          deferInitialSearchUntilAfterShellReady = true;
           return repository.buildHostedStartupFallbackSnapshot();
         }
       }
@@ -2122,14 +2124,53 @@ class TrackerViewModel extends ChangeNotifier {
     );
     notifyListeners();
     final requestToken = _beginSearchRequest();
-    final searchPage = await _repository.searchIssuePage(
-      _jql,
-      maxResults: _searchPageSize,
-    );
-    if (!_isSearchRequestCurrent(requestToken)) {
+    if (deferInitialSearchUntilAfterShellReady) {
+      unawaited(
+        _loadInitialSearchPage(
+          requestToken: requestToken,
+          rethrowOnError: false,
+        ),
+      );
       return;
     }
-    _applySearchPage(searchPage);
+    await _loadInitialSearchPage(
+      requestToken: requestToken,
+      rethrowOnError: true,
+      notifyListenersWhenDone: false,
+    );
+  }
+
+  Future<void> _loadInitialSearchPage({
+    required int requestToken,
+    required bool rethrowOnError,
+    bool notifyListenersWhenDone = true,
+  }) async {
+    var shouldNotify = false;
+    try {
+      final searchPage = await _repository.searchIssuePage(
+        _jql,
+        maxResults: _searchPageSize,
+      );
+      if (!_isSearchRequestCurrent(requestToken)) {
+        return;
+      }
+      _applySearchPage(searchPage);
+      _message = null;
+      shouldNotify = true;
+    } on Object catch (error) {
+      if (!_isSearchRequestCurrent(requestToken)) {
+        return;
+      }
+      if (rethrowOnError) {
+        rethrow;
+      }
+      _message = TrackerMessage.searchFailed(error);
+      shouldNotify = true;
+    } finally {
+      if (notifyListenersWhenDone && shouldNotify && !_disposed) {
+        notifyListeners();
+      }
+    }
   }
 
   TrackStateIssue? _resolveSelectedIssue(

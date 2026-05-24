@@ -32,6 +32,14 @@ external JSFunction get _consoleInfo;
 @JS('console.info')
 external set _consoleInfo(JSFunction value);
 
+const List<String> _startupShellNavigationLabels = <String>[
+  'Dashboard',
+  'Board',
+  'JQL Search',
+  'Hierarchy',
+  'Settings',
+];
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -100,11 +108,14 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
       expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(_shellReadyObserved(), isTrue);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
@@ -190,11 +201,14 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
       expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(_shellReadyObserved(), isTrue);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
@@ -296,11 +310,14 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
       expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
+      expect(_shellReadyObserved(), isTrue);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
@@ -384,15 +401,18 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
+      expect(_shellReadyObserved(), isTrue);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
       expect(find.text('Dashboard'), findsWidgets);
       expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(delayedRepository.session, isNotNull);
       expect(
@@ -464,10 +484,13 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(_shellReadyObserved(), isFalse);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
       expect(delayedRepository.initialSearchRequestCount, 1);
+      expect(delayedRepository.initialSearchPending, isTrue);
+      expect(_shellReadyObserved(), isTrue);
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
@@ -555,6 +578,7 @@ class _DelayedGitHubProbeRepository extends ProviderBackedTrackStateRepository {
 
   List<String> get requestedPaths => _harness.requestedPaths;
   int get userProbeRequestCount => _harness.userProbeRequestCount;
+  bool get userProbePending => _harness.userProbePending;
 
   void completeUserProbe() {
     _harness.completeUserProbe();
@@ -571,6 +595,8 @@ class _DelayedGitHubProbeHarness {
   final Completer<void> _userProbeCompleter = Completer<void>();
   final List<String> requestedPaths = <String>[];
   int userProbeRequestCount = 0;
+  bool get userProbePending =>
+      userProbeRequestCount > 0 && !_userProbeCompleter.isCompleted;
 
   Future<http.Response> handle(http.Request request) async {
     requestedPaths.add(request.url.path);
@@ -645,6 +671,8 @@ class _SearchBlockingBrowserStartupRepository
 
   final Completer<void> _initialSearchCompleter = Completer<void>();
   int initialSearchRequestCount = 0;
+  bool get initialSearchPending =>
+      initialSearchRequestCount > 0 && !_initialSearchCompleter.isCompleted;
 
   void completeInitialSearch() {
     if (_initialSearchCompleter.isCompleted) {
@@ -683,8 +711,14 @@ class _BrowserStartupAuthProbeHarness {
 
   int get userProbeRequestCount =>
       requestedPaths.where((path) => path == '/user').length;
+  bool get userProbePending =>
+      userProbeRequestCount > 0 && !_userProbeCompleter.isCompleted;
   List<String> get unexpectedConsoleMessages => consoleMessages
-      .where((message) => !message.startsWith('TrackState startup diagnostic:'))
+      .where(
+        (message) =>
+            !message.startsWith('TrackState startup diagnostic:') &&
+            !message.startsWith('TrackState startup fallback diagnostic:'),
+      )
       .toList(growable: false);
 
   void install() {
@@ -740,4 +774,15 @@ class _BrowserStartupAuthProbeHarness {
       ),
     );
   }
+}
+
+bool _shellReadyObserved() {
+  final navigationLabelsVisible = _startupShellNavigationLabels.every(
+    (label) => find.text(label).evaluate().isNotEmpty,
+  );
+  return navigationLabelsVisible &&
+      find
+          .byKey(const ValueKey('workspace-switcher-trigger'))
+          .evaluate()
+          .isNotEmpty;
 }
