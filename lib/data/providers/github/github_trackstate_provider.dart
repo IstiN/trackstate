@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../../../domain/models/trackstate_models.dart';
+import '../../services/startup_auth_probe_diagnostics.dart';
 import '../foundation_compat.dart' show kIsWeb;
 import '../trackstate_provider.dart';
 import 'github_auth_probe_stub.dart'
@@ -32,8 +33,8 @@ class GitHubTrackStateProvider
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
   );
-  static final Map<String, Future<Map<String, Object?>>> _inFlightWebUserProbes =
-      <String, Future<Map<String, Object?>>>{};
+  static final Map<String, Future<Map<String, Object?>>>
+  _inFlightWebUserProbes = <String, Future<Map<String, Object?>>>{};
 
   GitHubTrackStateProvider({
     http.Client? client,
@@ -109,6 +110,7 @@ class GitHubTrackStateProvider
     if (inFlight != null) {
       return inFlight;
     }
+    startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
     final future = () async {
       final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
         _githubUri('/user'),
@@ -131,6 +133,13 @@ class GitHubTrackStateProvider
       }
     });
     return future;
+  }
+
+  void startStartupAuthProbe(String token) {
+    if (!kIsWeb || token.trim().isEmpty) {
+      return;
+    }
+    _fetchSharedWebUserProbeJson(token);
   }
 
   @override
