@@ -11,6 +11,47 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test(
+    'workspace switcher preserves a pending selection while recovery refreshes the active workspace',
+    () {
+      const primaryWorkspace = WorkspaceProfile(
+        id: 'hosted:primary/repo@main',
+        displayName: 'TrackState setup (main)',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'primary/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      const alternateWorkspace = WorkspaceProfile(
+        id: 'hosted:retry-target/repo@main',
+        displayName: 'TrackState setup (retry target)',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'retry-target/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final previousWorkspaces = WorkspaceProfilesState(
+        profiles: [primaryWorkspace, alternateWorkspace],
+        activeWorkspaceId: null,
+        migrationComplete: true,
+      );
+      final nextWorkspaces = WorkspaceProfilesState(
+        profiles: [primaryWorkspace, alternateWorkspace],
+        activeWorkspaceId: primaryWorkspace.id,
+        migrationComplete: true,
+      );
+
+      expect(
+        resolveWorkspaceSwitcherSelectedWorkspaceId(
+          currentSelectedWorkspaceId: alternateWorkspace.id,
+          previousWorkspaces: previousWorkspaces,
+          nextWorkspaces: nextWorkspaces,
+        ),
+        alternateWorkspace.id,
+      );
+    },
+  );
+
   testWidgets(
     'workspace switcher enables Save and switch after selecting a different saved workspace row',
     (tester) async {
