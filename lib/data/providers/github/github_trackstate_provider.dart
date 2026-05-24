@@ -124,6 +124,7 @@ class GitHubTrackStateProvider
           prefix: 'GitHub API request failed for /user',
         );
       }
+      startupAuthProbeDiagnostics.recordAuthProbeSuccess();
       return jsonDecode(userResponse.body) as Map<String, Object?>;
     }();
     _inFlightWebUserProbes[probeKey] = future;
