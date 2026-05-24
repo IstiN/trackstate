@@ -11,9 +11,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-TS1002_SUPPORT_DIR = REPO_ROOT / "testing" / "tests" / "TS-1002" / "support"
-if str(TS1002_SUPPORT_DIR) not in sys.path:
-    sys.path.insert(0, str(TS1002_SUPPORT_DIR))
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
@@ -24,10 +21,10 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
-from ts1002_secondary_probe_delay_runtime import (  # noqa: E402
+from testing.tests.support.startup_secondary_probe_delay_runtime import (  # noqa: E402
     STARTUP_SAMPLE_GLOBAL,
-    Ts1002SecondaryProbeDelayRuntime,
-    Ts1002SecondaryProbeObservation,
+    StartupSecondaryProbeDelayRuntime,
+    StartupSecondaryProbeObservation,
 )
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
     build_annotated_steps,
@@ -77,9 +74,9 @@ LINKED_BUG_NOTES = (
     "after the linked 11-second window has elapsed."
 )
 REWORK_SUMMARY = (
-    "Reused the approved live secondary-probe runtime from TS-1002 so TS-1043 "
-    "checks the deployed `/user` lifecycle against an actual hung `DEMO/project.json` "
-    "bootstrap fetch, then verifies the same run at the timeout checkpoint."
+    "Promoted the live delayed secondary-probe runtime into shared test support so "
+    "TS-1043 checks the deployed `/user` lifecycle against an actual hung "
+    "`DEMO/project.json` bootstrap fetch without depending on another ticket folder."
 )
 REQUEST_STEPS = [
     "Launch the TrackState application.",
@@ -121,8 +118,8 @@ def main() -> None:
     hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     workspace_state = _workspace_state(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
-    observation = Ts1002SecondaryProbeObservation(repository=service.repository)
-    runtime = Ts1002SecondaryProbeDelayRuntime(
+    observation = StartupSecondaryProbeObservation(repository=service.repository)
+    runtime = StartupSecondaryProbeDelayRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
