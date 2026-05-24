@@ -97,6 +97,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1042_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1042_failure.png"
 
@@ -329,6 +330,19 @@ def main() -> None:
                     "timestamp because the request never appeared.\n"
                     f"Observed GitHub requests: {json.dumps(result['github_request_urls'], ensure_ascii=True)}"
                 )
+            elif (
+                observation.secondary_probe_started_at_monotonic is None
+                or observation.secondary_probe_started_at_monotonic
+                > observation.auth_probe_started_at_monotonic
+            ):
+                step_four_observed = (
+                    "Step 4 failed: the delayed secondary request matching "
+                    f"`{SECONDARY_PROBE_URL_FRAGMENT}` did not start until after `/user` had "
+                    "already been initiated, so the live result did not demonstrate the "
+                    "required overlapping-latency startup path.\n"
+                    f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
+                    f"secondary_probe_started_after_start_seconds={result['secondary_probe_started_after_start_seconds']!r}"
+                )
             else:
                 step_four_observed = (
                     "Step 4 failed: the `/user` request was only seen after the delayed "
@@ -495,15 +509,49 @@ def _secondary_pending_when_auth_started(
         return None
     if observation.secondary_probe_started_at_monotonic is None:
         return False
+    if (
+        observation.secondary_probe_started_at_monotonic
+        > observation.auth_probe_started_at_monotonic
+    ):
+        return False
     if observation.secondary_probe_released_at_monotonic is None:
         return True
     return (
-        observation.auth_probe_started_at_monotonic
+        observation.secondary_probe_started_at_monotonic
+        <= observation.auth_probe_started_at_monotonic
         <= observation.secondary_probe_released_at_monotonic
     )
 
 
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3294592694,
+                        "threadId": "PRRT_kwDOSU6Gf86EYr_c",
+                        "reply": (
+                            "Fixed: the overlap predicate now only returns true when the "
+                            "delayed secondary bootstrap request had already started before "
+                            "`/user` and, when present, the `/user` start still falls before "
+                            "the secondary request release timestamp."
+                        ),
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_common_outputs() -> None:
+    _write_review_replies()
+
+
 def _write_pass_outputs(result: dict[str, Any]) -> None:
+    _write_common_outputs()
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     write_test_automation_result(RESULT_PATH, passed=True)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
@@ -512,6 +560,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
+    _write_common_outputs()
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
     if result.get("is_product_failure"):
         write_test_automation_result(RESULT_PATH, passed=False, error=error)
@@ -699,6 +748,10 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
         f"(deadline {PRIMARY_AUTH_DISPATCH_DEADLINE_SECONDS!r}) with "
         f"`secondary_pending_when_auth_started`="
         f"{result.get('secondary_pending_when_auth_started')!r}. "
+        f"secondary_probe_started_after_start_seconds="
+        f"{result.get('secondary_probe_started_after_start_seconds')!r}; "
+        f"secondary_probe_released_after_start_seconds="
+        f"{result.get('secondary_probe_released_after_start_seconds')!r}. "
         f"Observed GitHub requests: {json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}"
     )
 
