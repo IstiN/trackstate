@@ -521,7 +521,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<bool> _restoreWorkspaceFromSavedState(
     WorkspaceProfilesState state, {
     bool allowFallbackFromActive = true,
-  }) async {
+    bool deferAccessRestore = false,
+  }
+  ) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
       if (activeWorkspaceId != null)
@@ -548,8 +550,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         preserveActiveLocalSelectionOnUnsupportedAccess:
             preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
-            workspace.id == activeWorkspaceId && workspace.isLocal,
-        deferAccessRestore: true,
+            workspace.id == activeWorkspaceId &&
+            workspace.isLocal,
+        deferAccessRestore: deferAccessRestore,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -836,17 +839,15 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     if (loadedState.hasProfiles) {
       if (kIsWeb) {
-        if (loadedState.selectedWorkspace case final activeWorkspace?) {
-          viewModel.updateWorkspaceScope(activeWorkspace.id);
-        }
-        final initialLoad = viewModel.load(deferAccessRestore: true);
-        if (mounted) {
-          setState(() {
-            _workspaceProfilesReady = true;
-          });
-        }
+        final restored = await _restoreWorkspaceFromSavedState(
+          loadedState,
+          allowFallbackFromActive: false,
+        );
         _scheduleWebStartupRefresh();
-        unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
+        if (restored || !mounted) {
+          return;
+        }
+        await _handleStartupWorkspaceRestoreFailure(loadedState);
         return;
       }
       final restored = await _restoreWorkspaceFromSavedState(
@@ -882,22 +883,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
-  }
-
-  Future<void> _finishWebStartupWorkspaceRestore(
-    WorkspaceProfilesState loadedState,
-    Future<void> initialLoad,
-  ) async {
-    await initialLoad;
-    final restored = await _restoreWorkspaceFromSavedState(
-      loadedState,
-      allowFallbackFromActive: false,
-    );
-    _scheduleWebStartupRefresh();
-    if (restored || !mounted) {
-      return;
-    }
-    await _handleStartupWorkspaceRestoreFailure(loadedState);
   }
 
   Future<void> _handleStartupWorkspaceRestoreFailure(
