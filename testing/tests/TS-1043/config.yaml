@@ -1,0 +1,12 @@
+test_id: TS-1043
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app at 1440x900 against the live implementation.
+  - Reuses the live delayed-secondary-startup runtime so DEMO/project.json stays pending for 31 seconds while the GitHub /user auth probe is delayed by 1 second.
+  - Verifies within the first 5 seconds that the auth probe lifecycle starts promptly, then rechecks after the 11-second timeout window while the secondary probe is still pending.
+  - Confirms the user-visible shell is already interactive at the timeout checkpoint so the auth probe is not serialized behind the hung secondary bootstrap fetch.
