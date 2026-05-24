@@ -27,7 +27,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
@@ -439,23 +438,15 @@ def _cleanup_local_workspace() -> None:
 
 
 def _open_startup_entrypoint(tracker_page: TrackStateTrackerPage) -> RuntimeObservation:
-    tracker_page.open_entrypoint(wait_until="domcontentloaded", timeout_ms=STARTUP_ENTRY_TIMEOUT_MS)
-    try:
-        wait_match = tracker_page.session.wait_for_any_text(
-            STARTUP_ENTRY_SIGNALS,
-            timeout_ms=STARTUP_ENTRY_TIMEOUT_MS,
-        )
-    except WebAppTimeoutError as error:
-        raise AssertionError(
+    return tracker_page.open_startup_entrypoint(
+        wait_signals=STARTUP_ENTRY_SIGNALS,
+        timeout_ms=STARTUP_ENTRY_TIMEOUT_MS,
+        wait_until="domcontentloaded",
+        timeout_error_message=(
             "Step 1 failed: the deployed app never reached an observable startup or landing "
-            f"state. Visible body text: {tracker_page.body_text()}",
-        ) from error
-    if wait_match.matched_text in TrackStateTrackerPage.LOAD_ERROR_TEXT_VARIANTS:
-        return RuntimeObservation(
-            kind="data-load-failed",
-            body_text=wait_match.body_text,
-        )
-    return RuntimeObservation(kind="ready", body_text=wait_match.body_text)
+            "state."
+        ),
+    )
 
 
 def _capture_startup_state(
