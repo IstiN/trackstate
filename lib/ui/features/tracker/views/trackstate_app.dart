@@ -7841,9 +7841,23 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
             child: ExcludeSemantics(child: summaryButton),
           );
+    final interactiveSummaryControl = onSelect == null
+        ? summaryControl
+        : GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onSelect,
+            child: summaryControl,
+          );
     return Semantics(
       container: true,
       explicitChildNodes: true,
+      identifier: kIsWeb
+          ? browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id)
+          : null,
+      button: kIsWeb && onSelect != null,
+      enabled: kIsWeb && onSelect != null,
+      selected: isActive,
+      onTap: kIsWeb ? onSelect : null,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -7854,7 +7868,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            summaryControl,
+            interactiveSummaryControl,
             const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.end,
