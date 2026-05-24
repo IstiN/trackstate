@@ -322,6 +322,83 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'web startup opens the preserved local shell without waiting for delayed hosted bootstrap when browser access is unavailable',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken(
+        'github-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final delayedRepository = _SlowHostedStartupRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+
+      delayedRepository.completeLoad();
+      await tester.pump();
+      await tester.pumpAndSettle();
+    },
+  );
 }
 
 Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
@@ -546,5 +623,73 @@ class _BrowserStartupAuthProbeHarness {
         headers: web.Headers()..set('content-type', 'application/json'),
       ),
     );
+  }
+}
+
+class _SlowHostedStartupRepository extends ProviderBackedTrackStateRepository {
+  _SlowHostedStartupRepository({required TrackerSnapshot snapshot})
+    : _snapshotOverride = snapshot,
+      super(
+        provider: GitHubTrackStateProvider(
+          client: MockClient((request) async {
+            switch (request.url.path) {
+              case '/user':
+                return http.Response(
+                  jsonEncode({
+                    'login': 'demo-user',
+                    'name': 'Demo User',
+                    'id': 1,
+                    'email': 'demo@example.com',
+                  }),
+                  200,
+                );
+              case '/repos/stable/repo':
+                return http.Response(
+                  jsonEncode({
+                    'full_name': 'stable/repo',
+                    'permissions': <String, Object?>{
+                      'pull': true,
+                      'push': true,
+                      'admin': false,
+                    },
+                  }),
+                  200,
+                );
+              case '/repos/stable/repo/branches/main':
+                return http.Response(
+                  jsonEncode({
+                    'name': 'main',
+                    'commit': <String, Object?>{'sha': 'mock-revision'},
+                  }),
+                  200,
+                );
+            }
+            throw StateError(
+              'Unexpected request: ${request.method} ${request.url}',
+            );
+          }),
+          repositoryName: 'stable/repo',
+          dataRef: 'main',
+          sourceRef: 'main',
+        ),
+      );
+
+  final TrackerSnapshot _snapshotOverride;
+  final Completer<void> _loadCompleter = Completer<void>();
+  bool loadStarted = false;
+
+  void completeLoad() {
+    if (_loadCompleter.isCompleted) {
+      return;
+    }
+    _loadCompleter.complete();
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    loadStarted = true;
+    await _loadCompleter.future;
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
   }
 }

@@ -59,6 +59,49 @@ void main() {
   );
 
   test(
+    'provider-backed deferred access restore publishes a fallback shell snapshot when hosted bootstrap exceeds the startup timeout',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final provider = _DelayedFixtureProvider();
+      final repository = _SlowHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
+      expect(viewModel.issues, isEmpty);
+      expect(
+        viewModel.snapshot?.loadWarnings,
+        contains(
+          contains(
+            ProviderBackedTrackStateRepository
+                .hostedStartupShellFallbackWarningPrefix,
+          ),
+        ),
+      );
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.isConnected, isFalse);
+      expect(viewModel.providerSession?.canWrite, isFalse);
+      expect(viewModel.providerSession?.canCreateBranch, isFalse);
+    },
+  );
+
+  test(
     'deferred access restore consumes handled token failures after publishing the snapshot',
     () async {
       final authStore = _FixedAuthStore();
@@ -195,6 +238,25 @@ class _DelayedFixtureRepository extends ProviderBackedTrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _SlowHostedStartupRepository extends ProviderBackedTrackStateRepository {
+  _SlowHostedStartupRepository({
+    required this.snapshot,
+    required _DelayedFixtureProvider provider,
+  }) : super(
+         provider: provider,
+         hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+       );
+
+  final TrackerSnapshot snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
     replaceCachedState(snapshot: snapshot);
     return snapshot;
   }

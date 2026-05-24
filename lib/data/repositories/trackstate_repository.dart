@@ -170,10 +170,82 @@ class ProviderBackedTrackStateRepository
       Queue<Completer<void>>();
   bool _deleteMutationInProgress = false;
   TrackerStartupRecovery? _startupRecovery;
+  static const String hostedStartupShellFallbackWarningPrefix =
+      'Hosted startup deferred repository bootstrap after ';
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
   TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  bool usesHostedStartupShellFallback(TrackerSnapshot? snapshot) =>
+      snapshot?.loadWarnings.any(
+        (warning) =>
+            warning.startsWith(hostedStartupShellFallbackWarningPrefix),
+      ) ??
+      false;
+
+  TrackerSnapshot buildHostedStartupFallbackSnapshot() {
+    final currentSnapshot = _snapshot;
+    final warning =
+        '$hostedStartupShellFallbackWarningPrefix${_formatStartupProbeTimeout(hostedStartupProbeTimeout)}. '
+        'TrackState.AI loaded a fallback shell snapshot so the shell can open while repository data keeps loading.';
+    if (currentSnapshot != null) {
+      final snapshot = TrackerSnapshot(
+        project: currentSnapshot.project,
+        issues: currentSnapshot.issues,
+        repositoryIndex: currentSnapshot.repositoryIndex,
+        loadWarnings: [
+          ...currentSnapshot.loadWarnings,
+          if (!currentSnapshot.loadWarnings.contains(warning)) warning,
+        ],
+        readiness: currentSnapshot.readiness,
+        startupRecovery: currentSnapshot.startupRecovery,
+      );
+      _snapshot = snapshot;
+      return snapshot;
+    }
+    final workspaceName = _repositoryWorkspaceName(_provider.repositoryLabel);
+    final snapshot = TrackerSnapshot(
+      project: ProjectConfig(
+        key: _deriveFallbackProjectKey(workspaceName),
+        name: workspaceName,
+        repository: _provider.repositoryLabel,
+        branch: _provider.dataRef,
+        defaultLocale: 'en',
+        supportedLocales: const <String>['en'],
+        issueTypeDefinitions: _issueTypeDefinitions,
+        statusDefinitions: _statusDefinitions,
+        fieldDefinitions: _fieldDefinitions,
+        workflowDefinitions: _workflowDefinitions,
+        priorityDefinitions: _priorityDefinitions,
+        versionDefinitions: _versionDefinitions,
+        componentDefinitions: _componentDefinitions,
+        resolutionDefinitions: _resolutionDefinitions,
+        attachmentStorage: const ProjectAttachmentStorageSettings(),
+      ),
+      issues: const <TrackStateIssue>[],
+      repositoryIndex: const RepositoryIndex(),
+      loadWarnings: <String>[warning],
+      readiness: const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.partial,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.partial,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.partial,
+          TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.partial,
+          TrackerSectionKey.board: TrackerLoadState.partial,
+          TrackerSectionKey.search: TrackerLoadState.partial,
+          TrackerSectionKey.hierarchy: TrackerLoadState.partial,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      ),
+      startupRecovery: _startupRecovery,
+    );
+    _snapshot = snapshot;
+    return snapshot;
+  }
 
   @override
   Future<RepositorySyncCheck> checkSync({
@@ -1915,7 +1987,8 @@ class ProviderBackedTrackStateRepository
     try {
       projectJson = await _loadHostedStartupProbe<Map<String, Object?>>(
         projectPath,
-        () async => await _getRepositoryJson(projectPath) as Map<String, Object?>,
+        () async =>
+            await _getRepositoryJson(projectPath) as Map<String, Object?>,
       );
     } on _HostedStartupProbeTimeout catch (error) {
       loadWarnings.add(
@@ -2004,6 +2077,7 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       dataRoot: dataRoot,
       issueTypeDefinitions: issueTypes,
+      loadWarnings: loadWarnings,
     );
     final statuses = await statusesFuture;
     final workflowsFuture = _loadWorkflowDefinitions(
@@ -2378,7 +2452,10 @@ class ProviderBackedTrackStateRepository
       }
       Object? json;
       try {
-        json = await _loadHostedStartupProbe<Object?>(path, () => _getRepositoryJson(path));
+        json = await _loadHostedStartupProbe<Object?>(
+          path,
+          () => _getRepositoryJson(path),
+        );
       } on _HostedStartupProbeTimeout catch (error) {
         loadWarnings.add(
           _hostedStartupTimeoutWarning(
@@ -2561,10 +2638,7 @@ class ProviderBackedTrackStateRepository
       );
     } on _HostedStartupProbeTimeout catch (error) {
       loadWarnings.add(
-        _hostedStartupTimeoutWarning(
-          error.path,
-          fallbackDescription: 'fields',
-        ),
+        _hostedStartupTimeoutWarning(error.path, fallbackDescription: 'fields'),
       );
       return List<TrackStateFieldDefinition>.from(
         _fieldDefinitions,
@@ -2584,7 +2658,10 @@ class ProviderBackedTrackStateRepository
     }
     Object? json;
     try {
-      json = await _loadHostedStartupProbe<Object?>(path, () => _getRepositoryJson(path));
+      json = await _loadHostedStartupProbe<Object?>(
+        path,
+        () => _getRepositoryJson(path),
+      );
     } on _HostedStartupProbeTimeout catch (error) {
       loadWarnings.add(
         _hostedStartupTimeoutWarning(
@@ -2667,17 +2744,36 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String dataRoot,
     required List<TrackStateConfigEntry> issueTypeDefinitions,
+    required List<String> loadWarnings,
   }) async {
     final issuesPath = _joinPath(dataRoot, '.trackstate/index/issues.json');
     final entries = <RepositoryIssueIndexEntry>[];
     if (blobPaths.contains(issuesPath)) {
-      final json = await _getRepositoryJson(issuesPath);
-      if (json is List) {
+      try {
+        final json = await _loadHostedStartupProbe<Object?>(
+          issuesPath,
+          () => _getRepositoryJson(issuesPath),
+        );
+        if (json is List) {
+          entries.addAll(
+            json
+                .whereType<Map>()
+                .map((entry) => _repositoryIndexEntry(entry))
+                .where((entry) => blobPaths.contains(entry.path)),
+          );
+        }
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'summary issue index',
+          ),
+        );
         entries.addAll(
-          json
-              .whereType<Map>()
-              .map((entry) => _repositoryIndexEntry(entry))
-              .where((entry) => blobPaths.contains(entry.path)),
+          _fallbackHostedRepositoryIndexEntries(
+            blobPaths: blobPaths,
+            dataRoot: dataRoot,
+          ),
         );
       }
     }
@@ -2685,6 +2781,7 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       dataRoot: dataRoot,
       issueTypeDefinitions: issueTypeDefinitions,
+      loadWarnings: loadWarnings,
     );
     return RepositoryIndex(entries: entries, deleted: deleted);
   }
@@ -2693,6 +2790,7 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String dataRoot,
     required List<TrackStateConfigEntry> issueTypeDefinitions,
+    required List<String> loadWarnings,
     bool includeLegacyDeletedIndex = true,
   }) async {
     final tombstonesPath = _joinPath(
@@ -2704,7 +2802,18 @@ class ProviderBackedTrackStateRepository
     if (blobPaths.contains(tombstonesPath)) {
       Object? json;
       try {
-        json = await _getRepositoryJson(tombstonesPath);
+        json = await _loadHostedStartupProbe<Object?>(
+          tombstonesPath,
+          () => _getRepositoryJson(tombstonesPath),
+        );
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'deleted issue index',
+          ),
+        );
+        return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
         return _dedupeDeletedIssueTombstones(deleted);
@@ -2724,7 +2833,18 @@ class ProviderBackedTrackStateRepository
           }
           Object? tombstoneJson;
           try {
-            tombstoneJson = await _getRepositoryJson(tombstonePath);
+            tombstoneJson = await _loadHostedStartupProbe<Object?>(
+              tombstonePath,
+              () => _getRepositoryJson(tombstonePath),
+            );
+          } on _HostedStartupProbeTimeout catch (error) {
+            loadWarnings.add(
+              _hostedStartupTimeoutWarning(
+                error.path,
+                fallbackDescription: 'deleted issue metadata',
+              ),
+            );
+            return _dedupeDeletedIssueTombstones(deleted);
           } on GitHubRateLimitException catch (error) {
             _captureHostedStartupRecovery(error);
             return _dedupeDeletedIssueTombstones(deleted);
@@ -2746,7 +2866,18 @@ class ProviderBackedTrackStateRepository
     if (includeLegacyDeletedIndex && blobPaths.contains(deletedPath)) {
       Object? json;
       try {
-        json = await _getRepositoryJson(deletedPath);
+        json = await _loadHostedStartupProbe<Object?>(
+          deletedPath,
+          () => _getRepositoryJson(deletedPath),
+        );
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'legacy deleted issue index',
+          ),
+        );
+        return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
         return _dedupeDeletedIssueTombstones(deleted);
@@ -2763,6 +2894,65 @@ class ProviderBackedTrackStateRepository
       }
     }
     return _dedupeDeletedIssueTombstones(deleted);
+  }
+
+  List<RepositoryIssueIndexEntry> _fallbackHostedRepositoryIndexEntries({
+    required Set<String> blobPaths,
+    required String dataRoot,
+  }) {
+    final issuePaths =
+        blobPaths
+            .where(
+              (path) =>
+                  path.startsWith(dataRoot.isEmpty ? '' : '$dataRoot/') &&
+                  path.endsWith('/main.md'),
+            )
+            .toList()
+          ..sort();
+    final fallbackEntries = <RepositoryIssueIndexEntry>[];
+    for (final path in issuePaths) {
+      final segments = path.split('/');
+      if (segments.length < 3) {
+        continue;
+      }
+      final issueSegments = segments.sublist(1, segments.length - 1);
+      if (issueSegments.isEmpty) {
+        continue;
+      }
+      final key = issueSegments.last;
+      final issueRoot = _issueRoot(path);
+      final hasChildren = issuePaths.any(
+        (candidate) => candidate != path && candidate.startsWith('$issueRoot/'),
+      );
+      final parentKey = issueSegments.length >= 3
+          ? issueSegments[issueSegments.length - 2]
+          : null;
+      final epicKey = issueSegments.length >= 2 ? issueSegments.first : null;
+      final issueTypeId = switch (issueSegments.length) {
+        >= 3 => 'subtask',
+        _ when hasChildren => 'epic',
+        _ => 'story',
+      };
+      fallbackEntries.add(
+        RepositoryIssueIndexEntry(
+          key: key,
+          path: path,
+          parentKey: parentKey,
+          epicKey: epicKey == key ? null : epicKey,
+          childKeys: const [],
+          isArchived: false,
+          summary: key,
+          issueTypeId: issueTypeId,
+          statusId: 'todo',
+          priorityId: 'medium',
+          labels: const <String>[],
+          updatedLabel: 'loading...',
+          progress: issueTypeId == 'subtask' ? 0 : .35,
+          revision: null,
+        ),
+      );
+    }
+    return fallbackEntries;
   }
 
   void _captureHostedStartupRecovery(GitHubRateLimitException error) {

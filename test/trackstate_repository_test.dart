@@ -1158,6 +1158,225 @@ updated: 2026-05-05T00:05:00Z
   );
 
   test(
+    'setup repository returns hosted shell bootstrap before delayed summary issue index completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'epic', 'name': 'Epic'},
+            {'id': 'story', 'name': 'Story'},
+            {'id': 'subtask', 'name': 'Sub-task'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: epic
+status: todo
+priority: medium
+summary: Bootstrap summary fallback
+updated: 2026-05-05T00:05:00Z
+---
+''',
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Child issue
+updated: 2026-05-05T00:06:00Z
+epic: DEMO-1
+---
+''',
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Bootstrap summary fallback',
+              'issueType': 'epic',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': ['DEMO-2'],
+              'archived': false,
+            },
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'summary': 'Child issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:06:00Z',
+              'epic': 'DEMO-1',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/index/issues.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode([
+              {
+                'key': 'DEMO-1',
+                'path': 'DEMO/DEMO-1/main.md',
+                'summary': 'Bootstrap summary fallback',
+                'issueType': 'epic',
+                'status': 'todo',
+                'updated': '2026-05-05T00:05:00Z',
+                'children': ['DEMO-2'],
+                'archived': false,
+              },
+              {
+                'key': 'DEMO-2',
+                'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+                'summary': 'Child issue',
+                'issueType': 'story',
+                'status': 'todo',
+                'updated': '2026-05-05T00:06:00Z',
+                'epic': 'DEMO-1',
+                'children': [],
+                'archived': false,
+              },
+            ]),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1', 'DEMO-2']);
+      expect(snapshot.issues.first.summary, 'DEMO-1');
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/index/issues.json',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed tombstone metadata completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Live issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
+            },
+          ]),
+          'DEMO/.trackstate/tombstones/DEMO-99.json': jsonEncode({
+            'key': 'DEMO-99',
+            'project': 'DEMO',
+            'formerPath': 'DEMO/DEMO-99/main.md',
+            'deletedAt': '2026-05-05T00:07:00Z',
+            'summary': 'Deleted issue',
+          }),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Live issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/tombstones/DEMO-99.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode({
+              'key': 'DEMO-99',
+              'project': 'DEMO',
+              'formerPath': 'DEMO/DEMO-99/main.md',
+              'deletedAt': '2026-05-05T00:07:00Z',
+              'summary': 'Deleted issue',
+            }),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(snapshot.repositoryIndex.deleted, isEmpty);
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/tombstones/DEMO-99.json',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(
