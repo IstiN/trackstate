@@ -373,16 +373,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     else:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
-        json.dumps(
-            {
-                "status": "failed",
-                "passed": 0,
-                "failed": 1,
-                "skipped": 0,
-                "summary": "0 passed, 1 failed",
-                "error": str(result.get("error", "AssertionError: TS-706 failed")),
-            }
-        )
+        json.dumps(_test_automation_result_payload(result, passed=False))
         + "\n",
         encoding="utf-8",
     )
@@ -664,6 +655,55 @@ def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
         json.dumps({"replies": replies}) + "\n",
         encoding="utf-8",
     )
+
+
+def _test_automation_result_payload(
+    result: dict[str, object], *, passed: bool
+) -> dict[str, object]:
+    if passed:
+        return {
+            "status": "passed",
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "summary": "1 passed, 0 failed",
+        }
+    if result.get("precondition_failure") is True:
+        return {
+            "status": "blocked_by_human",
+            "passed": 0,
+            "failed": 0,
+            "skipped": 1,
+            "summary": "0 passed, 0 failed, 1 skipped",
+            "blocked_reason": (
+                "TS-706 could not validate the no-runner workflow path because a "
+                "matching macOS release runner was online; a maintainer must make all "
+                "matching macOS release runners offline before rerunning the live test."
+            ),
+            "missing": [
+                {
+                    "type": "test_data",
+                    "name": "offline_macos_release_runner_state",
+                    "description": (
+                        "A live GitHub Actions environment where no online runner "
+                        "matches [self-hosted, macOS, trackstate-release, ARM64]."
+                    ),
+                    "how_to_add": (
+                        "Take all matching self-hosted macOS release runners offline, "
+                        "then rerun `mkdir -p outputs && PYTHONPATH=. python3 "
+                        "testing/tests/TS-706/test_ts_706.py`."
+                    ),
+                }
+            ],
+        }
+    return {
+        "status": "failed",
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "summary": "0 passed, 1 failed",
+        "error": str(result.get("error", "AssertionError: TS-706 failed")),
+    }
 
 
 def _discussion_threads() -> list[dict[str, object]]:
