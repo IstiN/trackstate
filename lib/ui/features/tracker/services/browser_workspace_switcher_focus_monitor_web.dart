@@ -128,6 +128,9 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       );
       if (tabMoveResult != _BrowserWorkspaceSwitcherTabMoveResult.none) {
         keyboardEvent.preventDefault();
+        // Stop propagation so Flutter's semantics layer cannot also act on the
+        // same Tab event and asynchronously reassign focus.
+        keyboardEvent.stopImmediatePropagation();
       }
       if (tabMoveResult ==
           _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
@@ -449,12 +452,40 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
-  if (!_focusElement(focusTargets[targetIndex].element)) {
+  final targetElement = focusTargets[targetIndex].element;
+  if (!_focusElement(targetElement)) {
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
+  // Guard the new focus target for a few frames. Flutter's semantics layer
+  // may asynchronously reassign focus after our _focusElement call; the guard
+  // detects that and corrects it back to the intended element.
+  _guardTabHandoffFocus(targetElement);
   return focusTargets[targetIndex].isWithinWorkspaceSwitcher
       ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
       : _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher;
+}
+
+/// Keeps [target] focused for up to [_tabHandoffGuardFrames] animation frames
+/// (~96 ms) in case Flutter's semantics bridge asynchronously moves focus
+/// away from the element we just focused during Tab navigation.
+void _guardTabHandoffFocus(web.Element target) {
+  const maxAttempts = 6;
+  var attempts = 0;
+  Timer? timer;
+  timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+    attempts++;
+    final active = web.document.activeElement;
+    if (active == null || active == target || target.contains(active)) {
+      timer?.cancel();
+      return;
+    }
+    (target as web.HTMLElement).focus(
+      web.FocusOptions(preventScroll: true),
+    );
+    if (attempts >= maxAttempts) {
+      timer?.cancel();
+    }
+  });
 }
 
 bool _isBrowserWorkspaceSwitcherFallbackFocus({
