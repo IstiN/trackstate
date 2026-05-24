@@ -2101,7 +2101,10 @@ class TrackerViewModel extends ChangeNotifier {
     bool allowHostedStartupFallback = false,
   }) async {
     final repository = _repository;
-    var deferInitialSearchUntilAfterShellReady = false;
+    final shouldDeferInitialSearchUntilAfterShellReady =
+        allowHostedStartupFallback &&
+        repository is ProviderBackedTrackStateRepository &&
+        !repository.usesLocalPersistence;
     final snapshot = await (() async {
       if (allowHostedStartupFallback &&
           repository is ProviderBackedTrackStateRepository &&
@@ -2111,7 +2114,6 @@ class TrackerViewModel extends ChangeNotifier {
         try {
           return await loadFuture.timeout(repository.hostedStartupProbeTimeout);
         } on TimeoutException {
-          deferInitialSearchUntilAfterShellReady = true;
           return repository.buildHostedStartupFallbackSnapshot();
         }
       }
@@ -2124,7 +2126,7 @@ class TrackerViewModel extends ChangeNotifier {
     );
     notifyListeners();
     final requestToken = _beginSearchRequest();
-    if (deferInitialSearchUntilAfterShellReady) {
+    if (shouldDeferInitialSearchUntilAfterShellReady) {
       unawaited(
         _loadInitialSearchPage(
           requestToken: requestToken,
