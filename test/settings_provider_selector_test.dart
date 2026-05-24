@@ -316,6 +316,41 @@ void main() {
     },
   );
 
+  testWidgets('settings locale editor exposes a validated locale selector', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    final repository = _EditableSettingsWidgetRepository();
+
+    try {
+      await tester.pumpWidget(TrackStateApp(repository: repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+      await tester.pumpAndSettle();
+
+      final localesTab = _settingsTab('Locales');
+      await tester.ensureVisible(localesTab);
+      await tester.tap(localesTab);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add locale'));
+      await tester.pumpAndSettle();
+
+      expect(_localeCodeDropdown(), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'Locale code'), findsNothing);
+
+      await tester.tap(_localeCodeDropdown());
+      await tester.pumpAndSettle();
+
+      expect(find.text('fr').last, findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
   testWidgets(
     'settings locale admin adds a locale and persists supported locales',
     (tester) async {
@@ -336,10 +371,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          'fr',
-        );
+        await _selectLocaleCode(tester, 'fr');
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -360,6 +392,41 @@ void main() {
       }
     },
   );
+
+  testWidgets('settings locale add persists immediately after dialog save', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    final repository = _EditableSettingsWidgetRepository();
+
+    try {
+      await tester.pumpWidget(TrackStateApp(repository: repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+      await tester.pumpAndSettle();
+
+      final localesTab = _settingsTab('Locales');
+      await tester.ensureVisible(localesTab);
+      await tester.tap(localesTab);
+      await tester.pumpAndSettle();
+
+      expect(repository.saveProjectSettingsCalls, 0);
+
+      await tester.tap(find.text('Add locale'));
+      await tester.pumpAndSettle();
+      await _selectLocaleCode(tester, 'fr');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      expect(repository.saveProjectSettingsCalls, 1);
+      expect(repository.savedSettings?.effectiveSupportedLocales, ['en', 'fr']);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
 
   testWidgets(
     'settings locale warnings stay accessible and focus in catalog order',
@@ -382,10 +449,7 @@ void main() {
         await robot.openLocalesTab();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          locale,
-        );
+        await _selectLocaleCode(tester, locale);
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -559,10 +623,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          'fr',
-        );
+        await _selectLocaleCode(tester, 'fr');
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -594,6 +655,20 @@ void main() {
 Finder _settingsTab(String label) =>
     find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
+Finder _localeCodeDropdown() => find.byWidgetPredicate(
+  (widget) =>
+      widget is DropdownButtonFormField<String> &&
+      widget.decoration.labelText == 'Locale code',
+  description: 'Locale code dropdown',
+);
+
+Future<void> _selectLocaleCode(WidgetTester tester, String locale) async {
+  await tester.tap(_localeCodeDropdown());
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(locale).last);
+  await tester.pumpAndSettle();
+}
+
 class _EditableSettingsWidgetRepository
     implements TrackStateRepository, ProjectSettingsRepository {
   _EditableSettingsWidgetRepository()
@@ -601,6 +676,7 @@ class _EditableSettingsWidgetRepository
 
   Future<TrackerSnapshot> _snapshot;
   ProjectSettingsCatalog? savedSettings;
+  int saveProjectSettingsCalls = 0;
 
   @override
   bool get supportsGitHubAuth => false;
@@ -691,6 +767,7 @@ class _EditableSettingsWidgetRepository
   Future<TrackerSnapshot> saveProjectSettings(
     ProjectSettingsCatalog settings,
   ) async {
+    saveProjectSettingsCalls += 1;
     savedSettings = settings;
     final current = await _snapshot;
     final updated = TrackerSnapshot(

@@ -8483,22 +8483,34 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   }
 
   Future<void> _addLocale(AppLocalizations l10n) async {
-    final locale = await _showSettingsEditor<String>(
-      title: l10n.addLocale,
-      child: const _LocaleCodeEditor(),
-    );
-    if (locale == null || _draftSettings == null) {
+    final current = _draftSettings;
+    if (current == null) {
       return;
     }
-    final current = _draftSettings!;
-    final supportedLocales = <String>[
-      ...current.effectiveSupportedLocales,
-      if (!current.effectiveSupportedLocales.contains(locale)) locale,
-    ];
-    _replaceDraft(current.copyWith(supportedLocales: supportedLocales));
-    setState(() {
-      _selectedLocale = locale;
-    });
+    await _showSettingsEditor<String>(
+      title: l10n.addLocale,
+      child: _LocaleCodeEditor(
+        configuredLocales: current.effectiveSupportedLocales,
+        onSaveLocale: (locale) async {
+          final nextSettings = current.copyWith(
+            supportedLocales: [
+              ...current.effectiveSupportedLocales,
+              if (!current.effectiveSupportedLocales.contains(locale)) locale,
+            ],
+          );
+          final saved = await widget.viewModel.saveProjectSettings(nextSettings);
+          if (!saved || !mounted) {
+            return false;
+          }
+          setState(() {
+            _projectSignature = _projectSettingsSignature(nextSettings);
+            _draftSettings = nextSettings;
+            _selectedLocale = locale;
+          });
+          return true;
+        },
+      ),
+    );
   }
 
   void _removeLocale(String locale) {
@@ -9594,20 +9606,46 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
 }
 
 class _LocaleCodeEditor extends StatefulWidget {
-  const _LocaleCodeEditor();
+  const _LocaleCodeEditor({
+    required this.configuredLocales,
+    required this.onSaveLocale,
+  });
+
+  final List<String> configuredLocales;
+  final Future<bool> Function(String locale) onSaveLocale;
 
   @override
   State<_LocaleCodeEditor> createState() => _LocaleCodeEditorState();
 }
 
 class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
-  final TextEditingController _controller = TextEditingController(text: 'fr');
+  static final RegExp _supportedLocaleCodePattern = RegExp(
+    r'^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?$',
+  );
+  static const List<String> _preferredLocaleCodes = [
+    'fr',
+    'de',
+    'es',
+    'it',
+    'pt',
+    'nl',
+    'pl',
+    'ja',
+    'ko',
+    'zh-CN',
+    'zh-TW',
+    'ar',
+    'he',
+    'hi',
+    'ru',
+  ];
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  late final List<String> _availableLocaleCodes = _buildAvailableLocaleCodes(
+    configuredLocales: widget.configuredLocales,
+  );
+  late String? _selectedLocaleCode = _availableLocaleCodes.isEmpty
+      ? null
+      : _availableLocaleCodes.first;
 
   @override
   Widget build(BuildContext context) {
@@ -9615,17 +9653,66 @@ class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(
-          label: l10n.localeCode,
-          controller: _controller,
-          helperText: l10n.localeCodeHelper,
+        DropdownButtonFormField<String>(
+          initialValue: _selectedLocaleCode,
+          decoration: InputDecoration(
+            labelText: l10n.localeCode,
+            helperText: l10n.localeCodeHelper,
+          ),
+          items: [
+            for (final localeCode in _availableLocaleCodes)
+              DropdownMenuItem<String>(
+                value: localeCode,
+                child: Text(localeCode),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _selectedLocaleCode = value;
+            });
+          },
         ),
         const SizedBox(height: 16),
         _SettingsEditorActions(
-          onSave: () => Navigator.of(context).pop(_controller.text.trim()),
+          onSave: () async {
+            final selectedLocaleCode = _selectedLocaleCode;
+            if (selectedLocaleCode == null) {
+              return;
+            }
+            final navigator = Navigator.of(context);
+            final normalizedLocaleCode = selectedLocaleCode.trim();
+            final saved = await widget.onSaveLocale(normalizedLocaleCode);
+            if (!mounted || !saved) {
+              return;
+            }
+            navigator.pop(normalizedLocaleCode);
+          },
         ),
       ],
     );
+  }
+
+  List<String> _buildAvailableLocaleCodes({
+    required List<String> configuredLocales,
+  }) {
+    final configured = configuredLocales.map((locale) => locale.trim()).toSet();
+    final available = <String>{};
+    for (final locale in DateFormat.allLocalesWithSymbols()) {
+      final normalized = locale.replaceAll('_', '-').trim();
+      if (normalized.isEmpty ||
+          configured.contains(normalized) ||
+          !_supportedLocaleCodePattern.hasMatch(normalized)) {
+        continue;
+      }
+      available.add(normalized);
+    }
+    final preferred = <String>[
+      for (final locale in _preferredLocaleCodes)
+        if (available.remove(locale)) locale,
+    ];
+    final availableLocaleCodes = available.toList()..sort();
+    availableLocaleCodes.insertAll(0, preferred);
+    return availableLocaleCodes;
   }
 }
 
