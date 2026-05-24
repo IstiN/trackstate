@@ -5940,10 +5940,17 @@ class _AccessCallout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final theme = Theme.of(context);
     final accentColor = switch (tone) {
       _AccessCalloutTone.warning => colors.accent,
       _AccessCalloutTone.success => colors.success,
     };
+    final usesLightWarningTreatment =
+        tone == _AccessCalloutTone.warning &&
+        theme.brightness == Brightness.light;
+    final contentColor = usesLightWarningTreatment
+        ? const Color(0xFF1F1D1A)
+        : colors.text;
     return Semantics(
       container: true,
       readOnly: true,
@@ -5973,7 +5980,8 @@ class _AccessCallout extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: contentColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -5982,7 +5990,14 @@ class _AccessCallout extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            ExcludeSemantics(child: Text(message)),
+            ExcludeSemantics(
+              child: Text(
+                message,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: contentColor,
+                ),
+              ),
+            ),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
@@ -5996,10 +6011,15 @@ class _AccessCallout extends StatelessWidget {
                       order: actionTraversalOrderBase,
                       child: OutlinedButton(
                         onPressed: onPrimaryAction,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: accentColor),
-                        ),
+                        style: usesLightWarningTreatment
+                            ? _warningCalloutPrimaryActionStyle(
+                                accentColor: accentColor,
+                                contentColor: contentColor,
+                              )
+                            : OutlinedButton.styleFrom(
+                                foregroundColor: colors.text,
+                                side: BorderSide(color: accentColor),
+                              ),
                         child: Text(primaryActionLabel!),
                       ),
                     ),
@@ -6010,6 +6030,9 @@ class _AccessCallout extends StatelessWidget {
                           : actionTraversalOrderBase! + 1,
                       child: FilledButton(
                         onPressed: onSecondaryAction,
+                        style: usesLightWarningTreatment
+                            ? _warningCalloutSecondaryActionStyle(colors)
+                            : null,
                         child: Text(secondaryActionLabel!),
                       ),
                     ),
@@ -6021,6 +6044,46 @@ class _AccessCallout extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _warningCalloutPrimaryActionStyle({
+  required Color accentColor,
+  required Color contentColor,
+}) {
+  return ButtonStyle(
+    foregroundColor: WidgetStatePropertyAll<Color>(contentColor),
+    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return const Color(0xFFFFE7AE);
+      }
+      if (states.contains(WidgetState.hovered) ||
+          states.contains(WidgetState.focused)) {
+        return const Color(0xFFFFF1CF);
+      }
+      return Colors.transparent;
+    }),
+    side: WidgetStatePropertyAll<BorderSide>(BorderSide(color: accentColor)),
+  );
+}
+
+ButtonStyle _warningCalloutSecondaryActionStyle(TrackStateColors colors) {
+  return ButtonStyle(
+    foregroundColor: WidgetStatePropertyAll<Color>(colors.page),
+    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return const Color(0xFF8F321B);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return const Color(0xFF9D381F);
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return const Color(0xFFA53B22);
+      }
+      return colors.primary;
+    }),
+  );
 }
 
 enum _AccessCalloutTone { warning, success }
@@ -6084,7 +6147,7 @@ class _StartupRecoveryView extends StatelessWidget {
                 semanticLabel: l10n.startupRecovery,
                 title: _startupRecoveryTitle(l10n, recovery),
                 message: _startupRecoveryMessage(l10n, viewModel),
-                primaryActionLabel: l10n.retry,
+                primaryActionLabel: l10n.retryStartup,
                 onPrimaryAction: () {
                   unawaited(onRetryStartupRecovery());
                 },
@@ -8498,7 +8561,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
               if (!current.effectiveSupportedLocales.contains(locale)) locale,
             ],
           );
-          final saved = await widget.viewModel.saveProjectSettings(nextSettings);
+          final saved = await widget.viewModel.saveProjectSettings(
+            nextSettings,
+          );
           if (!saved || !mounted) {
             return false;
           }
