@@ -547,11 +547,12 @@ void main() {
           selectedRow: true,
         );
 
-        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
-          onBrowserTab: () {},
-          onBrowserFocusOutside: () {},
-          onBrowserBoundaryKey: (_) {},
-        );
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
         addTearDown(subscription.cancel);
 
         trigger.focus();
@@ -567,6 +568,86 @@ void main() {
               'node instead of the managed bridge button, forward Tab should still '
               'enter the panel at the selected workspace row instead of falling '
               'through to page chrome.',
+        );
+      },
+    );
+
+    test(
+      'Tab from the selected row reaches the visually first in-panel control even when controls are earlier in DOM order',
+      () {
+        final panel = _appendPanel(host);
+        final hostedButton = _appendButton(
+          panel,
+          label: 'Hosted',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 120,
+          width: 96,
+          height: 36,
+        );
+        _appendButton(
+          panel,
+          label: 'Local',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 112,
+          top: 120,
+          width: 96,
+          height: 36,
+        );
+        _appendButton(
+          panel,
+          label: 'Save and switch',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 216,
+          width: 180,
+          height: 40,
+        );
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        row.focus();
+        expect(web.document.activeElement, same(row));
+
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        expect(
+          web.document.activeElement,
+          same(hostedButton),
+          reason:
+              'Forward tab from the selected row should use the visual first '
+              'in-panel control even when Flutter emits the bridge buttons '
+              'before the row in DOM order.',
         );
       },
     );
