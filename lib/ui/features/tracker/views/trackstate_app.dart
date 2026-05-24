@@ -3790,6 +3790,19 @@ class _WorkspaceOnboardingScreenState
                             label: l10n.branch,
                             controller: _hostedBranchController,
                           ),
+                          const SizedBox(height: 12),
+                          ListenableBuilder(
+                            listenable: Listenable.merge(<Listenable>[
+                              _hostedRepositoryController,
+                              _hostedBranchController,
+                            ]),
+                            builder: (context, _) {
+                              return _HostedWorkspaceIdentityPreview(
+                                repository: _hostedRepositoryController.text,
+                                branch: _hostedBranchController.text,
+                              );
+                            },
+                          ),
                           const SizedBox(height: 16),
                           _HostedRepositorySuggestions(
                             repositories: _hostedRepositories,
@@ -3938,6 +3951,72 @@ class _HostedRepositorySuggestions extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _HostedWorkspaceIdentityPreview extends StatelessWidget {
+  const _HostedWorkspaceIdentityPreview({
+    required this.repository,
+    required this.branch,
+  });
+
+  final String repository;
+  final String branch;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedRepository = repository.trim();
+    if (trimmedRepository.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    final trimmedBranch = branch.trim();
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      container: true,
+      label:
+          trimmedBranch.isEmpty
+              ? trimmedRepository
+              : '$trimmedRepository ${l10n.branch}: $trimmedBranch',
+      child: Container(
+        key: const ValueKey('workspace-onboarding-hosted-identity-preview'),
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              key: const ValueKey(
+                'workspace-onboarding-hosted-identity-preview-repository',
+              ),
+              trimmedRepository,
+              style: textTheme.bodyMedium?.copyWith(
+                fontFamily: 'JetBrains Mono',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (trimmedBranch.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                key: const ValueKey(
+                  'workspace-onboarding-hosted-identity-preview-branch',
+                ),
+                '${l10n.branch}: $trimmedBranch',
+                style: textTheme.bodySmall?.copyWith(color: colors.muted),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
