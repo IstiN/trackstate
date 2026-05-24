@@ -398,6 +398,7 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(
         ),
       );
     } else if (path.endsWith('/acceptance_criteria.md') ||
+        path == 'links.json' ||
         path.endsWith('/links.json')) {
       changes.add(
         WorkspaceSyncDomainChange(
