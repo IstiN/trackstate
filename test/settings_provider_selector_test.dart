@@ -658,7 +658,7 @@ Finder _settingsTab(String label) =>
 Finder _localeCodeDropdown() => find.byWidgetPredicate(
   (widget) =>
       widget is DropdownButtonFormField<String> &&
-      widget.decoration?.labelText == 'Locale code',
+      widget.decoration.labelText == 'Locale code',
   description: 'Locale code dropdown',
 );
 
