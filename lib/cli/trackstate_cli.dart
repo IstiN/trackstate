@@ -1016,6 +1016,7 @@ class TrackStateCli {
         'field',
         help:
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: arguments,
@@ -1069,10 +1070,12 @@ class TrackStateCli {
         'field',
         help:
             'Field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       )
       ..addMultiOption(
         'clear-field',
         help: 'Field identifiers to clear during the update.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: arguments,
@@ -1548,6 +1551,7 @@ class TrackStateCli {
         'field',
         help:
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: _normalizeLegacyJiraArguments(arguments, const {
@@ -1677,6 +1681,7 @@ class TrackStateCli {
         'field',
         help:
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: _normalizeLegacyJiraArguments(arguments, const {

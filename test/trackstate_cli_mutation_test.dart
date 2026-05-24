@@ -503,6 +503,54 @@ void main() {
     );
 
     test(
+      'preserves repeated --field assignments that contain JSON array commas',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final updateResult = await cli.run([
+          'ticket',
+          'update',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--key',
+          'DEMO-2',
+          '--field',
+          'summary=New Title',
+          '--field',
+          'priority=High',
+          '--field',
+          'labels=["bug","ai"]',
+          '--field',
+          'assignee=user1',
+        ]);
+        final updateJson =
+            jsonDecode(updateResult.stdout) as Map<String, Object?>;
+
+        expect(updateResult.exitCode, 0, reason: updateResult.stdout);
+        expect(updateJson['ok'], isTrue, reason: updateResult.stdout);
+        final updateData = updateJson['data']! as Map<String, Object?>;
+        final updatedIssue = updateData['issue']! as Map<String, Object?>;
+        expect(updateData['command'], 'ticket-update');
+        expect(updateData['operation'], 'update-fields');
+        expect(updatedIssue['summary'], 'New Title');
+        expect(updatedIssue['priority'], 'high');
+        expect(updatedIssue['assignee'], 'user1');
+        expect(updatedIssue['labels'], <String>['bug', 'ai']);
+
+        final mainFile = File('${repo.path}/DEMO/DEMO-1/DEMO-2/main.md')
+            .readAsStringSync();
+        expect(mainFile, contains('summary: "New Title"'));
+        expect(mainFile, contains('priority: high'));
+        expect(mainFile, contains('assignee: user1'));
+        expect(mainFile, contains('labels: ["bug","ai"]'));
+      },
+    );
+
+    test(
       'supports lifecycle mutations for status, assignee, labels, description, and hierarchy',
       () async {
         final repo = await _createCliMutationRepository();
