@@ -52,6 +52,43 @@ void main() {
     });
 
     test(
+      'creates tickets from the top-level create alias with native hierarchy flags',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final result = await cli.run([
+          'create',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--summary',
+          'CLI created story',
+          '--issueType',
+          'Story',
+          '--epic',
+          'DEMO-10',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final issue = data['issue']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['command'], 'ticket-create');
+        expect(issue['key'], 'DEMO-11');
+        expect(issue['epic'], 'DEMO-10');
+        expect(issue['issueType'], 'story');
+        expect(
+          File('${repo.path}/DEMO/DEMO-10/DEMO-11/main.md').existsSync(),
+          isTrue,
+        );
+      },
+    );
+
+    test(
       'creates tickets from legacy jira_create_ticket_with_json project and fieldsJson arguments',
       () async {
         final repo = await _createCliMutationRepository();
@@ -693,10 +730,7 @@ void main() {
         expect(error['message'], contains('DEMO-2'));
         expect(error['message'], contains('demo-2'));
         expect(error['message'], contains('itself'));
-        expect(
-          error['details'],
-          containsPair('targetKey', 'demo-2'),
-        );
+        expect(error['details'], containsPair('targetKey', 'demo-2'));
         expect(
           File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
           isFalse,
@@ -756,10 +790,7 @@ void main() {
                 as Map<String, Object?>;
         expect(archiveResult.exitCode, 0);
         expect(archiveIssue['archived'], isTrue);
-        expect(
-          File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(),
-          isTrue,
-        );
+        expect(File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(), isTrue);
         expect(
           File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
           contains('archived: true'),
@@ -820,7 +851,8 @@ void main() {
         final cli = _createCli(workingDirectory: repo.path);
 
         final archiveResult = await cli.run(['archive', 'DEMO-10']);
-        final archiveJson = jsonDecode(archiveResult.stdout) as Map<String, Object?>;
+        final archiveJson =
+            jsonDecode(archiveResult.stdout) as Map<String, Object?>;
         final archiveData = archiveJson['data']! as Map<String, Object?>;
         final archiveIssue = archiveData['issue']! as Map<String, Object?>;
 
@@ -834,8 +866,9 @@ void main() {
           contains('archived: true'),
         );
         expect(
-          File('${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md')
-              .existsSync(),
+          File(
+            '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
+          ).existsSync(),
           isFalse,
         );
 
@@ -859,17 +892,23 @@ void main() {
         final createdKey = createdIssue['key']! as String;
 
         final deleteResult = await cli.run(['jira_delete_ticket', createdKey]);
-        final deleteJson = jsonDecode(deleteResult.stdout) as Map<String, Object?>;
+        final deleteJson =
+            jsonDecode(deleteResult.stdout) as Map<String, Object?>;
         final deleteData = deleteJson['data']! as Map<String, Object?>;
-        final deletedIssue = deleteData['deletedIssue']! as Map<String, Object?>;
+        final deletedIssue =
+            deleteData['deletedIssue']! as Map<String, Object?>;
 
         expect(deleteResult.exitCode, 0);
         expect(deleteData['command'], 'jira-delete-ticket');
         expect(deletedIssue['key'], createdKey);
-        expect(File('${repo.path}/DEMO/$createdKey/main.md').existsSync(), isFalse);
         expect(
-          File('${repo.path}/DEMO/.trackstate/tombstones/$createdKey.json')
-              .existsSync(),
+          File('${repo.path}/DEMO/$createdKey/main.md').existsSync(),
+          isFalse,
+        );
+        expect(
+          File(
+            '${repo.path}/DEMO/.trackstate/tombstones/$createdKey.json',
+          ).existsSync(),
           isTrue,
         );
       },
