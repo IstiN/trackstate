@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -5,6 +7,58 @@ import 'package:trackstate/data/services/workspace_sync_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 void main() {
+  test(
+    'workspace sync service suppresses queued resume follow-ups until the minimum interval elapses',
+    () async {
+      final repository = _PendingWorkspaceSyncRepository();
+      final timers = _RecordedTimerFactory();
+      var now = DateTime.utc(2026, 5, 14, 12, 0, 0);
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async =>
+            await const DemoTrackStateRepository().loadSnapshot(),
+        onRefresh: (_) {},
+        onStatusChanged: (_) {},
+        now: () => now,
+        timerFactory: timers.call,
+      );
+
+      try {
+        final manualRequest = service.retryNow();
+        await repository.waitForCallCount(1);
+        expect(repository.callCount, 1);
+
+        now = now.add(const Duration(seconds: 10));
+        await service.handleAppResume();
+        expect(repository.callCount, 1);
+
+        final firstCompletedAt = now;
+        repository.completeLatest();
+        await manualRequest;
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(repository.callCount, 1);
+        expect(timers.lastScheduledDuration, const Duration(seconds: 30));
+
+        now = firstCompletedAt.add(const Duration(seconds: 10));
+        await service.handleAppResume();
+        expect(repository.callCount, 1);
+        expect(timers.lastScheduledDuration, const Duration(seconds: 20));
+
+        now = firstCompletedAt.add(const Duration(seconds: 35));
+        unawaited(service.handleAppResume());
+        await Future<void>.delayed(Duration.zero);
+        await repository.waitForCallCount(2);
+        expect(repository.callCount, 2);
+      } finally {
+        service.dispose();
+        repository.dispose();
+        timers.dispose();
+      }
+    },
+  );
+
   test(
     'workspace sync service does not reload the hosted snapshot for empty-path hosted syncs without an explicit reload signal',
     () async {
@@ -474,6 +528,84 @@ class _FakeWorkspaceSyncRepository implements WorkspaceSyncRepository {
   }
 }
 
+class _PendingWorkspaceSyncRepository implements WorkspaceSyncRepository {
+  final List<Completer<RepositorySyncCheck>> _pendingChecks =
+      <Completer<RepositorySyncCheck>>[];
+  final List<Timer> _timers = <Timer>[];
+
+  int get callCount => _pendingChecks.length + _completedChecks;
+
+  int _completedChecks = 0;
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState}) {
+    final completer = Completer<RepositorySyncCheck>();
+    _pendingChecks.add(completer);
+    return completer.future.whenComplete(() {
+      _completedChecks += 1;
+      _pendingChecks.remove(completer);
+    });
+  }
+
+  void completeLatest() {
+    if (_pendingChecks.isEmpty) {
+      throw StateError('No pending sync checks remain.');
+    }
+    final completer = _pendingChecks.last;
+    if (!completer.isCompleted) {
+      completer.complete(
+        const RepositorySyncCheck(
+          state: RepositorySyncState(
+            providerType: ProviderType.github,
+            repositoryRevision: 'rev-pending',
+            sessionRevision: 'session-pending',
+            connectionState: ProviderConnectionState.connected,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> waitForCallCount(int expected) {
+    if (callCount >= expected) {
+      return Future<void>.value();
+    }
+    final completer = Completer<void>();
+    late Timer timer;
+    timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
+      if (callCount >= expected && !completer.isCompleted) {
+        timer.cancel();
+        completer.complete();
+      }
+    });
+    _timers.add(timer);
+    return completer.future;
+  }
+
+  void dispose() {
+    for (final timer in _timers) {
+      timer.cancel();
+    }
+    for (final completer in _pendingChecks) {
+      if (!completer.isCompleted) {
+        completer.complete(
+          const RepositorySyncCheck(
+            state: RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-disposed',
+              sessionRevision: 'session-disposed',
+              connectionState: ProviderConnectionState.connected,
+            ),
+          ),
+        );
+      }
+    }
+  }
+}
+
 class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
   @override
   bool get usesLocalPersistence => false;
@@ -483,6 +615,24 @@ class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
     RepositorySyncState? previousState,
   }) async {
     throw const TrackStateProviderException('GitHub rate limit exceeded.');
+  }
+}
+
+class _RecordedTimerFactory {
+  final List<Timer> _timers = <Timer>[];
+  Duration? lastScheduledDuration;
+
+  Timer call(Duration duration, void Function() callback) {
+    lastScheduledDuration = duration;
+    final timer = Timer(const Duration(hours: 1), () {});
+    _timers.add(timer);
+    return timer;
+  }
+
+  void dispose() {
+    for (final timer in _timers) {
+      timer.cancel();
+    }
   }
 }
 
