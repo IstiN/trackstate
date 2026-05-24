@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app against the live implementation.
   - Preloads an active local workspace plus hosted fallback workspace and delays the GitHub /user startup probe by 5 seconds.
-  - Verifies the delayed /user request is triggered promptly during startup, stays pending long enough to observe, and the UI exits the loading surface after release.
+  - Verifies the first delayed /user request is triggered promptly during startup, stays pending for the configured observation window, and the UI exits the loading surface.

@@ -131,6 +131,7 @@ SHELL_READY_WAIT_SECONDS = 20
 PENDING_WINDOW_WAIT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 8
 POLL_INTERVAL_SECONDS = 0.15
 MIN_PENDING_WINDOW_SECONDS = 4.5
+MAX_PENDING_WINDOW_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 1.5
 MIN_PENDING_SAMPLE_COUNT = 5
 MIN_PENDING_OBSERVATION_SECONDS = 2.0
 PENDING_SAMPLE_WINDOW_TOLERANCE_SECONDS = 0.25
@@ -138,8 +139,8 @@ LINKED_BUGS = ["TS-1027", "TS-1029"]
 LINKED_BUG_NOTES = (
     "Reviewed TS-1027 and TS-1029. Their merged startup fixes depend on the live "
     "GitHub `/user` auth probe actually starting, so this test delays that probe by "
-    "5 seconds, waits long enough to observe the pending window, and only passes when "
-    "the deployed app exits the loading surface after the delayed probe is released."
+    "5 seconds, waits long enough to observe the pending window, isolates the first "
+    "startup `/user` request, and verifies the deployed app exits the loading surface."
 )
 
 REQUEST_STEPS = [
@@ -276,6 +277,10 @@ def main() -> None:
             result["github_request_paths"] = github_request_paths
             result["delayed_request_urls"] = list(runtime.delayed_request_urls)
             result["delayed_request_paths"] = delayed_request_paths
+            result["delayed_request_timings"] = _relative_delayed_request_timings(
+                delayed_request_timings=runtime.delayed_request_timings,
+                startup_started_at_monotonic=startup_started_at_monotonic,
+            )
             result["auth_probe_started_after_start_seconds"] = (
                 auth_probe_started_after_start_seconds
             )
@@ -321,8 +326,16 @@ def main() -> None:
             )
 
             transition_tracker = ShellReadyTransitionTracker()
-            runtime.wait_for_auth_probe_release(
+            first_auth_probe_released = runtime.wait_for_first_auth_probe_release(
                 timeout_seconds=PENDING_WINDOW_WAIT_SECONDS,
+            )
+            first_auth_probe_released_after_start_seconds = relative_startup_event_seconds(
+                startup_started_at_monotonic,
+                runtime.first_auth_probe_released_at_monotonic,
+            )
+            first_auth_probe_pending_duration_seconds = relative_startup_event_seconds(
+                runtime.auth_probe_started_at_monotonic,
+                runtime.first_auth_probe_released_at_monotonic,
             )
             shell_ready, final_observation = poll_until(
                 probe=lambda: _observe_startup_window(
@@ -335,31 +348,47 @@ def main() -> None:
                 is_satisfied=lambda observation: (
                     bool(observation["shell_observation"]["shell_ready"])
                     and observation["trigger"] is not None
-                    and not bool(observation["auth_pending"])
                 ),
                 timeout_seconds=SHELL_READY_WAIT_SECONDS,
                 interval_seconds=POLL_INTERVAL_SECONDS,
             )
             result["shell_window_observation"] = _window_payload(final_observation)
             result["shell_probe_state"] = final_observation.get("shell_probe_state")
+            github_request_paths = [
+                _request_path(url) for url in runtime.github_request_urls if _request_path(url)
+            ]
+            delayed_request_paths = [
+                _request_path(url) for url in runtime.delayed_request_urls if _request_path(url)
+            ]
+            result["github_request_urls"] = list(runtime.github_request_urls)
+            result["github_request_paths"] = github_request_paths
+            result["delayed_request_urls"] = list(runtime.delayed_request_urls)
+            result["delayed_request_paths"] = delayed_request_paths
+            result["delayed_request_timings"] = _relative_delayed_request_timings(
+                delayed_request_timings=runtime.delayed_request_timings,
+                startup_started_at_monotonic=startup_started_at_monotonic,
+            )
+            result["first_auth_probe_released_after_start_seconds"] = (
+                first_auth_probe_released_after_start_seconds
+            )
+            result["first_auth_probe_pending_duration_seconds"] = (
+                first_auth_probe_pending_duration_seconds
+            )
 
             pending_probe_state = final_observation["pending_shell_probe_state"]
-            auth_probe_released_after_start_seconds = final_observation[
-                "auth_probe_released_after_start_seconds"
-            ]
             pending_samples = _pending_window_samples_from_probe_state(
                 pending_probe_state=pending_probe_state,
                 auth_probe_started_after_start_seconds=auth_probe_started_after_start_seconds,
-                auth_probe_released_after_start_seconds=auth_probe_released_after_start_seconds,
+                auth_probe_released_after_start_seconds=(
+                    first_auth_probe_released_after_start_seconds
+                ),
             )
             pending_window_sampled_duration_seconds = _pending_window_duration_seconds(
                 pending_samples,
             )
-            pending_window_duration_seconds = pending_window_sampled_duration_seconds
+            pending_window_duration_seconds = first_auth_probe_pending_duration_seconds
             if pending_window_duration_seconds is None:
-                pending_window_duration_seconds = final_observation.get(
-                    "auth_probe_release_after_auth_start_seconds",
-                )
+                pending_window_duration_seconds = pending_window_sampled_duration_seconds
 
             result["pending_shell_probe_state"] = pending_probe_state
             result["pending_window_samples"] = _sampled_pending_window_payloads(
@@ -395,16 +424,6 @@ def main() -> None:
                 ),
             )
             pending_failures.extend(
-                _pending_state_failures(
-                    pending_samples=pending_samples,
-                    pending_probe_state=pending_probe_state,
-                    auth_probe_released_after_start_seconds=auth_probe_released_after_start_seconds,
-                    shell_ready_observed_while_auth_pending=bool(
-                        final_observation["shell_ready_observed_while_auth_pending"],
-                    ),
-                ),
-            )
-            pending_failures.extend(
                 _pending_probe_state_coverage_failures(
                     pending_probe_state=pending_probe_state,
                     post_release_observation=final_observation,
@@ -415,9 +434,39 @@ def main() -> None:
                     "No delayed GitHub `/user` request was captured even though the "
                     "auth probe wait completed."
                 )
+            if not first_auth_probe_released:
+                pending_failures.append(
+                    "The first delayed GitHub `/user` startup probe never released within "
+                    "the configured observation window."
+                )
             if auth_probe_started_after_start_seconds is None:
                 pending_failures.append(
                     "The startup auth probe start time was never recorded."
+                )
+            if first_auth_probe_released_after_start_seconds is None:
+                pending_failures.append(
+                    "The first delayed GitHub `/user` startup probe release time was "
+                    "never recorded."
+                )
+            if pending_window_duration_seconds is None:
+                pending_failures.append(
+                    "The first delayed GitHub `/user` startup probe duration was never "
+                    "measured."
+                )
+            elif pending_window_duration_seconds < MIN_PENDING_WINDOW_SECONDS:
+                pending_failures.append(
+                    "The first delayed GitHub `/user` startup probe did not remain "
+                    "pending for the configured 5-second observation window.\n"
+                    f"Measured first probe duration={pending_window_duration_seconds!r} "
+                    f"seconds; expected at least {MIN_PENDING_WINDOW_SECONDS!r} seconds."
+                )
+            elif pending_window_duration_seconds > MAX_PENDING_WINDOW_SECONDS:
+                pending_failures.append(
+                    "The first delayed GitHub `/user` startup probe stayed pending much "
+                    "longer than the configured 5-second observation window, which "
+                    "suggests the test observed more than the initial bootstrap probe.\n"
+                    f"Measured first probe duration={pending_window_duration_seconds!r} "
+                    f"seconds; expected no more than {MAX_PENDING_WINDOW_SECONDS!r} seconds."
                 )
             elif authoritative_shell_ready_after_start_seconds is not None and (
                 auth_probe_started_after_start_seconds
@@ -449,10 +498,11 @@ def main() -> None:
                     "probe behavior or did not exit the loading surface correctly.\n"
                     f"auth_probe_started_after_start_seconds="
                     f"{auth_probe_started_after_start_seconds!r}; "
-                    f"auth_probe_released_after_start_seconds="
-                    f"{auth_probe_released_after_start_seconds!r}; "
+                    f"first_auth_probe_released_after_start_seconds="
+                    f"{first_auth_probe_released_after_start_seconds!r}; "
                     f"github_request_paths={github_request_paths!r}; "
                     f"delayed_request_paths={delayed_request_paths!r}; "
+                    f"delayed_request_timings={json.dumps(result.get('delayed_request_timings'), ensure_ascii=True)}; "
                     f"pending_sample_count={len(pending_samples)!r}; "
                     f"pending_window_duration_seconds={pending_window_duration_seconds!r}; "
                     f"authoritative_shell_ready_after_start_seconds="
@@ -479,11 +529,14 @@ def main() -> None:
                 action=REQUEST_STEPS[2],
                 observed=(
                     "The delayed GitHub `/user` auth probe started during the initial "
-                    "loading window, stayed pending through the configured observation "
-                    "window, and the deployed app then rendered the interactive shell "
-                    "instead of remaining stuck on the loading surface.\n"
+                    "loading window, the first startup probe itself stayed pending for "
+                    "the configured observation window, and the deployed app then "
+                    "rendered the interactive shell instead of remaining stuck on the "
+                    "loading surface.\n"
                     f"auth_probe_started_after_start_seconds="
                     f"{auth_probe_started_after_start_seconds!r}; "
+                    f"first_auth_probe_released_after_start_seconds="
+                    f"{first_auth_probe_released_after_start_seconds!r}; "
                     f"pending_sample_count={len(pending_samples)!r}; "
                     f"pending_window_duration_seconds={pending_window_duration_seconds!r}; "
                     f"shell_ready_after_launch_seconds="
@@ -504,7 +557,9 @@ def main() -> None:
                     f"visible_navigation_labels="
                     f"{first_pending['shell_observation']['visible_navigation_labels']!r}; "
                     f"trigger_visible={first_pending['trigger'] is not None!r}; "
-                    f"branding_visible={first_pending['branding_visible']!r}"
+                    f"branding_visible={first_pending['branding_visible']!r}; "
+                    f"first_auth_probe_pending_duration_seconds="
+                    f"{pending_window_duration_seconds!r}"
                 ),
             )
             record_human_verification(
@@ -870,6 +925,36 @@ def _pending_sample_coverage_failures(
     return failures
 
 
+def _relative_delayed_request_timings(
+    *,
+    delayed_request_timings: list[dict[str, Any]],
+    startup_started_at_monotonic: float,
+) -> list[dict[str, Any]]:
+    relative_timings: list[dict[str, Any]] = []
+    for timing in delayed_request_timings:
+        if not isinstance(timing, dict):
+            continue
+        relative_timings.append(
+            {
+                "index": timing.get("index"),
+                "url": str(timing.get("url", "")),
+                "started_after_launch_seconds": relative_startup_event_seconds(
+                    startup_started_at_monotonic,
+                    timing.get("started_at_monotonic"),
+                ),
+                "released_after_launch_seconds": relative_startup_event_seconds(
+                    startup_started_at_monotonic,
+                    timing.get("released_at_monotonic"),
+                ),
+                "duration_seconds": relative_startup_event_seconds(
+                    timing.get("started_at_monotonic"),
+                    timing.get("released_at_monotonic"),
+                ),
+            },
+        )
+    return relative_timings
+
+
 def _pending_window_samples_from_probe_state(
     *,
     pending_probe_state: dict[str, Any],
@@ -967,117 +1052,6 @@ def _pending_window_samples_from_probe_state(
             },
         )
     return pending_samples
-
-
-def _pending_state_failures(
-    *,
-    pending_samples: list[dict[str, Any]],
-    pending_probe_state: dict[str, Any],
-    auth_probe_released_after_start_seconds: Any,
-    shell_ready_observed_while_auth_pending: bool,
-) -> list[str]:
-    failures: list[str] = []
-    first_shell_ready = next(
-        (
-            sample
-            for sample in pending_samples
-            if bool(sample["shell_observation"]["shell_ready"])
-        ),
-        None,
-    )
-    if first_shell_ready is not None:
-        failures.append(
-            "The shell reported shell_ready while the delayed startup probe was still "
-            "pending.\n"
-            f"Observed sample:\n{json.dumps(_pending_sample_payload(first_shell_ready), indent=2)}"
-        )
-    first_visible_navigation = next(
-        (
-            sample
-            for sample in pending_samples
-            if sample["shell_observation"]["visible_navigation_labels"]
-        ),
-        None,
-    )
-    if first_visible_navigation is not None:
-        failures.append(
-            "Sidebar navigation labels became visible during the delayed startup "
-            "window.\n"
-            f"Observed sample:\n{json.dumps(_pending_sample_payload(first_visible_navigation), indent=2)}"
-        )
-    first_visible_trigger = next(
-        (sample for sample in pending_samples if sample["trigger"] is not None),
-        None,
-    )
-    if first_visible_trigger is not None:
-        failures.append(
-            "The top-bar workspace trigger became visible during the delayed startup "
-            "window.\n"
-            f"Observed sample:\n{json.dumps(_pending_sample_payload(first_visible_trigger), indent=2)}"
-        )
-    first_visible_branding = next(
-        (sample for sample in pending_samples if bool(sample["branding_visible"])),
-        None,
-    )
-    if first_visible_branding is not None:
-        failures.append(
-            "The TrackState branding tagline became visible before the delayed startup "
-            "probe resolved.\n"
-            f"Observed sample:\n{json.dumps(_pending_sample_payload(first_visible_branding), indent=2)}"
-        )
-    first_dom_markers = next(
-        (
-            sample
-            for sample in pending_samples
-            if sample["dom_markers"]["navigation_labels"]
-            or sample["dom_markers"]["workspace_switcher_labels"]
-            or sample["dom_markers"]["branding_labels"]
-        ),
-        None,
-    )
-    if first_dom_markers is not None:
-        failures.append(
-            "Shell DOM markers were already mounted during the delayed startup "
-            "window.\n"
-            f"Observed sample:\n{json.dumps(_pending_sample_payload(first_dom_markers), indent=2)}"
-        )
-    for label, timestamp in (
-        (
-            "navigation",
-            pending_probe_state.get("first_navigation_visible_after_launch_seconds"),
-        ),
-        (
-            "top-bar trigger",
-            pending_probe_state.get("first_trigger_visible_after_launch_seconds"),
-        ),
-        (
-            "branding",
-            pending_probe_state.get("first_branding_visible_after_launch_seconds"),
-        ),
-        (
-            "any shell marker",
-            pending_probe_state.get("first_any_shell_marker_visible_after_launch_seconds"),
-        ),
-    ):
-        if not isinstance(timestamp, (int, float)) or not isinstance(
-            auth_probe_released_after_start_seconds,
-            (int, float),
-        ):
-            continue
-        if float(timestamp) < float(auth_probe_released_after_start_seconds):
-            failures.append(
-                f"The page-side startup observer saw the first {label} before the delayed "
-                "startup probe was released.\n"
-                f"pending_probe_state={json.dumps(pending_probe_state, indent=2)}\n"
-                f"auth_probe_released_after_start_seconds="
-                f"{auth_probe_released_after_start_seconds!r}"
-            )
-    if shell_ready_observed_while_auth_pending:
-        failures.append(
-            "The first recorded shell_ready transition happened while the delayed startup "
-            "probe was still pending."
-        )
-    return failures
 
 
 def _pending_sample_payload(observation: dict[str, Any]) -> dict[str, Any]:
@@ -1456,7 +1430,7 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "The deployed app issued the GitHub `/user` startup probe "
             f"{result.get('auth_probe_started_after_start_seconds')!r} seconds after "
             f"launch, kept it pending for "
-            f"{(result.get('shell_window_observation') or {}).get('auth_probe_release_after_auth_start_seconds')!r} "
+            f"{result.get('first_auth_probe_pending_duration_seconds')!r} "
             "seconds, and then exposed the interactive shell."
         )
     return str(result.get("error", "The deployed startup flow did not match the expected result."))

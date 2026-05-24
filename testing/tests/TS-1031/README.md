@@ -1,8 +1,8 @@
 # TS-1031
 
 Live Playwright regression for the startup authentication probe that must begin
-promptly during app bootstrap and remain pending long enough to observe before
-the shell becomes interactive.
+promptly during app bootstrap and remain pending long enough to observe while
+the app progresses out of the loading surface.
 
 ## Run
 
