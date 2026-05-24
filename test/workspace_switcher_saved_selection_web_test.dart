@@ -60,10 +60,14 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
         expect(trigger, findsOneWidget);
         final triggerButton = tester.widget<FilledButton>(
-          find.descendant(of: trigger, matching: find.byType(FilledButton)).first,
+          find
+              .descendant(of: trigger, matching: find.byType(FilledButton))
+              .first,
         );
         expect(triggerButton.onPressed, isNotNull);
         triggerButton.onPressed!();
