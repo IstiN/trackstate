@@ -3884,8 +3884,28 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      final releaseCreationFailure = _mapReleaseCreationProviderError(
+        error,
+        target,
+      );
+      if (releaseCreationFailure != null) {
+        return releaseCreationFailure;
+      }
       if (target.type == TrackStateCliTargetType.local &&
           _looksLikeAttachmentStorageValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeRepositoryIdentityValidationFailure(error.message)) {
         return _TrackStateCliException(
           code: 'INVALID_REQUEST',
           category: TrackStateCliErrorCategory.validation,
@@ -5708,6 +5728,35 @@ class TrackStateCli {
     );
   }
 
+  _TrackStateCliException? _mapReleaseCreationProviderError(
+    TrackStateProviderException error,
+    _ResolvedTarget target,
+  ) {
+    final message = error.message;
+    final match = RegExp(
+      r'^Could not create GitHub release .+ \((\d{3})\):',
+    ).firstMatch(message);
+    if (match == null) {
+      return null;
+    }
+    final statusCode = int.tryParse(match.group(1) ?? '');
+    final pathKey = target.type == TrackStateCliTargetType.local
+        ? 'path'
+        : 'repository';
+    final (code, category) = switch (statusCode) {
+      409 => ('RESOURCE_CONFLICT', TrackStateCliErrorCategory.repository),
+      422 => ('API_VALIDATION_FAILED', TrackStateCliErrorCategory.validation),
+      _ => ('RELEASE_CREATION_FAILED', TrackStateCliErrorCategory.repository),
+    };
+    return _TrackStateCliException(
+      code: code,
+      category: category,
+      message: message,
+      exitCode: 4,
+      details: <String, Object?>{pathKey: target.value, 'reason': message},
+    );
+  }
+
   TrackStateCliExecution _success({
     required TrackStateCliTargetType targetType,
     required String targetValue,
@@ -5786,6 +5835,14 @@ class TrackStateCli {
 
   bool _looksLikeAttachmentStorageValidationFailure(String message) =>
       message.startsWith('project.json attachmentStorage.');
+
+  bool _looksLikeRepositoryIdentityValidationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains(
+          'github repository identity cannot be resolved from the local git configuration',
+        ) &&
+        normalized.contains('no github remote is configured');
+  }
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{
