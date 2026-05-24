@@ -115,6 +115,30 @@ bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
   return hasSelectionAction;
 }
 
+@visibleForTesting
+String? resolveWorkspaceSwitcherSelectedWorkspaceId({
+  required String? currentSelectedWorkspaceId,
+  required WorkspaceProfilesState previousWorkspaces,
+  required WorkspaceProfilesState nextWorkspaces,
+}) {
+  final selectionStillExists =
+      currentSelectedWorkspaceId != null &&
+      nextWorkspaces.profiles.any(
+        (workspace) => workspace.id == currentSelectedWorkspaceId,
+      );
+  if (!selectionStillExists) {
+    return nextWorkspaces.activeWorkspaceId;
+  }
+  final activeWorkspaceChanged =
+      nextWorkspaces.activeWorkspaceId != previousWorkspaces.activeWorkspaceId;
+  final hasPendingSelection =
+      currentSelectedWorkspaceId != previousWorkspaces.activeWorkspaceId;
+  if (activeWorkspaceChanged && !hasPendingSelection) {
+    return nextWorkspaces.activeWorkspaceId;
+  }
+  return currentSelectedWorkspaceId;
+}
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -7206,17 +7230,11 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   @override
   void didUpdateWidget(covariant _WorkspaceSwitcherSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final activeWorkspaceChanged =
-        widget.workspaces.activeWorkspaceId !=
-        oldWidget.workspaces.activeWorkspaceId;
-    final selectionStillExists =
-        _selectedWorkspaceId != null &&
-        widget.workspaces.profiles.any(
-          (workspace) => workspace.id == _selectedWorkspaceId,
-        );
-    if (activeWorkspaceChanged || !selectionStillExists) {
-      _selectedWorkspaceId = widget.workspaces.activeWorkspaceId;
-    }
+    _selectedWorkspaceId = resolveWorkspaceSwitcherSelectedWorkspaceId(
+      currentSelectedWorkspaceId: _selectedWorkspaceId,
+      previousWorkspaces: oldWidget.workspaces,
+      nextWorkspaces: widget.workspaces,
+    );
     final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
     if (requestedFocusedWorkspaceId == null ||
         widget.focusRequestVersion == oldWidget.focusRequestVersion) {
