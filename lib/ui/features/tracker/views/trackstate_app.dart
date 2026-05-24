@@ -1713,6 +1713,11 @@ class _TrackStateAppState extends State<TrackStateApp>
             );
       }
       _workspaceSwitcherTriggerFocusNode.requestFocus();
+      if (kIsWeb) {
+        _requestDesktopWorkspaceSwitcherBrowserFocus(
+          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+        );
+      }
     });
   }
 
