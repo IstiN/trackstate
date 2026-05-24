@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../domain/models/trackstate_models.dart';
 import '../providers/github/github_trackstate_provider.dart';
 import '../providers/trackstate_provider.dart';
+import '../services/issue_link_validation_service.dart';
 import '../services/project_settings_validation_service.dart';
 import '../services/jql_search_service.dart';
 
@@ -2992,16 +2993,22 @@ class ProviderBackedTrackStateRepository
     if (json is! List) return const [];
     return json
         .whereType<Map>()
-        .map(
-          (entry) => IssueLink(
+        .map((entry) {
+          final link = IssueLink(
             type: entry['type']?.toString() ?? 'relates-to',
             targetKey:
                 entry['target']?.toString() ??
                 entry['targetKey']?.toString() ??
                 '',
             direction: entry['direction']?.toString() ?? 'outward',
-          ),
-        )
+          );
+          final warning = nonCanonicalIssueLinkMetadataWarning(link);
+          if (warning != null) {
+            // ignore: avoid_print
+            print(warning);
+          }
+          return link;
+        })
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
   }
