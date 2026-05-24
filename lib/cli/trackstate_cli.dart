@@ -63,6 +63,7 @@ class TrackStateCli {
         'session' => await _runSession(arguments.skip(1).toList()),
         'search' => await _runSearch(normalizedArguments.skip(1).toList()),
         'read' => await _runRead(normalizedArguments.skip(1).toList()),
+        'create' => await _runCreate(arguments.skip(1).toList()),
         'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
         'archive' => await _runTicketArchive(
           arguments.skip(1).toList(),
@@ -929,6 +930,13 @@ class TrackStateCli {
       ),
     };
   }
+
+  Future<TrackStateCliExecution> _runCreate(List<String> arguments) =>
+      _runTicketCreate(
+        _normalizeLegacyJiraArguments(arguments, const {
+          '--issueType': '--issue-type',
+        }),
+      );
 
   Future<TrackStateCliExecution> _runTicketShow(List<String> arguments) async {
     final parser = _mutationParser()
@@ -6509,6 +6517,7 @@ class TrackStateCli {
     '  session    Resolve the target and print session metadata.',
     '  search     Execute a paged JQL search.',
     '  read       Read tickets and metadata as Jira-shaped JSON.',
+    '  create     Compatibility alias for "trackstate ticket create".',
     '  ticket     Mutate tickets through the shared mutation service.',
     '  archive    Archive one issue from the current local repository by default.',
     '  attachment Upload or download one attachment.',
@@ -6520,6 +6529,7 @@ class TrackStateCli {
     '  trackstate session --target hosted --provider github --repository owner/name',
     '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\'',
     '  trackstate read ticket --key TRACK-1',
+    '  trackstate create --target local --summary "Implement mutations" --issueType Story',
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
     '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
