@@ -99,12 +99,6 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
-      );
-      expect(find.text('Dashboard'), findsNothing);
-
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 

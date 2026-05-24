@@ -546,6 +546,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfilesState state, {
     bool allowFallbackFromActive = true,
     bool deferAccessRestore = false,
+    bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
   }) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
@@ -568,6 +569,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
+        preserveActiveLocalSelectionOnUnsupportedAccess:
+            preserveActiveLocalSelectionOnUnsupportedAccess &&
+            workspace.id == activeWorkspaceId,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId && workspace.isLocal,
         deferAccessRestore: deferAccessRestore,
@@ -860,6 +864,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         final restored = await _restoreWorkspaceFromSavedState(
           loadedState,
           allowFallbackFromActive: false,
+          deferAccessRestore: true,
+          preserveActiveLocalSelectionOnUnsupportedAccess: true,
         );
         _scheduleWebStartupRefresh();
         if (restored || !mounted) {
