@@ -2517,6 +2517,9 @@ Nested release-backed attachment issue.
                 'id': 21,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': currentReleaseAssetId.isEmpty
                     ? const <Object?>[]
                     : [
@@ -2600,6 +2603,7 @@ Nested release-backed attachment issue.
     'github provider reuses a matching draft release when tag lookup misses it',
     () async {
       var createdDuplicateRelease = false;
+      var patchedRelease = false;
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
         dataRef: 'main',
@@ -2629,13 +2633,20 @@ Nested release-backed attachment issue.
                   'id': 10,
                   'tag_name': 'trackstate-attachments-DEMO-1',
                   'name': 'Attachments for DEMO-1',
-                  'body': 'Manual Notes',
+                  'body':
+                      'TrackState-managed attachment container for DEMO-1.\n',
                   'draft': true,
+                  'prerelease': false,
                   'assets': const <Object?>[],
                 },
               ]),
               200,
             );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/10' &&
+              request.method == 'PATCH') {
+            patchedRelease = true;
+            return http.Response('', 500);
           }
           if (path == '/repos/IstiN/trackstate/releases' &&
               request.method == 'POST') {
@@ -2678,6 +2689,109 @@ Nested release-backed attachment issue.
       );
 
       expect(createdDuplicateRelease, isFalse);
+      expect(patchedRelease, isFalse);
+      expect(result.assetId, '2');
+    },
+  );
+
+  test(
+    'github provider normalizes reused release metadata before uploading assets',
+    () async {
+      var patchedReleaseBody = '';
+      var patchedReleaseName = '';
+      var patchedReleaseTagName = '';
+      var patchedDraft = false;
+      var patchedPrerelease = true;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'body': 'Custom release body edited by a user',
+                'draft': true,
+                'prerelease': false,
+                'assets': const <Object?>[],
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/10' &&
+              request.method == 'PATCH') {
+            final body = jsonDecode(request.body) as Map<String, Object?>;
+            patchedReleaseBody = body['body']?.toString() ?? '';
+            patchedReleaseName = body['name']?.toString() ?? '';
+            patchedReleaseTagName = body['tag_name']?.toString() ?? '';
+            patchedDraft = body['draft'] as bool? ?? false;
+            patchedPrerelease = body['prerelease'] as bool? ?? true;
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': patchedReleaseName,
+                'body': patchedReleaseBody,
+                'draft': patchedDraft,
+                'prerelease': patchedPrerelease,
+                'assets': const <Object?>[],
+              }),
+              200,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(
+        patchedReleaseBody,
+        'TrackState-managed attachment container for DEMO-1.\n',
+      );
+      expect(patchedReleaseTagName, 'trackstate-attachments-DEMO-1');
+      expect(patchedReleaseName, 'Attachments for DEMO-1');
+      expect(patchedDraft, isTrue);
+      expect(patchedPrerelease, isFalse);
       expect(result.assetId, '2');
     },
   );
@@ -2717,6 +2831,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': assets,
               }),
               200,
@@ -2804,6 +2921,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': assets,
               }),
               200,
@@ -2886,6 +3006,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': [
                   {'id': 3, 'name': 'foreign.bin', 'size': 9},
                 ],

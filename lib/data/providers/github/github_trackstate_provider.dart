@@ -896,12 +896,18 @@ class GitHubTrackStateProvider
       allowMissing: true,
     );
     if (existing != null) {
-      _ensureAllowedReleaseAssets(
+      final normalized = await _normalizeReleaseContainer(
+        repository: repository,
         release: existing,
+        issueKey: issueKey,
+        releaseTitle: releaseTitle,
+      );
+      _ensureAllowedReleaseAssets(
+        release: normalized,
         releaseTag: releaseTag,
         allowedAssetNames: allowedAssetNames,
       );
-      return existing;
+      return normalized;
     }
     final created = await _createReleaseContainer(
       repository: repository,
@@ -1069,6 +1075,54 @@ class GitHubTrackStateProvider
     );
   }
 
+  Future<_GitHubReleaseSummary> _normalizeReleaseContainer({
+    required String repository,
+    required _GitHubReleaseSummary release,
+    required String issueKey,
+    required String releaseTitle,
+  }) async {
+    final expectedBody = _releaseBodyForIssue(issueKey);
+    if (release.title == releaseTitle &&
+        release.body == expectedBody &&
+        release.isDraft &&
+        !release.isPrerelease) {
+      return release;
+    }
+    final response = await _http.patch(
+      _githubUri('/repos/$repository/releases/${release.id}'),
+      headers: {
+        ..._githubHeaders(_connection?.token),
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: jsonEncode({
+        'tag_name': release.tagName,
+        'name': releaseTitle,
+        'body': expectedBody,
+        'draft': true,
+        'prerelease': false,
+      }),
+    );
+    if (response.statusCode == 403 || response.statusCode == 404) {
+      throw TrackStateProviderException(
+        'GitHub Releases attachment storage requires permission to manage '
+        'releases in $repository.',
+      );
+    }
+    if (response.statusCode != 200) {
+      _throwGitHubResponseException(
+        path: '/repos/$repository/releases/${release.id}',
+        response: response,
+        prefix:
+            'Could not normalize GitHub release ${release.tagName} for '
+            'issue $issueKey',
+      );
+    }
+    return _parseReleaseSummary(
+      jsonDecode(response.body) as Map<String, Object?>,
+      fallbackTagName: release.tagName,
+    );
+  }
+
   void _ensureAllowedReleaseAssets({
     required _GitHubReleaseSummary release,
     required String releaseTag,
@@ -1199,11 +1253,15 @@ class GitHubTrackStateProvider
     final parsedTagName = json['tag_name']?.toString().trim() ?? '';
     final tagName = parsedTagName.isEmpty ? fallbackTagName : parsedTagName;
     final title = json['name']?.toString().trim() ?? '';
+    final body = json['body']?.toString() ?? '';
     final assetsJson = json['assets'] as List<Object?>? ?? const <Object?>[];
     return _GitHubReleaseSummary(
       id: releaseId,
       tagName: tagName,
       title: title,
+      body: body,
+      isDraft: json['draft'] == true,
+      isPrerelease: json['prerelease'] == true,
       assets: [
         for (final entry in assetsJson.whereType<Map<String, Object?>>())
           _parseReleaseAsset(entry),
@@ -1719,12 +1777,18 @@ class _GitHubReleaseSummary {
     required this.id,
     required this.tagName,
     required this.title,
+    required this.body,
+    required this.isDraft,
+    required this.isPrerelease,
     required this.assets,
   });
 
   final String id;
   final String tagName;
   final String title;
+  final String body;
+  final bool isDraft;
+  final bool isPrerelease;
   final List<_GitHubReleaseAsset> assets;
 }
 
