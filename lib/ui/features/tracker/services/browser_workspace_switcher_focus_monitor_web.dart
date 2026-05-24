@@ -415,11 +415,16 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   );
   if (!backwards &&
       selectedRowIndex != -1 &&
-      _isBrowserWorkspaceSwitcherFallbackFocus(
-        activeElement: activeElement,
-        focusTargets: focusTargets,
-        currentIndex: currentIndex,
-      )) {
+      (_isBrowserWorkspaceSwitcherTriggerFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ) ||
+          _isBrowserWorkspaceSwitcherFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ))) {
     if (_focusElement(focusTargets[selectedRowIndex].element)) {
       return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
     }
@@ -486,6 +491,24 @@ void _guardTabHandoffFocus(web.Element target) {
       timer?.cancel();
     }
   });
+}
+
+bool _isBrowserWorkspaceSwitcherTriggerFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (_workspaceSwitcherTriggerElementFor(activeElement) == null) {
+    return false;
+  }
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool _isBrowserWorkspaceSwitcherFallbackFocus({
