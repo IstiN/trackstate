@@ -415,6 +415,8 @@ void main() {
 
     expect(result.isSuccess, isTrue);
     expect(result.value!.comments, hasLength(1));
+    expect(result.revision, isNotNull);
+    expect(result.revision, isNotEmpty);
     expect(
       result.value!.comments.single.body,
       'CLI parity keeps comments in the shared mutation layer.',

@@ -987,10 +987,22 @@ class IssueMutationService {
         resolution.issue!,
         body,
       );
+      final latestComment = updatedIssue.comments.isEmpty
+          ? null
+          : updatedIssue.comments.last;
+      final revision =
+          latestComment == null || latestComment.storagePath.isEmpty
+          ? null
+          : (await providerRepository.providerAdapter.readTextFile(
+              latestComment.storagePath,
+              ref: await providerRepository.providerAdapter
+                  .resolveWriteBranch(),
+            )).revision;
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
         value: updatedIssue,
+        revision: revision,
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
