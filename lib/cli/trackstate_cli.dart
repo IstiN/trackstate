@@ -3904,6 +3904,19 @@ class TrackStateCli {
           },
         );
       }
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeRepositoryIdentityValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       if (_looksLikeAuthenticationFailure(error.message)) {
         return _TrackStateCliException(
           code: 'AUTHENTICATION_FAILED',
@@ -5822,6 +5835,14 @@ class TrackStateCli {
 
   bool _looksLikeAttachmentStorageValidationFailure(String message) =>
       message.startsWith('project.json attachmentStorage.');
+
+  bool _looksLikeRepositoryIdentityValidationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains(
+          'github repository identity cannot be resolved from the local git configuration',
+        ) &&
+        normalized.contains('no github remote is configured');
+  }
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{
