@@ -334,8 +334,12 @@ jobs:
           trap cleanup_heartbeat EXIT
 
           release_notes="$(mktemp)"
+          legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"
           if gh release view "$release_tag" >/dev/null 2>&1; then
             echo "Updating existing release $release_tag"
+            if gh release view "$release_tag" --json assets --jq '.assets[].name' | grep -Fxq "$legacy_checksum_asset"; then
+              gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes
+            fi
           else
             gh api \
               -H "Accept: application/vnd.github+json" \

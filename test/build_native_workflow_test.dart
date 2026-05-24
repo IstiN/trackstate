@@ -65,31 +65,46 @@ void main() {
     expect(workflow, isNot(contains('.dmg')));
   });
 
-  test(
-    'apple release workflow enforces TS-708 arm64-only release contract',
-    () {
-      final workflow = repositoryFile(
-        '.github/workflows/build-native.yml',
-      ).readAsStringSync();
+  test('apple release workflow enforces TS-708 arm64-only release contract', () {
+    final workflow = repositoryFile(
+      '.github/workflows/build-native.yml',
+    ).readAsStringSync();
 
-      expect(
-        workflow,
-        contains(r'checksum_file=trackstate-apple-${release_tag}.sha256'),
-      );
-      expect(
-        workflow,
-        isNot(
-          contains(r'checksum_file=trackstate-apple-${release_tag}-sha256.txt'),
-        ),
-      );
-      expect(workflow, contains('ARCHS=arm64'));
-      expect(workflow, contains('ONLY_ACTIVE_ARCH=YES'));
-      expect(workflow, contains('EXCLUDED_ARCHS=x86_64'));
-      expect(workflow, contains('app_binary='));
-      expect(workflow, contains(r'file "$binary_path"'));
-      expect(workflow, contains('Mach-O 64-bit executable arm64'));
-      expect(workflow, contains('universal binary'));
-      expect(workflow, contains('x86_64'));
-    },
-  );
+    expect(
+      workflow,
+      contains(r'checksum_file=trackstate-apple-${release_tag}.sha256'),
+    );
+    expect(
+      workflow,
+      isNot(
+        contains(r'checksum_file=trackstate-apple-${release_tag}-sha256.txt'),
+      ),
+    );
+    expect(
+      workflow,
+      contains(
+        r'legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"',
+      ),
+    );
+    expect(
+      workflow,
+      contains(
+        'gh release view "\$release_tag" --json assets --jq \'.assets[].name\' | grep -Fxq "\$legacy_checksum_asset"',
+      ),
+    );
+    expect(
+      workflow,
+      contains(
+        r'gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes',
+      ),
+    );
+    expect(workflow, contains('ARCHS=arm64'));
+    expect(workflow, contains('ONLY_ACTIVE_ARCH=YES'));
+    expect(workflow, contains('EXCLUDED_ARCHS=x86_64'));
+    expect(workflow, contains('app_binary='));
+    expect(workflow, contains(r'file "$binary_path"'));
+    expect(workflow, contains('Mach-O 64-bit executable arm64'));
+    expect(workflow, contains('universal binary'));
+    expect(workflow, contains('x86_64'));
+  });
 }
