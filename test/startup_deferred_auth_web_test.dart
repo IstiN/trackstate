@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -21,7 +22,7 @@ void main() {
   });
 
   testWidgets(
-    'startup exposes the shell with restricted access before delayed auth completes in web-style restore flow',
+    'startup exposes the shell with restricted access after the timeout fallback while delayed auth remains in progress in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -62,6 +63,14 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
+      final previousDiagnostics = startupAuthProbeDiagnostics;
+      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
+        logger: (_) {},
+      );
+      addTearDown(() {
+        startupAuthProbeDiagnostics = previousDiagnostics;
+      });
+
       await tester.pumpWidget(
         TrackStateApp(
           repositoryFactory: () => delayedRepository,
@@ -92,6 +101,15 @@ void main() {
 
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
+      expect(find.text('Dashboard'), findsNothing);
+
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
       expect(find.text('Dashboard'), findsWidgets);
@@ -106,11 +124,11 @@ void main() {
       expect(delayedRepository.session, isNotNull);
       expect(
         delayedRepository.session?.connectionState,
-        ProviderConnectionState.connecting,
+        isNot(ProviderConnectionState.connected),
       );
-      expect(delayedRepository.session?.canRead, isTrue);
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
+      expect(find.text('Connect GitHub'), findsOneWidget);
       final savedStateBeforeConnect = await service.loadState();
       expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
       expect(

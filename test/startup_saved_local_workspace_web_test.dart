@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -138,6 +139,132 @@ void main() {
         savedStateAfterProbe.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
+    },
+  );
+
+  testWidgets(
+    'web startup logs the delayed /user timeout fallback when the shell opens before the auth probe completes',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken(
+        'github-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+      final diagnosticLogs = <String>[];
+      final previousDiagnostics = startupAuthProbeDiagnostics;
+      var elapsed = Duration.zero;
+
+      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
+        now: () => DateTime.fromMillisecondsSinceEpoch(elapsed.inMilliseconds),
+        logger: diagnosticLogs.add,
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        startupAuthProbeDiagnostics = previousDiagnostics;
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      elapsed += const Duration(milliseconds: 750);
+      await tester.pump(const Duration(milliseconds: 750));
+
+      expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
+      expect(diagnosticLogs, isEmpty);
+
+      elapsed += const Duration(seconds: 11);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(
+        delayedRepository.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+      expect(find.text('Connect GitHub'), findsOneWidget);
+      expect(
+        diagnosticLogs,
+        contains(
+          predicate<String>(
+            (entry) =>
+                entry.contains('/user') &&
+                entry.contains('shell_ready') &&
+                entry.contains('timeout') &&
+                entry.contains('delta_seconds='),
+            'startup timeout diagnostic entry',
+          ),
+        ),
+      );
+
+      delayedRepository.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
     },
   );
 }
