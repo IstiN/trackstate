@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
@@ -23,7 +24,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup waits for the delayed /user probe before exposing the shell when the active local workspace has no browser handle',
+    'web startup keeps the shell hidden until the delayed /user probe completes when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -99,6 +100,11 @@ void main() {
         findsNothing,
       );
       expect(find.text('Add workspace'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(delayedRepository.session, isNotNull);
+      expect(delayedRepository.session?.canRead, isTrue);
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
       final savedStateBeforeProbe = await workspaceProfiles.loadState();
       expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
@@ -120,6 +126,12 @@ void main() {
       );
       expect(find.text('Dashboard'), findsWidgets);
       expect(find.text('Add workspace'), findsNothing);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
       final savedStateAfterProbe = await workspaceProfiles.loadState();
       expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(

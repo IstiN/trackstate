@@ -21,7 +21,7 @@ void main() {
   });
 
   testWidgets(
-    'startup waits for delayed auth before exposing the shell in web-style restore flow',
+    'startup exposes the shell with restricted access before delayed auth completes in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -92,17 +92,25 @@ void main() {
 
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
       expect(find.text('Add workspace'), findsNothing);
       expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
       expect(delayedRepository.connectCalled, isTrue);
       expect(delayedRepository.connectCompleted, isFalse);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      expect(delayedRepository.session?.canRead, isTrue);
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
       final savedStateBeforeConnect = await service.loadState();
       expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
@@ -126,6 +134,12 @@ void main() {
       expect(find.text('Add workspace'), findsNothing);
       final savedState = await service.loadState();
       expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
       expect(
         savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
