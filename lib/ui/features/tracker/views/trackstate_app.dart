@@ -2245,9 +2245,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                           _switchToBoundaryWorkspace(selectFirst: false),
                         ),
                       )
-                    : _workspaceState.hasProfiles
-                    ? _WorkspaceOnboardingScreen(
-                        canCancel: true,
+                    : _WorkspaceOnboardingScreen(
+                        canCancel: _workspaceState.hasProfiles,
                         canBrowseHostedRepositories:
                             viewModel.canBrowseHostedRepositories,
                         directoryPicker: widget.workspaceDirectoryPicker,
@@ -2258,7 +2257,9 @@ class _TrackStateAppState extends State<TrackStateApp>
                             viewModel.canBrowseHostedRepositories
                             ? viewModel.loadAccessibleHostedRepositories
                             : null,
-                        onCancel: _closeWorkspaceOnboarding,
+                        onCancel: _workspaceState.hasProfiles
+                            ? _closeWorkspaceOnboarding
+                            : null,
                         onOpenLocalWorkspace:
                             ({
                               required String repositoryPath,
@@ -2272,24 +2273,6 @@ class _TrackStateAppState extends State<TrackStateApp>
                               displayName: displayName,
                             ),
                         onOpenHostedWorkspace: _switchToHostedRepository,
-                      )
-                    : _LocalWorkspaceOnboardingScreen(
-                        directoryPicker: widget.workspaceDirectoryPicker,
-                        onboardingService:
-                            widget.localWorkspaceOnboardingService ??
-                            createLocalWorkspaceOnboardingService(),
-                        onComplete:
-                            ({
-                              required String repositoryPath,
-                              required String displayName,
-                              required String defaultBranch,
-                              required String writeBranch,
-                            }) => _switchToLocalRepositoryWithProfile(
-                              repositoryPath: repositoryPath,
-                              defaultBranch: defaultBranch,
-                              writeBranch: writeBranch,
-                              displayName: displayName,
-                            ),
                       )
               : _TrackerHome(
                   viewModel: viewModel,
