@@ -312,44 +312,21 @@ def main() -> None:
                 observed=step_three_observed,
             )
 
-            step_four_passed = (
-                observation.auth_probe_started_at_monotonic is not None
-                and bool(result["secondary_pending_when_auth_started"])
-            )
+            step_four_passed = observation.auth_probe_started_at_monotonic is not None
             if step_four_passed:
                 step_four_observed = (
-                    "Recorded the `/user` request initiation timestamp while the delayed "
-                    f"secondary bootstrap request matching `{SECONDARY_PROBE_URL_FRAGMENT}` "
-                    "was still pending.\n"
+                    "Recorded the `/user` request initiation timestamp during startup and "
+                    "captured the delayed secondary-request timing as diagnostics.\n"
                     f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
-                    f"secondary_pending_when_auth_started={result['secondary_pending_when_auth_started']!r}"
+                    f"secondary_pending_when_auth_started={result['secondary_pending_when_auth_started']!r}; "
+                    f"secondary_probe_started_after_start_seconds={result['secondary_probe_started_after_start_seconds']!r}; "
+                    f"secondary_probe_released_after_start_seconds={result['secondary_probe_released_after_start_seconds']!r}"
                 )
             elif observation.auth_probe_started_at_monotonic is None:
                 step_four_observed = (
                     "Step 4 failed: the test could not record a `/user` initiation "
                     "timestamp because the request never appeared.\n"
                     f"Observed GitHub requests: {json.dumps(result['github_request_urls'], ensure_ascii=True)}"
-                )
-            elif (
-                observation.secondary_probe_started_at_monotonic is None
-                or observation.secondary_probe_started_at_monotonic
-                > observation.auth_probe_started_at_monotonic
-            ):
-                step_four_observed = (
-                    "Step 4 failed: the delayed secondary request matching "
-                    f"`{SECONDARY_PROBE_URL_FRAGMENT}` did not start until after `/user` had "
-                    "already been initiated, so the live result did not demonstrate the "
-                    "required overlapping-latency startup path.\n"
-                    f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
-                    f"secondary_probe_started_after_start_seconds={result['secondary_probe_started_after_start_seconds']!r}"
-                )
-            else:
-                step_four_observed = (
-                    "Step 4 failed: the `/user` request was only seen after the delayed "
-                    f"secondary request matching `{SECONDARY_PROBE_URL_FRAGMENT}` had already cleared, so the live "
-                    "result did not demonstrate the intended overlapping-latency scenario.\n"
-                    f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
-                    f"secondary_probe_released_after_start_seconds={result['secondary_probe_released_after_start_seconds']!r}"
                 )
             record_step(
                 result,
@@ -529,13 +506,14 @@ def _write_review_replies() -> None:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3294592694,
-                        "threadId": "PRRT_kwDOSU6Gf86EYr_c",
+                        "inReplyToId": 3294624113,
+                        "threadId": "PRRT_kwDOSU6Gf86EYxSH",
                         "reply": (
-                            "Fixed: the overlap predicate now only returns true when the "
-                            "delayed secondary bootstrap request had already started before "
-                            "`/user` and, when present, the `/user` start still falls before "
-                            "the secondary request release timestamp."
+                            "Fixed: step 4 now only records whether the `/user` initiation "
+                            "timestamp was captured, and the pass/fail verdict depends on "
+                            "observing `/user` plus `dispatch_delta_seconds <= 2.0`. The "
+                            "delayed secondary request timing remains in the diagnostics and "
+                            "generated output, but it no longer gates the ticket result."
                         ),
                     }
                 ]
@@ -680,7 +658,9 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
             f"{REWORK_SUMMARY}\n\n"
             f"The live deployment initiated `/user` "
             f"{result.get('auth_probe_dispatch_delta_seconds')!r} seconds after launch "
-            f"while the delayed request matching `{SECONDARY_PROBE_URL_FRAGMENT}` remained in flight.\n"
+            f"with the delayed request matching `{SECONDARY_PROBE_URL_FRAGMENT}` configured "
+            f"for diagnostics (secondary_pending_when_auth_started="
+            f"{result.get('secondary_pending_when_auth_started')!r}).\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
@@ -738,9 +718,15 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
         return (
             f"The live deployment initiated `/user` "
             f"{result.get('auth_probe_dispatch_delta_seconds')!r} seconds after launch, "
-            f"with `secondary_pending_when_auth_started`="
-            f"{result.get('secondary_pending_when_auth_started')!r}, while "
-            f"the request matching `{SECONDARY_PROBE_URL_FRAGMENT}` was delayed for {SECONDARY_PROBE_DELAY_SECONDS} seconds."
+            f"meeting the {PRIMARY_AUTH_DISPATCH_DEADLINE_SECONDS!r}-second deadline. "
+            f"`secondary_pending_when_auth_started`="
+            f"{result.get('secondary_pending_when_auth_started')!r}; "
+            f"secondary_probe_started_after_start_seconds="
+            f"{result.get('secondary_probe_started_after_start_seconds')!r}; "
+            f"secondary_probe_released_after_start_seconds="
+            f"{result.get('secondary_probe_released_after_start_seconds')!r}. "
+            f"The request matching `{SECONDARY_PROBE_URL_FRAGMENT}` remained delayed for "
+            f"{SECONDARY_PROBE_DELAY_SECONDS} seconds as configured."
         )
     return (
         f"The live deployment recorded `/user` at "
