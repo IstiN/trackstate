@@ -33,9 +33,6 @@ class GitHubTrackStateProvider
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
   );
-  static final Map<String, Future<Map<String, Object?>>>
-  _inFlightWebUserProbes = <String, Future<Map<String, Object?>>>{};
-
   GitHubTrackStateProvider({
     http.Client? client,
     this.repositoryName = defaultRepositoryName,
@@ -58,6 +55,8 @@ class GitHubTrackStateProvider
 
   final http.Client? _client;
   late final http.Client _ownedClient = http.Client();
+  final Map<String, Future<Map<String, Object?>>> _sharedWebUserProbes =
+      <String, Future<Map<String, Object?>>>{};
   final String repositoryName;
   final String sourceRef;
 
@@ -106,7 +105,7 @@ class GitHubTrackStateProvider
 
   Future<Map<String, Object?>> _fetchSharedWebUserProbeJson(String token) {
     final probeKey = token.trim();
-    final inFlight = _inFlightWebUserProbes[probeKey];
+    final inFlight = _sharedWebUserProbes[probeKey];
     if (inFlight != null) {
       return inFlight;
     }
@@ -127,12 +126,7 @@ class GitHubTrackStateProvider
       startupAuthProbeDiagnostics.recordAuthProbeSuccess();
       return jsonDecode(userResponse.body) as Map<String, Object?>;
     }();
-    _inFlightWebUserProbes[probeKey] = future;
-    future.whenComplete(() {
-      if (identical(_inFlightWebUserProbes[probeKey], future)) {
-        _inFlightWebUserProbes.remove(probeKey);
-      }
-    });
+    _sharedWebUserProbes[probeKey] = future;
     return future;
   }
 
