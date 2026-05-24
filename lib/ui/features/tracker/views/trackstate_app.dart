@@ -522,8 +522,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfilesState state, {
     bool allowFallbackFromActive = true,
     bool deferAccessRestore = false,
-  }
-  ) async {
+  }) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
       if (activeWorkspaceId != null)
@@ -546,8 +545,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         previousViewModel: previousViewModel,
         showFailureMessage: false,
         preserveActiveLocalSelectionOnStartupFailure:
-            workspace.id == activeWorkspaceId &&
-            workspace.isLocal,
+            workspace.id == activeWorkspaceId && workspace.isLocal,
         deferAccessRestore: deferAccessRestore,
       );
       if (prepared == null) {
@@ -2196,10 +2194,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                         viewModel: viewModel,
                         workspaces: _workspaceState,
                         authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
-                        hostedWorkspaceAccessModes:
-                            _hostedWorkspaceAccessModes,
-                        localWorkspaceAvailability:
-                            _localWorkspaceAvailability,
+                        hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
+                        localWorkspaceAvailability: _localWorkspaceAvailability,
                         onSelectWorkspace: _switchToWorkspace,
                         onRetryUnavailableLocalWorkspace:
                             _retryUnavailableLocalWorkspace,
@@ -2375,16 +2371,6 @@ class _TrackerHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    if (viewModel.snapshot == null && viewModel.isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Semantics(
-            label: l10n.appTitle,
-            child: CircularProgressIndicator(color: colors.primary),
-          ),
-        ),
-      );
-    }
     if (viewModel.snapshot == null) {
       if (viewModel.startupRecovery != null) {
         return Scaffold(
@@ -2393,6 +2379,16 @@ class _TrackerHome extends StatelessWidget {
             child: _StartupRecoveryView(
               viewModel: viewModel,
               onRetryStartupRecovery: onRetryStartupRecovery,
+            ),
+          ),
+        );
+      }
+      if (viewModel.isLoading) {
+        return Scaffold(
+          body: Center(
+            child: Semantics(
+              label: l10n.appTitle,
+              child: CircularProgressIndicator(color: colors.primary),
             ),
           ),
         );
