@@ -663,6 +663,48 @@ void main() {
     });
 
     test(
+      'rejects mixed-case self-referencing links with validation output',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final linkResult = await cli.run([
+          'ticket',
+          'link',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--key',
+          'DEMO-2',
+          '--target-key',
+          'demo-2',
+          '--type',
+          'relates to',
+        ]);
+        final linkJson = jsonDecode(linkResult.stdout) as Map<String, Object?>;
+        final error = linkJson['error']! as Map<String, Object?>;
+
+        expect(linkResult.exitCode, 2);
+        expect(linkJson['ok'], isFalse);
+        expect(error['code'], 'INVALID_MUTATION');
+        expect(error['category'], 'validation');
+        expect(error['message'], contains('DEMO-2'));
+        expect(error['message'], contains('demo-2'));
+        expect(error['message'], contains('itself'));
+        expect(
+          error['details'],
+          containsPair('targetKey', 'demo-2'),
+        );
+        expect(
+          File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+          isFalse,
+        );
+      },
+    );
+
+    test(
       'updates from jira JSON, archives explicitly, and deletes permanently',
       () async {
         final repo = await _createCliMutationRepository();
