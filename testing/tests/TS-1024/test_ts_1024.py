@@ -47,7 +47,7 @@ OBSERVATION_INTERVAL_SECONDS = 0.25
 RECOVERY_ACTION_LABELS = ("Retry", "Sync issue")
 RECOVERY_MARKERS = ("Retry", "Sync issue", "Connect GitHub")
 DISALLOWED_VISIBLE_TEXT = ("Saved workspaces", "Add workspace", "Save and switch")
-LINKED_BUGS = ["TS-1018"]
+LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028"]
 REWORK_SUMMARY = (
     "Moved recovery-state probing and retry-window monitoring into "
     "`LiveStartupRecoveryPage`, then switched TS-1024 to use page-level polling "
@@ -69,6 +69,10 @@ REQUEST_STEPS = [
     "Click the visible Retry recovery action and confirm the startup fetch is re-attempted with HTTP 500.",
     "Observe the workspace switcher panel during the retry observation window.",
     "Observe the workspace switcher panel and footer state after the failed retry completes.",
+]
+TICKET_STEPS = [
+    "Click the 'Retry' button in the workspace switcher panel.",
+    "Observe the workspace switcher panel and footer controls during and after the request.",
 ]
 EXPECTED_RESULT = (
     "The application re-attempts the fetch but remains consistently in the "
@@ -613,23 +617,53 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_bug_description(result: dict[str, Any]) -> str:
-    annotated_steps: list[str] = []
-    for index, action in enumerate(REQUEST_STEPS, start=1):
-        matching = next(
-            (
-                step
-                for step in result.get("steps", [])
-                if isinstance(step, dict) and int(step.get("step", -1)) == index
-            ),
-            None,
-        )
-        if matching is None:
-            annotated_steps.append(f"{index}. ⏭️ {action} Not reached.")
-            continue
-        icon = "✅" if str(matching.get("status")) == "passed" else "❌"
-        annotated_steps.append(
-            f"{index}. {icon} {action} Observed: {matching.get('observed', '')}",
-        )
+    steps = {
+        int(step.get("step", -1)): step
+        for step in result.get("steps", [])
+        if isinstance(step, dict)
+    }
+    step_1 = steps.get(1)
+    step_2 = steps.get(2)
+    step_3 = steps.get(3)
+    step_4 = steps.get(4)
+    annotated_steps = [
+        (
+            "1. "
+            + (
+                "✅"
+                if step_2 and str(step_2.get("status")) == "passed"
+                else "❌"
+            )
+            + f" {TICKET_STEPS[0]} "
+            + (
+                f"Observed: {step_2.get('observed', '')}"
+                if step_2
+                else "Observed: Not reached."
+            )
+        ),
+        (
+            "2. "
+            + (
+                "✅"
+                if all(
+                    step and str(step.get("status")) == "passed"
+                    for step in (step_3, step_4)
+                )
+                else "❌"
+            )
+            + f" {TICKET_STEPS[1]} "
+            + "Observed: "
+            + "\n\n".join(
+                part
+                for part in (
+                    f"Precondition before click: {step_1.get('observed', '')}" if step_1 else "",
+                    f"During request: {step_3.get('observed', '')}" if step_3 else "",
+                    f"After request: {step_4.get('observed', '')}" if step_4 else "",
+                )
+                if part
+            )
+        ),
+    ]
 
     lines = [
         f"# {TICKET_KEY} bug report",
@@ -684,6 +718,20 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "recovery view for the full observation window. No saved workspace rows or "
             "`Add workspace` / `Save and switch` footer actions appeared."
         )
+    final_snapshot = result.get("final_recovery_snapshot", {})
+    if isinstance(final_snapshot, dict):
+        body_text = str(final_snapshot.get("body_text", "")).strip()
+        surface_text = str(final_snapshot.get("surface_text", "")).strip()
+        visible_button_labels = final_snapshot.get("visible_button_labels", [])
+        if body_text or surface_text or visible_button_labels:
+            return (
+                "After Retry triggered another blocked startup fetch, the deployed app "
+                "did not remain on the `Sync issue` recovery surface. During the first "
+                "observation sample and after the request completed, the visible UI "
+                f"collapsed to body_text={body_text!r}, surface_text={surface_text!r}, "
+                f"visible_button_labels={visible_button_labels!r} instead of continuing "
+                "to show the recovery copy and controls."
+            )
     return (
         "The live deployment did not keep the recovery view consistent after the Retry "
         "action. See the annotated failed step, captured snapshots, and sampled retry "
