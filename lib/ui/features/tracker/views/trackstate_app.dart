@@ -712,9 +712,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool markUnavailable = false,
   }) async {
     previousViewModel.updateWorkspaceScope(workspace.id);
-    if (previousViewModel.snapshot == null) {
-      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
-    }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
         : _createViewModel(
@@ -723,9 +720,12 @@ class _TrackStateAppState extends State<TrackStateApp>
             autoLoad: false,
             workspaceId: workspace.id,
           );
-    if (!identical(preservedViewModel, previousViewModel) &&
-        preservedViewModel.snapshot == null) {
-      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+    if (preservedViewModel.snapshot == null) {
+      if (deferAccessRestore) {
+        unawaited(preservedViewModel.load(deferAccessRestore: true));
+      } else {
+        await preservedViewModel.load(deferAccessRestore: false);
+      }
     }
     if (markUnavailable) {
       await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
@@ -3961,10 +3961,9 @@ class _HostedWorkspaceIdentityPreview extends StatelessWidget {
 
     return Semantics(
       container: true,
-      label:
-          trimmedBranch.isEmpty
-              ? trimmedRepository
-              : '$trimmedRepository ${l10n.branch}: $trimmedBranch',
+      label: trimmedBranch.isEmpty
+          ? trimmedRepository
+          : '$trimmedRepository ${l10n.branch}: $trimmedBranch',
       child: Container(
         key: const ValueKey('workspace-onboarding-hosted-identity-preview'),
         width: double.infinity,

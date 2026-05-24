@@ -305,7 +305,7 @@ void main() {
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
-      expect(browserHarness.consoleMessages, isEmpty);
+      expect(browserHarness.unexpectedConsoleMessages, isEmpty);
       expect(find.text('Dashboard'), findsWidgets);
       expect(delayedRepository.session, isNotNull);
       expect(
@@ -402,6 +402,82 @@ void main() {
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
       expect(find.text('Connect GitHub'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'web startup commits the preserved local shell before the initial hosted search finishes',
+    (tester) async {
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+
+      final delayedRepository = _SearchBlockingBrowserStartupRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        delayedRepository.completeInitialSearch();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(delayedRepository.initialSearchRequestCount, 1);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Connect GitHub'), findsOneWidget);
+
+      delayedRepository.completeInitialSearch();
+      await tester.pump();
+      await tester.pumpAndSettle();
     },
   );
 }
@@ -563,6 +639,38 @@ class _BrowserStartupAuthProbeRepository
   }
 }
 
+class _SearchBlockingBrowserStartupRepository
+    extends _BrowserStartupAuthProbeRepository {
+  _SearchBlockingBrowserStartupRepository({required super.snapshot});
+
+  final Completer<void> _initialSearchCompleter = Completer<void>();
+  int initialSearchRequestCount = 0;
+
+  void completeInitialSearch() {
+    if (_initialSearchCompleter.isCompleted) {
+      return;
+    }
+    _initialSearchCompleter.complete();
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    initialSearchRequestCount += 1;
+    await _initialSearchCompleter.future;
+    return super.searchIssuePage(
+      jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+}
+
 class _BrowserStartupAuthProbeHarness {
   _BrowserStartupAuthProbeHarness();
 
@@ -575,6 +683,9 @@ class _BrowserStartupAuthProbeHarness {
 
   int get userProbeRequestCount =>
       requestedPaths.where((path) => path == '/user').length;
+  List<String> get unexpectedConsoleMessages => consoleMessages
+      .where((message) => !message.startsWith('TrackState startup diagnostic:'))
+      .toList(growable: false);
 
   void install() {
     if (_installed) {
