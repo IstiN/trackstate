@@ -1,6 +1,7 @@
 @TestOn('browser')
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -46,7 +47,7 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
       addTearDown(() async {
-        await tester.pump(const Duration(seconds: 31));
+        harness.completeDelayedProjectJson();
         await tester.pump();
       });
 
@@ -80,13 +81,33 @@ void main() {
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsWidgets,
       );
+      expect(harness.delayedProjectJsonStarted, isTrue);
       expect(harness.delayedProjectJsonCompleted, isFalse);
     },
   );
 }
 
 class _HostedSecondaryProbeHarness {
+  final Completer<http.Response> _delayedProjectJsonCompleter =
+      Completer<http.Response>();
+  bool delayedProjectJsonStarted = false;
   bool delayedProjectJsonCompleted = false;
+
+  void completeDelayedProjectJson() {
+    if (_delayedProjectJsonCompleter.isCompleted) {
+      return;
+    }
+    delayedProjectJsonCompleted = true;
+    _delayedProjectJsonCompleter.complete(
+      _contentResponse(
+        jsonEncode({
+          'key': 'DEMO',
+          'name': 'Demo Project',
+          'defaultLocale': 'en',
+        }),
+      ),
+    );
+  }
 
   Future<http.Response> handle(http.Request request) async {
     final path = request.url.path;
@@ -139,15 +160,8 @@ class _HostedSecondaryProbeHarness {
         );
       case '/repos/stable/repo/contents/DEMO/project.json':
         expect(ref, 'main');
-        await Future<void>.delayed(const Duration(seconds: 31));
-        delayedProjectJsonCompleted = true;
-        return _contentResponse(
-          jsonEncode({
-            'key': 'DEMO',
-            'name': 'Demo Project',
-            'defaultLocale': 'en',
-          }),
-        );
+        delayedProjectJsonStarted = true;
+        return _delayedProjectJsonCompleter.future;
       case '/repos/stable/repo/contents/DEMO/config/statuses.json':
         return _contentResponse(
           jsonEncode([
