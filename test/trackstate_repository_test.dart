@@ -1377,6 +1377,99 @@ updated: 2026-05-05T00:05:00Z
   );
 
   test(
+    'setup repository applies the hosted startup timeout across the full bootstrap load',
+    () async {
+      final files = <String, String>{
+        'DEMO/project.json': jsonEncode({
+          'key': 'DEMO',
+          'name': 'Demo Project',
+          'defaultLocale': 'en',
+        }),
+        'DEMO/config/statuses.json': jsonEncode([
+          {'id': 'todo', 'name': 'To Do'},
+        ]),
+        'DEMO/config/issue-types.json': jsonEncode([
+          {'id': 'story', 'name': 'Story'},
+        ]),
+        'DEMO/config/fields.json': jsonEncode([
+          {
+            'id': 'summary',
+            'name': 'Summary',
+            'type': 'string',
+            'required': true,
+          },
+        ]),
+        'DEMO/.trackstate/index/issues.json': jsonEncode([
+          {
+            'key': 'DEMO-1',
+            'path': 'DEMO/DEMO-1/main.md',
+            'parent': null,
+            'epic': null,
+            'summary': 'Indexed markdown issue',
+            'issueType': 'story',
+            'status': 'todo',
+            'labels': [],
+            'updated': '2026-05-05T00:05:00Z',
+            'children': [],
+            'archived': false,
+          },
+        ]),
+        'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Indexed markdown issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+      };
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            await Future<void>.delayed(const Duration(milliseconds: 75));
+            final tree = files.keys
+                .map((filePath) => {'path': filePath, 'type': 'blob'})
+                .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          final contentsPrefix =
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
+          if (path.startsWith(contentsPrefix)) {
+            final filePath = path.substring(contentsPrefix.length);
+            if (filePath == 'DEMO/project.json') {
+              await Future<void>.delayed(const Duration(milliseconds: 80));
+            }
+            final content = files[filePath];
+            if (content != null) {
+              return _contentResponse(content);
+            }
+          }
+          return http.Response('', 404);
+        }),
+        hostedStartupProbeTimeout: const Duration(milliseconds: 100),
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 140),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/project.json after 100 ms. TrackState.AI loaded fallback project metadata so the shell can open while repository data keeps loading.',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(
