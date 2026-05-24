@@ -1049,12 +1049,6 @@ class GitHubTrackStateProvider
         'releases in $repository.',
       );
     }
-    if (response.statusCode == 422) {
-      throw TrackStateProviderException(
-        'GitHub release $releaseTag could not be created for issue $issueKey. '
-        'Resolve the existing tag or release conflict and try again.',
-      );
-    }
     if (response.statusCode != 201) {
       _throwGitHubResponseException(
         path: '/repos/$repository/releases',
