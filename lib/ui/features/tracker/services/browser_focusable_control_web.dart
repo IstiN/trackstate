@@ -4,6 +4,7 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/widgets.dart';
 import 'package:web/web.dart' as web;
 
+import 'browser_focusable_control_listener_binding.dart';
 import 'browser_focusable_control_logic.dart';
 
 class BrowserFocusableControl extends StatefulWidget {
@@ -44,7 +45,17 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
 
   late final String _viewType = 'trackstate-browser-focus-control-${_nextId++}';
   web.HTMLButtonElement? _element;
-  JSFunction? _clickListener;
+  _BrowserFocusableButtonElementAdapter? _elementAdapter;
+  late final BrowserFocusableControlListenerBinding<JSFunction> _clickBinding =
+      BrowserFocusableControlListenerBinding<JSFunction>(
+        createListener: (handleClick) {
+          return ((web.Event event) {
+            event.preventDefault();
+            event.stopPropagation();
+            handleClick();
+          }).toJS;
+        },
+      );
 
   @override
   void initState() {
@@ -53,17 +64,9 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       final element = web.HTMLButtonElement()
         ..type = 'button'
         ..textContent = '';
-      _clickListener = ((web.Event event) {
-        event.preventDefault();
-        event.stopPropagation();
-        final onPressed = widget.onPressed;
-        if (onPressed == null) {
-          return;
-        }
-        onPressed();
-      }).toJS;
-      element.addEventListener('click', _clickListener);
       _element = element;
+      _elementAdapter = _BrowserFocusableButtonElementAdapter(element);
+      _clickBinding.bind(_elementAdapter!, onPressed: widget.onPressed);
       _syncElement();
       return element;
     });
@@ -72,18 +75,18 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
   @override
   void didUpdateWidget(covariant BrowserFocusableControl oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final elementAdapter = _elementAdapter;
+    if (elementAdapter != null) {
+      _clickBinding.bind(elementAdapter, onPressed: widget.onPressed);
+    }
     _syncElement();
   }
 
   @override
   void dispose() {
-    final element = _element;
-    final clickListener = _clickListener;
-    if (element != null && clickListener != null) {
-      element.removeEventListener('click', clickListener);
-    }
+    _clickBinding.dispose();
     _element = null;
-    _clickListener = null;
+    _elementAdapter = null;
     super.dispose();
   }
 
@@ -164,7 +167,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
           skipTraversal: true,
           descendantsAreFocusable: false,
           descendantsAreTraversable: false,
-          child: IgnorePointer(child: ExcludeSemantics(child: widget.child)),
+          child: ExcludeSemantics(child: widget.child),
         ),
         Positioned.fill(
           child: HtmlElementView(viewType: _viewType),
@@ -191,3 +194,20 @@ const String _browserFocusPanelIdAttribute =
     'data-trackstate-browser-focus-panel-id';
 const String _browserFocusRowIdAttribute =
     'data-trackstate-browser-focus-row-id';
+
+class _BrowserFocusableButtonElementAdapter
+    implements BrowserFocusableControlListenerHost<JSFunction> {
+  _BrowserFocusableButtonElementAdapter(this.element);
+
+  final web.HTMLButtonElement element;
+
+  @override
+  void addClickListener(JSFunction listener) {
+    element.addEventListener('click', listener);
+  }
+
+  @override
+  void removeClickListener(JSFunction listener) {
+    element.removeEventListener('click', listener);
+  }
+}
