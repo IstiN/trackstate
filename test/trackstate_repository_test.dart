@@ -2991,6 +2991,96 @@ Nested release-backed attachment issue.
   });
 
   test(
+    'github provider surfaces release creation validation details from GitHub',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'GET') {
+            return http.Response('[]', 200);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({
+                'message': 'Validation Failed',
+                'errors': [
+                  {
+                    'resource': 'Release',
+                    'field': 'target_commitish',
+                    'code': 'invalid',
+                    'message': 'target_commitish is invalid',
+                  },
+                ],
+              }),
+              422,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await expectLater(
+        () => provider.writeReleaseAttachment(
+          RepositoryReleaseAttachmentWriteRequest(
+            issueKey: 'DEMO-1',
+            releaseTag: 'trackstate-attachments-DEMO-1',
+            releaseTitle: 'Attachments for DEMO-1',
+            assetName: 'design.png',
+            bytes: Uint8List.fromList(const [1, 2, 3]),
+            mediaType: 'image/png',
+            branch: 'feature-unpushed',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Could not create GitHub release'),
+              )
+              .having((error) => error.message, 'message', contains('(422)'))
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Validation Failed'),
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                contains('target_commitish'),
+              ),
+        ),
+      );
+    },
+  );
+
+  test(
     'github provider falls back to release lookup when stored asset id is stale',
     () async {
       final provider = GitHubTrackStateProvider(
