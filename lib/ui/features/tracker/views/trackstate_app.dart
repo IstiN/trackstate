@@ -541,14 +541,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
-      final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
-          kIsWeb && workspace.id == activeWorkspaceId && workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
-        preserveActiveLocalSelectionOnUnsupportedAccess:
-            preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId &&
             workspace.isLocal,
@@ -2194,7 +2190,31 @@ class _TrackStateAppState extends State<TrackStateApp>
           home: !_workspaceProfilesReady
               ? _WorkspaceInitializationView(viewModel: viewModel)
               : _showsWorkspaceOnboarding
-              ? _workspaceState.hasProfiles
+              ? _pendingWorkspaceRestoreFailure != null &&
+                        _workspaceState.hasProfiles
+                    ? _WorkspaceRestoreLandingView(
+                        viewModel: viewModel,
+                        workspaces: _workspaceState,
+                        authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
+                        hostedWorkspaceAccessModes:
+                            _hostedWorkspaceAccessModes,
+                        localWorkspaceAvailability:
+                            _localWorkspaceAvailability,
+                        onSelectWorkspace: _switchToWorkspace,
+                        onRetryUnavailableLocalWorkspace:
+                            _retryUnavailableLocalWorkspace,
+                        onDeleteWorkspace: _deleteWorkspaceProfile,
+                        onAddWorkspace: _addWorkspaceProfile,
+                        onMoveWorkspaceSelection: (step) =>
+                            unawaited(_switchToAdjacentWorkspace(step: step)),
+                        onSelectFirstWorkspace: () => unawaited(
+                          _switchToBoundaryWorkspace(selectFirst: true),
+                        ),
+                        onSelectLastWorkspace: () => unawaited(
+                          _switchToBoundaryWorkspace(selectFirst: false),
+                        ),
+                      )
+                    : _workspaceState.hasProfiles
                     ? _WorkspaceOnboardingScreen(
                         canCancel: true,
                         canBrowseHostedRepositories:
@@ -2578,6 +2598,80 @@ class _WorkspaceInitializationView extends StatelessWidget {
         child: Semantics(
           label: l10n.appTitle,
           child: CircularProgressIndicator(color: colors.primary),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceRestoreLandingView extends StatelessWidget {
+  const _WorkspaceRestoreLandingView({
+    required this.viewModel,
+    required this.workspaces,
+    required this.authenticatedWorkspaceIds,
+    required this.hostedWorkspaceAccessModes,
+    required this.localWorkspaceAvailability,
+    required this.onSelectWorkspace,
+    required this.onRetryUnavailableLocalWorkspace,
+    required this.onDeleteWorkspace,
+    required this.onAddWorkspace,
+    required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
+  });
+
+  final TrackerViewModel viewModel;
+  final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
+  final Map<String, HostedWorkspaceAccessMode> hostedWorkspaceAccessModes;
+  final Map<String, bool> localWorkspaceAvailability;
+  final ValueChanged<WorkspaceProfile> onSelectWorkspace;
+  final ValueChanged<WorkspaceProfile> onRetryUnavailableLocalWorkspace;
+  final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final WorkspaceProfileCreator onAddWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      identifier: browserWorkspaceSwitcherSemanticsIdentifier,
+      label: l10n.workspaceSwitcher,
+      child: Scaffold(
+        backgroundColor: colors.page,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: _WorkspaceSwitcherSheet(
+                  sheetKey: const ValueKey('workspace-switcher-sheet'),
+                  exposeActiveSummarySemantics: true,
+                  viewModel: viewModel,
+                  workspaces: workspaces,
+                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                  hostedWorkspaceAccessModes: hostedWorkspaceAccessModes,
+                  localWorkspaceAvailability: localWorkspaceAvailability,
+                  requestedFocusedWorkspaceId: null,
+                  focusRequestVersion: 0,
+                  onSelectWorkspace: onSelectWorkspace,
+                  onRetryUnavailableLocalWorkspace:
+                      onRetryUnavailableLocalWorkspace,
+                  onDeleteWorkspace: onDeleteWorkspace,
+                  onAddWorkspace: onAddWorkspace,
+                  onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                  onSelectFirstWorkspace: onSelectFirstWorkspace,
+                  onSelectLastWorkspace: onSelectLastWorkspace,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
