@@ -1401,6 +1401,71 @@ void main() {
     );
 
     test(
+      'local release-backed upload with a non-GitHub remote returns a repository identity validation error',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/release-plan.txt');
+        await uploadFile.writeAsString('roadmap');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+        );
+        await _gitCliTest(repo.path, [
+          'remote',
+          'add',
+          'origin',
+          'https://gitlab.com/user/project.git',
+        ]);
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure release-backed attachment storage',
+        ]);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'INVALID_REQUEST');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no GitHub remote is configured.',
+          ),
+        );
+        expect(
+          details['reason'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no GitHub remote is configured.',
+          ),
+        );
+      },
+    );
+
+    test(
       'local attachment upload with an unsupported storage mode returns a validation error',
       () async {
         final repo = await _createCliLocalRepository();
