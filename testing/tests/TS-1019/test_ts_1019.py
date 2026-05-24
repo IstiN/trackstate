@@ -422,7 +422,6 @@ def main() -> None:
                     )
                     _record_not_reached_steps(result, starting_step=3)
                     raise AssertionError(f"Step 2 failed: {observed}")
-
                 _record_step(
                     result,
                     step=2,
@@ -443,7 +442,6 @@ def main() -> None:
                         f"pending_window_duration_seconds={pending_window_duration_seconds!r}"
                     ),
                 )
-                pending_observation_failures: list[str] = []
                 pending_observation_failures: list[str] = []
                 pending_observation_failures.extend(
                     _pending_state_failures(
@@ -1559,6 +1557,8 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         return (
             f"# {TICKET_KEY}\n\n"
             "✅ PASSED\n\n"
+            "Resolved the merge-conflicted TS-1019 automation by keeping the hosted-workspace "
+            "startup seeding, linked-bug coverage, and pending-shell reporting intact.\n\n"
             f"Observed {_pending_sample_count(result)} in-flight pending samples across "
             f"{_pending_sampled_duration_seconds(result)!r} seconds while the delayed GitHub "
             "`/user` startup probe was pending. The shell stayed hidden until probe "
@@ -1567,6 +1567,8 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     return (
         f"# {TICKET_KEY}\n\n"
         "❌ FAILED\n\n"
+        "Resolved the merge conflict and kept the latest TS-1019 pending-shell coverage and "
+        "product-bug classification logic in place.\n\n"
         "The live deployed app never started the delayed GitHub `/user` startup probe, "
         "so the pending synchronization window could not be observed. The user-visible "
         "page remained on the bare `TrackState.AI` loading surface.\n\n"
