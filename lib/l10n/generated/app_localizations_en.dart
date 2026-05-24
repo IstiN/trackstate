@@ -876,7 +876,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String repositoryConfigFallback(String error) {
-    return 'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. $error';
+    return 'TrackState.AI fell back to startup-safe repository defaults so the shell could open. $error';
   }
 
   @override

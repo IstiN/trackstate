@@ -25,7 +25,10 @@ class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
             raise RuntimeError(
                 "WorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(script=_build_preload_script(self._workspace_state))
+        script = _build_preload_script(self._workspace_state)
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 
@@ -48,14 +51,15 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
             raise RuntimeError(
                 "StoredWorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(
-            script=_build_preload_script(
-                self._workspace_state,
-                repository=self._repository,
-                token=self._token,
-                workspace_token_profile_ids=self._workspace_token_profile_ids,
-            ),
+        script = _build_preload_script(
+            self._workspace_state,
+            repository=self._repository,
+            token=self._token,
+            workspace_token_profile_ids=self._workspace_token_profile_ids,
         )
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 

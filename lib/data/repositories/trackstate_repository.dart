@@ -129,6 +129,7 @@ class ProviderBackedTrackStateRepository
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
     http.Client? githubClient,
+    this.hostedStartupProbeTimeout = const Duration(seconds: 11),
     JqlSearchService searchService = const JqlSearchService(),
   }) : _provider = provider,
        _githubClient = githubClient,
@@ -149,6 +150,7 @@ class ProviderBackedTrackStateRepository
 
   final TrackStateProviderAdapter _provider;
   final http.Client? _githubClient;
+  final Duration hostedStartupProbeTimeout;
   final JqlSearchService _searchService;
   final ProjectSettingsValidationService _projectSettingsValidationService =
       const ProjectSettingsValidationService();
@@ -1909,21 +1911,40 @@ class ProviderBackedTrackStateRepository
         ? projectPath.substring(0, projectPath.lastIndexOf('/'))
         : '';
     final resolvedBranchFuture = _provider.resolveWriteBranch();
-    final projectJson =
-        await _getRepositoryJson(projectPath) as Map<String, Object?>;
-    final configRoot = _resolveConfigRoot(projectJson, dataRoot);
-    final defaultLocale = projectJson['defaultLocale']?.toString() ?? 'en';
-    final attachmentStorage = _resolveAttachmentStorage(projectJson);
-    final supportedLocales = _resolveSupportedLocales(
-      projectJson: projectJson,
-      blobPaths: blobPaths,
-      configRoot: configRoot,
-      defaultLocale: defaultLocale,
-    );
+    Map<String, Object?>? projectJson;
+    try {
+      projectJson = await _loadHostedStartupProbe<Map<String, Object?>>(
+        projectPath,
+        () async => await _getRepositoryJson(projectPath) as Map<String, Object?>,
+      );
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: 'project metadata',
+        ),
+      );
+    }
+    final configRoot = projectJson == null
+        ? _defaultConfigRoot(dataRoot)
+        : _resolveConfigRoot(projectJson, dataRoot);
+    final defaultLocale = projectJson?['defaultLocale']?.toString() ?? 'en';
+    final attachmentStorage = projectJson == null
+        ? const ProjectAttachmentStorageSettings()
+        : _resolveAttachmentStorage(projectJson);
+    final supportedLocales = projectJson == null
+        ? const <String>['en']
+        : _resolveSupportedLocales(
+            projectJson: projectJson,
+            blobPaths: blobPaths,
+            configRoot: configRoot,
+            defaultLocale: defaultLocale,
+          );
     final localizedLabels = await _loadLocalizedLabels(
       blobPaths: blobPaths,
       configRoot: configRoot,
       locales: supportedLocales,
+      loadWarnings: loadWarnings,
     );
     final issueTypeWarnings = <String>[];
     final statusWarnings = <String>[];
@@ -1954,21 +1975,29 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'priorities.json'),
       localizedLabels: localizedLabels['priorities'] ?? const {},
+      loadWarnings: loadWarnings,
+      warningSubject: 'priorities',
     );
     final versionsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'versions.json'),
       localizedLabels: localizedLabels['versions'] ?? const {},
+      loadWarnings: loadWarnings,
+      warningSubject: 'versions',
     );
     final componentsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'components.json'),
       localizedLabels: localizedLabels['components'] ?? const {},
+      loadWarnings: loadWarnings,
+      warningSubject: 'components',
     );
     final resolutionsFuture = _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'resolutions.json'),
       localizedLabels: localizedLabels['resolutions'] ?? const {},
+      loadWarnings: loadWarnings,
+      warningSubject: 'resolutions',
     );
     final issueTypes = await issueTypesFuture;
     final repositoryIndexFuture = _loadRepositoryIndex(
@@ -1981,6 +2010,7 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'workflows.json'),
       statusDefinitions: statuses,
+      loadWarnings: loadWarnings,
     );
     final fields = await fieldsFuture;
     final priorities = await prioritiesFuture;
@@ -1994,8 +2024,12 @@ class ProviderBackedTrackStateRepository
       ..addAll(statusWarnings)
       ..addAll(fieldWarnings);
     final project = ProjectConfig(
-      key: (projectJson['key'] as String?) ?? 'DEMO',
-      name: (projectJson['name'] as String?) ?? 'TrackState Project',
+      key:
+          projectJson?['key'] as String? ??
+          _deriveFallbackProjectKey(_startupFallbackProjectName(dataRoot)),
+      name:
+          projectJson?['name'] as String? ??
+          _startupFallbackProjectName(dataRoot),
       repository: _provider.repositoryLabel,
       branch: await resolvedBranchFuture,
       defaultLocale: defaultLocale,
@@ -2180,6 +2214,40 @@ class ProviderBackedTrackStateRepository
     return normalizedPath;
   }
 
+  String _defaultConfigRoot(String dataRoot) =>
+      dataRoot.isEmpty ? 'config' : '$dataRoot/config';
+
+  String _startupFallbackProjectName(String dataRoot) {
+    final trimmedRoot = dataRoot.trim();
+    if (trimmedRoot.isNotEmpty) {
+      final segments = trimmedRoot.split('/');
+      return segments.lastWhere((segment) => segment.trim().isNotEmpty);
+    }
+    return _repositoryWorkspaceName(_provider.repositoryLabel);
+  }
+
+  Future<T> _loadHostedStartupProbe<T>(
+    String path,
+    Future<T> Function() load,
+  ) async {
+    if (usesLocalPersistence) {
+      return load();
+    }
+    return load().timeout(
+      hostedStartupProbeTimeout,
+      onTimeout: () =>
+          throw _HostedStartupProbeTimeout(path, hostedStartupProbeTimeout),
+    );
+  }
+
+  String _hostedStartupTimeoutWarning(
+    String path, {
+    required String fallbackDescription,
+  }) {
+    return 'Hosted startup deferred $path after ${_formatStartupProbeTimeout(hostedStartupProbeTimeout)}. '
+        'TrackState.AI loaded fallback $fallbackDescription so the shell can open while repository data keeps loading.';
+  }
+
   ProjectAttachmentStorageSettings _resolveAttachmentStorage(
     Map<String, Object?> projectJson,
   ) {
@@ -2300,6 +2368,7 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String configRoot,
     required List<String> locales,
+    required List<String> loadWarnings,
   }) async {
     final result = <String, Map<String, Map<String, String>>>{};
     for (final locale in locales) {
@@ -2307,7 +2376,18 @@ class ProviderBackedTrackStateRepository
       if (!blobPaths.contains(path)) {
         continue;
       }
-      final json = await _getRepositoryJson(path);
+      Object? json;
+      try {
+        json = await _loadHostedStartupProbe<Object?>(path, () => _getRepositoryJson(path));
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'localized labels',
+          ),
+        );
+        continue;
+      }
       if (json is! Map) {
         continue;
       }
@@ -2357,10 +2437,21 @@ class ProviderBackedTrackStateRepository
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
     try {
-      return await _getConfigEntries(path, localizedLabels: localizedLabels);
+      return await _loadHostedStartupProbe<List<TrackStateConfigEntry>>(
+        path,
+        () => _getConfigEntries(path, localizedLabels: localizedLabels),
+      );
     } on FormatException catch (error) {
       loadWarnings.add(
         'Falling back to built-in $warningSubject after failing to parse $path: $error',
+      );
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: warningSubject,
+        ),
       );
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
@@ -2370,9 +2461,24 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String path,
     required Map<String, Map<String, String>> localizedLabels,
+    required List<String> loadWarnings,
+    required String warningSubject,
   }) async {
     if (!blobPaths.contains(path)) return const [];
-    return _getConfigEntries(path, localizedLabels: localizedLabels);
+    try {
+      return await _loadHostedStartupProbe<List<TrackStateConfigEntry>>(
+        path,
+        () => _getConfigEntries(path, localizedLabels: localizedLabels),
+      );
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: warningSubject,
+        ),
+      );
+      return const [];
+    }
   }
 
   Future<List<TrackStateFieldDefinition>> _getFieldDefinitions(
@@ -2391,7 +2497,10 @@ class ProviderBackedTrackStateRepository
       );
     }
     try {
-      final json = await _getRepositoryJson(path);
+      final json = await _loadHostedStartupProbe<Object?>(
+        path,
+        () => _getRepositoryJson(path),
+      );
       if (json is! List) return const [];
       return json
           .whereType<Map>()
@@ -2450,6 +2559,17 @@ class ProviderBackedTrackStateRepository
         _fieldDefinitions,
         growable: false,
       );
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: 'fields',
+        ),
+      );
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
     }
   }
 
@@ -2457,11 +2577,23 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String path,
     required List<TrackStateConfigEntry> statusDefinitions,
+    required List<String> loadWarnings,
   }) async {
     if (!blobPaths.contains(path)) {
       return const [];
     }
-    final json = await _getRepositoryJson(path);
+    Object? json;
+    try {
+      json = await _loadHostedStartupProbe<Object?>(path, () => _getRepositoryJson(path));
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: 'workflows',
+        ),
+      );
+      return const [];
+    }
     if (json is! Map) {
       return const [];
     }
@@ -3348,6 +3480,7 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
     String repositoryName = GitHubTrackStateProvider.defaultRepositoryName,
     String sourceRef = GitHubTrackStateProvider.defaultSourceRef,
     String dataRef = GitHubTrackStateProvider.defaultDataRef,
+    super.hostedStartupProbeTimeout = const Duration(seconds: 11),
   }) : super(
          provider: GitHubTrackStateProvider(
            client: client,
@@ -4393,6 +4526,16 @@ String _repositoryWorkspaceName(String repositoryLabel) {
   return normalized;
 }
 
+String _formatStartupProbeTimeout(Duration duration) {
+  if (duration.inMilliseconds < 1000) {
+    return '${duration.inMilliseconds} ms';
+  }
+  if (duration.inMilliseconds.remainder(1000) == 0) {
+    return '${duration.inSeconds} seconds';
+  }
+  return '${duration.inMilliseconds} ms';
+}
+
 String _deriveFallbackProjectKey(String workspaceName) {
   final normalized = workspaceName
       .toUpperCase()
@@ -4415,6 +4558,13 @@ String _deriveFallbackProjectKey(String workspaceName) {
   final collapsed = parts.join();
   final endIndex = collapsed.length > 10 ? 10 : collapsed.length;
   return collapsed.substring(0, endIndex);
+}
+
+class _HostedStartupProbeTimeout implements Exception {
+  const _HostedStartupProbeTimeout(this.path, this.timeout);
+
+  final String path;
+  final Duration timeout;
 }
 
 String _defaultStatusId(ProjectConfig project) =>

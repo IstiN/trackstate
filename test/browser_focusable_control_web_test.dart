@@ -21,7 +21,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup keeps the shell visible when the saved active local workspace has no browser handle',
+    'web startup clears the saved active local workspace when the browser handle is missing',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       final workspaceProfiles = SharedPreferencesWorkspaceProfileService();
@@ -80,12 +80,29 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
       );
       expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
       final savedState = await workspaceProfiles.loadState();
-      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedState.activeWorkspaceId, isNull);
       expect(
         savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -94,7 +111,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup waits for delayed hosted auth before exposing the shell when the active local workspace has no browser handle',
+    'web startup clears a saved active local workspace with no browser handle before delayed hosted auth begins',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -166,46 +183,48 @@ void main() {
               ),
         ),
       );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
-      );
-      expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
-      );
-      expect(find.text('Dashboard'), findsNothing);
-      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
-      expect(delayedRepository.connectCalled, isTrue);
-      expect(delayedRepository.connectCompleted, isFalse);
-
-      final savedState = await workspaceProfiles.loadState();
-      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
-      expect(
-        savedState.unavailableLocalWorkspaceIds,
-        contains(activeLocalWorkspaceId),
-      );
-
-      delayedRepository.completeConnect();
-      await tester.pump();
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
       );
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
-      final savedStateAfterConnect = await workspaceProfiles.loadState();
-      expect(savedStateAfterConnect.activeWorkspaceId, activeLocalWorkspaceId);
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
       expect(
-        savedStateAfterConnect.unavailableLocalWorkspaceIds,
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
+      expect(delayedRepository.connectCalled, isFalse);
+      expect(delayedRepository.connectCompleted, isFalse);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+
+      final savedState = await workspaceProfiles.loadState();
+      expect(savedState.activeWorkspaceId, isNull);
+      expect(
+        savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
     },

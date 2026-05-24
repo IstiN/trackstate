@@ -55,6 +55,14 @@ class WorkspaceSwitcherTriggerObservation:
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
     LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
+    STARTUP_ENTRY_SIGNAL_TEXTS = (
+        "Connect GitHub",
+        "Workspace switcher",
+        "Add workspace",
+        "Board",
+    )
+    WORKSPACE_SWITCHER_LABEL = "Workspace switcher"
+    ADD_WORKSPACE_LABEL = "Add workspace"
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -118,16 +126,37 @@ class TrackStateTrackerPage:
         return f"{base_url}{normalized_route}"
 
     def open(self) -> RuntimeObservation:
-        self.open_entrypoint()
+        return self.open_startup_entrypoint(
+            wait_signals=(
+                *self.LOAD_ERROR_TEXT_VARIANTS,
+                *self.STARTUP_ENTRY_SIGNAL_TEXTS,
+            ),
+            timeout_ms=120_000,
+            timeout_error_message="Step 1 failed: the deployed app never reached an interactive state.",
+        )
+
+    def open_startup_entrypoint(
+        self,
+        *,
+        wait_signals: Sequence[str] | None = None,
+        timeout_ms: int = 120_000,
+        wait_until: str = "domcontentloaded",
+        timeout_error_message: str | None = None,
+    ) -> RuntimeObservation:
+        self.open_entrypoint(wait_until=wait_until, timeout_ms=timeout_ms)
+        startup_signals = tuple(wait_signals or self.STARTUP_ENTRY_SIGNAL_TEXTS)
         try:
             wait_match = self.session.wait_for_any_text(
-                [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
-                timeout_ms=120_000,
+                startup_signals,
+                timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
+            base_message = (
+                timeout_error_message
+                or "Step 1 failed: the deployed app never reached an interactive state."
+            )
             raise AssertionError(
-                "Step 1 failed: the deployed app never reached an interactive state. "
-                f"Visible body text: {self.body_text()}",
+                f"{base_message} Visible body text: {self.body_text()}",
             ) from error
         if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeObservation(
