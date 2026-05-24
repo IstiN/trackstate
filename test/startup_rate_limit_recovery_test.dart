@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -187,6 +189,63 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'retrying blocking hosted startup keeps the recovery view visible during and after a second startup failure',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final retryCompleter = Completer<TrackerSnapshot>();
+      final repository = _WidgetStartupRecoveryRepository(
+        loadResults: [
+          const GitHubRateLimitException(
+            message:
+                'GitHub API request failed for /repos/demo/contents/DEMO/project.json (403): {"message":"API rate limit exceeded"}',
+            requestPath: '/repos/demo/contents/DEMO/project.json',
+            statusCode: 403,
+          ),
+          retryCompleter.future,
+        ],
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub startup limit reached'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+        await tester.pump();
+
+        expect(find.text('GitHub startup limit reached'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(find.text('Saved workspaces'), findsNothing);
+        expect(find.text('Add workspace'), findsNothing);
+        expect(find.text('Save and switch'), findsNothing);
+
+        retryCompleter.completeError(
+          const TrackStateRepositoryException(
+            'GitHub API request failed for /repos/demo/contents/DEMO/project.json (500): {"message":"Internal Server Error"}',
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub startup limit reached'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+        expect(find.text('Saved workspaces'), findsNothing);
+        expect(find.text('Add workspace'), findsNothing);
+        expect(find.text('Save and switch'), findsNothing);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 class _RetryMigrationWorkspaceProfileService
@@ -307,7 +366,10 @@ class _WidgetStartupRecoveryRepository implements TrackStateRepository {
         ? loadCount
         : _loadResults.length - 1;
     loadCount += 1;
-    final result = _loadResults[index];
+    var result = _loadResults[index];
+    if (result is Future) {
+      result = await result;
+    }
     if (result is TrackerSnapshot) {
       _currentSnapshot = result;
       return result;

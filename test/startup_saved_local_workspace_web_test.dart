@@ -38,7 +38,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup clears the saved active local workspace when the browser handle is missing',
+    'web startup preserves the saved active local workspace when the browser handle is missing and opens the shell fallback',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -99,47 +99,36 @@ void main() {
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
 
-      expect(delayedRepository.userProbeRequestCount, 0);
-      expect(delayedRepository.requestedPaths, isNot(contains('/user')));
+      expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
-        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
-      final localRow = find.byKey(
-        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
-      );
-      expect(localRow, findsOneWidget);
-      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Retry')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Active')),
-        findsNothing,
-      );
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Connect GitHub'), findsOneWidget);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
+      delayedRepository.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
     },
   );
 
   testWidgets(
-    'web startup skips the delayed /user probe after clearing a saved local workspace with no browser handle',
+    'web startup completes the delayed /user probe after opening the shell fallback for a missing browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -200,36 +189,21 @@ void main() {
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
 
-      expect(delayedRepository.userProbeRequestCount, 0);
-      expect(delayedRepository.requestedPaths, isNot(contains('/user')));
+      expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
-        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
+      expect(find.text('Dashboard'), findsWidgets);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
+        findsWidgets,
       );
-      final localRow = find.byKey(
-        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
-      );
-      expect(localRow, findsOneWidget);
-      expect(find.text('Dashboard'), findsNothing);
-      expect(
-        find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Retry')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Active')),
-        findsNothing,
-      );
-      expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(delayedRepository.session, isNotNull);
       expect(
         delayedRepository.session?.connectionState,
@@ -237,8 +211,19 @@ void main() {
       );
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
+      expect(find.text('Connect GitHub'), findsOneWidget);
+      delayedRepository.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -247,7 +232,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup does not start the real browser /user probe after clearing a saved local workspace with no browser handle',
+    'web startup starts the real browser /user probe after opening the shell fallback for a missing browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -310,20 +295,18 @@ void main() {
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
 
-      expect(browserHarness.userProbeRequestCount, 0);
-      expect(browserHarness.requestedPaths, isNot(contains('/user')));
+      expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.requestedPaths, contains('/user'));
       expect(
-        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
       expect(browserHarness.consoleMessages, isEmpty);
-      expect(find.text('Dashboard'), findsNothing);
-      final localRow = find.byKey(
-        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
-      );
-      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsWidgets);
       expect(delayedRepository.session, isNotNull);
       expect(
         delayedRepository.session?.connectionState,
@@ -331,20 +314,8 @@ void main() {
       );
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
-      expect(
-        find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Retry')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: localRow, matching: find.text('Active')),
-        findsNothing,
-      );
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
