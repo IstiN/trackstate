@@ -441,10 +441,12 @@ void main() {
     expect(result.isSuccess, isTrue);
     expect(result.value!.isArchived, isTrue);
     expect(
-      File(
-        '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
-      ).existsSync(),
+      File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(),
       isTrue,
+    );
+    expect(
+      File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
+      contains('archived: true'),
     );
   });
 
@@ -668,11 +670,11 @@ void main() {
     final result = await harness.service.archiveIssue('DEMO-10');
 
     expect(result.isSuccess, isTrue);
+    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isTrue);
     expect(
-      harness.backend.exists('DEMO/.trackstate/archive/DEMO-10/main.md'),
-      isTrue,
+      harness.backend.readText('DEMO/DEMO-10/main.md'),
+      contains('archived: true'),
     );
-    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isFalse);
   });
 
   test('service deletes issues through the hosted GitHub provider', () async {
