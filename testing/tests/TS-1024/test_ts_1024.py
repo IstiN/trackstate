@@ -47,7 +47,7 @@ OBSERVATION_INTERVAL_SECONDS = 0.25
 RECOVERY_ACTION_LABELS = ("Retry", "Sync issue")
 RECOVERY_MARKERS = ("Retry", "Sync issue", "Connect GitHub")
 DISALLOWED_VISIBLE_TEXT = ("Saved workspaces", "Add workspace", "Save and switch")
-LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028"]
+LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028", "TS-1037", "TS-1039"]
 REWORK_SUMMARY = (
     "Moved recovery-state probing and retry-window monitoring into "
     "`LiveStartupRecoveryPage`, then switched TS-1024 to use page-level polling "
