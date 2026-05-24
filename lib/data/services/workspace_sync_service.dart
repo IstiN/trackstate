@@ -146,7 +146,7 @@ class WorkspaceSyncService {
       final nextRetryAt = _computeNextRetryAt();
       _publishStatus(
         _status.copyWith(
-          health: WorkspaceSyncHealth.attentionNeeded,
+          health: _healthForError(error),
           lastCheckAt: _lastCompletedAt,
           latestError: '$error',
           nextRetryAt: nextRetryAt,
@@ -292,6 +292,26 @@ class WorkspaceSyncService {
       _hostedBackoffIndex += 1;
     }
     return nextRetryAt;
+  }
+
+  WorkspaceSyncHealth _healthForError(Object error) {
+    if (_isHostedAuthenticationFailure(error)) {
+      return WorkspaceSyncHealth.unavailable;
+    }
+    return WorkspaceSyncHealth.attentionNeeded;
+  }
+
+  bool _isHostedAuthenticationFailure(Object error) {
+    if (_repository.usesLocalPersistence || error is GitHubRateLimitException) {
+      return false;
+    }
+    final message = '$error'.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains(' 401') ||
+        message.contains('bad credentials') ||
+        message.contains('authentication failed') ||
+        message.contains('requires github authentication') ||
+        message.contains('connect a github token');
   }
 
   void _scheduleNext(Duration duration) {
