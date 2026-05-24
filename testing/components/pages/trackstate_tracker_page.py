@@ -55,6 +55,8 @@ class WorkspaceSwitcherTriggerObservation:
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
     LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
+    WORKSPACE_SWITCHER_LABEL = "Workspace switcher"
+    ADD_WORKSPACE_LABEL = "Add workspace"
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -121,7 +123,13 @@ class TrackStateTrackerPage:
         self.open_entrypoint()
         try:
             wait_match = self.session.wait_for_any_text(
-                [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
+                [
+                    *self.LOAD_ERROR_TEXT_VARIANTS,
+                    "Connect GitHub",
+                    self.WORKSPACE_SWITCHER_LABEL,
+                    self.ADD_WORKSPACE_LABEL,
+                    self.BOARD_LABEL,
+                ],
                 timeout_ms=120_000,
             )
         except WebAppTimeoutError as error:

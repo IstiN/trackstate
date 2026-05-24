@@ -38,7 +38,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup keeps the shell hidden until the delayed /user probe completes when the active local workspace has no browser handle',
+    'web startup clears the saved active local workspace when the browser handle is missing',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -99,64 +99,155 @@ void main() {
               ),
         ),
       );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 750));
+      await tester.pumpAndSettle();
 
-      expect(delayedRepository.userProbeRequestCount, 1);
-      expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(delayedRepository.userProbeRequestCount, 0);
+      expect(delayedRepository.requestedPaths, isNot(contains('/user')));
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
       );
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
         findsNothing,
       );
-      expect(find.text('Add workspace'), findsNothing);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(delayedRepository.session, isNotNull);
-      expect(delayedRepository.session?.canRead, isTrue);
-      expect(delayedRepository.session?.canWrite, isFalse);
-      expect(delayedRepository.session?.canCreateBranch, isFalse);
-      final savedStateBeforeProbe = await workspaceProfiles.loadState();
-      expect(savedStateBeforeProbe.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        savedStateBeforeProbe.unavailableLocalWorkspaceIds,
-        contains(activeLocalWorkspaceId),
-      );
-
-      delayedRepository.completeUserProbe();
-      await tester.pump();
-      await tester.pumpAndSettle();
-
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
         findsOneWidget,
       );
       expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(find.text('Add workspace'), findsNothing);
       expect(
-        delayedRepository.session?.connectionState,
-        ProviderConnectionState.connected,
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
       );
-      expect(delayedRepository.session?.canWrite, isTrue);
-      expect(delayedRepository.session?.canCreateBranch, isTrue);
-      final savedStateAfterProbe = await workspaceProfiles.loadState();
-      expect(savedStateAfterProbe.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
       expect(
-        savedStateAfterProbe.unavailableLocalWorkspaceIds,
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
     },
   );
 
   testWidgets(
-    'web startup starts the real browser /user probe and logs the timeout fallback to the browser console',
+    'web startup skips the delayed /user probe after clearing a saved local workspace with no browser handle',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken(
+        'github-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(delayedRepository.userProbeRequestCount, 0);
+      expect(delayedRepository.requestedPaths, isNot(contains('/user')));
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsNothing,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
+
+  testWidgets(
+    'web startup does not start the real browser /user probe after clearing a saved local workspace with no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -219,49 +310,45 @@ void main() {
               ),
         ),
       );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 750));
+      await tester.pumpAndSettle();
 
-      expect(browserHarness.userProbeRequestCount, 1);
-      expect(browserHarness.requestedPaths, contains('/user'));
+      expect(browserHarness.userProbeRequestCount, 0);
+      expect(browserHarness.requestedPaths, isNot(contains('/user')));
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
-      );
-      expect(browserHarness.consoleMessages, isEmpty);
-
-      await tester.pump(const Duration(seconds: 11));
-      await tester.pump();
-
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(browserHarness.consoleMessages, isEmpty);
+      expect(find.text('Dashboard'), findsNothing);
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(delayedRepository.session, isNotNull);
       expect(
         delayedRepository.session?.connectionState,
         isNot(ProviderConnectionState.connected),
       );
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
-      expect(find.text('Connect GitHub'), findsOneWidget);
       expect(
-        browserHarness.consoleMessages,
-        contains(
-          predicate<String>(
-            (entry) =>
-                entry.contains('/user') &&
-                entry.contains('shell_ready') &&
-                entry.contains('timeout') &&
-                entry.contains('delta_seconds='),
-            'startup timeout diagnostic entry',
-          ),
-        ),
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsOneWidget,
       );
-
-      browserHarness.completeUserProbe();
-      await tester.pump();
-      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
     },
   );
 }
