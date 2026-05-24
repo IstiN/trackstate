@@ -50,14 +50,6 @@ module.exports = {
     // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
     smMaxWorkflows: 4,
 
-    // SM rule overrides: patch individual SM rules by configFile without replacing the full rule list.
-    // Set enabled:false on bug_creation and enabled:true on bulk_bugs_creation to use batch mode.
-    // To revert to single mode: swap the enabled values below.
-    smRuleOverrides: {
-        'agents/bug_creation.json':       { enabled: false },
-        'agents/bulk_bugs_creation.json': { enabled: true }
-    },
-
     repository: {
         owner: 'IstiN',
         repo: 'trackstate'
