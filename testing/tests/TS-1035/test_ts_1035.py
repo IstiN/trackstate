@@ -61,12 +61,15 @@ SUCCESS_WINDOW_WAIT_SECONDS = 30
 LOG_PROPAGATION_WAIT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.25
 DELTA_TOLERANCE_SECONDS = 1.5
-LINKED_BUGS = ["TS-1029"]
+LINKED_BUGS = ["TS-1040", "TS-1038", "TS-1036", "TS-1029"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1029. Its merged fix restored the live GitHub `/user` startup probe, "
-    "so this test does not assert immediately after launch: it waits for the real "
-    "success-path auth probe to start, waits for it to finish, and then keeps polling "
-    "for the startup diagnostic entry before evaluating the logs."
+    "Reviewed TS-1040, TS-1038, TS-1036, and TS-1029. The merged fixes mean the live "
+    "app should start the GitHub `/user` probe promptly, reach the interactive shell on "
+    "the intended success path, and emit a success-path startup diagnostic after the "
+    "probe completes. This test therefore waits for the real `/user` probe to start, "
+    "waits for it to finish, confirms the shell becomes interactive before the 11-second "
+    "timeout boundary, and then keeps polling long enough for the diagnostic log entry "
+    "to surface before asserting."
 )
 REWORK_SUMMARY = (
     "Restricted Step 4 to actual console or telemetry diagnostics that explicitly "
