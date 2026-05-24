@@ -1102,22 +1102,25 @@ class IssueMutationService {
           ),
         );
       }
-      final writeResult = await provider.writeTextFile(
-        RepositoryWriteRequest(
-          path: linksPath,
-          content: '${jsonEncode(_linksJson(existingLinks))}\n',
-          message: 'Link $issueKey to $targetKey',
-          branch: writeBranch,
-          expectedRevision: existingRevision,
-        ),
-      );
-      await _writeRepositoryRootLinksJson(
+      final message = 'Link $issueKey to $targetKey';
+      final commitResult = await _applyChanges(
         provider: provider,
-        writeBranch: writeBranch,
-        blobPaths: blobPaths,
-        updatedLinksPath: linksPath,
-        updatedLinks: existingLinks,
-        message: 'Link $issueKey to $targetKey',
+        branch: writeBranch,
+        message: message,
+        changes: [
+          RepositoryTextFileChange(
+            path: linksPath,
+            content: '${jsonEncode(_linksJson(existingLinks))}\n',
+            expectedRevision: existingRevision,
+          ),
+          await _repositoryRootLinksJsonChange(
+            provider: provider,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+            updatedLinksPath: linksPath,
+            updatedLinks: existingLinks,
+          ),
+        ],
       );
       final refreshed = await providerRepository.loadSnapshot();
       return IssueMutationResult.success(
@@ -1126,7 +1129,7 @@ class IssueMutationService {
         value: refreshed.issues.firstWhere(
           (candidate) => candidate.key == issueKey,
         ),
-        revision: writeResult.revision,
+        revision: commitResult.revision,
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
@@ -2164,20 +2167,44 @@ List<Map<String, Object?>> _linksJson(List<IssueLink> links) => [
     {'type': link.type, 'target': link.targetKey, 'direction': link.direction},
 ];
 
-Future<void> _writeRepositoryRootLinksJson({
+Future<RepositoryTextFileChange> _repositoryRootLinksJsonChange({
   required TrackStateProviderAdapter provider,
-  required String writeBranch,
+  required String ref,
   required Set<String> blobPaths,
   required String updatedLinksPath,
   required List<IssueLink> updatedLinks,
-  required String message,
+}) async {
+  final aggregateLinks = await _aggregateRepositoryRootLinks(
+    provider: provider,
+    ref: ref,
+    blobPaths: blobPaths,
+    updatedLinksPath: updatedLinksPath,
+    updatedLinks: updatedLinks,
+  );
+  return RepositoryTextFileChange(
+    path: 'links.json',
+    content: '${jsonEncode(_linksJson(aggregateLinks))}\n',
+    expectedRevision: await _existingTextRevision(
+      provider,
+      path: 'links.json',
+      ref: ref,
+      blobPaths: blobPaths,
+    ),
+  );
+}
+
+Future<List<IssueLink>> _aggregateRepositoryRootLinks({
+  required TrackStateProviderAdapter provider,
+  required String ref,
+  required Set<String> blobPaths,
+  required String updatedLinksPath,
+  required List<IssueLink> updatedLinks,
 }) async {
   final aggregateLinks = <IssueLink>[];
   final linksPaths = <String>{
     ...blobPaths.where((path) => path.endsWith('/links.json')),
     updatedLinksPath,
-  }.toList()
-    ..sort();
+  }.toList()..sort();
 
   for (final path in linksPaths) {
     if (path == updatedLinksPath) {
@@ -2185,27 +2212,10 @@ Future<void> _writeRepositoryRootLinksJson({
       continue;
     }
     aggregateLinks.addAll(
-      _parseLinksJson(
-        (await provider.readTextFile(path, ref: writeBranch)).content,
-      ),
+      _parseLinksJson((await provider.readTextFile(path, ref: ref)).content),
     );
   }
-
-  final existingRevision = await _existingTextRevision(
-    provider,
-    path: 'links.json',
-    ref: writeBranch,
-    blobPaths: blobPaths,
-  );
-  await provider.writeTextFile(
-    RepositoryWriteRequest(
-      path: 'links.json',
-      content: '${jsonEncode(_linksJson(aggregateLinks))}\n',
-      message: message,
-      branch: writeBranch,
-      expectedRevision: existingRevision,
-    ),
-  );
+  return aggregateLinks;
 }
 
 Map<String, Object?> _parseFrontmatter(List<String> lines) {

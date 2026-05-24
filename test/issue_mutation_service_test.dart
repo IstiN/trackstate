@@ -301,6 +301,9 @@ void main() {
         parentKey: 'DEMO-2',
       );
       expect(childResult.isSuccess, isTrue);
+      final commitCountBefore = int.parse(
+        await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD']),
+      );
 
       final linkResult = await service.createLink(
         issueKey: 'DEMO-2',
@@ -309,8 +312,14 @@ void main() {
       );
 
       expect(linkResult.isSuccess, isTrue);
+      expect(
+        int.parse(await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD'])),
+        commitCountBefore + 1,
+      );
 
-      final rootLinksContent = File('${repo.path}/links.json').readAsStringSync();
+      final rootLinksContent = File(
+        '${repo.path}/links.json',
+      ).readAsStringSync();
       final rootLinks = jsonDecode(rootLinksContent) as List<dynamic>;
       expect(rootLinks, [
         {'type': 'blocks', 'target': 'DEMO-10', 'direction': 'outward'},
@@ -318,8 +327,9 @@ void main() {
       expect(rootLinksContent, isNot(contains('DEMO-11')));
       expect(rootLinksContent, isNot(contains('parent')));
       expect(
-        File('${repo.path}/DEMO/DEMO-1/DEMO-2/DEMO-11/main.md')
-            .readAsStringSync(),
+        File(
+          '${repo.path}/DEMO/DEMO-1/DEMO-2/DEMO-11/main.md',
+        ).readAsStringSync(),
         contains('parent: DEMO-2'),
       );
     },
@@ -379,10 +389,7 @@ void main() {
       expect(result.failure?.message, contains('DEMO-2'));
       expect(result.failure?.message, contains('demo-2'));
       expect(result.failure?.message, contains('itself'));
-      expect(
-        result.failure?.details,
-        containsPair('targetKey', 'demo-2'),
-      );
+      expect(result.failure?.details, containsPair('targetKey', 'demo-2'));
       expect(
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
@@ -1083,10 +1090,15 @@ Future<void> _writeFile(
 }
 
 Future<void> _git(String repositoryPath, List<String> args) async {
+  await _gitOutput(repositoryPath, args);
+}
+
+Future<String> _gitOutput(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
   }
+  return result.stdout.toString().trim();
 }
 
 class _HostedMutationHarness {
