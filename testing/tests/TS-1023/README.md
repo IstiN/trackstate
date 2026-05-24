@@ -35,4 +35,3 @@ workspace switcher shows both Add workspace and Save and switch in the footer.
 Save and switch is initially disabled, then becomes enabled after a different
 saved workspace row is selected.
 ```
-
