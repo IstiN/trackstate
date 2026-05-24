@@ -121,8 +121,8 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   }).toJS;
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
-    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
+      _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
       final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
       );
@@ -140,6 +140,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       return;
     }
 
+    final ancestors = _activeBrowserFocusAncestors();
     if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
       key: keyboardEvent.key,
       ancestors: ancestors,
@@ -415,11 +416,16 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   );
   if (!backwards &&
       selectedRowIndex != -1 &&
-      _isBrowserWorkspaceSwitcherFallbackFocus(
-        activeElement: activeElement,
-        focusTargets: focusTargets,
-        currentIndex: currentIndex,
-      )) {
+      (_isBrowserWorkspaceSwitcherTriggerFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ) ||
+          _isBrowserWorkspaceSwitcherFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ))) {
     if (_focusElement(focusTargets[selectedRowIndex].element)) {
       return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
     }
@@ -453,12 +459,15 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   }
 
   final targetElement = focusTargets[targetIndex].element;
-  if (!_focusElement(targetElement)) {
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
-  }
-  // Guard the new focus target for a few frames. Flutter's semantics layer
-  // may asynchronously reassign focus after our _focusElement call; the guard
-  // detects that and corrects it back to the intended element.
+  // Attempt focus immediately; the result tells us whether the browser already
+  // accepted the focus change. For BrowserFocusableControl PlatformView
+  // buttons the attempt may not succeed synchronously (the flt-platform-view
+  // container may need a frame to accept focus), so we always install the
+  // guard timer and always report the result based on WHERE we are trying to
+  // move focus — not on whether the first attempt succeeded. The guard will
+  // retry for ~96 ms and correct any async reassignment by Flutter's semantics
+  // layer.
+  _focusElement(targetElement);
   _guardTabHandoffFocus(targetElement);
   return focusTargets[targetIndex].isWithinWorkspaceSwitcher
       ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
@@ -469,7 +478,9 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
 /// (~96 ms) in case Flutter's semantics bridge asynchronously moves focus
 /// away from the element we just focused during Tab navigation.
 void _guardTabHandoffFocus(web.Element target) {
-  const maxAttempts = 6;
+  // 12 attempts × 16 ms ≈ 192 ms. PlatformView (HtmlElementView) buttons may
+  // need multiple frames before the flt-platform-view container accepts focus.
+  const maxAttempts = 12;
   var attempts = 0;
   Timer? timer;
   timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
@@ -486,6 +497,24 @@ void _guardTabHandoffFocus(web.Element target) {
       timer?.cancel();
     }
   });
+}
+
+bool _isBrowserWorkspaceSwitcherTriggerFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (_workspaceSwitcherTriggerElementFor(activeElement) == null) {
+    return false;
+  }
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool _isBrowserWorkspaceSwitcherFallbackFocus({

@@ -247,6 +247,137 @@ void main() {
     );
 
     test(
+      'Tab from the open trigger moves focus outside and clears recent switcher pointer ownership',
+      () {
+        final panel = _appendPanel(host);
+        final trigger = _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        var focusOutsideCalls = 0;
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        trigger.dispatchEvent(
+          web.MouseEvent(
+            'mousedown',
+            web.MouseEventInit(bubbles: true, cancelable: true),
+          ),
+        );
+        trigger.focus();
+
+        _pressTab([trigger, externalInput]);
+
+        expect(
+          web.document.activeElement,
+          same(externalInput),
+          reason:
+              'Forward Tab from the open workspace switcher trigger should blur '
+              'to the next external control instead of re-entering the switcher.',
+        );
+        expect(
+          focusOutsideCalls,
+          greaterThanOrEqualTo(1),
+          reason:
+              'Keyboard navigation away from the trigger should notify the blur '
+              'dismissal path as soon as focus reaches the next external control.',
+        );
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isFalse);
+      },
+    );
+
+    test(
+      'Tab from an in-panel control clears recent switcher pointer ownership before blur dismissal',
+      () {
+        final panel = _appendPanel(host);
+        final saveButton = _appendButton(
+          panel,
+          label: 'Save and switch',
+          focusId: 'trackstate-workspace-switcher-save',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 216,
+          width: 180,
+          height: 40,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        var focusOutsideCalls = 0;
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        saveButton.dispatchEvent(
+          web.MouseEvent(
+            'mousedown',
+            web.MouseEventInit(bubbles: true, cancelable: true),
+          ),
+        );
+        saveButton.focus();
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isTrue);
+
+        _pressTab([saveButton, externalInput]);
+
+        expect(web.document.activeElement, same(externalInput));
+        expect(
+          focusOutsideCalls,
+          greaterThanOrEqualTo(1),
+          reason:
+              'The most recent pointer interaction should not keep the switcher '
+              'owned once keyboard Tab moves focus to an external control.',
+        );
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isFalse);
+      },
+    );
+
+    test(
       'recent pointer activity inside the switcher keeps focus ownership when the browser falls back to flutter-view',
       () async {
         final panel = _appendPanel(host);
@@ -376,6 +507,67 @@ void main() {
               'If the browser has fallen back to the flutter-view host while the '
               'workspace switcher is open, the first forward Tab should still '
               're-enter the switcher at the selected row.',
+        );
+      },
+    );
+
+    test(
+      'forward Tab from a programmatically focused trigger semantics node re-enters the open switcher at the selected row',
+      () {
+        final trigger = _appendSemanticsNode(
+          host,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+          semanticsIdentifier:
+              browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          role: 'button',
+          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          tabIndex: -1,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+        final panel = _appendPanel(host);
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        trigger.focus();
+        expect(web.document.activeElement, same(trigger));
+
+        _pressTab([trigger, externalInput, row]);
+
+        expect(
+          web.document.activeElement,
+          same(row),
+          reason:
+              'When the open switcher keeps browser focus on the trigger semantics '
+              'node instead of the managed bridge button, forward Tab should still '
+              'enter the panel at the selected workspace row instead of falling '
+              'through to page chrome.',
         );
       },
     );

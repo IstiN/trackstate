@@ -27,9 +27,6 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
     return null;
   }
 
-  final triggerIndex = focusStops.indexWhere(
-    (stop) => stop.isFocusable && stop.isWorkspaceSwitcherTrigger,
-  );
   final selectedRowIndex = focusStops.indexWhere(
     (stop) => stop.isFocusable && stop.isSelectedWorkspaceRow,
   );
@@ -37,8 +34,14 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
     return null;
   }
 
+  final triggerIndex = focusStops.indexWhere(
+    (stop) => stop.isFocusable && stop.isWorkspaceSwitcherTrigger,
+  );
   if (!backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
-    return selectedRowIndex;
+    return _firstOutsideWorkspaceSwitcherIndex(
+      focusStops,
+      startIndex: triggerIndex + 1,
+    );
   }
   if (backwards && currentIndex == selectedRowIndex) {
     final lastInPanelControlIndex = _lastInPanelControlIndex(focusStops);
@@ -150,6 +153,19 @@ int _firstVisuallyOrderedMatchingIndex(
     }
   }
   return visuallyFirstIndex != -1 ? visuallyFirstIndex : fallbackIndex;
+}
+
+int? _firstOutsideWorkspaceSwitcherIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
+  required int startIndex,
+}) {
+  for (var index = startIndex; index < stops.length; index += 1) {
+    final stop = stops[index];
+    if (stop.isFocusable && !stop.isWithinWorkspaceSwitcher) {
+      return index;
+    }
+  }
+  return null;
 }
 
 int _lastVisuallyOrderedMatchingIndex(

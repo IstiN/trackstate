@@ -325,7 +325,7 @@ void main() {
   });
 
   test(
-    'Tab from the open trigger hands focus to the selected workspace row',
+    'Tab from the open trigger hands focus to the first external control',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -362,7 +362,7 @@ void main() {
           currentIndex: 0,
           backwards: false,
         ),
-        1,
+        3,
       );
     },
   );
