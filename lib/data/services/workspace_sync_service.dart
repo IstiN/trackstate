@@ -58,7 +58,7 @@ class WorkspaceSyncService {
   Timer? _timer;
   bool _disposed = false;
   bool _inFlight = false;
-  bool _pendingFollowUp = false;
+  WorkspaceSyncTrigger? _queuedFollowUpTrigger;
   int _hostedBackoffIndex = 0;
   DateTime? _lastCompletedAt;
   TrackerSnapshot? _baselineSnapshot;
@@ -92,18 +92,23 @@ class WorkspaceSyncService {
       return;
     }
     if (_inFlight) {
-      _pendingFollowUp = true;
+      _queuedFollowUpTrigger = trigger;
       return;
     }
     final completedAt = _lastCompletedAt;
     final now = _now();
-    if (!force &&
+    final queuedFollowUpTrigger = _queuedFollowUpTrigger;
+    final enforceMinimumInterval = !force || queuedFollowUpTrigger != null;
+    if (enforceMinimumInterval &&
         completedAt != null &&
         now.difference(completedAt) < _minimumInterval) {
+      _queuedFollowUpTrigger = trigger;
       _scheduleNext(_minimumInterval - now.difference(completedAt));
       return;
     }
 
+    final effectiveTrigger = _queuedFollowUpTrigger ?? trigger;
+    _queuedFollowUpTrigger = null;
     _timer?.cancel();
     _inFlight = true;
     _publishStatus(
@@ -119,7 +124,10 @@ class WorkspaceSyncService {
         previousState: _previousSyncState,
       );
       _previousSyncState = syncCheck.state;
-      final result = await _buildResult(trigger: trigger, syncCheck: syncCheck);
+      final result = await _buildResult(
+        trigger: effectiveTrigger,
+        syncCheck: syncCheck,
+      );
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
       _publishStatus(
@@ -147,9 +155,8 @@ class WorkspaceSyncService {
       _scheduleNext(nextRetryAt.difference(_lastCompletedAt!));
     } finally {
       _inFlight = false;
-      if (_pendingFollowUp && !_disposed) {
-        _pendingFollowUp = false;
-        unawaited(checkNow(trigger: trigger, force: true));
+      if (_queuedFollowUpTrigger case final pendingTrigger? when !_disposed) {
+        unawaited(checkNow(trigger: pendingTrigger));
       }
     }
   }
