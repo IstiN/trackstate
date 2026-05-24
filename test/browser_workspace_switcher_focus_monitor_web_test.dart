@@ -510,6 +510,66 @@ void main() {
         );
       },
     );
+
+    test(
+      'forward Tab from a programmatically focused trigger semantics node re-enters the open switcher at the selected row',
+      () {
+        final trigger = _appendSemanticsNode(
+          host,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+          semanticsIdentifier:
+              browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          role: 'button',
+          label: 'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          tabIndex: -1,
+        );
+        final externalInput = _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+        final panel = _appendPanel(host);
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+
+        final subscription = createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+          onBrowserTab: () {},
+          onBrowserFocusOutside: () {},
+          onBrowserBoundaryKey: (_) {},
+        );
+        addTearDown(subscription.cancel);
+
+        trigger.focus();
+        expect(web.document.activeElement, same(trigger));
+
+        _pressTab([trigger, externalInput, row]);
+
+        expect(
+          web.document.activeElement,
+          same(row),
+          reason:
+              'When the open switcher keeps browser focus on the trigger semantics '
+              'node instead of the managed bridge button, forward Tab should still '
+              'enter the panel at the selected workspace row instead of falling '
+              'through to page chrome.',
+        );
+      },
+    );
   });
 }
 
