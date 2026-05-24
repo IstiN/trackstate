@@ -121,8 +121,8 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   }).toJS;
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
-    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
+      _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
       final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
       );
@@ -140,6 +140,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       return;
     }
 
+    final ancestors = _activeBrowserFocusAncestors();
     if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
       key: keyboardEvent.key,
       ancestors: ancestors,
