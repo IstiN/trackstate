@@ -7,7 +7,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -69,8 +69,8 @@ LINKED_BUG_NOTES = (
     "for the startup diagnostic entry before evaluating the logs."
 )
 REWORK_SUMMARY = (
-    "Restricted the success-path diagnostic matcher to the observed auth-probe "
-    "start->finish timing delta and added the missing TS-1035 README test artifact."
+    "Restricted Step 4 to actual console or telemetry diagnostics that explicitly "
+    "prove the auth-probe start and finish lifecycle plus the observed timing delta."
 )
 REQUEST_STEPS = [
     "Launch the TrackState application in an environment with normal network latency.",
@@ -98,19 +98,22 @@ AUTH_LOG_FRAGMENTS = (
     "github auth",
     "startup probe",
 )
-SUCCESS_LOG_FRAGMENTS = (
+DIAGNOSTIC_LOG_FRAGMENTS = (
     "startup diagnostic",
-    "successful",
-    "success path",
-    "resolved",
-    "resolve",
-    "finished",
-    "completed",
-    "interactive",
-    "shell_ready",
-    "shell ready",
+    "startup_diagnostic",
+    "trackstate startup",
 )
 DELTA_LOG_FRAGMENTS = ("delta", "elapsed", "duration", "timing")
+AUTH_PROBE_START_PATTERNS = (
+    re.compile(r"auth(?:entication)?(?:[-\s_/]*probe)?[^.;\n]*\bstart(?:ed|ing)?\b"),
+    re.compile(r"\bstart(?:ed|ing)?\b[^.;\n]*auth(?:entication)?(?:[-\s_/]*probe)?"),
+    re.compile(r"auth[_-]?probe[_-]?start(?:ed)?"),
+)
+AUTH_PROBE_FINISH_PATTERNS = (
+    re.compile(r"auth(?:entication)?(?:[-\s_/]*probe)?[^.;\n]*\b(?:finish(?:ed)?|complete(?:d)?|resolve(?:d)?)\b"),
+    re.compile(r"\b(?:finish(?:ed)?|complete(?:d)?|resolve(?:d)?)\b[^.;\n]*auth(?:entication)?(?:[-\s_/]*probe)?"),
+    re.compile(r"auth[_-]?probe[_-]?(?:finish(?:ed)?|complete(?:d)?|resolve(?:d)?)"),
+)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -672,7 +675,6 @@ def _observe_diagnostics_window(
     interesting_logs = _interesting_console_events(runtime.console_events)
     matching_entries = _diagnostic_console_events(
         interesting_logs=interesting_logs,
-        page_errors=runtime.page_errors,
         expected_probe_duration_seconds=expected_probe_duration_seconds,
     )
     elapsed_since_probe_release_seconds = _elapsed_since(runtime.auth_probe_released_at_monotonic)
@@ -734,19 +736,23 @@ def _interesting_console_events(
 def _diagnostic_console_events(
     *,
     interesting_logs: list[Ts1025ConsoleEvent],
-    page_errors: list[str],
     expected_probe_duration_seconds: float | None,
 ) -> list[str]:
     matches: list[str] = []
-    for text in _candidate_log_texts(interesting_logs, page_errors):
+    for event in interesting_logs:
+        text = event.text
         lowered = text.lower()
-        if not any(fragment in lowered for fragment in AUTH_LOG_FRAGMENTS):
+        if not _is_startup_diagnostic_entry(lowered):
             continue
-        if not any(fragment in lowered for fragment in SUCCESS_LOG_FRAGMENTS):
+        if not any(fragment in lowered for fragment in AUTH_LOG_FRAGMENTS):
             continue
         if "timeout fallback" in lowered:
             continue
-        if not any(fragment in lowered for fragment in DELTA_LOG_FRAGMENTS) and not _contains_close_numeric_value(
+        if not _has_auth_probe_lifecycle_markers(lowered):
+            continue
+        if not any(fragment in lowered for fragment in DELTA_LOG_FRAGMENTS):
+            continue
+        if not _contains_close_numeric_value(
             text,
             expected_value=expected_probe_duration_seconds,
         ):
@@ -755,11 +761,19 @@ def _diagnostic_console_events(
     return matches
 
 
-def _candidate_log_texts(
-    interesting_logs: Iterable[Ts1025ConsoleEvent],
-    page_errors: Iterable[str],
-) -> list[str]:
-    return [event.text for event in interesting_logs] + [str(error) for error in page_errors]
+def _is_startup_diagnostic_entry(lowered_text: str) -> bool:
+    return any(fragment in lowered_text for fragment in DIAGNOSTIC_LOG_FRAGMENTS)
+
+
+def _has_auth_probe_lifecycle_markers(lowered_text: str) -> bool:
+    return _matches_any_pattern(lowered_text, AUTH_PROBE_START_PATTERNS) and _matches_any_pattern(
+        lowered_text,
+        AUTH_PROBE_FINISH_PATTERNS,
+    )
+
+
+def _matches_any_pattern(text: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
+    return any(pattern.search(text) is not None for pattern in patterns)
 
 
 def _contains_close_numeric_value(text: str, *, expected_value: float | None) -> bool:
