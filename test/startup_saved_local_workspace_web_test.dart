@@ -24,7 +24,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup exposes the shell with restricted access before the delayed /user probe completes when the active local workspace has no browser handle',
+    'web startup keeps the shell hidden until the delayed /user probe completes when the active local workspace has no browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -92,14 +92,15 @@ void main() {
       expect(delayedRepository.requestedPaths, contains('/user'));
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Dashboard'), findsNothing);
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
+        findsNothing,
       );
       expect(find.text('Add workspace'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(delayedRepository.session, isNotNull);
       expect(delayedRepository.session?.canRead, isTrue);
       expect(delayedRepository.session?.canWrite, isFalse);
