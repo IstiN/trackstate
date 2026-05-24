@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'browser_workspace_profiles_storage_mirror.dart';
 import '../../domain/models/workspace_profile_models.dart';
 import 'browser_preferences_storage_repair.dart';
 import 'trackstate_auth_store.dart';
@@ -400,7 +401,8 @@ class SharedPreferencesWorkspaceProfileService
             writeBranch: previousActiveWorkspace.first.writeBranch,
           );
     final activeWorkspaceId =
-        normalizedActiveWorkspaceId == null || normalizedActiveWorkspaceId.isEmpty
+        normalizedActiveWorkspaceId == null ||
+            normalizedActiveWorkspaceId.isEmpty
         ? null
         : normalizedProfiles.any(
             (profile) => profile.id == normalizedActiveWorkspaceId,
@@ -426,16 +428,15 @@ class SharedPreferencesWorkspaceProfileService
     SharedPreferences preferences,
     WorkspaceProfilesState state,
   ) async {
-    await preferences.setString(
-      _stateKey,
-      jsonEncode({
-        'activeWorkspaceId': state.activeWorkspaceId,
-        'migrationComplete': state.migrationComplete,
-        'unavailableLocalWorkspaceIds':
-            state.unavailableLocalWorkspaceIds.toList()..sort(),
-        'profiles': [for (final profile in state.profiles) profile.toJson()],
-      }),
-    );
+    final rawState = jsonEncode({
+      'activeWorkspaceId': state.activeWorkspaceId,
+      'migrationComplete': state.migrationComplete,
+      'unavailableLocalWorkspaceIds':
+          state.unavailableLocalWorkspaceIds.toList()..sort(),
+      'profiles': [for (final profile in state.profiles) profile.toJson()],
+    });
+    await preferences.setString(_stateKey, rawState);
+    await mirrorLegacyBrowserWorkspaceProfilesState(rawState);
   }
 
   void _validateInput(WorkspaceProfileInput input) {
