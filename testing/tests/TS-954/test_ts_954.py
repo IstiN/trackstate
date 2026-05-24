@@ -663,8 +663,7 @@ def _assert_traversal_reached_footer(
             "the footer focus state was reached, but the Save and switch button state could not be re-read",
         )
     else:
-        footer_active_label = _active_from_state(footer_state).get("accessible_name")
-        if not footer_button_state.active_within and footer_active_label != LAST_INTERNAL_CONTROL_LABEL:
+        if not footer_button_state.active_within:
             failures.append(
                 "the Save and switch footer control did not report active focus when Tab reached it",
             )
