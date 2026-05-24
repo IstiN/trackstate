@@ -1111,6 +1111,14 @@ class IssueMutationService {
           expectedRevision: existingRevision,
         ),
       );
+      await _writeRepositoryRootLinksJson(
+        provider: provider,
+        writeBranch: writeBranch,
+        blobPaths: blobPaths,
+        updatedLinksPath: linksPath,
+        updatedLinks: existingLinks,
+        message: 'Link $issueKey to $targetKey',
+      );
       final refreshed = await providerRepository.loadSnapshot();
       return IssueMutationResult.success(
         operation: operation,
@@ -2155,6 +2163,50 @@ List<Map<String, Object?>> _linksJson(List<IssueLink> links) => [
   for (final link in links)
     {'type': link.type, 'target': link.targetKey, 'direction': link.direction},
 ];
+
+Future<void> _writeRepositoryRootLinksJson({
+  required TrackStateProviderAdapter provider,
+  required String writeBranch,
+  required Set<String> blobPaths,
+  required String updatedLinksPath,
+  required List<IssueLink> updatedLinks,
+  required String message,
+}) async {
+  final aggregateLinks = <IssueLink>[];
+  final linksPaths = <String>{
+    ...blobPaths.where((path) => path.endsWith('/links.json')),
+    updatedLinksPath,
+  }.toList()
+    ..sort();
+
+  for (final path in linksPaths) {
+    if (path == updatedLinksPath) {
+      aggregateLinks.addAll(updatedLinks);
+      continue;
+    }
+    aggregateLinks.addAll(
+      _parseLinksJson(
+        (await provider.readTextFile(path, ref: writeBranch)).content,
+      ),
+    );
+  }
+
+  final existingRevision = await _existingTextRevision(
+    provider,
+    path: 'links.json',
+    ref: writeBranch,
+    blobPaths: blobPaths,
+  );
+  await provider.writeTextFile(
+    RepositoryWriteRequest(
+      path: 'links.json',
+      content: '${jsonEncode(_linksJson(aggregateLinks))}\n',
+      message: message,
+      branch: writeBranch,
+      expectedRevision: existingRevision,
+    ),
+  );
+}
 
 Map<String, Object?> _parseFrontmatter(List<String> lines) {
   final result = <String, Object?>{};

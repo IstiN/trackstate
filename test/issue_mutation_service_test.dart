@@ -283,6 +283,49 @@ void main() {
   );
 
   test(
+    'service writes repository-root links.json without leaking hierarchy relationships',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final childResult = await service.createIssue(
+        summary: 'Nested sub-task',
+        issueTypeId: 'sub-task',
+        parentKey: 'DEMO-2',
+      );
+      expect(childResult.isSuccess, isTrue);
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+
+      expect(linkResult.isSuccess, isTrue);
+
+      final rootLinksContent = File('${repo.path}/links.json').readAsStringSync();
+      final rootLinks = jsonDecode(rootLinksContent) as List<dynamic>;
+      expect(rootLinks, [
+        {'type': 'blocks', 'target': 'DEMO-10', 'direction': 'outward'},
+      ]);
+      expect(rootLinksContent, isNot(contains('DEMO-11')));
+      expect(rootLinksContent, isNot(contains('parent')));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/DEMO-11/main.md')
+            .readAsStringSync(),
+        contains('parent: DEMO-2'),
+      );
+    },
+  );
+
+  test(
     'service rejects self-referencing links without writing metadata',
     () async {
       final repo = await _createMutationRepository();
