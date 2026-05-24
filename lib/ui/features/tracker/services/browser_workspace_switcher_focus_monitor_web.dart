@@ -9,6 +9,10 @@ import 'browser_workspace_switcher_focus_matcher.dart';
 import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
 
+const Duration _workspaceSwitcherPointerInteractionGrace = Duration(
+  milliseconds: 150,
+);
+
 class BrowserViewportScrollSnapshot {
   const BrowserViewportScrollSnapshot(this._targets);
 
@@ -109,6 +113,12 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserFocusOutside,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
+  final pointerdownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
+  final mousedownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
     final ancestors = _activeBrowserFocusAncestors();
@@ -148,18 +158,34 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     onBrowserFocusOutside();
   }).toJS;
 
+  web.window.addEventListener('pointerdown', pointerdownListener, true.toJS);
+  web.window.addEventListener('mousedown', mousedownListener, true.toJS);
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   web.window.addEventListener('focusin', focusinListener, true.toJS);
   return BrowserWorkspaceSwitcherFocusMonitorSubscription(() {
+    web.window.removeEventListener(
+      'pointerdown',
+      pointerdownListener,
+      true.toJS,
+    );
+    web.window.removeEventListener('mousedown', mousedownListener, true.toJS);
     web.window.removeEventListener('keydown', keydownListener, true.toJS);
     web.window.removeEventListener('focusin', focusinListener, true.toJS);
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
   });
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
-  return browserFocusWithinWorkspaceSwitcher(
+  if (browserFocusWithinWorkspaceSwitcher(
     ancestors: _activeBrowserFocusAncestors(),
-  );
+  )) {
+    return true;
+  }
+  final ancestors = _recentBrowserWorkspaceSwitcherPointerAncestors;
+  if (ancestors == null) {
+    return false;
+  }
+  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
 }
 
 BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
@@ -388,13 +414,18 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
     focusStops: [
       for (final target in focusTargets)
-        BrowserWorkspaceSwitcherTabStopSnapshot(
-          isFocusable: true,
-          isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
-          isWithinWorkspaceRow: target.isWithinWorkspaceRow,
-          isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
-          isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
-        ),
+        () {
+          final rect = target.element.getBoundingClientRect();
+          return BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+            visualTop: rect.top,
+            visualLeft: rect.left,
+          );
+        }(),
     ],
     currentIndex: currentIndex,
     backwards: backwards,
@@ -524,22 +555,61 @@ bool _focusBrowserFocusableControl(String focusTargetId) {
 
 List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>
 _activeBrowserFocusAncestors() {
+  final activeElement = web.document.activeElement;
+  if (activeElement is! web.Element) {
+    return const <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
+  }
+  return _browserFocusAncestorsFor(activeElement);
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot> _browserFocusAncestorsFor(
+  web.Element element,
+) {
   final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
-  web.Element? element = web.document.activeElement;
-  while (element != null) {
+  web.Element? current = element;
+  while (current != null) {
     ancestors.add(
       BrowserWorkspaceSwitcherFocusAncestorSnapshot(
         semanticsIdentifier:
-            element.getAttribute(_browserFocusIdAttribute) ??
-            element.getAttribute(_browserFocusPanelIdAttribute) ??
-            element.getAttribute(_browserFocusRowIdAttribute) ??
-            element.getAttribute('flt-semantics-identifier'),
-        textContent: element.textContent,
+            current.getAttribute(_browserFocusIdAttribute) ??
+            current.getAttribute(_browserFocusPanelIdAttribute) ??
+            current.getAttribute(_browserFocusRowIdAttribute) ??
+            current.getAttribute('flt-semantics-identifier'),
+        textContent: current.textContent,
       ),
     );
-    element = element.parentElement;
+    current = current.parentElement;
   }
   return ancestors;
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>?
+_recentBrowserWorkspaceSwitcherPointerAncestors;
+Timer? _recentBrowserWorkspaceSwitcherPointerResetTimer;
+
+void _recordBrowserWorkspaceSwitcherPointerInteraction(web.Event event) {
+  final target = event.target as web.Element?;
+  if (target == null) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  final ancestors = _browserFocusAncestorsFor(target);
+  if (!browserFocusWithinWorkspaceSwitcher(ancestors: ancestors)) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  _recentBrowserWorkspaceSwitcherPointerAncestors = ancestors;
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = Timer(
+    _workspaceSwitcherPointerInteractionGrace,
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction,
+  );
+}
+
+void _clearRecentBrowserWorkspaceSwitcherPointerInteraction() {
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = null;
+  _recentBrowserWorkspaceSwitcherPointerAncestors = null;
 }
 
 void syncBrowserWorkspaceSwitcherRowTabIndices({
@@ -649,7 +719,8 @@ bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
   if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
     return true;
   }
-  if (element.getAttribute(_browserFocusPanelIdAttribute) case final String _?) {
+  if (element.getAttribute(_browserFocusPanelIdAttribute)
+      case final String _?) {
     return true;
   }
   if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {
