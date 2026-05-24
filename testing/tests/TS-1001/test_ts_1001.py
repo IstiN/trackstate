@@ -67,19 +67,20 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 10
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-996"]
+LINKED_BUGS = ["TS-1022", "TS-1014", "TS-1013", "TS-1012", "TS-996", "TS-992"]
 REVIEW_THREADS = (
-    {"inReplyToId": 3293062308, "threadId": "PRRT_kwDOSU6Gf86EUM-8"},
-    {"inReplyToId": 3293062331, "threadId": "PRRT_kwDOSU6Gf86EUM_M"},
+    {"inReplyToId": 3293652659, "threadId": "PRRT_kwDOSU6Gf86EV9tK"},
+    {"inReplyToId": 3293652686, "threadId": "PRRT_kwDOSU6Gf86EV9tZ"},
 )
 WORKSPACE_PROFILE_STATE_KEYS = (
     "trackstate.workspaceProfiles.state",
     "flutter.trackstate.workspaceProfiles.state",
 )
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996. Its fix makes startup enter shell_ready after the 11-second "
-    "timeout instead of waiting for a hanging GitHub `/user` probe, so this test "
-    "waits past that timeout before asserting the fallback session state."
+    "Reviewed TS-1022, TS-1014, TS-1013, TS-1012, TS-996, and TS-992. The linked "
+    "startup fixes all depend on real delayed `/user` timing, so this test waits "
+    "past the 11-second timeout, proves the live `/user` request actually started, "
+    "and samples the same browser session while that request is still pending."
 )
 REWORK_SUMMARY_ITEMS = (
     "Started the live scenario from the local workspace so the delayed GitHub `/user` "
@@ -310,9 +311,9 @@ def main() -> None:
                 status="passed",
                 action=REQUEST_STEPS[0],
                 observed=(
-                    "Opened the deployed TrackState app with a stored hosted GitHub token "
-                    f"and delayed the GitHub `/user` startup probe by {SIMULATED_PROBE_DELAY_SECONDS} "
-                    "seconds.\n"
+                    "Opened the deployed TrackState app with preloaded local and hosted "
+                    "workspaces, started from the local workspace, and delayed the GitHub "
+                    f"`/user` startup probe by {SIMULATED_PROBE_DELAY_SECONDS} seconds.\n"
                     f"startup_surface={json.dumps(startup_surface, ensure_ascii=True)}; "
                     f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
                     f"delayed_request_urls={runtime.delayed_request_urls!r}"
@@ -1204,32 +1205,39 @@ def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
 
 
 def _write_review_replies(result: dict[str, Any]) -> None:
-    workspace_profile_state = result.get("workspace_profile_state")
-    capability_reply = (
-        "Fixed in code: removed the synthetic Dart permission probe. Step 4 now relies "
-        "only on same-browser-session evidence from the live fallback UI, and the test "
-        "stays failed unless the product exposes a real same-session surface for "
-        "`canCreateBranch`."
-        if workspace_profile_state
-        else "Fixed in code: removed the synthetic Dart permission probe and the direct "
-        "`PythonDartProbeRuntime` dependency. The latest rerun failed earlier on the "
-        "startup-timeout regression before step 4 reached the live browser-session "
-        "access-mode assertion."
+    auth_probe_observed = bool(result.get("auth_probe_observed"))
+    timeout_window = result.get("timeout_window_observation")
+    startup_reply = (
+        "Fixed: Step 2 now proves the live delayed `/user` startup path ran in the same "
+        "browser session. The test waits for the real `/user` request to start, fails if "
+        "it never starts or starts too late, and records the timeout-window snapshot only "
+        "while that delayed request is still pending."
+        if auth_probe_observed
+        else "Fixed in code: Step 2 now waits for the real delayed `/user` startup request "
+        "before making the timeout assertion and fails if the request never starts. The "
+        "latest rerun still failed before the timeout snapshot because the production build "
+        "did not satisfy that delayed-startup precondition."
     )
-    layering_reply = (
-        "Fixed: `test_ts_1001.py` no longer instantiates `PythonDartProbeRuntime` or "
-        "any framework probe directly. The ticket flow now stays on the page/service "
-        "component side and uses browser-session evidence only."
+    same_session_reply = (
+        "Fixed: removed the synthetic delayed-auth probe. Step 4 now uses only same-browser-"
+        "session evidence from the live app: the blocked `Create issue` gate plus the hosted "
+        "workspace storage state captured while the delayed `/user` request is still pending. "
+        "If the product still does not expose a public same-session surface for "
+        "`canCreateBranch=false`, the test stays failed as a real product gap."
+        if timeout_window
+        else "Fixed in code: removed the synthetic delayed-auth probe so Step 4 now depends "
+        "only on same-browser-session evidence from the live app. The latest rerun failed "
+        "earlier in the startup flow before that same-session capability check was reached."
     )
     payload = {
         "replies": [
             {
                 **REVIEW_THREADS[0],
-                "reply": capability_reply,
+                "reply": startup_reply,
             },
             {
                 **REVIEW_THREADS[1],
-                "reply": layering_reply,
+                "reply": same_session_reply,
             },
         ]
     }
