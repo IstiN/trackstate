@@ -756,7 +756,16 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     if (seen.contains(element)) {
       continue;
     }
-    if (!_isVisible(element) ||
+    // Explicitly-registered controls (BrowserFocusableControl widgets that set
+    // our custom data attributes) may have zero visual rect because their
+    // visual representation is rendered on Flutter's canvas while the DOM
+    // element is just a focus/semantic receptor. Skip the rect-based visibility
+    // check for those, but still require them to be focusable and meaningful.
+    final hasExplicitRegistration =
+        element.getAttribute(_browserFocusIdAttribute) != null ||
+        element.getAttribute(_browserFocusPanelIdAttribute) != null ||
+        element.getAttribute(_browserFocusRowIdAttribute) != null;
+    if ((!hasExplicitRegistration && !_isVisible(element)) ||
         !_isFocusable(element) ||
         !_isMeaningfullyInteractiveFocusTarget(element)) {
       continue;
