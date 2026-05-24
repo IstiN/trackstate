@@ -812,10 +812,10 @@ void main() {
   });
 }
 
-TrackStateCli _createCli() => TrackStateCli(
-  environment: const TrackStateCliEnvironment(
+TrackStateCli _createCli({String workingDirectory = '.'}) => TrackStateCli(
+  environment: TrackStateCliEnvironment(
     resolvePath: _identityPath,
-    workingDirectory: '.',
+    workingDirectory: workingDirectory,
   ),
 );
 
