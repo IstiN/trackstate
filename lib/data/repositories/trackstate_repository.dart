@@ -171,6 +171,7 @@ class ProviderBackedTrackStateRepository
       Queue<Completer<void>>();
   bool _deleteMutationInProgress = false;
   TrackerStartupRecovery? _startupRecovery;
+  DateTime? _hostedStartupProbeDeadline;
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
@@ -303,14 +304,18 @@ class ProviderBackedTrackStateRepository
   Future<TrackerSnapshot> loadSnapshot() async {
     _startupRecovery = null;
     _snapshotArtifactRevisions.clear();
-    final snapshot = await _loadSetupSnapshot();
+    final snapshot = await _runWithHostedStartupProbeDeadline(
+      _loadSetupSnapshot,
+    );
     _snapshot = snapshot;
     return snapshot;
   }
 
   @override
   Future<ProjectMetadataRefresh> loadProjectMetadata() async {
-    final metadata = await _loadSnapshotInputs();
+    final metadata = await _runWithHostedStartupProbeDeadline(
+      _loadSnapshotInputs,
+    );
     final currentSnapshot = _snapshot;
     if (currentSnapshot != null) {
       _snapshot = TrackerSnapshot(
@@ -2173,11 +2178,41 @@ class ProviderBackedTrackStateRepository
     if (usesLocalPersistence) {
       return load();
     }
+    final timeout = _remainingHostedStartupProbeTimeout;
+    if (timeout <= Duration.zero) {
+      throw _HostedStartupProbeTimeout(path, hostedStartupProbeTimeout);
+    }
     return load().timeout(
-      hostedStartupProbeTimeout,
+      timeout,
       onTimeout: () =>
           throw _HostedStartupProbeTimeout(path, hostedStartupProbeTimeout),
     );
+  }
+
+  Future<T> _runWithHostedStartupProbeDeadline<T>(
+    Future<T> Function() action,
+  ) async {
+    if (usesLocalPersistence) {
+      return action();
+    }
+    final previousDeadline = _hostedStartupProbeDeadline;
+    _hostedStartupProbeDeadline ??= DateTime.now().add(
+      hostedStartupProbeTimeout,
+    );
+    try {
+      return await action();
+    } finally {
+      _hostedStartupProbeDeadline = previousDeadline;
+    }
+  }
+
+  Duration get _remainingHostedStartupProbeTimeout {
+    final deadline = _hostedStartupProbeDeadline;
+    if (deadline == null) {
+      return hostedStartupProbeTimeout;
+    }
+    final remaining = deadline.difference(DateTime.now());
+    return remaining <= Duration.zero ? Duration.zero : remaining;
   }
 
   String _hostedStartupTimeoutWarning(
