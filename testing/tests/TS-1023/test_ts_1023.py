@@ -54,7 +54,7 @@ TEST_CASE_TITLE = (
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1023/test_ts_1023.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 BLOCKED_BOOTSTRAP_PATH = "DEMO/.trackstate/index/tombstones.json"
-LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028"]
+LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028", "TS-1039"]
 RECOVERY_ACTION_LABELS = ("Sync issue", "Retry")
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 REQUEST_STEPS = [
@@ -195,8 +195,9 @@ def main() -> None:
                         status="failed",
                         action=REQUEST_STEPS[0],
                         observed=(
-                            "The synthetic startup block for DEMO/project.json was never "
-                            "observed before the recovery action appeared."
+                            "The synthetic startup block for "
+                            f"{BLOCKED_BOOTSTRAP_PATH} was never observed before the "
+                            "recovery action appeared."
                         ),
                     )
                     record_not_reached_steps(
@@ -432,6 +433,22 @@ def main() -> None:
                     if not enabled_observation:
                         enabled_observation = _observe_save_button_after_selection(page)
                     result["save_button_after_selection"] = enabled_observation
+                    record_human_verification(
+                        result,
+                        check=(
+                            "Selected the other recovered workspace row and checked the "
+                            "visible switcher state exactly as a user would after the click."
+                        ),
+                        observed=(
+                            f"clicked_workspace={target_row.display_name!r}; "
+                            f"active_workspace_after_click="
+                            f"{_selected_workspace_name(enabled_observation)!r}; "
+                            f"save_button_enabled={enabled_observation.get('button_enabled')!r}; "
+                            f"save_button_aria_disabled="
+                            f"{_save_button_field(enabled_observation, 'aria_disabled')!r}; "
+                            f"visible_row_labels={_visible_row_names(enabled_observation)!r}"
+                        ),
+                    )
                     record_step(
                         result,
                         step=4,
@@ -688,6 +705,41 @@ def _observe_save_button_after_selection(
 
 def _button_is_enabled(observation: WorkspaceSwitcherButtonStateObservation) -> bool:
     return not observation.disabled and observation.aria_disabled != "true"
+
+
+def _selected_workspace_name(observation: dict[str, Any]) -> str | None:
+    switcher = observation.get("switcher", {})
+    if not isinstance(switcher, dict):
+        return None
+    rows = switcher.get("rows", [])
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and bool(row.get("selected")):
+            display_name = row.get("display_name")
+            return str(display_name) if display_name is not None else None
+    return None
+
+
+def _visible_row_names(observation: dict[str, Any]) -> list[str]:
+    switcher = observation.get("switcher", {})
+    if not isinstance(switcher, dict):
+        return []
+    rows = switcher.get("rows", [])
+    if not isinstance(rows, list):
+        return []
+    return [
+        str(row.get("display_name"))
+        for row in rows
+        if isinstance(row, dict) and row.get("display_name") is not None
+    ]
+
+
+def _save_button_field(observation: dict[str, Any], field_name: str) -> Any:
+    save_button = observation.get("save_button", {})
+    if not isinstance(save_button, dict):
+        return None
+    return save_button.get(field_name)
 
 
 def _recovery_surface_payload(
