@@ -137,12 +137,13 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 PENDING_WINDOW_WAIT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 6
 SHELL_READY_WAIT_SECONDS = FULL_SYNC_TIMEOUT_SECONDS + 8
 POLL_INTERVAL_SECONDS = 0.15
-LINKED_BUG_KEYS = ("TS-1014",)
+LINKED_BUG_KEYS = ("TS-1014", "TS-1027", "TS-1029")
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1014. Its deployed fix moved startup shell rendering behind the delayed "
-    "GitHub `/user` successful-probe path, so this test waits through the real 5-second "
-    "pending window before asserting the shell stays hidden and only becomes interactive "
-    "after probe release."
+    "Reviewed TS-1014, TS-1027, and TS-1029. Their deployed fixes restored the live "
+    "startup `/user` probe path and kept shell rendering gated behind that delayed "
+    "successful-probe flow, so this test seeds the hosted workspace token, waits "
+    "through the real 5-second pending window, and asserts the shell stays hidden "
+    "until probe release."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -182,6 +183,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = _hosted_workspace_id(service.repository)
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = Ts1019PendingShellProbeRuntime(
         repository=config.repository,
@@ -189,6 +191,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_PROBE_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -206,6 +209,7 @@ def main() -> None:
         "simulated_probe_delay_seconds": SIMULATED_PROBE_DELAY_SECONDS,
         "linked_bug_notes": LINKED_BUG_NOTES,
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -228,6 +232,20 @@ def main() -> None:
                     timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
                 )
                 if not auth_probe_started or runtime.auth_probe_started_at_monotonic is None:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the live page as a user immediately after launch to see "
+                            "whether startup progressed beyond the loading surface."
+                        ),
+                        observed=(
+                            f"startup_title={result['startup_observation_initial'].get('title')!r}; "
+                            f"button_labels={result['startup_observation_initial'].get('button_labels')!r}; "
+                            f"body_excerpt={_snippet(tracker_page.body_text())!r}; "
+                            "the page stayed on the bare TrackState.AI loading surface and "
+                            "never exposed the delayed `/user` startup-probe path."
+                        ),
+                    )
                     observed = (
                         "The deployed app never started the delayed GitHub `/user` startup "
                         "probe, so the pending synchronization window could not be observed.\n"
@@ -258,6 +276,21 @@ def main() -> None:
                     auth_probe_started_after_start_seconds is not None
                     and auth_probe_started_after_start_seconds >= FULL_SYNC_TIMEOUT_SECONDS
                 ):
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Watched the live startup flow to confirm whether the delayed "
+                            "probe started within the expected startup window."
+                        ),
+                        observed=(
+                            f"auth_probe_started_after_start_seconds="
+                            f"{auth_probe_started_after_start_seconds!r}; "
+                            f"delayed_request_urls={runtime.delayed_request_urls!r}; "
+                            f"body_excerpt={_snippet(tracker_page.body_text())!r}; "
+                            "the delayed `/user` probe started too late for the requested "
+                            "pending-startup inspection."
+                        ),
+                    )
                     observed = (
                         "The delayed GitHub `/user` startup probe did not begin until well "
                         "after the startup window, so the pending-state startup scenario was "
@@ -571,18 +604,23 @@ def _workspace_state(repository: str) -> dict[str, object]:
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
+        active_workspace="hosted",
     )
+
+
+def _hosted_workspace_id(repository: str) -> str:
+    return f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
     return prepare_local_workspace_repository(
         local_target=LOCAL_TARGET,
         default_branch=DEFAULT_BRANCH,
-        marker_filename=".trackstate-ts985-precondition.txt",
-        marker_contents="Prepared for TS-985 successful startup probe validation.\n",
-        commit_author_name="TS-985 Automation",
-        commit_author_email="ts985@example.com",
-        commit_message="Prepare TS-985 local workspace",
+        marker_filename=".trackstate-ts1019-precondition.txt",
+        marker_contents="Prepared for TS-1019 pending startup probe validation.\n",
+        commit_author_name="TS-1019 Automation",
+        commit_author_email="ts1019@example.com",
+        commit_message="Prepare TS-1019 local workspace",
     )
 
 
@@ -1519,23 +1557,20 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
 def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
     if passed:
         return (
-            "h3. PR Rework Result\n\n"
-            "*Fixed:* Enforced TS-1019's pending-window coverage minimums so Step 2 now "
-            "fails when no in-flight samples are captured, and updated the pass reporting "
-            "to publish the real sampled coverage.\n"
-            f"*Test Run:* `{RUN_COMMAND}`\n"
-            "*Result:* ✅ PASSED\n"
-            "*Summary:* 1 passed, 0 failed.\n"
+            f"# {TICKET_KEY}\n\n"
+            "✅ PASSED\n\n"
+            f"Observed {_pending_sample_count(result)} in-flight pending samples across "
+            f"{_pending_sampled_duration_seconds(result)!r} seconds while the delayed GitHub "
+            "`/user` startup probe was pending. The shell stayed hidden until probe "
+            "release, then the interactive shell appeared.\n"
         )
     return (
-        "h3. PR Rework Result\n\n"
-        "*Fixed:* Enforced TS-1019's pending-window coverage minimums so Step 2 fails "
-        "instead of reporting zero-sample runs as a pass, and updated the reporting to "
-        "reflect the real sampled coverage.\n"
-        f"*Test Run:* `{RUN_COMMAND}`\n"
-        "*Result:* ❌ FAILED\n"
-        "*Summary:* 0 passed, 1 failed.\n"
-        f"*Error:* {result.get('error', 'The deployed app did not keep the startup shell hidden during the pending probe window.')}\n"
+        f"# {TICKET_KEY}\n\n"
+        "❌ FAILED\n\n"
+        "The live deployed app never started the delayed GitHub `/user` startup probe, "
+        "so the pending synchronization window could not be observed. The user-visible "
+        "page remained on the bare `TrackState.AI` loading surface.\n\n"
+        f"Error: {result.get('error', 'The deployed app did not keep the startup shell hidden during the pending probe window.')}\n"
     )
 
 
