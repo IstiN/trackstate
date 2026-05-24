@@ -65,12 +65,22 @@ MAX_READY_AFTER_RELEASE_SECONDS = 3.5
 AUTH_PROBE_START_WAIT_SECONDS = 30
 SHELL_READY_WAIT_SECONDS = FULL_SYNC_TIMEOUT_SECONDS + 8
 POLL_INTERVAL_SECONDS = 0.25
-LINKED_BUG_KEYS = ("TS-996", "TS-992", "TS-973", "TS-971")
+LINKED_BUG_KEYS = (
+    "TS-1014",
+    "TS-1013",
+    "TS-1012",
+    "TS-996",
+    "TS-992",
+    "TS-973",
+    "TS-971",
+)
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996, TS-992, TS-973, and TS-971. The startup-related fixes "
-    "require observing the delayed live GitHub `/user` probe and waiting until "
-    "it finishes before asserting the shell-ready success path; TS-973 is "
-    "workspace-switcher specific and adds no extra startup wait requirement."
+    "Reviewed TS-1014, TS-1013, TS-1012, TS-996, TS-992, TS-973, and TS-971. "
+    "The startup-related fixes require observing the delayed live GitHub "
+    "`/user` probe during startup, waiting for the real post-release shell "
+    "transition, and proving the shell did not simply appear from the 11-second "
+    "fallback or a late post-startup probe; TS-973 is workspace-switcher "
+    "specific and adds no extra startup wait requirement."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -221,6 +231,18 @@ def main() -> None:
                     )
 
                 if auth_probe_started_after_start_seconds is None:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Observed the live page immediately after launch to confirm what "
+                            "a user actually saw during startup."
+                        ),
+                        observed=(
+                            "The delayed GitHub `/user` startup probe never started, while "
+                            "the visible page content was:\n"
+                            f"{tracker_page.body_text()}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -240,6 +262,23 @@ def main() -> None:
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
                 if auth_probe_started_after_start_seconds >= FULL_SYNC_TIMEOUT_SECONDS:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Observed the visible startup experience like a user instead of "
+                            "relying only on network timing."
+                        ),
+                        observed=(
+                            "The interactive shell was already visible before the delayed "
+                            "GitHub `/user` startup probe began, so the requested successful-"
+                            "probe startup path was not what the user experienced.\n"
+                            f"auth_probe_started_after_start_seconds="
+                            f"{auth_probe_started_after_start_seconds!r}; "
+                            f"auth_probe_released_after_start_seconds="
+                            f"{auth_probe_released_after_start_seconds!r}; "
+                            f"visible_body_excerpt={_snippet(tracker_page.body_text())!r}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -270,6 +309,18 @@ def main() -> None:
                     )
 
                 if initial_trigger is None:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Observed the top bar area after launch to confirm whether a "
+                            "user could see the workspace trigger."
+                        ),
+                        observed=(
+                            "The deployed page never exposed the header workspace trigger "
+                            "needed for the requested startup-shell verification.\n"
+                            f"visible_body_excerpt={_snippet(tracker_page.body_text())!r}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -289,6 +340,19 @@ def main() -> None:
                     )
 
                 if auth_probe_released_after_start_seconds is None:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Observed the page after launch to verify whether the delayed "
+                            "startup probe ever completed from a user's perspective."
+                        ),
+                        observed=(
+                            "The app never completed the delayed GitHub `/user` startup "
+                            "probe within the observation window.\n"
+                            f"visible_body_excerpt={_snippet(tracker_page.body_text())!r}; "
+                            f"observed_request_urls={runtime.github_request_urls!r}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -769,6 +833,26 @@ def _write_failure_outputs(result: dict[str, Any], *, product_bug: bool) -> None
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
     status_icon = "✅" if passed else "❌"
     status_word = "PASSED" if passed else "FAILED"
+    result_lines = [
+        "* Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
+    ]
+    if passed:
+        result_lines.extend(
+            [
+                "* Delayed the live GitHub {/user} startup probe by 2 seconds, then waited for the real deployed shell to report {shell_ready} instead of asserting immediately.",
+                "* Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed.",
+                "* Confirmed the live page exposed shell navigation, the top-bar workspace trigger, and TrackState branding from the user's perspective.",
+                "",
+                "* Expected result matched.",
+            ],
+        )
+    else:
+        result_lines.extend(
+            [
+                "* Delayed the live GitHub {/user} startup probe by 2 seconds and observed the real deployed startup sequence.",
+                f"* Failed while checking the requested startup behavior. Actual issue: {_actual_result_summary(result, passed=False)}",
+            ],
+        )
     lines = [
         "h3. Test Automation Result",
         "",
@@ -782,14 +866,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"* Linked bug review: {LINKED_BUG_NOTES}",
         "",
         "h4. Result",
-        "* Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
-        "* Delayed the live GitHub {/user} startup probe by 2 seconds, then waited for the real deployed shell to report {shell_ready} instead of asserting immediately.",
-        "* Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed.",
-        "* Confirmed the live page exposed shell navigation, the top-bar workspace trigger, and TrackState branding from the user's perspective.",
-        "",
-        "* Expected result matched."
-        if passed
-        else f"* Failed while checking the requested startup behavior. Actual issue: {_actual_result_summary(result, passed=False)}",
+        *result_lines,
         "",
         "h4. Automation checks",
         *_step_lines(result, jira=True),
@@ -833,6 +910,20 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
+    result_lines = [
+        "- Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
+    ]
+    if passed:
+        result_lines.append(
+            "- Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed.",
+        )
+    else:
+        result_lines.extend(
+            [
+                "- Delayed the live GitHub `/user` startup probe by 2 seconds and observed the real deployed startup sequence.",
+                f"- Failed while verifying the requested startup behavior: {_actual_result_summary(result, passed=False)}",
+            ],
+        )
     lines = [
         "## Test Automation Result",
         "",
@@ -847,10 +938,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "- Checked the user-visible shell navigation, top-bar workspace trigger, and TrackState branding after startup.",
         "",
         "## Result",
-        "- Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
-        "- Verified the visible shell became interactive before the full 11-second timeout and shortly after the delayed probe completed."
-        if passed
-        else f"- Failed while verifying the requested startup behavior: {_actual_result_summary(result, passed=False)}",
+        *result_lines,
         "",
         "## Automation checks",
         *_step_lines(result, jira=False),
