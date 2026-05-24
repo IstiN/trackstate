@@ -56,10 +56,13 @@ REWORK_SUMMARY = (
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1024_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1024_failure.png"
@@ -473,7 +476,8 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     pr_body = _build_pr_body(result, passed=True)
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
-    RESPONSE_PATH.write_text(pr_body, encoding="utf-8")
+    RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_review_replies_payload(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -495,7 +499,11 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     pr_body = _build_pr_body(result, passed=False)
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(pr_body, encoding="utf-8")
-    RESPONSE_PATH.write_text(pr_body, encoding="utf-8")
+    RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     if bool(result.get("product_failure", True)):
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -553,6 +561,34 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
                 "{code}",
                 str(result.get("traceback", result.get("error", ""))),
                 "{code}",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    lines = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        f"**Test case:** {TEST_CASE_TITLE}",
+        f"**Status:** {'passed' if passed else 'failed'}",
+        "",
+        "## Rework summary",
+        f"- {REWORK_SUMMARY}",
+        "",
+        "## New test result",
+        f"- `{RUN_COMMAND}`",
+        f"- {_actual_result_summary(result, passed=passed)}",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Assertion / error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
             ],
         )
     return "\n".join(lines) + "\n"
@@ -718,26 +754,109 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "recovery view for the full observation window. No saved workspace rows or "
             "`Add workspace` / `Save and switch` footer actions appeared."
         )
-    final_snapshot = result.get("final_recovery_snapshot", {})
-    if isinstance(final_snapshot, dict):
-        body_text = str(final_snapshot.get("body_text", "")).strip()
-        surface_text = str(final_snapshot.get("surface_text", "")).strip()
-        visible_button_labels = final_snapshot.get("visible_button_labels", [])
-        if body_text or surface_text or visible_button_labels:
-            return (
-                "After Retry triggered another blocked startup fetch, the deployed app "
-                "did not remain on the `Sync issue` recovery surface. During the first "
-                "observation sample and after the request completed, the visible UI "
-                f"collapsed to body_text={body_text!r}, surface_text={surface_text!r}, "
-                f"visible_button_labels={visible_button_labels!r} instead of continuing "
-                "to show the recovery copy and controls."
-            )
+    first_navigation_sample = _first_snapshot_with(result, key="visible_navigation_labels")
+    if first_navigation_sample is not None:
+        return (
+            "After Retry triggered another blocked startup fetch, shell navigation became "
+            "visible even though the startup recovery surface should still own the screen. "
+            f"visible_navigation_labels={first_navigation_sample.get('visible_navigation_labels', [])!r}; "
+            f"body_text={_snapshot_excerpt(first_navigation_sample)!r}"
+        )
+    first_disallowed_sample = _first_snapshot_with(result, key="disallowed_visible_text")
+    if first_disallowed_sample is not None:
+        return (
+            "After Retry triggered another blocked startup fetch, the recovery flow exposed "
+            "forbidden workspace content instead of staying on a clean `Sync issue` surface. "
+            f"disallowed_visible_text={first_disallowed_sample.get('disallowed_visible_text', [])!r}; "
+            f"surface_text={_snapshot_excerpt(first_disallowed_sample, field='surface_text')!r}"
+        )
+    final_snapshot = _final_snapshot(result)
+    if final_snapshot is not None and not final_snapshot.get("recovery_markers"):
+        return (
+            "After Retry triggered another blocked startup fetch, the deployed app did "
+            "not remain on the `Sync issue` recovery surface. During the first "
+            "observation sample and after the request completed, the visible UI "
+            f"collapsed to body_text={_snapshot_excerpt(final_snapshot)!r}, "
+            f"surface_text={_snapshot_excerpt(final_snapshot, field='surface_text')!r}, "
+            f"visible_button_labels={final_snapshot.get('visible_button_labels', [])!r} "
+            "instead of continuing to show the recovery copy and controls."
+        )
+    error = str(result.get("error", "")).strip()
+    if error:
+        return error
     return (
         "The live deployment did not keep the recovery view consistent after the Retry "
         "action. See the annotated failed step, captured snapshots, and sampled retry "
         "window for the exact point where workspace rows, footer actions, or shell "
         "navigation became visible."
     )
+
+
+def _review_replies_payload(result: dict[str, Any], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, Any]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, Any], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{_error_summary(result)}`."
+    )
+    return (
+        "Fixed: `_actual_result_summary()` now branches on the real observed failure "
+        "signal instead of treating any captured snapshot as proof that recovery "
+        "disappeared. It reports shell-navigation exposure, forbidden workspace/footer "
+        "content, and loss of recovery markers as separate outcomes, and the test now "
+        f"also writes `review_replies.json` for the unresolved thread. {rerun_summary}"
+    )
+
+
+def _final_snapshot(result: dict[str, Any]) -> dict[str, Any] | None:
+    final_snapshot = result.get("final_recovery_snapshot")
+    return final_snapshot if isinstance(final_snapshot, dict) else None
+
+
+def _first_snapshot_with(result: dict[str, Any], *, key: str) -> dict[str, Any] | None:
+    for sample in result.get("retry_window_samples", []):
+        if isinstance(sample, dict) and sample.get(key):
+            return sample
+    final_snapshot = _final_snapshot(result)
+    if final_snapshot is not None and final_snapshot.get(key):
+        return final_snapshot
+    return None
+
+
+def _snapshot_excerpt(snapshot: dict[str, Any], *, field: str = "body_text", limit: int = 240) -> str:
+    return _snippet(str(snapshot.get(field, "")), limit=limit)
+
+
+def _error_summary(result: dict[str, Any]) -> str:
+    return str(result.get("error", f"AssertionError: {TICKET_KEY} failed")).splitlines()[0]
 
 
 def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:

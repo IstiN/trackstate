@@ -216,7 +216,7 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'After tapping the retry action, verified the header trigger and workspace row both changed to the restored local workspace in the Local Git state without any repeated directory prompt.',
+              'After tapping the retry action, checked whether the header trigger and workspace row changed to the restored local workspace in the Local Git state and whether any repeated directory prompt appeared.',
           observed:
               'directory_picker_calls=${fixture.directoryPickerCalls}; visible_texts=${_formatList(restoredVisibleTexts)}; visible_semantics=${_formatList(restoredVisibleSemantics)}',
         );
@@ -415,7 +415,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   return [
     '## Test Automation Summary',
     '',
-    '- Added `TS-981` as a Flutter widget regression around unavailable local workspace retry with pre-granted browser access.',
+    '- Reused the existing `TS-981` Flutter widget regression around unavailable local workspace retry with pre-granted browser access.',
     '- Covered the user-visible workspace switcher flow, including the unavailable row, retry-style action, and the restored `Local Git` state.',
     '- Result: **$status** via `$_runCommand`.$failureNote',
   ].join('\n');
@@ -426,7 +426,7 @@ String _bugDescription(Map<String, Object?> result) {
   final pickerInitialDirectories =
       result['directory_picker_initial_directories'] ?? '<missing>';
   return [
-    '# $_ticketKey - Retry on an unavailable local workspace still prompts or fails to restore Local Git',
+    '# $_ticketKey - Retry on an unavailable local workspace still prompts despite restoring Local Git',
     '',
     '## Exact steps to reproduce',
     ..._bugStepLines(result),
