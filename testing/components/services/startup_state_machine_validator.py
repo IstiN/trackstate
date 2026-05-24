@@ -62,7 +62,8 @@ class StartupStateMachineReachabilityValidator:
         self._logic_map = {
             "bootstrap": (
                 "Initial startup loading surface is visible, the app title is present, "
-                "and the interactive shell is not yet ready."
+                "the auth probe has not entered the pending state, and the interactive "
+                "shell is not yet ready."
             ),
             "pending": (
                 "The GitHub /user startup auth probe is pending while the interactive "
@@ -107,9 +108,9 @@ class StartupStateMachineReachabilityValidator:
             )
 
         if bootstrap is not None and pending is not None:
-            if bootstrap.sample_index > pending.sample_index:
+            if bootstrap.sample_index >= pending.sample_index:
                 failures.append(
-                    "The first pending-phase sample appeared before the bootstrap sample.",
+                    "A distinct bootstrap sample was not observed before the pending sample.",
                 )
         if pending is not None and resolved is not None:
             if pending.sample_index >= resolved.sample_index:
@@ -144,6 +145,7 @@ class StartupStateMachineReachabilityValidator:
         if phase == "bootstrap":
             return (
                 self._application_title in sample.combined_text
+                and not sample.auth_pending
                 and not sample.shell_ready
                 and not self._has_full_navigation(sample.visible_navigation_labels)
             )

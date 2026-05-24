@@ -25,6 +25,7 @@ from testing.components.services.startup_state_machine_validator import (  # noq
     StartupStateSample,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_startup_case_support import (  # noqa: E402
     ShellReadyTransitionTracker,
     build_annotated_steps,
@@ -39,79 +40,12 @@ from testing.tests.support.live_startup_case_support import (  # noqa: E402
     snippet,
     write_test_automation_result,
 )
+from testing.tests.support.ts1032_startup_state_machine_runtime import (  # noqa: E402
+    Ts1032StartupStateMachineRuntime,
+)
 from testing.tests.support.ts984_delayed_auth_probe_runtime import (  # noqa: E402
     Ts984DelayedAuthProbeRuntime,
 )
-
-
-class Ts1032PendingShellProbeRuntime(Ts984DelayedAuthProbeRuntime):
-    def __enter__(self):
-        session = super().__enter__()
-        if self._context is None or self._page is None:
-            raise RuntimeError(
-                "Ts1032PendingShellProbeRuntime expected a browser context and page.",
-            )
-        script = _pending_shell_probe_script()
-        self._context.add_init_script(script=script)
-        self._page.add_init_script(script=script)
-        return session
-
-    def read_pending_shell_probe_state(self) -> dict[str, Any]:
-        if self._page is None:
-            raise RuntimeError(
-                "Ts1032PendingShellProbeRuntime expected a browser page before reading state.",
-            )
-        payload = self._page.evaluate(
-            """
-            () => {
-              const state = window.__ts1032PendingShellProbeState;
-              if (!state) {
-                return null;
-              }
-              return {
-                firstNavigationVisibleAtMs: state.firstNavigationVisibleAtMs,
-                firstTriggerVisibleAtMs: state.firstTriggerVisibleAtMs,
-                firstBrandingVisibleAtMs: state.firstBrandingVisibleAtMs,
-                firstAnyShellMarkerVisibleAtMs: state.firstAnyShellMarkerVisibleAtMs,
-                firstTriggerLabel: state.firstTriggerLabel,
-                firstNavigationLabels: state.firstNavigationLabels,
-                samples: state.samples,
-              };
-            }
-            """,
-        )
-        if not isinstance(payload, dict):
-            return {
-                "first_navigation_visible_after_launch_seconds": None,
-                "first_trigger_visible_after_launch_seconds": None,
-                "first_branding_visible_after_launch_seconds": None,
-                "first_any_shell_marker_visible_after_launch_seconds": None,
-                "first_trigger_label": "",
-                "first_navigation_labels": [],
-                "sample_count": 0,
-                "samples": [],
-            }
-        normalized_samples = _normalize_pending_probe_samples(payload.get("samples", []))
-        return {
-            "first_navigation_visible_after_launch_seconds": _ms_to_seconds(
-                payload.get("firstNavigationVisibleAtMs"),
-            ),
-            "first_trigger_visible_after_launch_seconds": _ms_to_seconds(
-                payload.get("firstTriggerVisibleAtMs"),
-            ),
-            "first_branding_visible_after_launch_seconds": _ms_to_seconds(
-                payload.get("firstBrandingVisibleAtMs"),
-            ),
-            "first_any_shell_marker_visible_after_launch_seconds": _ms_to_seconds(
-                payload.get("firstAnyShellMarkerVisibleAtMs"),
-            ),
-            "first_trigger_label": str(payload.get("firstTriggerLabel", "")),
-            "first_navigation_labels": [
-                str(label) for label in payload.get("firstNavigationLabels", [])
-            ],
-            "sample_count": len(normalized_samples),
-            "samples": normalized_samples,
-        }
 
 TICKET_KEY = "TS-1032"
 TEST_CASE_TITLE = (
@@ -184,7 +118,7 @@ def main() -> None:
         required_navigation_labels=SHELL_NAVIGATION_LABELS,
         application_title="TrackState.AI",
     )
-    runtime = Ts1032PendingShellProbeRuntime(
+    runtime = Ts1032StartupStateMachineRuntime(
         repository=config.repository,
         token=token,
         workspace_state=workspace_state,
@@ -558,28 +492,28 @@ def _wait_for_resolved_window(
     *,
     tracker_page: TrackStateTrackerPage,
     page: LiveWorkspaceSwitcherPage,
-    runtime: Ts1032PendingShellProbeRuntime,
+    runtime: Ts1032StartupStateMachineRuntime,
     startup_started_at_monotonic: float,
     transition_tracker: ShellReadyTransitionTracker,
     poll_timeout_ms: int = 250,
 ) -> dict[str, Any] | None:
-    deadline = time.monotonic() + RESOLUTION_WAIT_SECONDS
-    resolved_window: dict[str, Any] | None = None
-
-    while time.monotonic() < deadline:
-        window = _observe_shell_window(
+    found, resolved_window = poll_until(
+        probe=lambda: _observe_shell_window(
             tracker_page=tracker_page,
             page=page,
             runtime=runtime,
             startup_started_at_monotonic=startup_started_at_monotonic,
             transition_tracker=transition_tracker,
             poll_timeout_ms=poll_timeout_ms,
-        )
-        if not window["auth_pending"] and window["shell_observation"]["shell_ready"]:
-            resolved_window = window
-            break
-        time.sleep(POLL_INTERVAL_SECONDS)
-    return resolved_window
+        ),
+        is_satisfied=lambda window: (
+            not bool(window["auth_pending"])
+            and bool(window["shell_observation"]["shell_ready"])
+        ),
+        timeout_seconds=RESOLUTION_WAIT_SECONDS,
+        interval_seconds=POLL_INTERVAL_SECONDS,
+    )
+    return resolved_window if found else None
 
 
 def _pending_window_duration_seconds(
@@ -702,154 +636,6 @@ def _interactive_shell_failures(observation: dict[str, Any]) -> list[str]:
             "The resolved startup sample did not expose visible TrackState branding.",
         )
     return failures
-
-
-def _ms_to_seconds(value: Any) -> float | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return round(float(value) / 1000, 2)
-
-
-def _normalize_pending_probe_samples(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, list):
-        return []
-    samples: list[dict[str, Any]] = []
-    for sample in payload:
-        if not isinstance(sample, dict):
-            continue
-        samples.append(
-            {
-                "observed_after_launch_seconds": _ms_to_seconds(sample.get("observedAtMs")),
-                "visible_navigation_labels": [
-                    str(label) for label in sample.get("visibleNavigationLabels", [])
-                ],
-                "trigger_visible": bool(sample.get("triggerVisible")),
-                "trigger_label": str(sample.get("triggerLabel", "")),
-                "branding_visible": bool(sample.get("brandingVisible")),
-                "shell_ready": bool(sample.get("shellReady")),
-                "body_excerpt": str(sample.get("bodyExcerpt", "")),
-            },
-        )
-    return samples
-
-
-def _pending_shell_probe_script() -> str:
-    return """
-(() => {
-  const MAX_SAMPLES = 300;
-  const SAMPLE_INTERVAL_MS = 100;
-  const state = {
-    firstNavigationVisibleAtMs: null,
-    firstTriggerVisibleAtMs: null,
-    firstBrandingVisibleAtMs: null,
-    firstAnyShellMarkerVisibleAtMs: null,
-    firstTriggerLabel: '',
-    firstNavigationLabels: [],
-    samples: [],
-  };
-  window.__ts1032PendingShellProbeState = state;
-
-  const readyLabels = ['Dashboard', 'Board', 'JQL Search', 'Hierarchy', 'Settings'];
-  const brandingLabels = ['Git-native. Jira-compatible. Team-proven.', 'TrackState.AI'];
-  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-
-  const semanticTexts = () => Array.from(
-    document.querySelectorAll('flt-semantics, button, [role], nav, header, aside, a, [aria-label]'),
-  )
-    .filter((element) => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(element.tagName))
-    .map((element) => normalize(
-      element.getAttribute?.('aria-label')
-      || element.innerText
-      || element.textContent
-      || '',
-    ))
-    .filter((text) => text.length > 0);
-
-  const updateFirstAny = () => {
-    if (state.firstAnyShellMarkerVisibleAtMs !== null) {
-      return;
-    }
-    const candidates = [
-      state.firstNavigationVisibleAtMs,
-      state.firstTriggerVisibleAtMs,
-      state.firstBrandingVisibleAtMs,
-    ].filter((value) => value !== null);
-    if (candidates.length > 0) {
-      state.firstAnyShellMarkerVisibleAtMs = Math.min(...candidates);
-    }
-  };
-
-  const observe = () => {
-    const bodyText = normalize(document.body?.innerText ?? document.body?.textContent ?? '');
-    const texts = semanticTexts();
-    const visibleNavigation = readyLabels.filter(
-      (label) => bodyText.includes(label) || texts.includes(label),
-    );
-    if (state.firstNavigationVisibleAtMs === null && visibleNavigation.length > 0) {
-      state.firstNavigationVisibleAtMs = performance.now();
-      state.firstNavigationLabels = visibleNavigation;
-    }
-    const triggerLabel = texts.find((text) => text.includes('Workspace switcher:'));
-    if (state.firstTriggerVisibleAtMs === null && triggerLabel) {
-      state.firstTriggerVisibleAtMs = performance.now();
-      state.firstTriggerLabel = triggerLabel;
-    }
-    const brandingVisible = brandingLabels.some((label) =>
-      bodyText.includes(label) || texts.some((text) => text.includes(label)),
-    );
-    if (state.firstBrandingVisibleAtMs === null && brandingVisible) {
-      state.firstBrandingVisibleAtMs = performance.now();
-    }
-    updateFirstAny();
-  };
-
-  const captureSample = () => {
-    const bodyText = normalize(document.body?.innerText ?? document.body?.textContent ?? '');
-    const texts = semanticTexts();
-    const visibleNavigationLabels = readyLabels.filter(
-      (label) => bodyText.includes(label) || texts.includes(label),
-    );
-    const triggerLabel = texts.find((text) => text.includes('Workspace switcher:')) || '';
-    const brandingVisible = brandingLabels.some((label) =>
-      bodyText.includes(label) || texts.some((text) => text.includes(label)),
-    );
-    state.samples.push({
-      observedAtMs: performance.now(),
-      visibleNavigationLabels,
-      triggerVisible: !!triggerLabel,
-      triggerLabel,
-      brandingVisible,
-      shellReady: visibleNavigationLabels.length === readyLabels.length,
-      bodyExcerpt: bodyText.slice(0, 240),
-    });
-    if (state.samples.length > MAX_SAMPLES) {
-      state.samples.splice(0, state.samples.length - MAX_SAMPLES);
-    }
-  };
-
-  const attachObserver = () => {
-    observe();
-    captureSample();
-    if (!document.documentElement) {
-      requestAnimationFrame(attachObserver);
-      return;
-    }
-    new MutationObserver(() => observe()).observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-    });
-  };
-
-  attachObserver();
-  window.setInterval(() => {
-    observe();
-    captureSample();
-  }, SAMPLE_INTERVAL_MS);
-  window.addEventListener('load', () => observe(), { once: false });
-})();
-"""
 
 
 def _validation_result_payload(result: Any) -> dict[str, Any]:
