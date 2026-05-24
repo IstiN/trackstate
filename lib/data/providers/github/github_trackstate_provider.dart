@@ -110,22 +110,33 @@ class GitHubTrackStateProvider
       return inFlight;
     }
     startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
-    final future = () async {
-      final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
-        _githubUri('/user'),
-        headers: _githubHeaders(token),
-        client: _client,
-      );
-      if (userResponse.statusCode != 200) {
-        _throwGitHubResponseException(
-          path: '/user',
-          response: http.Response(userResponse.body, userResponse.statusCode),
-          prefix: 'GitHub API request failed for /user',
-        );
-      }
-      startupAuthProbeDiagnostics.recordAuthProbeSuccess();
-      return jsonDecode(userResponse.body) as Map<String, Object?>;
-    }();
+    late final Future<Map<String, Object?>> future;
+    future =
+        (() async {
+          final userResponse = await github_auth_probe
+              .fetchGitHubAuthProbeResponse(
+                _githubUri('/user'),
+                headers: _githubHeaders(token),
+                client: _client,
+              );
+          if (userResponse.statusCode != 200) {
+            _throwGitHubResponseException(
+              path: '/user',
+              response: http.Response(
+                userResponse.body,
+                userResponse.statusCode,
+              ),
+              prefix: 'GitHub API request failed for /user',
+            );
+          }
+          startupAuthProbeDiagnostics.recordAuthProbeSuccess();
+          return jsonDecode(userResponse.body) as Map<String, Object?>;
+        }()).catchError((Object error, StackTrace stackTrace) {
+          if (identical(_sharedWebUserProbes[probeKey], future)) {
+            _sharedWebUserProbes.remove(probeKey);
+          }
+          Error.throwWithStackTrace(error, stackTrace);
+        });
     _sharedWebUserProbes[probeKey] = future;
     return future;
   }
