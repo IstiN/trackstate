@@ -5949,7 +5949,7 @@ class _AccessCallout extends StatelessWidget {
         tone == _AccessCalloutTone.warning &&
         theme.brightness == Brightness.light;
     final contentColor = usesLightWarningTreatment
-        ? const Color(0xFF1F1D1A)
+        ? Color.lerp(colors.text, Colors.black, .3)!
         : colors.text;
     return Semantics(
       container: true,
@@ -6015,6 +6015,7 @@ class _AccessCallout extends StatelessWidget {
                             ? _warningCalloutPrimaryActionStyle(
                                 accentColor: accentColor,
                                 contentColor: contentColor,
+                                colors: colors,
                               )
                             : OutlinedButton.styleFrom(
                                 foregroundColor: colors.text,
@@ -6049,17 +6050,18 @@ class _AccessCallout extends StatelessWidget {
 ButtonStyle _warningCalloutPrimaryActionStyle({
   required Color accentColor,
   required Color contentColor,
+  required TrackStateColors colors,
 }) {
   return ButtonStyle(
     foregroundColor: WidgetStatePropertyAll<Color>(contentColor),
     overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
     backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
       if (states.contains(WidgetState.pressed)) {
-        return const Color(0xFFFFE7AE);
+        return Color.lerp(colors.accentSoft, colors.accent, .18);
       }
       if (states.contains(WidgetState.hovered) ||
           states.contains(WidgetState.focused)) {
-        return const Color(0xFFFFF1CF);
+        return colors.accentSoft;
       }
       return Colors.transparent;
     }),
@@ -6073,13 +6075,13 @@ ButtonStyle _warningCalloutSecondaryActionStyle(TrackStateColors colors) {
     overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
     backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
       if (states.contains(WidgetState.pressed)) {
-        return const Color(0xFF8F321B);
+        return Color.lerp(colors.primary, colors.text, .26);
       }
       if (states.contains(WidgetState.focused)) {
-        return const Color(0xFF9D381F);
+        return Color.lerp(colors.primary, colors.text, .18);
       }
       if (states.contains(WidgetState.hovered)) {
-        return const Color(0xFFA53B22);
+        return Color.lerp(colors.primary, colors.text, .10);
       }
       return colors.primary;
     }),
@@ -7002,7 +7004,7 @@ class _SettingsState extends State<_Settings> {
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),
             message: _startupRecoveryMessage(l10n, widget.viewModel),
-            primaryActionLabel: l10n.retry,
+            primaryActionLabel: l10n.retryStartup,
             onPrimaryAction: () {
               unawaited(widget.onRetryStartupRecovery());
             },
