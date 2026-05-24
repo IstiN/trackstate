@@ -581,6 +581,7 @@ class TrackerViewModel extends ChangeNotifier {
           !usesLocalPersistence &&
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
+        await _primeStartupGitHubAuthProbe();
       }
       await _loadSnapshotAndSearch();
       _startupRecovery = _snapshot?.startupRecovery;
@@ -1964,6 +1965,34 @@ class TrackerViewModel extends ChangeNotifier {
       _bindProviderSession();
       rethrow;
     }
+  }
+
+  Future<void> _primeStartupGitHubAuthProbe() async {
+    if (!kIsWeb) {
+      return;
+    }
+    final repository = _repository;
+    if (repository is! ProviderBackedTrackStateRepository ||
+        usesLocalPersistence ||
+        !supportsGitHubAuth) {
+      return;
+    }
+    final providerAdapter = repository.providerAdapter;
+    if (providerAdapter is! GitHubTrackStateProvider) {
+      return;
+    }
+    final repositoryName = providerAdapter.repositoryLabel.trim();
+    if (repositoryName.isEmpty) {
+      return;
+    }
+    final storedToken = await _authStore.readToken(
+      repository: repositoryName,
+      workspaceId: _workspaceId,
+    );
+    if (storedToken == null || storedToken.trim().isEmpty) {
+      return;
+    }
+    providerAdapter.startStartupAuthProbe(storedToken);
   }
 
   Future<void> _runAutomaticRepositoryConnectionRestore({

@@ -570,6 +570,15 @@ class TrackStateTrackerPage:
             button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
         )
 
+    def read_global_samples(self, key: str) -> list[dict[str, object]]:
+        payload = self.session.evaluate(
+            "({ key }) => globalThis[key] || []",
+            arg={"key": key},
+        )
+        if not isinstance(payload, list):
+            return []
+        return [dict(sample) for sample in payload if isinstance(sample, dict)]
+
     def snapshot_local_storage(
         self,
         keys: Sequence[str],

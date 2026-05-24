@@ -33,9 +33,6 @@ class GitHubTrackStateProvider
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
   );
-  static final Map<String, Future<Map<String, Object?>>>
-  _inFlightWebUserProbes = <String, Future<Map<String, Object?>>>{};
-
   GitHubTrackStateProvider({
     http.Client? client,
     this.repositoryName = defaultRepositoryName,
@@ -58,6 +55,8 @@ class GitHubTrackStateProvider
 
   final http.Client? _client;
   late final http.Client _ownedClient = http.Client();
+  final Map<String, Future<Map<String, Object?>>> _sharedWebUserProbes =
+      <String, Future<Map<String, Object?>>>{};
   final String repositoryName;
   final String sourceRef;
 
@@ -106,33 +105,39 @@ class GitHubTrackStateProvider
 
   Future<Map<String, Object?>> _fetchSharedWebUserProbeJson(String token) {
     final probeKey = token.trim();
-    final inFlight = _inFlightWebUserProbes[probeKey];
+    final inFlight = _sharedWebUserProbes[probeKey];
     if (inFlight != null) {
       return inFlight;
     }
     startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
-    final future = () async {
-      final userResponse = await github_auth_probe.fetchGitHubAuthProbeResponse(
-        _githubUri('/user'),
-        headers: _githubHeaders(token),
-        client: _client,
-      );
-      if (userResponse.statusCode != 200) {
-        _throwGitHubResponseException(
-          path: '/user',
-          response: http.Response(userResponse.body, userResponse.statusCode),
-          prefix: 'GitHub API request failed for /user',
-        );
-      }
-      startupAuthProbeDiagnostics.recordAuthProbeSuccess();
-      return jsonDecode(userResponse.body) as Map<String, Object?>;
-    }();
-    _inFlightWebUserProbes[probeKey] = future;
-    future.whenComplete(() {
-      if (identical(_inFlightWebUserProbes[probeKey], future)) {
-        _inFlightWebUserProbes.remove(probeKey);
-      }
-    });
+    late final Future<Map<String, Object?>> future;
+    future =
+        (() async {
+          final userResponse = await github_auth_probe
+              .fetchGitHubAuthProbeResponse(
+                _githubUri('/user'),
+                headers: _githubHeaders(token),
+                client: _client,
+              );
+          if (userResponse.statusCode != 200) {
+            _throwGitHubResponseException(
+              path: '/user',
+              response: http.Response(
+                userResponse.body,
+                userResponse.statusCode,
+              ),
+              prefix: 'GitHub API request failed for /user',
+            );
+          }
+          startupAuthProbeDiagnostics.recordAuthProbeSuccess();
+          return jsonDecode(userResponse.body) as Map<String, Object?>;
+        }()).catchError((Object error, StackTrace stackTrace) {
+          if (identical(_sharedWebUserProbes[probeKey], future)) {
+            _sharedWebUserProbes.remove(probeKey);
+          }
+          Error.throwWithStackTrace(error, stackTrace);
+        });
+    _sharedWebUserProbes[probeKey] = future;
     return future;
   }
 
