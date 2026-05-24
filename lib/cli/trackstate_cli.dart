@@ -64,6 +64,10 @@ class TrackStateCli {
         'search' => await _runSearch(normalizedArguments.skip(1).toList()),
         'read' => await _runRead(normalizedArguments.skip(1).toList()),
         'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
+        'archive' => await _runTicketArchive(
+          arguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
+        ),
         'attachment' => await _runAttachment(arguments.skip(1).toList()),
         'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
           arguments.skip(1).toList(),
@@ -114,6 +118,7 @@ class TrackStateCli {
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
           arguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
         ),
         'jira_attach_file_to_ticket' => await _runAttachmentUpload(
           _normalizeAttachmentUploadArguments(arguments.skip(1).toList()),
@@ -1464,7 +1469,8 @@ class TrackStateCli {
   }
 
   Future<TrackStateCliExecution> _runTicketArchive(
-    List<String> arguments,
+    List<String> arguments, {
+    TrackStateCliTargetType? defaultTargetType,
   ) async {
     final parser = _mutationParser()
       ..addOption('key', help: 'Issue key to archive.');
@@ -1473,8 +1479,14 @@ class TrackStateCli {
       parser: parser,
       helpText: _ticketArchiveHelpText(parser),
       commandName: 'ticket-archive',
+      defaultTargetType: defaultTargetType,
       execute: (context, results) async {
-        final issueKey = _requiredTrimmedOption(results, 'key');
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['key'],
+          results.rest,
+          0,
+        );
         final result = await context.service.archiveIssue(issueKey);
         final issue = _requireMutationSuccess(result);
         return <String, Object?>{
@@ -2206,7 +2218,8 @@ class TrackStateCli {
   }
 
   Future<TrackStateCliExecution> _runJiraDeleteTicket(
-    List<String> arguments,
+    List<String> arguments, {
+    TrackStateCliTargetType? defaultTargetType,
   ) async {
     final parser = _mutationParser()
       ..addOption('issueKey', help: 'Issue key to delete permanently.');
@@ -2217,10 +2230,14 @@ class TrackStateCli {
       parser: parser,
       helpText: _jiraDeleteTicketHelpText(parser),
       commandName: 'jira-delete-ticket',
+      defaultTargetType: defaultTargetType,
       execute: (context, results) async {
-        final issueKey = _firstRequiredTrimmedOption(results, const [
-          'issueKey',
-        ]);
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['issueKey'],
+          results.rest,
+          0,
+        );
         final result = await context.service.deleteIssue(issueKey);
         final tombstone = _requireMutationSuccess(result);
         return <String, Object?>{
@@ -2272,6 +2289,7 @@ class TrackStateCli {
     required ArgParser parser,
     required String helpText,
     required String commandName,
+    TrackStateCliTargetType? defaultTargetType,
     required Future<Map<String, Object?>> Function(
       _PreparedMutationContext context,
       ArgResults results,
@@ -2301,7 +2319,10 @@ class TrackStateCli {
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
-    final target = await _resolveTarget(results);
+    final target = await _resolveTarget(
+      results,
+      defaultTargetType: defaultTargetType,
+    );
 
     try {
       final context = await _prepareMutationContext(target);
@@ -6489,6 +6510,7 @@ class TrackStateCli {
     '  search     Execute a paged JQL search.',
     '  read       Read tickets and metadata as Jira-shaped JSON.',
     '  ticket     Mutate tickets through the shared mutation service.',
+    '  archive    Archive one issue from the current local repository by default.',
     '  attachment Upload or download one attachment.',
     '  jira_execute_request',
     '             Execute a narrow Jira-compatible raw request.',
@@ -6499,6 +6521,7 @@ class TrackStateCli {
     '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\'',
     '  trackstate read ticket --key TRACK-1',
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
+    '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',

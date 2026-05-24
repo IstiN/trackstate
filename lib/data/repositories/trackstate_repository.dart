@@ -1345,21 +1345,11 @@ class ProviderBackedTrackStateRepository
           'Could not resolve the project root for the issue being archived.',
         );
       }
-      final issueArtifactPaths = _issueArtifactPaths(
-        blobPaths,
-        currentIssue.storagePath,
-      );
-      if (!issueArtifactPaths.contains(currentIssue.storagePath)) {
+      if (!blobPaths.contains(currentIssue.storagePath)) {
         throw TrackStateRepositoryException(
           'Could not find repository artifacts for ${currentIssue.key}.',
         );
       }
-      final issueRoot = _issueRoot(currentIssue.storagePath);
-      final archivedStoragePath = _archivedIssueStoragePath(
-        projectRoot,
-        currentIssue.key,
-      );
-      final archivedIssueRoot = _issueRoot(archivedStoragePath);
 
       final issueFile = await _provider.readTextFile(
         currentIssue.storagePath,
@@ -1377,7 +1367,6 @@ class ProviderBackedTrackStateRepository
               rawMarkdown: updatedMarkdown,
               updatedLabel: 'just now',
               isArchived: true,
-              storagePath: archivedStoragePath,
             )
           else
             candidate,
@@ -1391,64 +1380,13 @@ class ProviderBackedTrackStateRepository
         '.trackstate/index/issues.json',
       );
       final changes = <RepositoryFileChange>[];
-      for (final artifactPath in issueArtifactPaths) {
-        final targetPath = artifactPath == currentIssue.storagePath
-            ? archivedStoragePath
-            : _joinPath(
-                archivedIssueRoot,
-                artifactPath.substring(issueRoot.length + 1),
-              );
-        if (artifactPath == currentIssue.storagePath) {
-          changes.add(
-            RepositoryTextFileChange(
-              path: targetPath,
-              content: updatedMarkdown,
-              expectedRevision: artifactPath == targetPath
-                  ? issueFile.revision
-                  : await _existingArtifactRevision(
-                      path: targetPath,
-                      ref: writeBranch,
-                      blobPaths: blobPaths,
-                    ),
-            ),
-          );
-          if (artifactPath != targetPath) {
-            changes.add(
-              RepositoryDeleteFileChange(
-                path: artifactPath,
-                expectedRevision: issueFile.revision,
-              ),
-            );
-          }
-          continue;
-        }
-
-        final artifact = await _provider.readAttachment(
-          artifactPath,
-          ref: writeBranch,
-        );
-        changes.add(
-          RepositoryBinaryFileChange(
-            path: targetPath,
-            bytes: artifact.bytes,
-            expectedRevision: artifactPath == targetPath
-                ? artifact.revision
-                : await _existingArtifactRevision(
-                    path: targetPath,
-                    ref: writeBranch,
-                    blobPaths: blobPaths,
-                  ),
-          ),
-        );
-        if (artifactPath != targetPath) {
-          changes.add(
-            RepositoryDeleteFileChange(
-              path: artifactPath,
-              expectedRevision: artifact.revision,
-            ),
-          );
-        }
-      }
+      changes.add(
+        RepositoryTextFileChange(
+          path: currentIssue.storagePath,
+          content: updatedMarkdown,
+          expectedRevision: issueFile.revision,
+        ),
+      );
       changes.add(
         RepositoryTextFileChange(
           path: issuesIndexPath,
