@@ -6,7 +6,7 @@ dependencies:
   - Playwright for Python with Chromium installed
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
-  - Reuses the live startup retry recovery setup from TS-983 to force the workspace switcher into the recoverable Sync issue state.
-  - Waits for the live retry request to succeed before opening the recovered workspace switcher.
+  - Reuses the live hosted recovery runtime from TS-983 with a deferred tombstones bootstrap rate-limit so the current deployed app exposes the visible Retry recovery state.
+  - Waits for the live retry request to succeed before inspecting the recovered workspace switcher state.
   - Verifies both Add workspace and Save and switch are visible after recovery.
   - Confirms Save and switch starts disabled, then becomes enabled after selecting a different saved workspace row.
