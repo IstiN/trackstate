@@ -317,6 +317,38 @@ void main() {
   );
 
   test(
+    'workspace sync service marks hosted authentication failures unavailable while applying hosted backoff',
+    () async {
+      final repository = _ThrowingWorkspaceSyncRepository(
+        error: const TrackStateProviderException(
+          'GitHub API request failed for /repos/IstiN/trackstate-setup/branches/main (401): {"message":"Bad credentials"}',
+        ),
+      );
+      final statuses = <WorkspaceSyncStatus>[];
+      var now = DateTime.utc(2026, 5, 14, 10, 0);
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async =>
+            await const DemoTrackStateRepository().loadSnapshot(),
+        onRefresh: (_) {},
+        onStatusChanged: statuses.add,
+        now: () => now,
+      );
+
+      await service.checkNow(force: true);
+
+      expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+      expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
+
+      now = DateTime.utc(2026, 5, 14, 10, 1);
+      await service.checkNow(force: true);
+
+      expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+      expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 3));
+    },
+  );
+
+  test(
     'workspace sync service does not reload the hosted snapshot for comment-only changes',
     () async {
       final baseline = await const DemoTrackStateRepository().loadSnapshot();
@@ -607,6 +639,12 @@ class _PendingWorkspaceSyncRepository implements WorkspaceSyncRepository {
 }
 
 class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
+  _ThrowingWorkspaceSyncRepository({
+    this.error = const TrackStateProviderException('GitHub rate limit exceeded.'),
+  });
+
+  final Object error;
+
   @override
   bool get usesLocalPersistence => false;
 
@@ -614,7 +652,7 @@ class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
   }) async {
-    throw const TrackStateProviderException('GitHub rate limit exceeded.');
+    throw error;
   }
 }
 
