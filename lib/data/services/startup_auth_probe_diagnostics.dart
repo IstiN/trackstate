@@ -1,10 +1,12 @@
-import 'dart:developer' as developer;
+import 'startup_auth_probe_diagnostic_logger_stub.dart'
+    if (dart.library.js_interop) 'startup_auth_probe_diagnostic_logger_web.dart'
+    as startup_auth_probe_diagnostic_logger;
 
 typedef StartupAuthProbeDiagnosticClock = DateTime Function();
 typedef StartupAuthProbeDiagnosticLogger = void Function(String message);
 
 void _defaultStartupAuthProbeDiagnosticLogger(String message) {
-  developer.log(message, name: 'trackstate.startup');
+  startup_auth_probe_diagnostic_logger.emitStartupAuthProbeDiagnostic(message);
 }
 
 StartupAuthProbeDiagnostics startupAuthProbeDiagnostics =

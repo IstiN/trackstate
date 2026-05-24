@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/github/github_trackstate_provider.dart';
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
@@ -1852,6 +1853,15 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
+      if (kIsWeb) {
+        final repository = _repository;
+        if (repository is ProviderBackedTrackStateRepository) {
+          final providerAdapter = repository.providerAdapter;
+          if (providerAdapter is GitHubTrackStateProvider) {
+            providerAdapter.startStartupAuthProbe(storedToken);
+          }
+        }
+      }
       await _runAutomaticRepositoryConnectionRestore(
         connect: () => _repository.connect(
           GitHubConnection(

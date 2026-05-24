@@ -33,8 +33,8 @@ class GitHubTrackStateProvider
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
   );
-  static final Map<String, Future<Map<String, Object?>>> _inFlightWebUserProbes =
-      <String, Future<Map<String, Object?>>>{};
+  static final Map<String, Future<Map<String, Object?>>>
+  _inFlightWebUserProbes = <String, Future<Map<String, Object?>>>{};
 
   GitHubTrackStateProvider({
     http.Client? client,
@@ -133,6 +133,13 @@ class GitHubTrackStateProvider
       }
     });
     return future;
+  }
+
+  void startStartupAuthProbe(String token) {
+    if (!kIsWeb || token.trim().isEmpty) {
+      return;
+    }
+    _fetchSharedWebUserProbeJson(token);
   }
 
   @override

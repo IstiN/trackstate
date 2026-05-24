@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,12 +13,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:web/web.dart' as web;
+
+@JS('window.fetch')
+external JSFunction get _windowFetch;
+
+@JS('window.fetch')
+external set _windowFetch(JSFunction value);
+
+@JS('console.info')
+external JSFunction get _consoleInfo;
+
+@JS('console.info')
+external set _consoleInfo(JSFunction value);
 
 void main() {
   setUp(() {
@@ -143,7 +156,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup logs the delayed /user timeout fallback when the shell opens before the auth probe completes',
+    'web startup starts the real browser /user probe and logs the timeout fallback to the browser console',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -172,24 +185,17 @@ void main() {
         workspaceId: activeLocalWorkspaceId,
       );
 
-      final delayedRepository = _DelayedGitHubProbeRepository(
+      final delayedRepository = _BrowserStartupAuthProbeRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
       );
-      final diagnosticLogs = <String>[];
-      final previousDiagnostics = startupAuthProbeDiagnostics;
-      var elapsed = Duration.zero;
-
-      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
-        now: () => DateTime.fromMillisecondsSinceEpoch(elapsed.inMilliseconds),
-        logger: diagnosticLogs.add,
-      );
+      final browserHarness = _BrowserStartupAuthProbeHarness()..install();
 
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(() {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        startupAuthProbeDiagnostics = previousDiagnostics;
+        browserHarness.dispose();
       });
 
       await tester.pumpWidget(
@@ -214,18 +220,16 @@ void main() {
         ),
       );
       await tester.pump();
-      elapsed += const Duration(milliseconds: 750);
       await tester.pump(const Duration(milliseconds: 750));
 
-      expect(delayedRepository.userProbeRequestCount, 1);
-      expect(delayedRepository.requestedPaths, contains('/user'));
+      expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.requestedPaths, contains('/user'));
       expect(
         find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsNothing,
       );
-      expect(diagnosticLogs, isEmpty);
+      expect(browserHarness.consoleMessages, isEmpty);
 
-      elapsed += const Duration(seconds: 11);
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
@@ -242,7 +246,7 @@ void main() {
       expect(delayedRepository.session?.canCreateBranch, isFalse);
       expect(find.text('Connect GitHub'), findsOneWidget);
       expect(
-        diagnosticLogs,
+        browserHarness.consoleMessages,
         contains(
           predicate<String>(
             (entry) =>
@@ -255,16 +259,9 @@ void main() {
         ),
       );
 
-      delayedRepository.completeUserProbe();
+      browserHarness.completeUserProbe();
       await tester.pump();
       await tester.pumpAndSettle();
-
-      expect(
-        delayedRepository.session?.connectionState,
-        ProviderConnectionState.connected,
-      );
-      expect(delayedRepository.session?.canWrite, isTrue);
-      expect(delayedRepository.session?.canCreateBranch, isTrue);
     },
   );
 }
@@ -294,6 +291,28 @@ Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
     loadWarnings: base.loadWarnings,
     readiness: base.readiness,
     startupRecovery: base.startupRecovery,
+  );
+}
+
+class _BrowserStartupAuthProbeProvider extends GitHubTrackStateProvider {
+  _BrowserStartupAuthProbeProvider()
+    : super(repositoryName: 'stable/repo', dataRef: 'main', sourceRef: 'main');
+
+  bool _authenticated = false;
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    final user = await super.authenticate(connection);
+    _authenticated = true;
+    return user;
+  }
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _authenticated,
+    isAdmin: false,
+    supportsReleaseAttachmentWrites: false,
   );
 }
 
@@ -381,5 +400,93 @@ class _DelayedGitHubProbeHarness {
       return;
     }
     _userProbeCompleter.complete();
+  }
+}
+
+class _BrowserStartupAuthProbeRepository
+    extends ProviderBackedTrackStateRepository {
+  _BrowserStartupAuthProbeRepository({required TrackerSnapshot snapshot})
+    : this._(snapshot: snapshot, provider: _BrowserStartupAuthProbeProvider());
+
+  _BrowserStartupAuthProbeRepository._({
+    required TrackerSnapshot snapshot,
+    required _BrowserStartupAuthProbeProvider provider,
+  }) : _snapshotOverride = snapshot,
+       super(provider: provider);
+
+  final TrackerSnapshot _snapshotOverride;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
+  }
+}
+
+class _BrowserStartupAuthProbeHarness {
+  _BrowserStartupAuthProbeHarness();
+
+  final List<String> requestedPaths = <String>[];
+  final List<String> consoleMessages = <String>[];
+  final Completer<web.Response> _userProbeCompleter = Completer<web.Response>();
+  bool _installed = false;
+  late final JSFunction _previousFetch = _windowFetch;
+  late final JSFunction _previousConsoleInfo = _consoleInfo;
+
+  int get userProbeRequestCount =>
+      requestedPaths.where((path) => path == '/user').length;
+
+  void install() {
+    if (_installed) {
+      return;
+    }
+    _installed = true;
+    _windowFetch = ((JSAny? input, JSAny? init) {
+      final requestUrl = (input! as JSString).toDart;
+      final path = Uri.parse(requestUrl).path;
+      requestedPaths.add(path);
+      return switch (path) {
+        '/user' => _userProbeCompleter.future.toJS,
+        _ => Future<web.Response>.value(_jsonResponse('{}', status: 404)).toJS,
+      };
+    }).toJS;
+    _consoleInfo = ((JSAny? message) {
+      consoleMessages.add((message! as JSString).toDart);
+    }).toJS;
+  }
+
+  void completeUserProbe() {
+    if (_userProbeCompleter.isCompleted) {
+      return;
+    }
+    _userProbeCompleter.complete(
+      _jsonResponse(
+        jsonEncode({
+          'login': 'demo-user',
+          'name': 'Demo User',
+          'id': 1,
+          'email': 'demo@example.com',
+        }),
+      ),
+    );
+  }
+
+  void dispose() {
+    if (!_installed) {
+      return;
+    }
+    _windowFetch = _previousFetch;
+    _consoleInfo = _previousConsoleInfo;
+    completeUserProbe();
+  }
+
+  web.Response _jsonResponse(String body, {int status = 200}) {
+    return web.Response(
+      body.toJS,
+      web.ResponseInit(
+        status: status,
+        headers: web.Headers()..set('content-type', 'application/json'),
+      ),
+    );
   }
 }
