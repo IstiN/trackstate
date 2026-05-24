@@ -64,7 +64,7 @@ BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1024_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1024_failure.png"
 
-AUTOMATION_STEPS = [
+REQUEST_STEPS = [
     "Wait for the startup workspace switcher panel to enter the visible Sync issue recovery state.",
     "Click the visible Retry recovery action and confirm the startup fetch is re-attempted with HTTP 500.",
     "Observe the workspace switcher panel during the retry observation window.",
@@ -159,7 +159,7 @@ def main() -> None:
                         result,
                         step=1,
                         status="failed",
-                        action=AUTOMATION_STEPS[0],
+                        action=REQUEST_STEPS[0],
                         observed=(
                             "The deployed app never settled into the expected recovery view "
                             "before the retry action.\n"
@@ -183,7 +183,7 @@ def main() -> None:
                     result,
                     step=1,
                     status="passed",
-                    action=AUTOMATION_STEPS[0],
+                    action=REQUEST_STEPS[0],
                     observed=(
                         "The live app entered the startup recovery view with only recovery "
                         "controls visible and without any saved workspace rows or footer "
@@ -230,7 +230,7 @@ def main() -> None:
                         result,
                         step=2,
                         status="failed",
-                        action=AUTOMATION_STEPS[1],
+                        action=REQUEST_STEPS[1],
                         observed=(
                             "Clicked the recovery action, but the deployed app never sent the "
                             "expected failing retry request.\n"
@@ -248,7 +248,7 @@ def main() -> None:
                     result,
                     step=2,
                     status="passed",
-                    action=AUTOMATION_STEPS[1],
+                    action=REQUEST_STEPS[1],
                     observed=(
                         "Clicked the visible recovery action and captured a second blocked "
                         "startup fetch with HTTP 500.\n"
@@ -276,7 +276,7 @@ def main() -> None:
                         result,
                         step=3,
                         status="failed",
-                        action=AUTOMATION_STEPS[2],
+                        action=REQUEST_STEPS[2],
                         observed="\n\n".join(retry_window_failures),
                     )
                 else:
@@ -284,7 +284,7 @@ def main() -> None:
                         result,
                         step=3,
                         status="passed",
-                        action=AUTOMATION_STEPS[2],
+                        action=REQUEST_STEPS[2],
                         observed=(
                             "Sampled the visible recovery surface throughout the 5-second "
                             "post-click observation window and it never exposed saved "
@@ -305,7 +305,7 @@ def main() -> None:
                         result,
                         step=4,
                         status="failed",
-                        action=AUTOMATION_STEPS[3],
+                        action=REQUEST_STEPS[3],
                         observed="\n\n".join(final_failures),
                     )
                 else:
@@ -313,7 +313,7 @@ def main() -> None:
                         result,
                         step=4,
                         status="passed",
-                        action=AUTOMATION_STEPS[3],
+                        action=REQUEST_STEPS[3],
                         observed=(
                             "After the retry failed, the deployed app still showed the same "
                             "recovery state and did not expose any partial saved-workspace "
@@ -416,12 +416,12 @@ def _record_step(
 
 
 def _record_not_reached_steps(result: dict[str, Any], *, starting_step: int) -> None:
-    for step_number in range(starting_step, len(AUTOMATION_STEPS) + 1):
+    for step_number in range(starting_step, len(REQUEST_STEPS) + 1):
         _record_step(
             result,
             step=step_number,
             status="failed",
-            action=AUTOMATION_STEPS[step_number - 1],
+            action=REQUEST_STEPS[step_number - 1],
             observed="Not reached because the prior step did not complete successfully.",
         )
 

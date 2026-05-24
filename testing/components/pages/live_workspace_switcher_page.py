@@ -5811,6 +5811,41 @@ class LiveWorkspaceSwitcherPage:
                 return null;
               }
 
+              const switcherRect = switcher.getBoundingClientRect();
+              const floatingButtonLabels = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],[role="button"],button'),
+              )
+                .filter((candidate) => isVisible(candidate) && !switcher.contains(candidate))
+                .map((candidate) => {
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    label: accessibleLabel(candidate) || normalize(candidate.innerText || ''),
+                    left: rect.left,
+                    top: rect.top,
+                    centerX: rect.left + rect.width / 2,
+                    centerY: rect.top + rect.height / 2,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.label.length > 0
+                  && candidate.centerX >= switcherRect.left - 8
+                  && candidate.centerX <= switcherRect.right + 8
+                  && candidate.centerY >= switcherRect.top - 8
+                  && candidate.centerY <= switcherRect.bottom + 8,
+                )
+                .sort((left, right) => {
+                  if (left.top !== right.top) {
+                    return left.top - right.top;
+                  }
+                  return left.left - right.left;
+                });
+              const switcherText = [
+                normalize(switcher.innerText || ''),
+                ...floatingButtonLabels.map((candidate) => candidate.label),
+              ]
+                .filter((value, index, values) => value.length > 0 && values.indexOf(value) === index)
+                .join(' ');
+
               const actionLabels = [
                 'Open',
                 'Open workspace',
@@ -5936,14 +5971,14 @@ class LiveWorkspaceSwitcherPage:
                   .filter((candidate) => candidate !== null);
                 return {
                   bodyText,
-                  switcherText: normalize(switcher.innerText || ''),
+                  switcherText,
                   rows: accessibleRows,
                 };
               }
 
               return {
                 bodyText,
-                switcherText: normalize(switcher.innerText || ''),
+                switcherText,
                 rows: rows.map((rowCandidate) => {
                   const rowElement = rowCandidate.element;
                   const rawLines = (rowElement.innerText || '')

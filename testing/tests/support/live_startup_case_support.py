@@ -21,6 +21,7 @@ from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
 @dataclass
 class ShellReadyTransitionTracker:
     first_shell_ready_at_monotonic: float | None = None
+    first_shell_ready_after_auth_pending_at_monotonic: float | None = None
     first_shell_ready_observed_while_auth_pending: bool | None = None
     observed_pending_samples: int = 0
     observed_samples: int = 0
@@ -35,7 +36,16 @@ class ShellReadyTransitionTracker:
         self.observed_samples += 1
         if auth_pending:
             self.observed_pending_samples += 1
-        if not shell_ready or self.first_shell_ready_at_monotonic is not None:
+        if not shell_ready:
+            return
+        if (
+            auth_pending
+            and self.first_shell_ready_after_auth_pending_at_monotonic is None
+        ):
+            self.first_shell_ready_after_auth_pending_at_monotonic = (
+                observed_at_monotonic
+            )
+        if self.first_shell_ready_at_monotonic is not None:
             return
         self.first_shell_ready_at_monotonic = observed_at_monotonic
         self.first_shell_ready_observed_while_auth_pending = auth_pending
@@ -234,6 +244,14 @@ def observe_live_startup_shell_window(
             runtime.auth_probe_released_at_monotonic,
         ),
         "elapsed_since_auth_start_seconds": elapsed_since(runtime.auth_probe_started_at_monotonic),
+        "probe_recorded_shell_ready_after_start_seconds": relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            (
+                transition_tracker.first_shell_ready_after_auth_pending_at_monotonic
+                if transition_tracker is not None
+                else (observed_at_monotonic if shell_ready and auth_pending else None)
+            ),
+        ),
         "shell_ready_after_start_seconds": relative_startup_event_seconds(
             startup_started_at_monotonic,
             shell_ready_event_monotonic,
