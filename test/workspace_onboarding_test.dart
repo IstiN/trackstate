@@ -91,7 +91,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('first launch shows local workspace onboarding actions', (
+  testWidgets('first launch shows local and hosted onboarding choices', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 960);
@@ -105,10 +105,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add workspace'), findsOneWidget);
-    expect(find.text('Open existing folder'), findsOneWidget);
-    expect(find.text('Initialize folder'), findsOneWidget);
-    expect(find.textContaining('Choose a local folder'), findsOneWidget);
-    expect(find.text('Hosted repository'), findsNothing);
+    expect(
+      find.text(
+        'Choose a local folder to open an existing workspace or initialize TrackState in a new one.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Local folder'), findsOneWidget);
+    expect(find.text('Hosted repository'), findsOneWidget);
+    expect(find.byKey(const ValueKey('workspace-onboarding-cancel')), findsNothing);
+    expect(find.byKey(const ValueKey('local-workspace-onboarding-open-existing')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('local-workspace-onboarding-initialize-folder')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
