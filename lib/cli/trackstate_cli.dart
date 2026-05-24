@@ -1471,7 +1471,7 @@ class TrackStateCli {
   Future<TrackStateCliExecution> _runTicketArchive(
     List<String> arguments, {
     TrackStateCliTargetType? defaultTargetType,
-  ) async {
+  }) async {
     final parser = _mutationParser()
       ..addOption('key', help: 'Issue key to archive.');
     return _runMutationCommand(
@@ -2220,7 +2220,7 @@ class TrackStateCli {
   Future<TrackStateCliExecution> _runJiraDeleteTicket(
     List<String> arguments, {
     TrackStateCliTargetType? defaultTargetType,
-  ) async {
+  }) async {
     final parser = _mutationParser()
       ..addOption('issueKey', help: 'Issue key to delete permanently.');
     return _runMutationCommand(

@@ -4782,32 +4782,6 @@ String _joinPath(String left, String right) {
 String _issueRoot(String storagePath) =>
     storagePath.substring(0, storagePath.lastIndexOf('/'));
 
-String _archivedIssueStoragePath(String projectRoot, String key) =>
-    _joinPath(projectRoot, '.trackstate/archive/$key/main.md');
-
-List<String> _issueArtifactPaths(Set<String> blobPaths, String storagePath) {
-  final issueRoot = _issueRoot(storagePath);
-  return blobPaths.where((path) {
-    if (path == storagePath) {
-      return true;
-    }
-    if (!path.startsWith('$issueRoot/')) {
-      return false;
-    }
-    final relativePath = path.substring(issueRoot.length + 1);
-    return !_isNestedIssueArtifactRelativePath(relativePath);
-  }).toList()..sort();
-}
-
-bool _isNestedIssueArtifactRelativePath(String relativePath) {
-  final separatorIndex = relativePath.indexOf('/');
-  if (separatorIndex <= 0) {
-    return false;
-  }
-  final firstSegment = relativePath.substring(0, separatorIndex);
-  return RegExp(r'^[A-Za-z][A-Za-z0-9]+-\d+$').hasMatch(firstSegment);
-}
-
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   final childKeys = entry['children'];
   final labels = entry['labels'];
