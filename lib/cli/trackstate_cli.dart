@@ -11,6 +11,7 @@ import '../data/providers/local/local_git_trackstate_provider.dart';
 import '../data/providers/trackstate_provider.dart';
 import '../data/repositories/trackstate_repository.dart';
 import '../data/services/jql_search_service.dart';
+import '../data/services/issue_link_validation_service.dart';
 import '../data/services/issue_mutation_service.dart';
 import '../data/repositories/trackstate_runtime.dart';
 import '../domain/models/issue_mutation_models.dart';
@@ -2875,9 +2876,9 @@ class TrackStateCli {
         return _ReadResponse(
           text: _listText(
             title: 'Link types',
-            values: _jiraLinkTypes.map((entry) => entry['name']! as String),
+            values: jiraIssueLinkTypes.map((entry) => entry['name']! as String),
           ),
-          jsonPayload: _jiraLinkTypes,
+          jsonPayload: jiraIssueLinkTypes,
         );
       case 'profile':
         final user = currentUser!;
@@ -5195,7 +5196,7 @@ class TrackStateCli {
       };
 
   Map<String, Object?> _linkPayload(IssueLink link) {
-    final warning = _nonCanonicalLinkMetadataWarning(link);
+    final warning = nonCanonicalIssueLinkMetadataWarning(link);
     if (warning != null) {
       stderr.writeln(warning);
     }
@@ -5209,7 +5210,7 @@ class TrackStateCli {
 
   String _displayLinkType(String type, {required String direction}) {
     final normalizedType = type.trim().toLowerCase();
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString().trim().toLowerCase();
       final name = linkType['name']!.toString().trim().toLowerCase();
       final outward = linkType['outward']!.toString().trim().toLowerCase();
@@ -5226,42 +5227,6 @@ class TrackStateCli {
       return linkType['outward']!.toString();
     }
     return type;
-  }
-
-  String? _nonCanonicalLinkMetadataWarning(IssueLink link) {
-    final normalizedType = link.type.trim().toLowerCase();
-    final normalizedDirection = link.direction.trim().toLowerCase();
-    if (normalizedType.isEmpty || normalizedDirection.isEmpty) {
-      return null;
-    }
-
-    for (final linkType in _jiraLinkTypes) {
-      final id = linkType['id']!.toString().trim().toLowerCase();
-      final name = linkType['name']!.toString().trim().toLowerCase();
-      final outward = linkType['outward']!.toString().trim().toLowerCase();
-      final inward = linkType['inward']!.toString().trim().toLowerCase();
-
-      if (normalizedType != id &&
-          normalizedType != name &&
-          normalizedType != outward &&
-          normalizedType != inward) {
-        continue;
-      }
-
-      if (outward == inward) {
-        return null;
-      }
-
-      final expectedDirection = normalizedType == inward ? 'inward' : 'outward';
-      if (normalizedDirection == expectedDirection) {
-        return null;
-      }
-
-      return 'Warning: link type "${link.type}" uses non-canonical '
-          'direction "${link.direction}"; expected "$expectedDirection".';
-    }
-
-    return null;
   }
 
   IssueLink _canonicalCliLinkPayload({
@@ -5287,7 +5252,7 @@ class TrackStateCli {
       return requestedType;
     }
 
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString().trim().toLowerCase();
       if (id != canonicalKey) {
         continue;
@@ -5312,7 +5277,7 @@ class TrackStateCli {
 
   _ResolvedMutationField? _normalizeCliLinkType(String rawType) {
     final normalized = rawType.trim().toLowerCase();
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString();
       final name = linkType['name']!.toString();
       final outward = linkType['outward']!.toString();
@@ -5431,7 +5396,7 @@ class TrackStateCli {
 
   Map<String, Object?> _jiraIssueLinkTypePayload(IssueLink link) {
     final normalizedType = link.type.trim().toLowerCase();
-    for (final entry in _jiraLinkTypes) {
+    for (final entry in jiraIssueLinkTypes) {
       final id = entry['id']!.toString().trim().toLowerCase();
       final name = entry['name']!.toString().trim().toLowerCase();
       final outward = entry['outward']!.toString().trim().toLowerCase();
@@ -6899,33 +6864,6 @@ const List<_ResolvedMutationField> _mutationSystemFields = [
     displayName: 'Acceptance Criteria',
     aliases: <String>['acceptancecriteria'],
   ),
-];
-
-const List<Map<String, Object?>> _jiraLinkTypes = [
-  {
-    'id': 'blocks',
-    'name': 'Blocks',
-    'outward': 'blocks',
-    'inward': 'is blocked by',
-  },
-  {
-    'id': 'relates-to',
-    'name': 'Relates',
-    'outward': 'relates to',
-    'inward': 'relates to',
-  },
-  {
-    'id': 'duplicates',
-    'name': 'Duplicates',
-    'outward': 'duplicates',
-    'inward': 'is duplicated by',
-  },
-  {
-    'id': 'clones',
-    'name': 'Clones',
-    'outward': 'clones',
-    'inward': 'is cloned by',
-  },
 ];
 
 extension on String {
