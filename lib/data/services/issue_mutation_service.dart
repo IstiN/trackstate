@@ -1027,6 +1027,18 @@ class IssueMutationService {
       }
       final snapshot = resolution.snapshot!;
       final issue = resolution.issue!;
+      final normalizedIssueKey = _normalizedIssueKey(issue.key);
+      final normalizedTargetKey = _normalizedIssueKey(targetKey);
+      if (normalizedIssueKey == normalizedTargetKey) {
+        return _failure(
+          operation: operation,
+          issueKey: issueKey,
+          category: IssueMutationErrorCategory.validation,
+          message:
+              'Issue $issueKey cannot be linked to itself using target key $targetKey.',
+          details: <String, Object?>{'targetKey': targetKey},
+        );
+      }
       final target = snapshot.issues.where(
         (candidate) => candidate.key == targetKey,
       );
@@ -1046,15 +1058,6 @@ class IssueMutationService {
           issueKey: issueKey,
           category: IssueMutationErrorCategory.validation,
           message: 'Unsupported link type $type.',
-        );
-      }
-      if (issue.key == targetKey) {
-        return _failure(
-          operation: operation,
-          issueKey: issueKey,
-          category: IssueMutationErrorCategory.validation,
-          message: 'Issue $issueKey cannot be linked to itself.',
-          details: <String, Object?>{'targetKey': targetKey},
         );
       }
 
@@ -2440,6 +2443,8 @@ String _upsertSection(String markdown, String title, String content) {
 
 String _issueRoot(String storagePath) =>
     storagePath.substring(0, storagePath.lastIndexOf('/'));
+
+String _normalizedIssueKey(String key) => key.trim().toUpperCase();
 
 bool? _boolValue(Object? value) {
   if (value is bool) {
