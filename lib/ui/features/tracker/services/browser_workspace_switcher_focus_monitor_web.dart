@@ -407,6 +407,21 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     targets: focusTargets,
     activeElement: activeElement,
   );
+  final selectedRowIndex = focusTargets.indexWhere(
+    (target) => target.isSelectedWorkspaceRow,
+  );
+  if (!backwards &&
+      selectedRowIndex != -1 &&
+      _isBrowserWorkspaceSwitcherFallbackFocus(
+        activeElement: activeElement,
+        focusTargets: focusTargets,
+        currentIndex: currentIndex,
+      )) {
+    if (_focusElement(focusTargets[selectedRowIndex].element)) {
+      return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
+    }
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  }
   if (currentIndex == null) {
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
@@ -440,6 +455,30 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   return focusTargets[targetIndex].isWithinWorkspaceSwitcher
       ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
       : _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher;
+}
+
+bool _isBrowserWorkspaceSwitcherFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+
+  final tagName = activeElement.tagName.toLowerCase();
+  if (tagName == 'flt-glass-pane' ||
+      tagName == 'flt-scene-host' ||
+      tagName == 'flt-semantics-host') {
+    return true;
+  }
+
+  return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
+      'flutter-view';
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
