@@ -3,7 +3,7 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
   test(
-    'web inactive row summary stays inert when a separate Open action is shown',
+    'web inactive row summary can activate selection when a separate Open action is shown',
     () {
       expect(
         shouldActivateBrowserWorkspaceSwitcherRowSummary(
@@ -12,7 +12,7 @@ void main() {
           showOpenAction: true,
           hasSelectionAction: true,
         ),
-        isFalse,
+        isTrue,
       );
     },
   );

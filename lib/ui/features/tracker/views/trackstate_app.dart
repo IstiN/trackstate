@@ -112,10 +112,7 @@ bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
   required bool showOpenAction,
   required bool hasSelectionAction,
 }) {
-  if (!hasSelectionAction) {
-    return false;
-  }
-  return !(isWeb && !isActive && showOpenAction);
+  return hasSelectionAction;
 }
 
 class TrackStateApp extends StatefulWidget {
@@ -524,8 +521,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<bool> _restoreWorkspaceFromSavedState(
     WorkspaceProfilesState state, {
     bool allowFallbackFromActive = true,
-  }
-  ) async {
+  }) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
       if (activeWorkspaceId != null)
@@ -544,9 +540,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         continue;
       }
       final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
-          kIsWeb &&
-          workspace.id == activeWorkspaceId &&
-          workspace.isLocal;
+          kIsWeb && workspace.id == activeWorkspaceId && workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
@@ -554,8 +548,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         preserveActiveLocalSelectionOnUnsupportedAccess:
             preserveActiveLocalStartupSelectionOnUnsupportedAccess,
         preserveActiveLocalSelectionOnStartupFailure:
-            workspace.id == activeWorkspaceId &&
-            workspace.isLocal,
+            workspace.id == activeWorkspaceId && workspace.isLocal,
         deferAccessRestore: true,
       );
       if (prepared == null) {
@@ -7107,12 +7100,14 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   final Map<String, VoidCallback> _workspaceRowFocusRequesters =
       <String, VoidCallback>{};
   bool _canSaveWorkspace = false;
+  String? _selectedWorkspaceId;
 
   @override
   void initState() {
     super.initState();
     _targetController = TextEditingController();
     _branchController = TextEditingController(text: 'main');
+    _selectedWorkspaceId = widget.workspaces.activeWorkspaceId;
     _targetController.addListener(_handleAddWorkspaceInputChanged);
     _branchController.addListener(_handleAddWorkspaceInputChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -7136,6 +7131,17 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   @override
   void didUpdateWidget(covariant _WorkspaceSwitcherSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final activeWorkspaceChanged =
+        widget.workspaces.activeWorkspaceId !=
+        oldWidget.workspaces.activeWorkspaceId;
+    final selectionStillExists =
+        _selectedWorkspaceId != null &&
+        widget.workspaces.profiles.any(
+          (workspace) => workspace.id == _selectedWorkspaceId,
+        );
+    if (activeWorkspaceChanged || !selectionStillExists) {
+      _selectedWorkspaceId = widget.workspaces.activeWorkspaceId;
+    }
     final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
     if (requestedFocusedWorkspaceId == null ||
         widget.focusRequestVersion == oldWidget.focusRequestVersion) {
@@ -7162,6 +7168,38 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     );
   }
 
+  bool get _hasPendingWorkspaceSwitch {
+    final selectedWorkspaceId = _selectedWorkspaceId;
+    return selectedWorkspaceId != null &&
+        selectedWorkspaceId != widget.workspaces.activeWorkspaceId &&
+        widget.workspaces.profiles.any(
+          (workspace) => workspace.id == selectedWorkspaceId,
+        );
+  }
+
+  void _selectSavedWorkspace(WorkspaceProfile workspace) {
+    if (_selectedWorkspaceId == workspace.id) {
+      return;
+    }
+    setState(() {
+      _selectedWorkspaceId = workspace.id;
+    });
+  }
+
+  void _saveAndSwitchSelectedWorkspace() {
+    if (!_hasPendingWorkspaceSwitch) {
+      return;
+    }
+    final selectedWorkspaceId = _selectedWorkspaceId;
+    final workspace = widget.workspaces.profiles.where(
+      (candidate) => candidate.id == selectedWorkspaceId,
+    );
+    if (workspace.isEmpty) {
+      return;
+    }
+    widget.onSelectWorkspace(workspace.first);
+  }
+
   void _handleAddWorkspaceInputChanged() {
     final canSaveWorkspace =
         _targetController.text.trim().isNotEmpty &&
@@ -7179,6 +7217,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final activeWorkspaceId = widget.workspaces.activeWorkspaceId;
+    final selectedWorkspaceId = _selectedWorkspaceId ?? activeWorkspaceId;
     final activeSummary = _activeWorkspaceSummary(
       l10n,
       widget.viewModel,
@@ -7262,6 +7301,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           builder: (context) {
                             final workspace = widget.workspaces.profiles[index];
                             final workspaceId = workspace.id;
+                            final isSelected =
+                                workspaceId == selectedWorkspaceId;
                             final isUnavailableLocal =
                                 workspace.isLocal &&
                                 widget.localWorkspaceAvailability[workspaceId] ==
@@ -7272,7 +7313,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                             return _WorkspaceSwitcherRow(
                               key: ValueKey('workspace-$workspaceId'),
                               workspace: workspace,
-                              isActive: workspaceId == activeWorkspaceId,
+                              isActive: isSelected,
                               stateLabel: _workspaceStateLabel(
                                 l10n,
                                 widget.viewModel,
@@ -7310,8 +7351,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                       allowLocalGitHubConnection: true,
                                     )
                                   : null,
-                              showOpenAction: !isUnavailableLocal,
-                              onSelect:
+                              showOpenAction:
+                                  workspaceId != activeWorkspaceId &&
+                                  !isUnavailableLocal,
+                              onSelect: isUnavailableLocal
+                                  ? null
+                                  : () => _selectSavedWorkspace(workspace),
+                              onOpen:
                                   workspaceId == activeWorkspaceId ||
                                       isUnavailableLocal
                                   ? null
@@ -7362,14 +7408,16 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                         onPressed: () => setState(
                           () => _targetType = WorkspaceProfileTargetType.hosted,
                         ),
-                        focusTargetId: _workspaceSwitcherTargetTypeHostedFocusId,
+                        focusTargetId:
+                            _workspaceSwitcherTargetTypeHostedFocusId,
                         panelId: browserWorkspaceSwitcherSemanticsIdentifier,
                         child: _SettingsProviderButton(
                           label: l10n.workspaceTargetTypeHosted,
                           selected:
                               _targetType == WorkspaceProfileTargetType.hosted,
                           onPressed: () => setState(
-                            () => _targetType = WorkspaceProfileTargetType.hosted,
+                            () =>
+                                _targetType = WorkspaceProfileTargetType.hosted,
                           ),
                         ),
                       ),
@@ -7394,7 +7442,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           selected:
                               _targetType == WorkspaceProfileTargetType.local,
                           onPressed: () => setState(
-                            () => _targetType = WorkspaceProfileTargetType.local,
+                            () =>
+                                _targetType = WorkspaceProfileTargetType.local,
                           ),
                         ),
                       ),
@@ -7428,16 +7477,24 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 order: NumericFocusOrder(addWorkspaceOrderBase + 4),
                 child: _WorkspaceSwitcherExplicitControlSemantics(
                   label: l10n.workspaceSaveAndSwitch,
-                  enabled: _canSaveWorkspace,
+                  enabled: _canSaveWorkspace || _hasPendingWorkspaceSwitch,
                   child: browser_focusable_control.BrowserFocusableControl(
                     label: l10n.workspaceSaveAndSwitch,
-                    onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                    onPressed: _canSaveWorkspace
+                        ? _saveWorkspace
+                        : _hasPendingWorkspaceSwitch
+                        ? _saveAndSwitchSelectedWorkspace
+                        : null,
                     focusTargetId: _workspaceSwitcherSaveFocusId,
                     panelId: browserWorkspaceSwitcherSemanticsIdentifier,
                     focusableWhenDisabled: true,
                     child: FilledButton(
                       key: const ValueKey('workspace-add-button'),
-                      onPressed: _canSaveWorkspace ? _saveWorkspace : null,
+                      onPressed: _canSaveWorkspace
+                          ? _saveWorkspace
+                          : _hasPendingWorkspaceSwitch
+                          ? _saveAndSwitchSelectedWorkspace
+                          : null,
                       child: Text(l10n.workspaceSaveAndSwitch),
                     ),
                   ),
@@ -7467,6 +7524,7 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     this.primaryActionSemanticLabel,
     this.onPrimaryAction,
     this.onSelect,
+    this.onOpen,
     this.showOpenAction = true,
   });
 
@@ -7483,6 +7541,7 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final String? primaryActionSemanticLabel;
   final VoidCallback? onPrimaryAction;
   final VoidCallback? onSelect;
+  final VoidCallback? onOpen;
   final bool showOpenAction;
 
   @override
@@ -7564,6 +7623,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final stateLabel = widget.stateLabel;
     final focusOrderBase = widget.focusOrderBase;
     final onSelect = widget.onSelect;
+    final onOpen = widget.onOpen;
     final onDelete = widget.onDelete;
     final primaryActionLabel = widget.primaryActionLabel;
     final primaryActionSemanticLabel =
@@ -7711,7 +7771,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       label: l10n.openWorkspace,
                       semanticsLabel:
                           '${l10n.openWorkspace}: ${workspace.displayName}',
-                      onPressed: onSelect,
+                      onPressed: onOpen,
                       focusTargetId: _workspaceSwitcherActionFocusId(
                         workspace.id,
                         'open',
