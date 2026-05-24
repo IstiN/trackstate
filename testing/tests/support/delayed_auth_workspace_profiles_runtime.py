@@ -40,10 +40,16 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
         self.delayed_request_urls: list[str] = []
 
     def wait_for_auth_probe_start(self, *, timeout_seconds: float) -> bool:
-        return self._auth_request_started.wait(timeout_seconds)
+        return self._wait_for_event(
+            self._auth_request_started,
+            timeout_seconds=timeout_seconds,
+        )
 
     def wait_for_auth_probe_release(self, *, timeout_seconds: float) -> bool:
-        return self._auth_request_released.wait(timeout_seconds)
+        return self._wait_for_event(
+            self._auth_request_released,
+            timeout_seconds=timeout_seconds,
+        )
 
     @property
     def auth_probe_pending(self) -> bool:
@@ -76,3 +82,23 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
             path == delayed_path or path.endswith(delayed_path)
             for delayed_path in self._delayed_paths
         )
+
+    def _wait_for_event(
+        self,
+        event: threading.Event,
+        *,
+        timeout_seconds: float,
+        poll_interval_ms: int = 100,
+    ) -> bool:
+        if event.is_set():
+            return True
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            page = self._page
+            if page is not None:
+                page.wait_for_timeout(poll_interval_ms)
+            else:
+                time.sleep(poll_interval_ms / 1000)
+            if event.is_set():
+                return True
+        return event.is_set()
