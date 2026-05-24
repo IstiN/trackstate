@@ -420,6 +420,151 @@ void main() {
   );
 
   testWidgets(
+    'hosted onboarding shows a visible identity preview for manual fallback values',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.workspace.hosted%3Aowner%2Fcurrent%40main':
+            'workspace-token',
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'owner/current',
+          defaultBranch: 'main',
+        ),
+      );
+
+      Future<TrackStateRepository> openHostedRepository({
+        required String repository,
+        required String defaultBranch,
+        required String writeBranch,
+      }) async {
+        return _HostedWorkspaceTestRepository(
+          snapshot: await _snapshotForRepository(
+            repository: repository,
+            branch: defaultBranch,
+          ),
+          provider: _TestHostedProvider(
+            repositoryName: repository,
+            branch: defaultBranch,
+            accessibleRepositories: const [
+              HostedRepositoryReference(
+                fullName: 'owner/next-repo',
+                defaultBranch: 'release',
+              ),
+              HostedRepositoryReference(
+                fullName: 'owner/platform-foundation',
+                defaultBranch: 'main',
+              ),
+            ],
+          ),
+        );
+      }
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => _HostedWorkspaceTestRepository(
+            snapshot: const TrackerSnapshot(
+              project: ProjectConfig(
+                key: 'TRACK',
+                name: 'TrackState.AI',
+                repository: 'bootstrap/bootstrap',
+                branch: 'main',
+                defaultLocale: 'en',
+                issueTypeDefinitions: [],
+                statusDefinitions: [],
+                fieldDefinitions: [],
+              ),
+              issues: [],
+            ),
+            provider: _TestHostedProvider(
+              repositoryName: 'bootstrap/bootstrap',
+              branch: 'main',
+            ),
+          ),
+          workspaceProfileService: service,
+          openHostedRepository: openHostedRepository,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _openAddWorkspaceOnboarding(tester);
+      await tester.tap(find.text('Hosted repository'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(const ValueKey('workspace-onboarding-hosted-repository')),
+          matching: find.byType(EditableText),
+        ),
+        'manual-owner/manual-repo',
+      );
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(const ValueKey('workspace-onboarding-hosted-branch')),
+          matching: find.byType(EditableText),
+        ),
+        'feature/preview-42',
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('workspace-onboarding-hosted-identity-preview'),
+          ),
+          matching: find.byKey(
+            const ValueKey(
+              'workspace-onboarding-hosted-identity-preview-repository',
+            ),
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('workspace-onboarding-hosted-identity-preview'),
+          ),
+          matching: find.byKey(
+            const ValueKey(
+              'workspace-onboarding-hosted-identity-preview-branch',
+            ),
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<Text>(
+          find.byKey(
+            const ValueKey('workspace-onboarding-hosted-identity-preview-repository'),
+          ),
+        ).data,
+        'manual-owner/manual-repo',
+      );
+      expect(
+        tester.widget<Text>(
+          find.byKey(
+            const ValueKey('workspace-onboarding-hosted-identity-preview-branch'),
+          ),
+        ).data,
+        'Branch: feature/preview-42',
+      );
+    },
+  );
+
+  testWidgets(
     'add workspace local folder can browse and open an existing repository',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
