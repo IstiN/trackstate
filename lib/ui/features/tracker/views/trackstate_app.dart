@@ -87,6 +87,9 @@ bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
 String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
     'trackstate-workspace-switcher-$action-$workspaceId';
 
+String _workspaceSwitcherRowFocusBridgeId(String workspaceId) =>
+    'trackstate-workspace-switcher-row-focus-$workspaceId';
+
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
   required bool isWeb,
@@ -718,7 +721,11 @@ class _TrackStateAppState extends State<TrackStateApp>
   }) async {
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(previousViewModel.load(deferAccessRestore: deferAccessRestore));
+      } else {
+        await previousViewModel.load(deferAccessRestore: deferAccessRestore);
+      }
     }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
@@ -730,7 +737,11 @@ class _TrackStateAppState extends State<TrackStateApp>
           );
     if (!identical(preservedViewModel, previousViewModel) &&
         preservedViewModel.snapshot == null) {
-      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(preservedViewModel.load(deferAccessRestore: deferAccessRestore));
+      } else {
+        await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+      }
     }
     if (markUnavailable) {
       await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
@@ -8007,9 +8018,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
           hasSelectionAction: onSelect != null,
         );
     final browserSummaryLabel =
-        !isActive && widget.showOpenAction && onSelect != null
-        ? '${l10n.openWorkspace}: ${workspace.displayName}'
-        : '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
+        '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -8081,9 +8090,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
-            focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
-              workspace.id,
-            ),
+            focusTargetId: _workspaceSwitcherRowFocusBridgeId(workspace.id),
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
             rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
             selectedRow: isActive,

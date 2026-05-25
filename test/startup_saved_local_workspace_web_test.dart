@@ -795,6 +795,22 @@ class _BrowserStartupAuthProbeHarness {
 void _expectRestrictedFallbackShell(
   ProviderBackedTrackStateRepository repository,
 ) {
+  _expectShellReadySurface();
+  expect(find.byType(CircularProgressIndicator), findsNothing);
+  expect(find.text('Connect GitHub'), findsOneWidget);
+  expect(
+    repository.session,
+    isNotNull,
+  );
+  expect(
+    repository.session?.connectionState,
+    isNot(ProviderConnectionState.connected),
+  );
+  expect(repository.session?.canWrite, isFalse);
+  expect(repository.session?.canCreateBranch, isFalse);
+}
+
+void _expectShellReadySurface() {
   expect(
     find.byKey(const ValueKey('workspace-switcher-trigger')),
     findsOneWidget,
@@ -803,14 +819,6 @@ void _expectRestrictedFallbackShell(
     expect(find.text(label), findsWidgets);
   }
   expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
-  expect(find.text('Connect GitHub'), findsOneWidget);
-  expect(repository.session, isNotNull);
-  expect(
-    repository.session?.connectionState,
-    isNot(ProviderConnectionState.connected),
-  );
-  expect(repository.session?.canWrite, isFalse);
-  expect(repository.session?.canCreateBranch, isFalse);
 }
 
 Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
