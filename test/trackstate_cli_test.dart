@@ -2502,6 +2502,62 @@ void main() {
         expect(error['category'], 'unsupported');
       },
     );
+
+    test(
+      'rejects unsupported admin paths for jira_execute_request before local repo access',
+      () async {
+        final localProvider = _FailingLocalGitTrackStateProvider(
+          repositoryPath: '/tmp/isolated-target',
+          user: const RepositoryUser(
+            login: 'local@example.com',
+            displayName: 'Local User',
+          ),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: localProvider,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--path',
+          '/tmp/isolated-target',
+          '--method',
+          'POST',
+          '--request-path',
+          '/rest/api/2/user/permission',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final target = json['target']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(error['code'], 'UNSUPPORTED_REQUEST');
+        expect(error['category'], 'unsupported');
+        expect(
+          error['message'],
+          contains(
+            'jira_execute_request does not support "/rest/api/2/user/permission"',
+          ),
+        );
+        expect(target, <String, Object?>{
+          'type': 'local',
+          'value': '/tmp/isolated-target',
+        });
+        expect(localProvider.resolveWriteBranchCalled, isFalse);
+      },
+    );
   });
 }
 
@@ -3051,6 +3107,23 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
       permission: permission,
     ),
   );
+}
+
+class _FailingLocalGitTrackStateProvider
+    extends _FakeLocalGitTrackStateProvider {
+  _FailingLocalGitTrackStateProvider({
+    required super.repositoryPath,
+    required super.user,
+    required super.permission,
+  }) : super(branch: 'main');
+
+  bool resolveWriteBranchCalled = false;
+
+  @override
+  Future<String> resolveWriteBranch() async {
+    resolveWriteBranchCalled = true;
+    throw StateError('resolveWriteBranch should not be called');
+  }
 }
 
 class _FakeHostedTrackStateProvider
