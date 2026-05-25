@@ -185,6 +185,89 @@ jobs:
         self.assertEqual(observation.gate.pull_request_mergeable_state, "blocked")
         self.assertEqual(observation.gate.accessibility_status_check_name, "Accessibility checks")
 
+    def test_low_contrast_helper_accepts_same_surface_probe_pattern(self) -> None:
+        probe = _StubProbeService(
+            self.config,
+            github_api_client=_FakeGitHubApiClient(
+                {
+                    "/repos/IstiN/trackstate": {"default_branch": "main"},
+                    "/repos/IstiN/trackstate/actions/workflows?per_page=100": {"workflows": []},
+                }
+            ),
+        )
+
+        self.assertTrue(
+            probe._probe_has_low_contrast_indicator(  # noqa: SLF001
+                """
+                final colorScheme = Theme.of(context).colorScheme;
+                final lowContrastColor = colorScheme.surface;
+                return ColoredBox(
+                  color: colorScheme.surface,
+                  child: Text(
+                    'Sync issue',
+                    style: TextStyle(color: colorScheme.surface),
+                  ),
+                );
+                """
+            )
+        )
+
+    def test_inject_probe_into_render_host_replaces_stale_checked_in_probe_import(self) -> None:
+        probe = _StubProbeService(
+            self.config,
+            github_api_client=_FakeGitHubApiClient(
+                {
+                    "/repos/IstiN/trackstate": {"default_branch": "main"},
+                    "/repos/IstiN/trackstate/actions/workflows?per_page=100": {"workflows": []},
+                }
+            ),
+        )
+
+        patched = probe._inject_probe_into_render_host(  # noqa: SLF001
+            """
+import 'package:flutter/material.dart';
+
+import 'data/repositories/trackstate_repository.dart';
+import 'ui/features/tracker/views/trackstate_app.dart';
+import 'ts908_probe_surface.dart';
+
+const bool _useDemoRepositoryForAccessibility = bool.fromEnvironment(
+  'TRACKSTATE_USE_DEMO_REPOSITORY',
+);
+
+void main() {
+  runApp(_Ts908RenderedProbeApp(child: _useDemoRepositoryForAccessibility
+        ? const TrackStateApp(repository: DemoTrackStateRepository())
+        : const TrackStateApp(),));
+}
+
+class _Ts908RenderedProbeApp extends StatelessWidget {
+  const _Ts908RenderedProbeApp({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'TrackState.AI',
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: const Ts908ProbeSurface(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+""".strip()
+        )
+
+        self.assertIn("import 'ts936_probe_surface.dart';", patched)
+        self.assertNotIn("import 'ts908_probe_surface.dart';", patched)
+
 
 if __name__ == "__main__":
     unittest.main()

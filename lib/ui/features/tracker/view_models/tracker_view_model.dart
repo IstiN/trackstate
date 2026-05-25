@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/github/github_trackstate_provider.dart';
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/jql_search_service.dart';
+import '../../../../data/services/startup_auth_probe_diagnostics.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
@@ -34,6 +36,8 @@ enum HostedRepositoryAccessMode {
   writable,
   attachmentRestricted,
 }
+
+const Duration _startupAccessRestoreTimeout = Duration(seconds: 10);
 
 enum TrackerMessageTone { info, error }
 
@@ -307,17 +311,20 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
     String? workspaceId,
+    Uri Function()? currentUriProvider,
   }) : _repository = repository,
        _issueMutationService =
            issueMutationService ?? IssueMutationService(repository: repository),
        _authStore = authStore,
-       _workspaceId = workspaceId {
+       _workspaceId = workspaceId,
+       _currentUriProvider = currentUriProvider ?? (() => Uri.base) {
     _bindProviderSession();
   }
 
   final TrackStateRepository _repository;
   final IssueMutationService _issueMutationService;
   final TrackStateAuthStore _authStore;
+  final Uri Function() _currentUriProvider;
   String? _workspaceId;
   ProviderSession? _boundProviderSession;
 
@@ -534,6 +541,11 @@ class TrackerViewModel extends ChangeNotifier {
       issues.where((issue) => issue.status == IssueStatus.inProgress).length;
 
   Future<void> load({bool deferAccessRestore = false}) async {
+    final previousStartupRecovery = startupRecovery;
+    final retainedStartupRecovery = _snapshot == null
+        ? previousStartupRecovery
+        : null;
+    startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
       maxResults: _searchPageSize,
@@ -541,17 +553,43 @@ class TrackerViewModel extends ChangeNotifier {
     _searchResults = const [];
     _hasLoadedInitialSearchResults = false;
     _message = null;
-    _startupRecovery = null;
+    _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
+    Future<void> Function()? deferredAccessRestore;
+    var startedDeferredAccessRestore = false;
+    var waitedForDeferredAccessRestore = false;
+
+    Future<void> startDeferredAccessRestoreIfNeeded({
+      required bool waitForCompletion,
+    }) async {
+      final restore = deferredAccessRestore;
+      if (restore == null || startedDeferredAccessRestore) {
+        return;
+      }
+      startedDeferredAccessRestore = true;
+      if (waitForCompletion) {
+        waitedForDeferredAccessRestore = true;
+        await restore();
+        return;
+      }
+      unawaited(_finishDeferredAccessRestore(restore));
+    }
+
     try {
+      if (_repository is ProviderBackedTrackStateRepository &&
+          !usesLocalPersistence &&
+          supportsGitHubAuth) {
+        deferredAccessRestore = _restoreGitHubConnection;
+        await _primeStartupGitHubAuthProbe();
+      }
       await _loadSnapshotAndSearch();
-      Future<void>? deferredAccessRestore;
+      _startupRecovery = _snapshot?.startupRecovery;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
-        deferredAccessRestore = _restoreLocalHostedAccess();
+        deferredAccessRestore = _restoreLocalHostedAccess;
       } else if (supportsGitHubAuth) {
-        deferredAccessRestore = _restoreGitHubConnection();
+        deferredAccessRestore ??= _restoreGitHubConnection;
       }
       if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
@@ -562,18 +600,20 @@ class TrackerViewModel extends ChangeNotifier {
         _section = TrackerSection.settings;
       }
       if (!deferAccessRestore && deferredAccessRestore != null) {
-        await deferredAccessRestore;
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: true);
       }
       _configureWorkspaceSync();
-      if (deferAccessRestore && deferredAccessRestore != null) {
-        unawaited(_finishDeferredAccessRestore(deferredAccessRestore));
+      if (deferAccessRestore &&
+          deferredAccessRestore != null &&
+          !waitedForDeferredAccessRestore) {
+        await startDeferredAccessRestoreIfNeeded(waitForCompletion: false);
       }
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
-      if (recovery == null) {
+      if (recovery == null && previousStartupRecovery == null) {
         _message = TrackerMessage.dataLoadFailed(error);
       } else {
-        _startupRecovery = recovery;
+        _startupRecovery = recovery ?? previousStartupRecovery;
         if (supportsGitHubAuth) {
           await _restoreGitHubConnection();
         }
@@ -586,19 +626,18 @@ class TrackerViewModel extends ChangeNotifier {
           _section = TrackerSection.settings;
         }
       }
-
     } finally {
       _isLoading = false;
+      startupAuthProbeDiagnostics.recordShellReady();
       notifyListeners();
     }
   }
 
-  Future<void> _finishDeferredAccessRestore(Future<void> restore) async {
-    await restore;
-    if (_disposed) {
-      return;
-    }
-    notifyListeners();
+  Future<void> _finishDeferredAccessRestore(
+    Future<void> Function() restore,
+  ) async {
+    await Future<void>.microtask(() {});
+    unawaited(restore());
   }
 
   Future<void> retryStartupRecovery() async {
@@ -633,7 +672,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final searchPage = await _repository.searchIssuePage(
         query,
-        maxResults: _searchPageSize,
+        maxResults: _maxResultsForQuery(query),
       );
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
@@ -1303,7 +1342,7 @@ class TrackerViewModel extends ChangeNotifier {
           orElse: () => selectedIssue,
         );
       }
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
@@ -1531,9 +1570,12 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final searchPage = await _repository.searchIssuePage(
         _jql,
-        maxResults: _searchResults.isEmpty
-            ? _searchPageSize
-            : _searchResults.length,
+        maxResults: _maxResultsForQuery(
+          _jql,
+          fallbackMaxResults: _searchResults.isEmpty
+              ? _searchPageSize
+              : _searchResults.length,
+        ),
       );
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
@@ -1566,14 +1608,39 @@ class TrackerViewModel extends ChangeNotifier {
       issues: snapshot.issues,
       project: snapshot.project,
       jql: _jql,
-      maxResults: _searchResults.isEmpty
-          ? _searchPageSize
-          : _searchResults.length,
+      maxResults: _maxResultsForQuery(
+        _jql,
+        snapshot: snapshot,
+        fallbackMaxResults: _searchResults.isEmpty
+            ? _searchPageSize
+            : _searchResults.length,
+      ),
     );
     _applySearchPage(
       searchPage,
       retainSelectionWhenMissing: retainSelectionWhenMissing,
     );
+  }
+
+  int _maxResultsForQuery(
+    String query, {
+    TrackerSnapshot? snapshot,
+    int fallbackMaxResults = _searchPageSize,
+  }) {
+    if (query.trim().isNotEmpty) {
+      return fallbackMaxResults;
+    }
+    final resolvedSnapshot = snapshot ?? _snapshot;
+    if (resolvedSnapshot != null) {
+      return resolvedSnapshot.issues.length;
+    }
+    if (_searchPage.total > 0) {
+      return _searchPage.total;
+    }
+    if (_searchResults.isNotEmpty) {
+      return _searchResults.length;
+    }
+    return fallbackMaxResults;
   }
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
@@ -1779,7 +1846,7 @@ class TrackerViewModel extends ChangeNotifier {
         queryParameters: {
           ...Uri.parse(_githubAuthProxyUrl).queryParameters,
           'repository': project.repository,
-          'redirect_uri': Uri.base.removeFragment().toString(),
+          'redirect_uri': _currentUriProvider().removeFragment().toString(),
         },
       );
       await launchUrl(proxyUri, webOnlyWindowName: '_self');
@@ -1788,7 +1855,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (_githubAppClientId.isNotEmpty) {
       final authorizeUri = Uri.https('github.com', '/login/oauth/authorize', {
         'client_id': _githubAppClientId,
-        'redirect_uri': Uri.base.removeFragment().toString(),
+        'redirect_uri': _currentUriProvider().removeFragment().toString(),
         'scope': 'repo',
         'state': project.repository,
       });
@@ -1812,39 +1879,62 @@ class TrackerViewModel extends ChangeNotifier {
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
         _message = TrackerMessage.githubAuthorizationCodeReturned();
+        if (!_isLoading && !_disposed) {
+          notifyListeners();
+        }
       }
       return;
     }
     try {
-      final user = await _repository.connect(
-        GitHubConnection(
-          repository: target.repository,
-          branch: target.branch,
-          token: storedToken,
-        ),
-      );
-      _connectedUser = user;
-      _isConnected = true;
-      if (callbackToken != null) {
-        await _authStore.saveToken(
-          callbackToken,
-          repository: _workspaceId == null ? target.repository : null,
-          workspaceId: _workspaceId,
-        );
+      if (kIsWeb) {
+        final repository = _repository;
+        if (repository is ProviderBackedTrackStateRepository) {
+          final providerAdapter = repository.providerAdapter;
+          if (providerAdapter is GitHubTrackStateProvider) {
+            providerAdapter.startStartupAuthProbe(storedToken);
+          }
+        }
       }
-      await _resumeStartupRecoveryAfterAuthentication();
-      _message = TrackerMessage.githubConnected(
-        login: user.login,
-        repository: target.repository,
+      await _runAutomaticRepositoryConnectionRestore(
+        connect: () => _repository.connect(
+          GitHubConnection(
+            repository: target.repository,
+            branch: target.branch,
+            token: storedToken,
+          ),
+        ),
+        onSuccess: (user) async {
+          _connectedUser = user;
+          _isConnected = true;
+          if (callbackToken != null) {
+            await _authStore.saveToken(
+              callbackToken,
+              repository: _workspaceId == null ? target.repository : null,
+              workspaceId: _workspaceId,
+            );
+          }
+          await _resumeStartupRecoveryAfterAuthentication();
+          if (callbackToken != null) {
+            _message = TrackerMessage.githubConnected(
+              login: user.login,
+              repository: target.repository,
+            );
+          }
+        },
+        onError: (error) async {
+          _message = TrackerMessage.storedGitHubTokenInvalid(error);
+          await _authStore.clearToken(
+            repository: _workspaceId == null ? target.repository : null,
+            workspaceId: _workspaceId,
+          );
+        },
+        onFinally: () async {
+          _bindProviderSession();
+        },
       );
-    } on Object catch (error) {
-      _message = TrackerMessage.storedGitHubTokenInvalid(error);
-      await _authStore.clearToken(
-        repository: _workspaceId == null ? target.repository : null,
-        workspaceId: _workspaceId,
-      );
-    } finally {
+    } on Object catch (_) {
       _bindProviderSession();
+      rethrow;
     }
   }
 
@@ -1878,19 +1968,108 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
-      _connectedUser = await _repository.connect(
-        RepositoryConnection(
-          repository: target.repository,
-          branch: target.branch,
-          token: storedToken,
+      await _runAutomaticRepositoryConnectionRestore(
+        connect: () => _repository.connect(
+          RepositoryConnection(
+            repository: target.repository,
+            branch: target.branch,
+            token: storedToken,
+          ),
         ),
+        onSuccess: (user) async {
+          _connectedUser = user;
+          _isConnected = true;
+          _hasLocalHostedAccessSession = true;
+        },
+        onError: (_) async {
+          _hasLocalHostedAccessSession = false;
+        },
+        onFinally: () async {
+          _bindProviderSession();
+        },
       );
-      _isConnected = true;
-      _hasLocalHostedAccessSession = true;
     } on Object {
       _hasLocalHostedAccessSession = false;
-    } finally {
       _bindProviderSession();
+      rethrow;
+    }
+  }
+
+  Future<void> _primeStartupGitHubAuthProbe() async {
+    if (!kIsWeb) {
+      return;
+    }
+    final repository = _repository;
+    if (repository is! ProviderBackedTrackStateRepository ||
+        usesLocalPersistence ||
+        !supportsGitHubAuth) {
+      return;
+    }
+    final providerAdapter = repository.providerAdapter;
+    if (providerAdapter is! GitHubTrackStateProvider) {
+      return;
+    }
+    final repositoryName = providerAdapter.repositoryLabel.trim();
+    if (repositoryName.isEmpty) {
+      return;
+    }
+    final storedToken = await _authStore.readToken(
+      repository: repositoryName,
+      workspaceId: _workspaceId,
+    );
+    if (storedToken == null || storedToken.trim().isEmpty) {
+      return;
+    }
+    providerAdapter.startStartupAuthProbe(storedToken);
+  }
+
+  Future<void> _runAutomaticRepositoryConnectionRestore({
+    required Future<RepositoryUser> Function() connect,
+    required Future<void> Function(RepositoryUser user) onSuccess,
+    required Future<void> Function(Object error) onError,
+    required Future<void> Function() onFinally,
+  }) async {
+    var settled = false;
+
+    Future<void> finishSuccess(RepositoryUser user) async {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await onSuccess(user);
+      await onFinally();
+      if (_disposed) {
+        return;
+      }
+      notifyListeners();
+    }
+
+    Future<void> finishError(Object error) async {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await onError(error);
+      await onFinally();
+      if (_disposed) {
+        return;
+      }
+      notifyListeners();
+    }
+
+    final handledConnectionFuture = connect().then<void>(
+      finishSuccess,
+      onError: (Object error, StackTrace _) async {
+        await finishError(error);
+      },
+    );
+    try {
+      await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
+    } on TimeoutException {
+      startupAuthProbeDiagnostics.recordTimeoutFallback(
+        timeout: _startupAccessRestoreTimeout,
+      );
+      return;
     }
   }
 
@@ -2363,11 +2542,11 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   String? _callbackToken() {
-    final fragment = Uri.splitQueryString(Uri.base.fragment);
+    final fragment = Uri.splitQueryString(_currentUriProvider().fragment);
     return fragment['trackstate_token'] ?? fragment['access_token'];
   }
 
-  String? _callbackCode() => Uri.base.queryParameters['code'];
+  String? _callbackCode() => _currentUriProvider().queryParameters['code'];
 
   int _beginSearchRequest() {
     _searchRequestSerial += 1;

@@ -36,6 +36,16 @@ class WorkspaceRestoreMessageObservation:
 
 
 @dataclass(frozen=True)
+class StartupSurfaceObservation:
+    title: str
+    location_href: str
+    location_hash: str
+    location_pathname: str
+    body_text: str
+    button_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherTriggerObservation:
     aria_label: str
     visible_text: str
@@ -45,6 +55,14 @@ class WorkspaceSwitcherTriggerObservation:
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
     LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
+    STARTUP_ENTRY_SIGNAL_TEXTS = (
+        "Connect GitHub",
+        "Workspace switcher",
+        "Add workspace",
+        "Board",
+    )
+    WORKSPACE_SWITCHER_LABEL = "Workspace switcher"
+    ADD_WORKSPACE_LABEL = "Add workspace"
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -65,19 +83,34 @@ class TrackStateTrackerPage:
         self.app_url = app_url
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
-    def open_entrypoint(self) -> None:
-        self.open_url(self.app_url)
+    def open_entrypoint(
+        self,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        self.open_url(
+            self.app_url,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
+        )
 
     def open_route(self, route: str) -> str:
         route_url = self.build_route_url(route)
         self.open_url(route_url)
         return route_url
 
-    def open_url(self, url: str) -> None:
+    def open_url(
+        self,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
         self.session.goto(
             url,
-            wait_until="domcontentloaded",
-            timeout_ms=120_000,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
         )
         self.session.activate_accessibility()
 
@@ -93,16 +126,37 @@ class TrackStateTrackerPage:
         return f"{base_url}{normalized_route}"
 
     def open(self) -> RuntimeObservation:
-        self.open_entrypoint()
+        return self.open_startup_entrypoint(
+            wait_signals=(
+                *self.LOAD_ERROR_TEXT_VARIANTS,
+                *self.STARTUP_ENTRY_SIGNAL_TEXTS,
+            ),
+            timeout_ms=120_000,
+            timeout_error_message="Step 1 failed: the deployed app never reached an interactive state.",
+        )
+
+    def open_startup_entrypoint(
+        self,
+        *,
+        wait_signals: Sequence[str] | None = None,
+        timeout_ms: int = 120_000,
+        wait_until: str = "domcontentloaded",
+        timeout_error_message: str | None = None,
+    ) -> RuntimeObservation:
+        self.open_entrypoint(wait_until=wait_until, timeout_ms=timeout_ms)
+        startup_signals = tuple(wait_signals or self.STARTUP_ENTRY_SIGNAL_TEXTS)
         try:
             wait_match = self.session.wait_for_any_text(
-                [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
-                timeout_ms=120_000,
+                startup_signals,
+                timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
+            base_message = (
+                timeout_error_message
+                or "Step 1 failed: the deployed app never reached an interactive state."
+            )
             raise AssertionError(
-                "Step 1 failed: the deployed app never reached an interactive state. "
-                f"Visible body text: {self.body_text()}",
+                f"{base_message} Visible body text: {self.body_text()}",
             ) from error
         if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeObservation(
@@ -457,6 +511,73 @@ class TrackStateTrackerPage:
             "connect_github_visible": bool(payload.get("connectGitHubVisible")),
             "shell_ready": bool(payload.get("shellReady")),
         }
+
+    def observe_startup_surface(self) -> StartupSurfaceObservation:
+        payload = self.session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const buttonLabels = Array.from(
+                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+              )
+                .filter(isVisible)
+                .map((element) =>
+                  normalize(
+                    element.getAttribute?.('aria-label')
+                    || element.innerText
+                    || element.textContent
+                    || '',
+                  ),
+                )
+                .filter((label) => label.length > 0);
+              return {
+                title: document.title || '',
+                locationHref: window.location.href,
+                locationHash: window.location.hash,
+                locationPathname: window.location.pathname,
+                bodyText: document.body?.innerText || document.body?.textContent || '',
+                buttonLabels,
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            return StartupSurfaceObservation(
+                title="",
+                location_href="",
+                location_hash="",
+                location_pathname="",
+                body_text=self.body_text(),
+                button_labels=(),
+            )
+        return StartupSurfaceObservation(
+            title=str(payload.get("title", "")),
+            location_href=str(payload.get("locationHref", "")),
+            location_hash=str(payload.get("locationHash", "")),
+            location_pathname=str(payload.get("locationPathname", "")),
+            body_text=str(payload.get("bodyText", "")),
+            button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
+        )
+
+    def read_global_samples(self, key: str) -> list[dict[str, object]]:
+        payload = self.session.evaluate(
+            "({ key }) => globalThis[key] || []",
+            arg={"key": key},
+        )
+        if not isinstance(payload, list):
+            return []
+        return [dict(sample) for sample in payload if isinstance(sample, dict)]
 
     def snapshot_local_storage(
         self,

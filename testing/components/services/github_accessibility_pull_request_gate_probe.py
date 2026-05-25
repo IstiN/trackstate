@@ -204,6 +204,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             runtime_accessibility_surface_summary=str(
                 pull_request_observation["runtime_accessibility_surface_summary"]
             ),
+            runtime_accessibility_sample_labels=list(
+                pull_request_observation.get("runtime_accessibility_sample_labels", [])
+            ),
             probe_contains_low_contrast_indicator=bool(
                 pull_request_observation["probe_contains_low_contrast_indicator"]
             ),
@@ -211,6 +214,7 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 pull_request_observation["probe_contains_semantic_label_indicator"]
             ),
             probe_semantic_label=str(pull_request_observation["probe_semantic_label"]),
+            probe_visible_text=str(pull_request_observation.get("probe_visible_text", "")),
             probe_contrast_technique=str(
                 pull_request_observation["probe_contrast_technique"]
             ),
@@ -219,6 +223,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
             ),
             cleanup_deleted_branch=bool(
                 pull_request_observation["cleanup_deleted_branch"]
+            ),
+            default_branch_probe_host_present=bool(
+                pull_request_observation.get("default_branch_probe_host_present")
+            ),
+            default_branch_probe_host_summary=str(
+                pull_request_observation.get("default_branch_probe_host_summary", "")
             ),
             flutter_engine_initialization_log_entries=list(
                 pull_request_observation.get("flutter_engine_initialization_log_entries", [])
@@ -242,6 +252,10 @@ class GitHubAccessibilityPullRequestGateProbeService:
         cleanup_closed_pull_request = False
         cleanup_deleted_branch = False
         observation: dict[str, object] | None = None
+        (
+            default_branch_probe_host_present,
+            default_branch_probe_host_summary,
+        ) = self._default_branch_probe_host_details(self._config.base_branch)
 
         try:
             self._run_command(["gh", "auth", "setup-git"], cwd=None)
@@ -279,8 +293,9 @@ class GitHubAccessibilityPullRequestGateProbeService:
             probe_file.parent.mkdir(parents=True, exist_ok=True)
             probe_file.write_text(probe_source, encoding="utf-8")
             render_host_file = temp_repository_root / self._config.probe_render_host_path
+            render_host_original_source = render_host_file.read_text(encoding="utf-8")
             render_host_source = self._inject_probe_into_render_host(
-                render_host_file.read_text(encoding="utf-8")
+                render_host_original_source
             )
             render_host_file.write_text(render_host_source, encoding="utf-8")
 
@@ -380,8 +395,14 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 self._config.semantic_evidence_markers,
             )
             probe_semantic_label = self._extract_probe_semantic_label(probe_source)
+            probe_visible_text = self._extract_probe_visible_text(probe_source)
             runtime_accessibility_surface_summary = (
                 self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
+            )
+            runtime_accessibility_sample_labels = (
+                self._extract_runtime_accessibility_sample_labels(
                     accessibility_stage_run_log_text
                 )
             )
@@ -406,7 +427,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "probe_render_host_path": self._config.probe_render_host_path,
                 "probe_rendered_in_application": (
                     self._config.probe_path in pull_request_files
-                    and self._config.probe_render_host_path in pull_request_files
+                    and (
+                        self._config.probe_render_host_path in pull_request_files
+                        or default_branch_probe_host_present
+                        or self._render_host_renders_probe(render_host_original_source)
+                        or self._render_host_renders_probe(render_host_source)
+                    )
                 ),
                 "pull_request_file_paths": pull_request_files,
                 "pull_request_state": self._optional_string(pull_request.get("state")),
@@ -473,14 +499,20 @@ class GitHubAccessibilityPullRequestGateProbeService:
                 "runtime_accessibility_surface_summary": (
                     runtime_accessibility_surface_summary
                 ),
-                "probe_contains_low_contrast_indicator": (
-                    "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+                "runtime_accessibility_sample_labels": (
+                    runtime_accessibility_sample_labels
+                ),
+                "probe_contains_low_contrast_indicator": self._probe_has_low_contrast_indicator(
+                    probe_source
                 ),
                 "probe_contains_semantic_label_indicator": probe_semantic_label is not None,
                 "probe_semantic_label": probe_semantic_label or "",
+                "probe_visible_text": probe_visible_text or "",
                 "probe_contrast_technique": self._probe_contrast_technique(probe_source),
                 "cleanup_closed_pull_request": False,
                 "cleanup_deleted_branch": False,
+                "default_branch_probe_host_present": default_branch_probe_host_present,
+                "default_branch_probe_host_summary": default_branch_probe_host_summary,
                 "flutter_engine_initialization_log_entries": (
                     flutter_engine_initialization_log_entries
                 ),
@@ -611,6 +643,45 @@ class GitHubAccessibilityPullRequestGateProbeService:
             field_args=["-H", "Accept: application/vnd.github.raw+json"],
         )
 
+    def _read_repository_file_text(self, file_path: str, ref: str) -> str:
+        return self._github_api_client.request_text(
+            endpoint=(
+                f"/repos/{self._config.repository}/contents/"
+                f"{quote(file_path, safe='/')}?ref={quote(ref, safe='')}"
+            ),
+            field_args=["-H", "Accept: application/vnd.github.raw+json"],
+        )
+
+    def _default_branch_probe_host_details(self, ref: str) -> tuple[bool, str]:
+        try:
+            source = self._read_repository_file_text(self._config.probe_render_host_path, ref)
+        except GitHubApiClientError as error:
+            return (
+                False,
+                f"Could not read {self._config.probe_render_host_path}@{ref}: {error}",
+            )
+
+        matched_indicators: list[str] = []
+        probe_widget_name = self._probe_widget_name()
+        rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        if probe_widget_name in source:
+            matched_indicators.append(probe_widget_name)
+        if rendered_probe_app_class_name in source:
+            matched_indicators.append(rendered_probe_app_class_name)
+
+        if not matched_indicators:
+            return (
+                False,
+                f"{self._config.probe_render_host_path}@{ref} did not expose "
+                f"{probe_widget_name} or {rendered_probe_app_class_name}.",
+            )
+
+        return (
+            True,
+            f"{self._config.probe_render_host_path}@{ref} already exposed "
+            f"{', '.join(matched_indicators)}.",
+        )
+
     def _wait_for_pull_request_run(
         self,
         workflow_id: int,
@@ -654,9 +725,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         deadline = time.time() + self._config.pull_request_timeout_seconds
         latest: dict[str, Any] | None = None
         while time.time() < deadline:
-            latest = self._read_json_object(
+            latest = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if latest is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             head_sha = self._optional_string(((latest.get("head") or {}).get("sha")))
             if head_sha:
                 return latest
@@ -685,9 +759,12 @@ class GitHubAccessibilityPullRequestGateProbeService:
         }
 
         while time.time() < deadline:
-            pull_request = self._read_json_object(
+            pull_request = self._try_read_json_object(
                 f"/repos/{self._config.repository}/pulls/{pull_request_number}"
             )
+            if pull_request is None:
+                time.sleep(self._config.poll_interval_seconds)
+                continue
             sha = self._optional_string(((pull_request.get("head") or {}).get("sha"))) or head_sha
             mergeable_state = self._optional_string(pull_request.get("mergeable_state"))
             status_state = self._read_check_runs_state(sha) if sha else None
@@ -1004,29 +1081,100 @@ class GitHubAccessibilityPullRequestGateProbeService:
     @staticmethod
     def _extract_probe_semantic_label(probe_source: str) -> str | None:
         match = re.search(r"label:\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
-        if match is None:
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"label:\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
+        )
+        if variable_match is None:
             return None
-        return match.group("label")
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
 
     @staticmethod
     def _probe_contrast_technique(probe_source: str) -> str:
-        del probe_source
+        if "final lowContrastColor = colorScheme.surface;" in " ".join(probe_source.split()):
+            return (
+                "Uses `colorScheme.surface` text on `colorScheme.surface` to guarantee a "
+                "WCAG contrast failure while remaining theme-token-safe."
+            )
+        if "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source:
+            return (
+                "Uses `colorScheme.onSurface.withAlpha(89)` text on "
+                "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            )
         return (
             "Uses `colorScheme.onSurface.withAlpha(89)` text on "
-            "`colorScheme.surface` to reduce contrast while remaining theme-token-safe."
+            "`colorScheme.surface` or an equivalent theme-token-safe low-contrast signal."
+        )
+
+    @staticmethod
+    def _extract_probe_visible_text(probe_source: str) -> str | None:
+        match = re.search(r"Text\(\s*['\"](?P<label>[^'\"]+)['\"]", probe_source)
+        if match is not None:
+            return match.group("label")
+
+        variable_match = re.search(
+            r"Text\(\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)",
+            probe_source,
+        )
+        if variable_match is None:
+            return None
+        variable_name = variable_match.group("variable")
+        assignment_match = re.search(
+            rf"(?:const|final)\s+{re.escape(variable_name)}\s*=\s*['\"](?P<label>[^'\"]+)['\"]",
+            probe_source,
+        )
+        if assignment_match is None:
+            return None
+        return assignment_match.group("label")
+
+    @staticmethod
+    def _probe_has_low_contrast_indicator(probe_source: str) -> bool:
+        normalized = " ".join(probe_source.split())
+        return (
+            "final lowContrastColor = colorScheme.surface;" in normalized
+            or (
+                "withAlpha(89)" in probe_source and "colorScheme.surface" in probe_source
+            )
         )
 
     def _extract_runtime_accessibility_surface_summary(self, run_log_text: str) -> str:
+        for line in self._extract_matching_log_lines(
+            run_log_text,
+            markers=["accessibility runtime surface ready"],
+        ):
+            return line
+        return ""
+
+    def _extract_runtime_accessibility_sample_labels(self, run_log_text: str) -> list[str]:
         if not run_log_text.strip():
-            return ""
-        match = re.search(
-            r"Accessibility runtime surface ready:[^\r\n]*",
+            return []
+
+        labels: list[str] = []
+        for match in re.finditer(
+            r"sample-labels=\[(?P<labels>[^\]]*)\]",
             run_log_text,
             flags=re.IGNORECASE,
-        )
-        if match is None:
-            return ""
-        return self._snippet(match.group(0), limit=400)
+        ):
+            labels_payload = f"[{match.group('labels')}]"
+            try:
+                parsed = json.loads(labels_payload)
+            except json.JSONDecodeError:
+                parsed = re.findall(r"""['"]([^'"]+)['"]""", match.group("labels"))
+            if isinstance(parsed, list):
+                labels.extend(
+                    item.strip() for item in parsed if isinstance(item, str) and item.strip()
+                )
+        return self._dedupe(labels)
 
     def _extract_flutter_engine_initialization_log_entries(
         self,
@@ -1064,10 +1212,25 @@ class GitHubAccessibilityPullRequestGateProbeService:
             normalized_line = " ".join(raw_line.split()).strip()
             if not normalized_line:
                 continue
-            lowered_line = normalized_line.lower()
-            if any(marker in lowered_line for marker in lowered_markers):
+            if any(
+                self._line_contains_runtime_marker(normalized_line, marker)
+                for marker in lowered_markers
+            ):
                 matches.append(self._snippet(normalized_line, limit=300))
         return self._dedupe(matches)
+
+    @staticmethod
+    def _line_contains_runtime_marker(normalized_line: str, marker: str) -> bool:
+        lowered_line = normalized_line.lower()
+        marker = marker.lower().strip()
+        if not marker:
+            return False
+        return lowered_line.startswith(marker) or bool(
+            re.search(
+                r"\d{4}-\d{2}-\d{2}t[\d:.]+z\s+" + re.escape(marker),
+                lowered_line,
+            )
+        )
 
     def _summarize_log_entries(self, entries: list[str]) -> str:
         if not entries:
@@ -1197,6 +1360,20 @@ class GitHubAccessibilityPullRequestGateProbeService:
             )
         return payload
 
+    def _try_read_json_object(
+        self,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        field_args: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._read_json_object(endpoint, method=method, field_args=field_args)
+        except GitHubAccessibilityPullRequestGateError as error:
+            if "HTTP 404" in str(error):
+                return None
+            raise
+
     def _read_json_array(self, endpoint: str) -> list[Any]:
         payload = self._read_json(endpoint)
         if not isinstance(payload, list):
@@ -1242,6 +1419,8 @@ class GitHubAccessibilityPullRequestGateProbeService:
     def _probe_source() -> str:
         return """import 'package:flutter/material.dart';
 
+import 'ui/features/tracker/services/accessibility_probe_signal.dart';
+
 class Ts908ProbeSurface extends StatelessWidget {
   const Ts908ProbeSurface({super.key});
 
@@ -1249,18 +1428,29 @@ class Ts908ProbeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
-    final lowContrastColor = colorScheme.onSurface.withAlpha(89);
+    final lowContrastColor = colorScheme.surface;
+    const probeText = 'Sync issue';
+    const semanticsLabel = 'button';
+
+    publishAccessibilityContrastProbeSignal(
+      text: probeText,
+      semanticsLabel: semanticsLabel,
+      foreground: lowContrastColor,
+      background: colorScheme.surface,
+    );
 
     return Semantics(
-      label: 'button',
+      label: semanticsLabel,
       button: true,
-      child: Container(
-        color: colorScheme.surface,
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          'Sync issue',
-          style: textStyle?.copyWith(color: lowContrastColor) ??
-              TextStyle(color: lowContrastColor),
+      child: ExcludeSemantics(
+        child: Container(
+          color: colorScheme.surface,
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            probeText,
+            style: textStyle?.copyWith(color: lowContrastColor) ??
+                TextStyle(color: lowContrastColor),
+          ),
         ),
       ),
     );
@@ -1271,11 +1461,30 @@ class Ts908ProbeSurface extends StatelessWidget {
     def _inject_probe_into_render_host(self, source: str) -> str:
         probe_widget_name = self._probe_widget_name()
         rendered_probe_app_class_name = self._rendered_probe_app_class_name()
+        probe_import = f"import '{Path(self._config.probe_path).name}';"
 
         if (
             probe_widget_name in source
             or rendered_probe_app_class_name in source
         ):
+            if probe_import in source:
+                return source
+
+            updated_source, replacements = re.subn(
+                r"^import '[^']+_probe_surface\.dart';\n",
+                f"{probe_import}\n",
+                source,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if replacements > 0:
+                return updated_source
+
+            source = source.replace(
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n",
+                "import 'ui/features/tracker/views/trackstate_app.dart';\n"
+                f"{probe_import}\n",
+            )
             return source
 
         if "package:flutter/material.dart" not in source:
@@ -1286,7 +1495,6 @@ class Ts908ProbeSurface extends StatelessWidget {
         if "package:flutter/material.dart" not in source:
             source = "import 'package:flutter/material.dart';\n\n" + source.lstrip()
 
-        probe_import = f"import '{Path(self._config.probe_path).name}';"
         if probe_import not in source:
             source = source.replace(
                 "import 'ui/features/tracker/views/trackstate_app.dart';\n",
@@ -1505,6 +1713,11 @@ class Ts908ProbeSurface extends StatelessWidget {
             ):
                 return True
         return False
+
+    def _render_host_renders_probe(self, render_host_source: str) -> bool:
+        probe_import = Path(self._config.probe_path).name
+        probe_widget_name = self._probe_widget_name()
+        return probe_import in render_host_source and probe_widget_name in render_host_source
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:

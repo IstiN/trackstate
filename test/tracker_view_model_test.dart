@@ -143,6 +143,31 @@ void main() {
     },
   );
 
+  test(
+    'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
+    () async {
+      final authStore = _TokenTrackingAuthStore(
+        repository: 'trackstate/trackstate',
+        token: 'github-token',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _FailingStoredTokenRepository(),
+        authStore: authStore,
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.storedGitHubTokenInvalid,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+    },
+  );
+
   test('view model appends the next search page through load more', () async {
     final viewModel = TrackerViewModel(
       repository: DemoTrackStateRepository(
@@ -158,6 +183,22 @@ void main() {
 
     await viewModel.loadMoreSearchResults();
 
+    expect(viewModel.searchResults.length, 8);
+    expect(viewModel.searchResults.last.key, 'TRACK-8');
+    expect(viewModel.hasMoreSearchResults, isFalse);
+  });
+
+  test('empty JQL query shows all issues instead of the first page only', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 8);
     expect(viewModel.searchResults.length, 8);
     expect(viewModel.searchResults.last.key, 'TRACK-8');
     expect(viewModel.hasMoreSearchResults, isFalse);
@@ -305,6 +346,7 @@ void main() {
     final viewModel = TrackerViewModel(
       repository: const DemoTrackStateRepository(),
     );
+    addTearDown(viewModel.dispose);
 
     await viewModel.load();
 
@@ -321,6 +363,7 @@ void main() {
       repository: const DemoTrackStateRepository(),
       workspaceId: 'hosted:trackstate/trackstate@main',
     );
+    addTearDown(viewModel.dispose);
 
     await viewModel.load();
 
@@ -343,6 +386,7 @@ void main() {
         authStore: authStore,
         workspaceId: workspaceId,
       );
+      addTearDown(viewModel.dispose);
 
       await viewModel.load();
 
@@ -364,6 +408,7 @@ void main() {
         writeBranch: 'feature/ts-632',
       );
       final viewModel = TrackerViewModel(repository: repository);
+      addTearDown(viewModel.dispose);
 
       await viewModel.load();
       await viewModel.connectGitHub('token');
@@ -388,6 +433,43 @@ void main() {
       expect(repository.connectCount, 1);
       expect(viewModel.startupRecovery, isNull);
       expect(viewModel.section, TrackerSection.settings);
+    },
+  );
+
+  test(
+    'view model keeps startup recovery active when retry fails with a non-rate-limit startup error',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [
+            GitHubRateLimitException(
+              message:
+                  'GitHub API request failed for /repos/demo/contents/DEMO/project.json (403): {"message":"API rate limit exceeded"}',
+              requestPath: '/repos/demo/contents/DEMO/project.json',
+              statusCode: 403,
+            ),
+            TrackStateRepositoryException(
+              'GitHub API request failed for /repos/demo/contents/DEMO/project.json (500): {"message":"Internal Server Error"}',
+            ),
+          ],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message, isNull);
+
+      await viewModel.retryStartupRecovery();
+
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
     },
   );
 
@@ -1035,7 +1117,7 @@ void main() {
       expect(viewModel.selectedIssue?.attachments, isNotEmpty);
       expect(
         viewModel.selectedIssue?.attachments.first.name,
-        'release-notes.pdf',
+        'release notes.pdf',
       );
       expect(viewModel.selectedIssue?.attachments.first.sizeBytes, 4);
     },
@@ -1727,6 +1809,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -1742,6 +1825,16 @@ class _LocalHostedAccessRepository extends _LocalRuntimeRepository {
       return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
     }
     return super.connect(connection);
+  }
+}
+
+class _FailingStoredTokenRepository extends DemoTrackStateRepository {
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    throw const TrackStateRepositoryException('Bad credentials');
   }
 }
 
@@ -1777,6 +1870,46 @@ class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     readScopes.add((repository: repository, workspaceId: workspaceId));
     if (repository == this.repository && workspaceId == this.workspaceId) {
+      return token;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveToken(
+    String token, {
+    String? repository,
+    String? workspaceId,
+  }) async {}
+}
+
+class _TokenTrackingAuthStore implements TrackStateAuthStore {
+  _TokenTrackingAuthStore({required this.repository, required this.token});
+
+  final String repository;
+  final String token;
+  final List<String?> clearedRepositories = <String?>[];
+
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {
+    clearedRepositories.add(repository);
+  }
+
+  @override
+  Future<String?> migrateLegacyRepositoryToken({
+    required String repository,
+    required String workspaceId,
+  }) async => null;
+
+  @override
+  Future<void> moveToken({
+    required String fromWorkspaceId,
+    required String toWorkspaceId,
+  }) async {}
+
+  @override
+  Future<String?> readToken({String? repository, String? workspaceId}) async {
+    if (repository == this.repository) {
       return token;
     }
     return null;
@@ -2075,6 +2208,7 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     final sanitizedName = sanitizeAttachmentName(name);
     final updated = issue.copyWith(
@@ -2744,6 +2878,7 @@ class _StartupRecoveryRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

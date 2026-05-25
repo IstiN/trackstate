@@ -97,10 +97,12 @@ class _StubProbeService(GitHubAccessibilityPullRequestGateProbeService):
             "run_log_error": None,
             "runtime_accessibility_surface_present": False,
             "runtime_accessibility_surface_summary": "",
+            "runtime_accessibility_sample_labels": [],
             "probe_contains_low_contrast_indicator": True,
             "probe_contains_semantic_label_indicator": True,
             "probe_semantic_label": "button",
-            "probe_contrast_technique": "Uses onSurface.withAlpha(89) on surface.",
+            "probe_visible_text": "Sync issue",
+            "probe_contrast_technique": "Uses surface text on surface.",
             "cleanup_closed_pull_request": True,
             "cleanup_deleted_branch": True,
         }
@@ -152,12 +154,29 @@ class GitHubAccessibilityPullRequestGateProbeRegressionTest(unittest.TestCase):
                 "aria",
                 "semantic",
             ],
-            contrast_evidence_markers=["contrast", "wcag", "4.5:1"],
+            contrast_evidence_markers=[
+                "color-contrast",
+                "color contrast",
+                "contrast ratio",
+                "4.5:1",
+                "minimum color contrast ratio thresholds",
+            ],
             semantic_evidence_markers=["aria", "semantic", "label"],
             poll_interval_seconds=5,
             run_timeout_seconds=900,
             pull_request_timeout_seconds=180,
         )
+
+    def test_probe_source_publishes_runtime_contrast_signal(self) -> None:
+        source = GitHubAccessibilityPullRequestGateProbeService._probe_source()
+
+        self.assertIn(
+            "import 'ui/features/tracker/services/accessibility_probe_signal.dart';",
+            source,
+        )
+        self.assertIn("publishAccessibilityContrastProbeSignal(", source)
+        self.assertIn("foreground: lowContrastColor", source)
+        self.assertIn("background: colorScheme.surface", source)
 
     def test_validate_combines_workflow_contract_with_live_pr_observation(self) -> None:
         workflow_text = """
@@ -244,6 +263,18 @@ jobs:
         self.assertTrue(observation.cleanup_closed_pull_request)
         self.assertTrue(observation.cleanup_deleted_branch)
 
+    def test_probe_source_publishes_runtime_contrast_signal(self) -> None:
+        probe_source = _StubProbeService._probe_source()  # noqa: SLF001
+
+        self.assertIn(
+            "import 'ui/features/tracker/services/accessibility_probe_signal.dart';",
+            probe_source,
+        )
+        self.assertIn("publishAccessibilityContrastProbeSignal(", probe_source)
+        self.assertIn("foreground: lowContrastColor", probe_source)
+        self.assertIn("background: colorScheme.surface", probe_source)
+        self.assertIn("ExcludeSemantics(", probe_source)
+
     def test_find_accessibility_status_check_uses_actual_check_surface(self) -> None:
         probe = _StubProbeService(self.config)
 
@@ -310,6 +341,19 @@ void main() {
             summary,
             'Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["Create tracker"]',
         )
+
+    def test_extract_runtime_accessibility_sample_labels_reads_summary_labels(self) -> None:
+        probe = _StubProbeService(self.config)
+
+        labels = probe._extract_runtime_accessibility_sample_labels(  # noqa: SLF001
+            """
+            some prefix
+            Accessibility runtime surface ready: hosts=1; nodes=4; sample-labels=["button", "Create tracker"]
+            trailing line
+            """
+        )
+
+        self.assertEqual(labels, ["button", "Create tracker"])
 
     def test_extract_flutter_engine_initialization_log_entries_reads_distinct_states(self) -> None:
         probe = _StubProbeService(self.config)
@@ -433,6 +477,19 @@ void main() {
         self.assertNotIn("runApp(const _Ts908RenderedProbeApp());", patched)
         self.assertIn("return MaterialApp(", patched)
         self.assertIn("Ts908ProbeSurface()", patched)
+
+    def test_probe_source_preserves_variable_based_label_and_text_extraction(self) -> None:
+        probe_source = _StubProbeService._probe_source()  # noqa: SLF001
+
+        self.assertEqual(
+            _StubProbeService._extract_probe_semantic_label(probe_source),  # noqa: SLF001
+            "button",
+        )
+        self.assertEqual(
+            _StubProbeService._extract_probe_visible_text(probe_source),  # noqa: SLF001
+            "Sync issue",
+        )
+        self.assertTrue(_StubProbeService._probe_has_low_contrast_indicator(probe_source))  # noqa: SLF001
 
 
 if __name__ == "__main__":

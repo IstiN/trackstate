@@ -135,16 +135,20 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 surface_observation["status_checks"]
             )
             run_log_text, run_log_error = self._try_read_run_log(run_id)
-            run_log_matched_accessibility_markers = self._matched_markers(
+            accessibility_stage_run_log_text = self._accessibility_stage_run_log_text(
                 run_log_text,
+                jobs,
+            )
+            run_log_matched_accessibility_markers = self._matched_markers(
+                accessibility_stage_run_log_text,
                 self._config.expected_accessibility_markers,
             )
             run_log_matched_contrast_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.contrast_evidence_markers,
             )
             run_log_matched_semantic_markers = self._matched_markers(
-                run_log_text,
+                accessibility_stage_run_log_text,
                 self._config.semantic_evidence_markers,
             )
             evidence_text = "\n".join(
@@ -153,7 +157,7 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                     *surface_observation["status_check_workflow_names"],
                     *self._job_names(jobs),
                     *self._step_names(jobs),
-                    run_log_text,
+                    accessibility_stage_run_log_text,
                 ]
             )
             matched_accessibility_markers = self._matched_markers(
@@ -169,7 +173,9 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 self._config.semantic_evidence_markers,
             )
             runtime_accessibility_surface_summary = (
-                self._extract_runtime_accessibility_surface_summary(run_log_text)
+                self._extract_runtime_accessibility_surface_summary(
+                    accessibility_stage_run_log_text
+                )
             )
 
             observation = {
@@ -238,7 +244,10 @@ class GitHubAccessibilitySemanticsFailureProbeService(
                 "run_log_mentions_semantic_issue": bool(
                     run_log_matched_semantic_markers
                 ),
-                "run_log_excerpt": self._extract_log_excerpt(run_log_text, evidence_text),
+                "run_log_excerpt": self._extract_log_excerpt(
+                    accessibility_stage_run_log_text,
+                    evidence_text,
+                ),
                 "run_log_error": run_log_error,
                 "runtime_accessibility_surface_present": bool(
                     runtime_accessibility_surface_summary
@@ -300,35 +309,35 @@ module.exports = {{
     @classmethod
     def _patch_spec_source(cls, source: str) -> str:
         if cls.simulation_require_statement not in source:
-            require_block = (
-                "const {\n"
-                "  collectAccessibilityViolations,\n"
-                "  enableFlutterSemantics,\n"
-                "  formatFlutterSemanticsEvidence,\n"
-                "  formatViolations,\n"
-                "} = require('./accessibility_gate');"
-            )
-            if require_block not in source:
+            import_anchor = "} = require('./accessibility_gate');"
+            if import_anchor not in source:
                 raise GitHubAccessibilityPullRequestGateError(
                     "TS-933 could not find the shared accessibility gate import block in "
                     f"{cls.__name__} source."
                 )
             source = source.replace(
-                require_block,
-                require_block + "\n" + cls.simulation_require_statement,
+                import_anchor,
+                import_anchor + "\n" + cls.simulation_require_statement,
                 1,
             )
 
         if cls.simulation_call not in source:
-            goto_line = "  await page.goto('/');"
-            if goto_line not in source:
+            insertion_targets = [
+                "  await captureFlutterStartupDiagnostics(page, {",
+                "  await page.goto('/');",
+            ]
+            insertion_target = next(
+                (target for target in insertion_targets if target in source),
+                None,
+            )
+            if insertion_target is None:
                 raise GitHubAccessibilityPullRequestGateError(
-                    "TS-933 could not find the page navigation in "
+                    "TS-933 could not find a supported accessibility gate setup step in "
                     "testing/accessibility/accessibility_gate.spec.js."
                 )
             source = source.replace(
-                goto_line,
-                f"{cls.simulation_call}\n{goto_line}",
+                insertion_target,
+                f"{cls.simulation_call}\n{insertion_target}",
                 1,
             )
 
