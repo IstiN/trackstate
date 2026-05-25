@@ -1,11 +1,14 @@
 name: SM Agent
 
-run-name: "SM Agent : ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}"
+run-name: "SM Agent : ${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_run' && format('after {0}', github.event.workflow_run.display_title) || 'manual' }}"
 
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["AI Teammate"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -13,7 +16,45 @@ permissions:
   actions: read
 
 jobs:
+  check-skip:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if other AI Teammate runs are in progress
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" != "workflow_run" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Count in-progress AI Teammate runs (exclude the one that just completed)
+          ACTIVE=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status in_progress --json databaseId --jq 'length')
+          # Count only recent queued runs (ignore zombie runs older than 60 minutes)
+          STALE_CUTOFF=$(date -u -d '60 minutes ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-60M '+%Y-%m-%dT%H:%M:%SZ')
+          QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$STALE_CUTOFF\")] | length")
+          STALE_QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt <= \"$STALE_CUTOFF\")] | length")
+          echo "Active AI Teammate runs: $ACTIVE, Queued (recent): $QUEUED, Queued (stale >60min): $STALE_QUEUED"
+          if [ "$STALE_QUEUED" -gt 0 ]; then
+            echo "⚠️ Ignoring $STALE_QUEUED stale queued run(s) older than 60 minutes"
+          fi
+          if [ "$ACTIVE" -gt 0 ] || [ "$QUEUED" -gt 0 ]; then
+            echo "Skipping SM — other AI Teammate runs still active, SM will trigger when they finish"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No active AI Teammate runs — SM should process new state"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   sm-agent:
+    needs: check-skip
+    if: needs.check-skip.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: sm-agent
@@ -29,7 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -37,9 +78,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install DMTools CLI v1.7.180
+      - name: Install DMTools CLI v1.7.195
         run: |
-          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.180/install.sh | bash -s v1.7.180
+          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.195/install.sh | bash -s v1.7.195
 
       - name: Add DMTools to PATH
         run: echo "$HOME/.dmtools/bin" >> "$GITHUB_PATH"

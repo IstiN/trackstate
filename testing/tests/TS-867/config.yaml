@@ -1,0 +1,14 @@
+test_id: TS-867
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from Dashboard.
+  - Explicitly focuses the active first saved workspace row before sending Arrow Down so the row-list keyboard precondition is established.
+  - Uses Arrow Down once to move selection and keyboard focus from the first saved workspace row to the second row.
+  - Verifies the selected second row is the only sequentially focusable saved workspace row.
+  - Verifies Tab leaves the workspace row list, Shift+Tab returns to the second row, and another Tab still cannot reach inactive rows.

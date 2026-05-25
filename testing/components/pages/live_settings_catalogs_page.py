@@ -181,17 +181,25 @@ class LiveSettingsCatalogsPage:
             )
 
     def save_settings(self) -> None:
-        rect = self._session.bounding_box(
-            self._button_selector,
-            has_text="Save settings",
-            timeout_ms=30_000,
-        )
-        self._session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
+        if (
+            self._session.count(self._button_by_aria_label("Save settings")) > 0
+            or self._session.count(self._nested_button_by_aria_label("Save settings")) > 0
+        ):
+            self._click_button_by_aria_label("Save settings")
+        else:
+            rect = self._session.bounding_box(
+                self._button_selector,
+                has_text="Save settings",
+                timeout_ms=30_000,
+            )
+            self._session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
         self._session.wait_for_function(
             """
-            () => Array.from(document.querySelectorAll('flt-semantics[role="button"]')).some(
-              (candidate) => (candidate.innerText ?? '').trim() === 'Save settings',
-            )
+            () => Array.from(document.querySelectorAll('flt-semantics')).some((candidate) => {
+              const ariaLabel = (candidate.getAttribute('aria-label') ?? '').trim();
+              const text = (candidate.innerText ?? '').trim();
+              return ariaLabel === 'Save settings' || text === 'Save settings';
+            })
             """,
             timeout_ms=30_000,
         )
