@@ -4711,6 +4711,7 @@ class _QueuedLoadTrackStateRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

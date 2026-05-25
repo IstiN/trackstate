@@ -1173,6 +1173,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -1282,6 +1283,7 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
@@ -1444,6 +1446,7 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
