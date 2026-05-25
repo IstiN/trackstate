@@ -5939,42 +5939,51 @@ class _MessageBanner extends StatelessWidget {
         ? l10n.trackerDataNotFound
         : _trackerMessageText(l10n, message!);
     final isError = message?.tone == TrackerMessageTone.error;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: isError
-            ? colors.accent.withValues(alpha: .12)
-            : colors.primarySoft.withValues(alpha: .72),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isError ? colors.accent : colors.primary),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TrackStateIcon(
-            isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
-            size: 18,
-            color: isError ? colors.accent : colors.primary,
-            semanticLabel: resolvedMessage,
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Text(resolvedMessage)),
-          if (onDismiss != null) ...[
-            const SizedBox(width: 8),
-            Semantics(
-              button: true,
-              label: l10n.close,
-              child: TextButton(
-                onPressed: onDismiss,
-                style: TextButton.styleFrom(
-                  foregroundColor: isError ? colors.accent : colors.primary,
-                ),
-                child: Text(l10n.close),
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      liveRegion: true,
+      label: resolvedMessage,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isError
+              ? colors.accent.withValues(alpha: .12)
+              : colors.primarySoft.withValues(alpha: .72),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isError ? colors.accent : colors.primary),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: TrackStateIcon(
+                isError
+                    ? TrackStateIconGlyph.issue
+                    : TrackStateIconGlyph.gitBranch,
+                size: 18,
+                color: isError ? colors.accent : colors.primary,
               ),
             ),
+            const SizedBox(width: 10),
+            Expanded(child: ExcludeSemantics(child: Text(resolvedMessage))),
+            if (onDismiss != null) ...[
+              const SizedBox(width: 8),
+              Semantics(
+                button: true,
+                label: l10n.close,
+                child: TextButton(
+                  onPressed: onDismiss,
+                  style: TextButton.styleFrom(
+                    foregroundColor: isError ? colors.accent : colors.primary,
+                  ),
+                  child: Text(l10n.close),
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
