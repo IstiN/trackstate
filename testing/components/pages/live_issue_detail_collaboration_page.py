@@ -17,6 +17,7 @@ class ScreenRect:
 
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _connect_token_button_selector = 'flt-semantics[role="button"][aria-label="Connect token"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
@@ -37,6 +38,11 @@ class LiveIssueDetailCollaborationPage:
         connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
             user_login=user_login,
             repository=repository,
+        )
+        connected_markers = (
+            connected_banner,
+            f"Connected as {user_login} to {repository}.",
+            "Synced with Git",
         )
         if self._is_connected(connected_banner):
             return
@@ -62,18 +68,14 @@ class LiveIssueDetailCollaborationPage:
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
         self._session.click(
-            self._button_selector,
-            has_text="Connect token",
+            self._connect_token_button_selector,
             timeout_ms=30_000,
         )
         wait_match = self._session.wait_for_any_text(
-            [
-                connected_banner,
-                "GitHub connection failed:",
-            ],
+            [*connected_markers, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_markers:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
                 "connected state required for TS-311.\n"
@@ -357,6 +359,7 @@ class LiveIssueDetailCollaborationPage:
         return (
             self._session.count(self._connected_button_selector) > 0
             or connected_banner in self.current_body_text()
+            or "Synced with Git" in self.current_body_text()
         )
 
     @staticmethod

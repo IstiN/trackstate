@@ -24,7 +24,6 @@ class EditControlObservation:
 
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
     _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
@@ -56,8 +55,16 @@ class LiveMultiViewRefreshPage:
             issue_key=issue_key,
             issue_summary=issue_summary,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
         dialog_text = self._session.wait_for_text("Edit issue", timeout_ms=30_000)
         if issue_key not in dialog_text:
             raise AssertionError(
@@ -237,8 +244,14 @@ class LiveMultiViewRefreshPage:
         issue_key: str,
         expected_status: str,
     ) -> str:
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Save",
+            timeout_ms=30_000,
+        )
         self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
+            self._button_selector,
+            has_text="Save",
             timeout_ms=30_000,
         )
         try:
