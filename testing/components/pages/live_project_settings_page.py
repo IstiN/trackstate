@@ -109,6 +109,7 @@ class ProjectSettingsAdminTabObservation:
 
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_selector = 'flt-semantics[role="tab"]'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
@@ -138,6 +139,10 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
+        connected_banners = TrackStateTrackerPage.connected_banners(
+            user_login=user_login,
+            repository=repository,
+        )
         current_body = self.body_text()
         if TrackStateTrackerPage.body_has_connected_banner(
             current_body,
@@ -147,7 +152,13 @@ class LiveProjectSettingsPage:
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
-        connect_via_text = self._session.count(self._button_selector, has_text="Connect GitHub") > 0
+        connect_via_text = (
+            self._session.count(
+                self._visible_button_selector,
+                has_text="Connect GitHub",
+            )
+            > 0
+        )
         if not connect_via_aria and not connect_via_text:
             raise AssertionError(
                 "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
@@ -161,7 +172,7 @@ class LiveProjectSettingsPage:
                     self._session.click(self._connect_selector, timeout_ms=30_000)
                 else:
                     self._session.click(
-                        self._button_selector,
+                        self._visible_button_selector,
                         has_text="Connect GitHub",
                         timeout_ms=30_000,
                     )
@@ -169,7 +180,7 @@ class LiveProjectSettingsPage:
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
             self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
             self._session.click(
-                self._button_selector,
+                self._visible_button_selector,
                 has_text="Connect token",
                 timeout_ms=30_000,
             )
@@ -177,10 +188,7 @@ class LiveProjectSettingsPage:
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        *TrackStateTrackerPage.connected_banners(
-                            user_login=user_login,
-                            repository=repository,
-                        ),
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                         "GitHub connection failed:",
@@ -192,10 +200,7 @@ class LiveProjectSettingsPage:
                 if any(
                     marker in current_body
                     for marker in (
-                        *TrackStateTrackerPage.connected_banners(
-                            user_login=user_login,
-                            repository=repository,
-                        ),
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                     )
@@ -229,6 +234,10 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
+        connected_banners = TrackStateTrackerPage.connected_banners(
+            user_login=user_login,
+            repository=repository,
+        )
         current_body = self.body_text()
         if TrackStateTrackerPage.body_has_connected_banner(
             current_body,
@@ -239,7 +248,7 @@ class LiveProjectSettingsPage:
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
         connect_via_text = self._session.count(
-            self._button_selector,
+            self._visible_button_selector,
             has_text="Connect GitHub",
         ) > 0
         if not connect_via_aria and not connect_via_text:
@@ -260,7 +269,7 @@ class LiveProjectSettingsPage:
                     )
                     self._scroll_into_view(connect_button_selector)
                     self._session.click(
-                        self._button_selector,
+                        self._visible_button_selector,
                         has_text="Connect GitHub",
                         timeout_ms=30_000,
                     )
@@ -272,7 +281,7 @@ class LiveProjectSettingsPage:
                 self._session.click(self._connect_token_selector, timeout_ms=30_000)
             else:
                 self._session.click(
-                    self._button_selector,
+                    self._visible_button_selector,
                     has_text="Connect token",
                     timeout_ms=30_000,
                 )
@@ -280,10 +289,7 @@ class LiveProjectSettingsPage:
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        *TrackStateTrackerPage.connected_banners(
-                            user_login=user_login,
-                            repository=repository,
-                        ),
+                        *connected_banners,
                         "GitHub connection failed:",
                     ],
                     timeout_ms=timeout_seconds * 1_000,
@@ -308,7 +314,7 @@ class LiveProjectSettingsPage:
                 raise AssertionError(
                     "Step 2 failed: the hosted session never exposed the connected "
                     "write-capable banner after the token submit.\n"
-                    f"Expected banner: {connected_banner}\n"
+                    f"Expected one of: {connected_banners}\n"
                     f"Observed body text:\n{current_body}",
                 ) from None
 

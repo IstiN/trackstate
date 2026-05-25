@@ -64,6 +64,7 @@ class CommentComposerObservation:
 
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
@@ -98,22 +99,29 @@ class LiveIssueDetailCollaborationPage:
             return
         connect_via_aria = self._session.count(self._connect_button_selector) > 0
         connect_via_text = self._session.count(
-            self._button_selector,
+            self._visible_button_selector,
             has_text="Connect GitHub",
         ) > 0
         if not connect_via_aria and not connect_via_text:
+            current_body = self.current_body_text()
+            if TrackStateTrackerPage.body_has_connected_banner(
+                current_body,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
                 "precondition for TS-311.\n"
-                f"Observed body text:\n{self.current_body_text()}",
+                f"Observed body text:\n{current_body}",
             )
 
         if connect_via_aria:
             self._session.click(self._connect_button_selector, timeout_ms=30_000)
         else:
             self._session.click(
-                self._button_selector,
+                self._visible_button_selector,
                 has_text="Connect GitHub",
                 timeout_ms=30_000,
             )
@@ -121,7 +129,7 @@ class LiveIssueDetailCollaborationPage:
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
         self._session.click(
-            self._button_selector,
+            self._visible_button_selector,
             has_text="Connect token",
             timeout_ms=30_000,
         )

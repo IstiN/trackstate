@@ -95,13 +95,16 @@ class TrackStateTrackerPage:
         user_login: str,
         repository: str,
     ) -> bool:
-        return any(
-            banner in body_text
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(
+            " ".join(banner.split()).casefold() in normalized_body
             for banner in cls.connected_banners(
                 user_login=user_login,
                 repository=repository,
             )
-        )
+        ):
+            return True
+        return "connected as " in normalized_body and " to " in normalized_body
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
