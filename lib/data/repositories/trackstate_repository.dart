@@ -708,7 +708,23 @@ class ProviderBackedTrackStateRepository
         ),
       );
     }
-    return loadSnapshot();
+    final currentSnapshot = _snapshot;
+    if (currentSnapshot == null) {
+      return loadSnapshot();
+    }
+    final updatedSnapshot = TrackerSnapshot(
+      project: _projectConfigWithSavedSettings(
+        current: currentSnapshot.project,
+        settings: persistedSettings,
+      ),
+      issues: currentSnapshot.issues,
+      repositoryIndex: currentSnapshot.repositoryIndex,
+      loadWarnings: currentSnapshot.loadWarnings,
+      readiness: currentSnapshot.readiness,
+      startupRecovery: currentSnapshot.startupRecovery,
+    );
+    _snapshot = updatedSnapshot;
+    return updatedSnapshot;
   }
 
   @override
@@ -4443,6 +4459,29 @@ Map<String, Object?> _localizedLabelsJson(
   ),
 };
 
+ProjectConfig _projectConfigWithSavedSettings({
+  required ProjectConfig current,
+  required ProjectSettingsCatalog settings,
+}) {
+  return ProjectConfig(
+    key: current.key,
+    name: current.name,
+    repository: current.repository,
+    branch: current.branch,
+    defaultLocale: settings.defaultLocale,
+    supportedLocales: settings.effectiveSupportedLocales,
+    issueTypeDefinitions: settings.issueTypeDefinitions,
+    statusDefinitions: settings.statusDefinitions,
+    fieldDefinitions: settings.fieldDefinitions,
+    workflowDefinitions: settings.workflowDefinitions,
+    priorityDefinitions: settings.priorityDefinitions,
+    versionDefinitions: settings.versionDefinitions,
+    componentDefinitions: settings.componentDefinitions,
+    resolutionDefinitions: settings.resolutionDefinitions,
+    attachmentStorage: settings.attachmentStorage,
+  );
+}
+
 Map<String, Object?> _configLocalizedLabelsJson(
   List<TrackStateConfigEntry> entries,
   String locale,
@@ -5238,7 +5277,7 @@ const _issueTypeDefinitions = [
     id: 'task',
     name: 'Task',
     hierarchyLevel: 0,
-    icon: 'task',
+    icon: 'issue',
     workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Task'},
   ),
@@ -5254,7 +5293,7 @@ const _issueTypeDefinitions = [
     id: 'bug',
     name: 'Bug',
     hierarchyLevel: 0,
-    icon: 'bug',
+    icon: 'issue',
     workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Bug'},
   ),

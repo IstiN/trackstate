@@ -9407,10 +9407,10 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
     final activeTab = ProjectSettingsTab.values[_tabController.index];
-    final canEdit =
+    final canManageCatalogs =
         widget.viewModel.supportsProjectSettingsAdmin &&
-        !widget.viewModel.hasBlockedWriteAccess &&
-        !widget.viewModel.isSaving;
+        !widget.viewModel.hasBlockedWriteAccess;
+    final canSaveSettings = canManageCatalogs && !widget.viewModel.isSaving;
     final tabBar = FocusTraversalOrder(
       order: const NumericFocusOrder(0),
       child: TabBar(
@@ -9430,18 +9430,26 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ),
     );
     final content = switch (activeTab) {
-      ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      ProjectSettingsTab.statuses => _buildStatusTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
       ProjectSettingsTab.issueTypes => _buildIssueTypeTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      ProjectSettingsTab.fields => _buildFieldTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.priorities => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.priorities,
@@ -9449,7 +9457,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editPriority,
         deleteLabel: l10n.deletePriority,
         entries: settings.priorityDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addPriority,
           editTitle: l10n.editPriority,
@@ -9468,7 +9476,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editComponent,
         deleteLabel: l10n.deleteComponent,
         entries: settings.componentDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addComponent,
           editTitle: l10n.editComponent,
@@ -9487,7 +9495,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editVersion,
         deleteLabel: l10n.deleteVersion,
         entries: settings.versionDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addVersion,
           editTitle: l10n.editVersion,
@@ -9502,9 +9510,13 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ProjectSettingsTab.attachments => _buildAttachmentsTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.locales => _buildLocalesTab(l10n, settings, canEdit),
+      ProjectSettingsTab.locales => _buildLocalesTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -9538,9 +9550,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       emphasized: false,
                       child: _IssueDetailActionButton(
                         label: l10n.resetSettings,
-                        onPressed: widget.viewModel.isSaving
-                            ? null
-                            : () => _resetDraft(project),
+                        onPressed: canSaveSettings
+                            ? () => _resetDraft(project)
+                            : null,
                       ),
                     ),
                     _orderedSettingsAction(
@@ -9550,7 +9562,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       child: _IssueDetailActionButton(
                         label: l10n.saveSettings,
                         emphasized: true,
-                        onPressed: canEdit ? _saveSettings : null,
+                        onPressed: canSaveSettings ? _saveSettings : null,
                       ),
                     ),
                   ],
@@ -10148,7 +10160,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
   late final TextEditingController _idController;
   late final TextEditingController _nameController;
   late final TextEditingController _hierarchyLevelController;
-  late final TextEditingController _iconController;
+  late String _iconId;
   String? _workflowId;
 
   @override
@@ -10159,7 +10171,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _hierarchyLevelController = TextEditingController(
       text: widget.initial?.hierarchyLevel?.toString() ?? '0',
     );
-    _iconController = TextEditingController(text: widget.initial?.icon ?? '');
+    _iconId = _normalizedIssueTypeIconId(widget.initial?.icon);
     _workflowId =
         widget.initial?.workflowId ??
         (widget.workflows.isNotEmpty ? widget.workflows.first.id : null);
@@ -10170,7 +10182,6 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _idController.dispose();
     _nameController.dispose();
     _hierarchyLevelController.dispose();
-    _iconController.dispose();
     super.dispose();
   }
 
@@ -10189,9 +10200,21 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
           controller: _hierarchyLevelController,
         ),
         const SizedBox(height: 12),
-        _SettingsTextField(
-          label: l10n.catalogIcon,
-          controller: _iconController,
+        DropdownButtonFormField<String>(
+          initialValue: _iconId,
+          decoration: InputDecoration(labelText: l10n.catalogIcon),
+          items: [
+            for (final option in _supportedIssueTypeIconOptions)
+              DropdownMenuItem<String>(
+                value: option.id,
+                child: Text(option.label),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _iconId = _normalizedIssueTypeIconId(value);
+            });
+          },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -10219,7 +10242,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
                 name: _nameController.text.trim(),
                 hierarchyLevel:
                     int.tryParse(_hierarchyLevelController.text.trim()) ?? 0,
-                icon: _iconController.text.trim(),
+                icon: _iconId,
                 workflowId: _workflowId,
               ),
             );
@@ -10238,6 +10261,35 @@ class _FieldEditor extends StatefulWidget {
 
   @override
   State<_FieldEditor> createState() => _FieldEditorState();
+}
+
+class _IssueTypeIconOption {
+  const _IssueTypeIconOption({required this.id, required this.label});
+
+  final String id;
+  final String label;
+}
+
+const List<_IssueTypeIconOption> _supportedIssueTypeIconOptions = [
+  _IssueTypeIconOption(id: 'epic', label: 'Epic'),
+  _IssueTypeIconOption(id: 'story', label: 'Story'),
+  _IssueTypeIconOption(id: 'subtask', label: 'Sub-task'),
+  _IssueTypeIconOption(id: 'hierarchy', label: 'Hierarchy'),
+  _IssueTypeIconOption(id: 'settings', label: 'Settings'),
+  _IssueTypeIconOption(id: 'issue', label: 'Issue'),
+];
+
+String _normalizedIssueTypeIconId(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return switch (normalized) {
+    'epic' => 'epic',
+    'story' => 'story',
+    'subtask' => 'subtask',
+    'hierarchy' => 'hierarchy',
+    'settings' => 'settings',
+    'task' || 'bug' || 'issue' => 'issue',
+    _ => 'issue',
+  };
 }
 
 class _FieldEditorState extends State<_FieldEditor> {
