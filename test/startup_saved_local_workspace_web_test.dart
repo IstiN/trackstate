@@ -39,6 +39,7 @@ const List<String> _startupShellNavigationLabels = <String>[
   'Hierarchy',
   'Settings',
 ];
+const String _hostedWorkspaceId = 'hosted:stable/repo@main';
 
 void main() {
   setUp(() {
@@ -114,17 +115,8 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      expect(_shellReadyObserved(), isTrue);
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
-      );
-      expect(find.text('Connect GitHub'), findsOneWidget);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
       expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
@@ -206,24 +198,8 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      expect(_shellReadyObserved(), isTrue);
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsWidgets,
-      );
-      expect(delayedRepository.session, isNotNull);
-      expect(
-        delayedRepository.session?.connectionState,
-        isNot(ProviderConnectionState.connected),
-      );
-      expect(delayedRepository.session?.canWrite, isFalse);
-      expect(delayedRepository.session?.canCreateBranch, isFalse);
-      expect(find.text('Connect GitHub'), findsOneWidget);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectHostedFallbackWorkspaceRow(tester);
       delayedRepository.completeUserProbe();
       await tester.pump();
       await tester.pumpAndSettle();
@@ -314,20 +290,9 @@ void main() {
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
-      expect(_shellReadyObserved(), isTrue);
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(delayedRepository.session, isNotNull);
-      expect(
-        delayedRepository.session?.connectionState,
-        isNot(ProviderConnectionState.connected),
-      );
-      expect(delayedRepository.session?.canWrite, isFalse);
-      expect(delayedRepository.session?.canCreateBranch, isFalse);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
       expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
@@ -401,23 +366,11 @@ void main() {
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
-      expect(_shellReadyObserved(), isTrue);
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
-      expect(find.text('Dashboard'), findsWidgets);
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
-      expect(delayedRepository.session, isNotNull);
-      expect(
-        delayedRepository.session?.connectionState,
-        isNot(ProviderConnectionState.connected),
-      );
-      expect(delayedRepository.session?.canWrite, isFalse);
-      expect(delayedRepository.session?.canCreateBranch, isFalse);
-      expect(find.text('Connect GitHub'), findsOneWidget);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectHostedFallbackWorkspaceRow(tester);
     },
   );
 
@@ -485,15 +438,83 @@ void main() {
 
       expect(delayedRepository.initialSearchRequestCount, 1);
       expect(delayedRepository.initialSearchPending, isTrue);
-      expect(_shellReadyObserved(), isTrue);
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsOneWidget,
-      );
-      expect(find.text('Dashboard'), findsWidgets);
-      expect(find.text('Connect GitHub'), findsOneWidget);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectHostedFallbackWorkspaceRow(tester);
 
       delayedRepository.completeInitialSearch();
+      await tester.pump();
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'web startup switches into the hosted fallback workspace and keeps Create issue fully gated while /user remains pending',
+    (tester) async {
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => delayedRepository,
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(delayedRepository.userProbePending, isTrue);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _switchToHostedWorkspace(tester);
+      final savedStateAfterSwitch = await workspaceProfiles.loadState();
+      expect(savedStateAfterSwitch.activeWorkspaceId, _hostedWorkspaceId);
+      _expectRestrictedFallbackShell(delayedRepository);
+      await _expectBlockedCreateIssueGate(tester);
+      delayedRepository.completeUserProbe();
       await tester.pump();
       await tester.pumpAndSettle();
     },
@@ -771,13 +792,68 @@ class _BrowserStartupAuthProbeHarness {
   }
 }
 
-bool _shellReadyObserved() {
-  final navigationLabelsVisible = _startupShellNavigationLabels.every(
-    (label) => find.text(label).evaluate().isNotEmpty,
+void _expectRestrictedFallbackShell(
+  ProviderBackedTrackStateRepository repository,
+) {
+  expect(
+    find.byKey(const ValueKey('workspace-switcher-trigger')),
+    findsOneWidget,
   );
-  return navigationLabelsVisible &&
-      find
-          .byKey(const ValueKey('workspace-switcher-trigger'))
-          .evaluate()
-          .isNotEmpty;
+  for (final label in _startupShellNavigationLabels) {
+    expect(find.text(label), findsWidgets);
+  }
+  expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+  expect(find.text('Connect GitHub'), findsOneWidget);
+  expect(repository.session, isNotNull);
+  expect(
+    repository.session?.connectionState,
+    isNot(ProviderConnectionState.connected),
+  );
+  expect(repository.session?.canWrite, isFalse);
+  expect(repository.session?.canCreateBranch, isFalse);
+}
+
+Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+  await tester.pumpAndSettle();
+  final hostedRow = find.byKey(const ValueKey('workspace-$_hostedWorkspaceId'));
+  expect(hostedRow, findsOneWidget);
+  expect(
+    find.descendant(of: hostedRow, matching: find.text('Needs sign-in')),
+    findsWidgets,
+  );
+  await tester.tapAt(const Offset(8, 8));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _switchToHostedWorkspace(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+  await tester.pumpAndSettle();
+  final openButton = find.byKey(
+    const ValueKey('workspace-open-$_hostedWorkspaceId'),
+  );
+  await tester.ensureVisible(openButton);
+  await tester.tap(openButton, warnIfMissed: false);
+  await tester.pump();
+  await tester.tap(find.byKey(const ValueKey('workspace-add-button')));
+  await tester.pump();
+  await tester.pumpAndSettle();
+}
+
+Future<void> _expectBlockedCreateIssueGate(WidgetTester tester) async {
+  await tester.tap(find.text('Create issue').first);
+  await tester.pumpAndSettle();
+  expect(find.text('GitHub write access is not connected'), findsWidgets);
+  expect(
+    find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Summary',
+    ),
+    findsNothing,
+  );
+  expect(find.widgetWithText(FilledButton, 'Save'), findsNothing);
+  expect(find.widgetWithText(OutlinedButton, 'Open settings'), findsOneWidget);
+  expect(find.widgetWithText(OutlinedButton, 'Cancel'), findsOneWidget);
+  await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+  await tester.pumpAndSettle();
 }

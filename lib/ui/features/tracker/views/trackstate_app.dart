@@ -617,6 +617,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         state.unavailableLocalWorkspaceIds.contains(workspace.id);
   }
 
+  bool _shouldDeferAccessRestoreForWorkspace(WorkspaceProfile workspace) {
+    return kIsWeb && workspace.isHosted;
+  }
+
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
@@ -713,6 +717,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool markUnavailable = false,
   }) async {
     previousViewModel.updateWorkspaceScope(workspace.id);
+    if (previousViewModel.snapshot == null) {
+      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
+    }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
         : _createViewModel(
@@ -721,12 +728,9 @@ class _TrackStateAppState extends State<TrackStateApp>
             autoLoad: false,
             workspaceId: workspace.id,
           );
-    if (preservedViewModel.snapshot == null) {
-      if (deferAccessRestore) {
-        unawaited(preservedViewModel.load(deferAccessRestore: true));
-      } else {
-        await preservedViewModel.load(deferAccessRestore: false);
-      }
+    if (!identical(preservedViewModel, previousViewModel) &&
+        preservedViewModel.snapshot == null) {
+      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
     }
     if (markUnavailable) {
       await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
@@ -1191,18 +1195,23 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
     }
-    final prepared = await _prepareWorkspaceSwitch(
-      workspace ??
-          WorkspaceProfile.create(
-            WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.hosted,
-              target: normalizedRepository,
-              defaultBranch: normalizedDefaultBranch,
-              writeBranch: normalizedWriteBranch,
-            ),
+    final targetWorkspace =
+        workspace ??
+        WorkspaceProfile.create(
+          WorkspaceProfileInput(
+            targetType: WorkspaceProfileTargetType.hosted,
+            target: normalizedRepository,
+            defaultBranch: normalizedDefaultBranch,
+            writeBranch: normalizedWriteBranch,
           ),
+        );
+    final prepared = await _prepareWorkspaceSwitch(
+      targetWorkspace,
       previousViewModel: previousViewModel,
       showFailureMessage: true,
+      deferAccessRestore: _shouldDeferAccessRestoreForWorkspace(
+        targetWorkspace,
+      ),
     );
     if (prepared == null) {
       return;
@@ -1235,6 +1244,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace,
       previousViewModel: previousViewModel,
       showFailureMessage: true,
+      deferAccessRestore: _shouldDeferAccessRestoreForWorkspace(workspace),
     );
     if (prepared == null) {
       return;
@@ -1795,6 +1805,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isDesktopWorkspaceSwitcherFocused() {
+    if (_desktopWorkspaceSwitcherBrowserFocusRequest != null) {
+      return true;
+    }
     if (kIsWeb &&
         browser_workspace_switcher_focus_monitor
             .isBrowserFocusWithinWorkspaceSwitcher()) {
@@ -2005,6 +2018,11 @@ class _TrackStateAppState extends State<TrackStateApp>
                 requestedFocusedWorkspaceId:
                     _requestedWorkspaceSwitcherRowFocusId,
                 focusRequestVersion: _workspaceSwitcherRowFocusRequestVersion,
+                onPendingWorkspaceSelection: kIsWeb && !compact
+                    ? () => _requestDesktopWorkspaceSwitcherBrowserFocus(
+                        _workspaceSwitcherSaveFocusId,
+                      )
+                    : null,
                 onSelectWorkspace: (workspace) {
                   closeSwitcher();
                   unawaited(_switchToWorkspace(workspace));
@@ -7432,6 +7450,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.onMoveWorkspaceSelection,
     required this.onSelectFirstWorkspace,
     required this.onSelectLastWorkspace,
+    this.onPendingWorkspaceSelection,
   });
 
   final Key? sheetKey;
@@ -7450,6 +7469,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onSelectFirstWorkspace;
   final VoidCallback onSelectLastWorkspace;
+  final VoidCallback? onPendingWorkspaceSelection;
 
   @override
   State<_WorkspaceSwitcherSheet> createState() =>
@@ -7541,6 +7561,9 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     setState(() {
       _selectedWorkspaceId = workspace.id;
     });
+    if (kIsWeb) {
+      widget.onPendingWorkspaceSelection?.call();
+    }
   }
 
   void _saveAndSwitchSelectedWorkspace() {
@@ -7580,6 +7603,89 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       widget.viewModel,
       widget.workspaces,
       widget.localWorkspaceAvailability,
+    );
+    final savedWorkspaceRows = Column(
+      children: [
+        for (
+          var index = 0;
+          index < widget.workspaces.profiles.length;
+          index += 1
+        ) ...[
+          Builder(
+            builder: (context) {
+              final workspace = widget.workspaces.profiles[index];
+              final workspaceId = workspace.id;
+              final isSelected = workspaceId == selectedWorkspaceId;
+              final isUnavailableLocal =
+                  workspace.isLocal &&
+                  widget.localWorkspaceAvailability[workspaceId] == false;
+              final showLocalHostedAccessAction =
+                  workspace.isLocal && widget.viewModel.usesLocalPersistence;
+              return _WorkspaceSwitcherRow(
+                key: ValueKey('workspace-$workspaceId'),
+                workspace: workspace,
+                isActive: isSelected,
+                stateLabel: _workspaceStateLabel(
+                  l10n,
+                  widget.viewModel,
+                  workspace,
+                  activeWorkspaceId: activeWorkspaceId,
+                  authenticatedWorkspaceIds: widget.authenticatedWorkspaceIds,
+                  hostedWorkspaceAccessModes: widget.hostedWorkspaceAccessModes,
+                  localWorkspaceAvailability: widget.localWorkspaceAvailability,
+                ),
+                focusOrderBase: index * 3.0 + 1,
+                primaryActionLabel: isUnavailableLocal
+                    ? l10n.retry
+                    : showLocalHostedAccessAction
+                    ? (widget.viewModel.hasLocalHostedAccessSession
+                          ? l10n.manageGitHubAccess
+                          : l10n.connectGitHub)
+                    : null,
+                primaryActionSemanticLabel: isUnavailableLocal
+                    ? '${l10n.retry}: ${workspace.displayName}'
+                    : null,
+                onPrimaryAction: isUnavailableLocal
+                    ? () => widget.onRetryUnavailableLocalWorkspace(workspace)
+                    : showLocalHostedAccessAction
+                    ? () => _showRepositoryAccessDialog(
+                        context,
+                        widget.viewModel,
+                        allowLocalGitHubConnection: true,
+                      )
+                    : null,
+                showOpenAction:
+                    workspaceId != activeWorkspaceId && !isUnavailableLocal,
+                onSelect: isUnavailableLocal
+                    ? null
+                    : () => _selectSavedWorkspace(workspace),
+                onOpen: workspaceId == activeWorkspaceId || isUnavailableLocal
+                    ? null
+                    : () {
+                        if (kIsWeb) {
+                          _selectSavedWorkspace(workspace);
+                          return;
+                        }
+                        widget.onSelectWorkspace(workspace);
+                      },
+                onDelete: () => widget.onDeleteWorkspace(workspace),
+                onMoveWorkspaceSelection: widget.onMoveWorkspaceSelection,
+                onSelectFirstWorkspace: widget.onSelectFirstWorkspace,
+                onSelectLastWorkspace: widget.onSelectLastWorkspace,
+                onSummaryFocusRequesterChanged: (requestFocus) {
+                  if (requestFocus == null) {
+                    _workspaceRowFocusRequesters.remove(workspaceId);
+                    return;
+                  }
+                  _workspaceRowFocusRequesters[workspaceId] = requestFocus;
+                },
+              );
+            },
+          ),
+          if (index != widget.workspaces.profiles.length - 1)
+            const SizedBox(height: 8),
+        ],
+      ],
     );
     final workspaceRowActionCount = widget.workspaces.profiles.length * 3;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
@@ -7646,106 +7752,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
             else
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 280),
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      for (
-                        var index = 0;
-                        index < widget.workspaces.profiles.length;
-                        index += 1
-                      ) ...[
-                        Builder(
-                          builder: (context) {
-                            final workspace = widget.workspaces.profiles[index];
-                            final workspaceId = workspace.id;
-                            final isSelected =
-                                workspaceId == selectedWorkspaceId;
-                            final isUnavailableLocal =
-                                workspace.isLocal &&
-                                widget.localWorkspaceAvailability[workspaceId] ==
-                                    false;
-                            final showLocalHostedAccessAction =
-                                workspace.isLocal &&
-                                widget.viewModel.usesLocalPersistence;
-                            return _WorkspaceSwitcherRow(
-                              key: ValueKey('workspace-$workspaceId'),
-                              workspace: workspace,
-                              isActive: isSelected,
-                              stateLabel: _workspaceStateLabel(
-                                l10n,
-                                widget.viewModel,
-                                workspace,
-                                activeWorkspaceId: activeWorkspaceId,
-                                authenticatedWorkspaceIds:
-                                    widget.authenticatedWorkspaceIds,
-                                hostedWorkspaceAccessModes:
-                                    widget.hostedWorkspaceAccessModes,
-                                localWorkspaceAvailability:
-                                    widget.localWorkspaceAvailability,
-                              ),
-                              focusOrderBase: index * 3.0 + 1,
-                              primaryActionLabel: isUnavailableLocal
-                                  ? l10n.retry
-                                  : showLocalHostedAccessAction
-                                  ? (widget
-                                            .viewModel
-                                            .hasLocalHostedAccessSession
-                                        ? l10n.manageGitHubAccess
-                                        : l10n.connectGitHub)
-                                  : null,
-                              primaryActionSemanticLabel: isUnavailableLocal
-                                  ? '${l10n.retry}: ${workspace.displayName}'
-                                  : null,
-                              onPrimaryAction: isUnavailableLocal
-                                  ? () =>
-                                        widget.onRetryUnavailableLocalWorkspace(
-                                          workspace,
-                                        )
-                                  : showLocalHostedAccessAction
-                                  ? () => _showRepositoryAccessDialog(
-                                      context,
-                                      widget.viewModel,
-                                      allowLocalGitHubConnection: true,
-                                    )
-                                  : null,
-                              showOpenAction:
-                                  workspaceId != activeWorkspaceId &&
-                                  !isUnavailableLocal,
-                              onSelect: isUnavailableLocal
-                                  ? null
-                                  : () => _selectSavedWorkspace(workspace),
-                              onOpen:
-                                  workspaceId == activeWorkspaceId ||
-                                      isUnavailableLocal
-                                  ? null
-                                  : () => widget.onSelectWorkspace(workspace),
-                              onDelete: () =>
-                                  widget.onDeleteWorkspace(workspace),
-                              onMoveWorkspaceSelection:
-                                  widget.onMoveWorkspaceSelection,
-                              onSelectFirstWorkspace:
-                                  widget.onSelectFirstWorkspace,
-                              onSelectLastWorkspace:
-                                  widget.onSelectLastWorkspace,
-                              onSummaryFocusRequesterChanged: (requestFocus) {
-                                if (requestFocus == null) {
-                                  _workspaceRowFocusRequesters.remove(
-                                    workspaceId,
-                                  );
-                                  return;
-                                }
-                                _workspaceRowFocusRequesters[workspaceId] =
-                                    requestFocus;
-                              },
-                            );
-                          },
-                        ),
-                        if (index != widget.workspaces.profiles.length - 1)
-                          const SizedBox(height: 8),
-                      ],
-                    ],
-                  ),
-                ),
+                child: SingleChildScrollView(child: savedWorkspaceRows),
               ),
             const SizedBox(height: 16),
             Text(
@@ -7999,6 +8006,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
           showOpenAction: widget.showOpenAction,
           hasSelectionAction: onSelect != null,
         );
+    final browserSummaryLabel =
+        !isActive && widget.showOpenAction && onSelect != null
+        ? '${l10n.openWorkspace}: ${workspace.displayName}'
+        : '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -8068,8 +8079,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final shouldUseBrowserFocusableSummaryControl = kIsWeb && onSelect != null;
     final summaryControl = shouldUseBrowserFocusableSummaryControl
         ? browser_focusable_control.BrowserFocusableControl(
-            label:
-                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
             focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
@@ -11076,23 +11086,23 @@ class _IssueDetailState extends State<_IssueDetail> {
 
   void _selectCollaborationTab(int index) {
     setState(() {
-    _selectedCollaborationTab = index;
+      _selectedCollaborationTab = index;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (!mounted) {
-      return;
-    }
-    _collaborationTabFocusNodes[index].requestFocus();
+      if (!mounted) {
+        return;
+      }
+      _collaborationTabFocusNodes[index].requestFocus();
     });
     switch (index) {
-    case 0:
-      widget.viewModel.ensureIssueDetailLoaded(widget.issue);
-    case 1:
-      widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
-    case 2:
-      widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
-    case 3:
-      widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+      case 0:
+        widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+      case 1:
+        widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+      case 2:
+        widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+      case 3:
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
     }
   }
 
@@ -13982,249 +13992,253 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
             child: ListenableBuilder(
               listenable: widget.viewModel,
               builder: (context, _) {
+                final hasBlockedWriteAccess =
+                    widget.viewModel.hasBlockedWriteAccess;
                 final canEditFields =
-                    !widget.viewModel.hasBlockedWriteAccess &&
-                    !widget.viewModel.isSaving;
+                    !hasBlockedWriteAccess && !widget.viewModel.isSaving;
                 final canSubmit =
-                    !widget.viewModel.hasBlockedWriteAccess &&
-                    !widget.viewModel.isSaving;
-                return _SurfaceCard(
-                  semanticLabel: l10n.createIssue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _SectionTitle(l10n.createIssue),
-                              const SizedBox(height: 12),
-                              if (widget.viewModel.hasBlockedWriteAccess) ...[
-                                _AccessCallout(
-                                  semanticLabel: l10n.createIssue,
-                                  title: _repositoryAccessTitle(
-                                    l10n,
-                                    widget.viewModel,
-                                  ),
-                                  message: _repositoryAccessMessage(
-                                    l10n,
-                                    widget.viewModel,
-                                  ),
-                                  primaryActionLabel: l10n.openSettings,
-                                  onPrimaryAction: () {
-                                    widget.onDismiss();
-                                    widget.viewModel.selectSection(
-                                      TrackerSection.settings,
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              _DropdownCreateField(
-                                label: issueTypeLabel,
-                                value: _selectedIssueTypeId,
-                                enabled: canEditFields,
-                                items: [
-                                  for (final option in issueTypeOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.issueTypeLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                    !hasBlockedWriteAccess && !widget.viewModel.isSaving;
+                final createContent = hasBlockedWriteAccess
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SectionTitle(l10n.createIssue),
+                          const SizedBox(height: 12),
+                          _AccessCallout(
+                            semanticLabel: l10n.createIssue,
+                            title: _repositoryAccessTitle(
+                              l10n,
+                              widget.viewModel,
+                            ),
+                            message: _repositoryAccessMessage(
+                              l10n,
+                              widget.viewModel,
+                            ),
+                            primaryActionLabel: l10n.openSettings,
+                            onPrimaryAction: () {
+                              widget.onDismiss();
+                              widget.viewModel.selectSection(
+                                TrackerSection.settings,
+                              );
+                            },
+                          ),
+                        ],
+                      )
+                    : SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _SectionTitle(l10n.createIssue),
+                            const SizedBox(height: 12),
+                            _DropdownCreateField(
+                              label: issueTypeLabel,
+                              value: _selectedIssueTypeId,
+                              enabled: canEditFields,
+                              items: [
+                                for (final option in issueTypeOptions)
+                                  DropdownMenuItem<String>(
+                                    value: option.id,
+                                    child: Text(
+                                      project?.issueTypeLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                ],
-                                onChanged: _applyIssueType,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildWebCompatibleTextField(
-                                controller: _summaryController,
-                                label: summaryLabel,
-                                enabled: canEditFields,
-                                errorText:
-                                    _didAttemptSubmit &&
-                                        _summaryController.text.trim().isEmpty
-                                    ? l10n.summaryRequired
-                                    : null,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildWebCompatibleTextField(
-                                controller: _descriptionController,
-                                label: l10n.description,
-                                enabled: canEditFields,
-                                minLines: 3,
-                                maxLines: null,
-                                alignLabelWithHint: true,
-                              ),
+                                  ),
+                              ],
+                              onChanged: _applyIssueType,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildWebCompatibleTextField(
+                              controller: _summaryController,
+                              label: summaryLabel,
+                              enabled: canEditFields,
+                              errorText:
+                                  _didAttemptSubmit &&
+                                      _summaryController.text.trim().isEmpty
+                                  ? l10n.summaryRequired
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildWebCompatibleTextField(
+                              controller: _descriptionController,
+                              label: l10n.description,
+                              enabled: canEditFields,
+                              minLines: 3,
+                              maxLines: null,
+                              alignLabelWithHint: true,
+                            ),
+                            const SizedBox(height: 12),
+                            _DropdownCreateField(
+                              label: priorityLabel,
+                              value: _selectedPriorityId,
+                              enabled: canEditFields,
+                              items: [
+                                for (final option in priorityOptions)
+                                  DropdownMenuItem<String>(
+                                    value: option.id,
+                                    child: Text(
+                                      project?.priorityLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedPriorityId = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            _ReadOnlyCreateField(
+                              label: l10n.initialStatus,
+                              value:
+                                  (defaultStatus == null
+                                      ? null
+                                      : project?.statusLabel(
+                                          defaultStatus.id,
+                                          locale: metadataLocale,
+                                        )) ??
+                                  l10n.toDo,
+                            ),
+                            if (!_isEpicType && !_isSubtaskType) ...[
                               const SizedBox(height: 12),
                               _DropdownCreateField(
-                                label: priorityLabel,
-                                value: _selectedPriorityId,
+                                label: epicLabel,
+                                value: _selectedEpicKey,
                                 enabled: canEditFields,
+                                hintText: l10n.optional,
                                 items: [
-                                  for (final option in priorityOptions)
+                                  for (final option in epicOptions)
                                     DropdownMenuItem<String>(
-                                      value: option.id,
+                                      value: option.key,
                                       child: Text(
-                                        project?.priorityLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
+                                        '${option.key} · ${option.summary}',
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                 ],
                                 onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
                                   setState(() {
-                                    _selectedPriorityId = value;
+                                    _selectedEpicKey = value;
                                   });
                                 },
+                              ),
+                            ],
+                            if (_isSubtaskType) ...[
+                              const SizedBox(height: 12),
+                              _DropdownCreateField(
+                                label: parentLabel,
+                                value: _selectedParentKey,
+                                enabled: canEditFields,
+                                hintText: parentOptions.isEmpty
+                                    ? l10n.noEligibleParents
+                                    : null,
+                                errorText:
+                                    _didAttemptSubmit &&
+                                        _selectedParentKey == null
+                                    ? l10n.subTaskParentRequired
+                                    : null,
+                                items: [
+                                  for (final option in parentOptions)
+                                    DropdownMenuItem<String>(
+                                      value: option.key,
+                                      child: Text(
+                                        '${option.key} · ${option.summary}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: parentOptions.isEmpty
+                                    ? null
+                                    : (value) {
+                                        setState(() {
+                                          _selectedParentKey = value;
+                                        });
+                                      },
                               ),
                               const SizedBox(height: 12),
                               _ReadOnlyCreateField(
-                                label: l10n.initialStatus,
-                                value:
-                                    (defaultStatus == null
-                                        ? null
-                                        : project?.statusLabel(
-                                            defaultStatus.id,
-                                            locale: metadataLocale,
-                                          )) ??
-                                    l10n.toDo,
+                                label: epicLabel,
+                                value: derivedEpic == null
+                                    ? l10n.derivedFromParent
+                                    : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                helperText: l10n.epicDerivedFromParent,
                               ),
-                              if (!_isEpicType && !_isSubtaskType) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: epicLabel,
-                                  value: _selectedEpicKey,
-                                  enabled: canEditFields,
-                                  hintText: l10n.optional,
-                                  items: [
-                                    for (final option in epicOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedEpicKey = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                              if (_isSubtaskType) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: parentLabel,
-                                  value: _selectedParentKey,
-                                  enabled: canEditFields,
-                                  hintText: parentOptions.isEmpty
-                                      ? l10n.noEligibleParents
-                                      : null,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedParentKey == null
-                                      ? l10n.subTaskParentRequired
-                                      : null,
-                                  items: [
-                                    for (final option in parentOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: parentOptions.isEmpty
-                                      ? null
-                                      : (value) {
-                                          setState(() {
-                                            _selectedParentKey = value;
-                                          });
-                                        },
-                                ),
-                                const SizedBox(height: 12),
-                                _ReadOnlyCreateField(
-                                  label: epicLabel,
-                                  value: derivedEpic == null
-                                      ? l10n.derivedFromParent
-                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
-                                  helperText: l10n.epicDerivedFromParent,
-                                ),
-                              ],
+                            ],
+                            const SizedBox(height: 12),
+                            _buildAssigneeField(
+                              controller: _assigneeController,
+                              label: assigneeLabel,
+                              enabled: canEditFields,
+                              collaboratorSuggestions: collaboratorSuggestions,
+                            ),
+                            const SizedBox(height: 12),
+                            _LabelTokenField(
+                              label: labelsLabel,
+                              controller: _labelEntryController,
+                              labels: _labels,
+                              enabled: canEditFields,
+                              helperText: l10n.labelsTokenHelper,
+                              onChanged: (_) => _commitLabels(),
+                              onSubmitted: (_) =>
+                                  _commitLabels(commitRemainder: true),
+                              onRemove: (label) {
+                                setState(() {
+                                  _labels.remove(label);
+                                });
+                              },
+                            ),
+                            for (final field in createFields) ...[
                               const SizedBox(height: 12),
-                              _buildAssigneeField(
-                                controller: _assigneeController,
-                                label: assigneeLabel,
+                              _buildCreateIssueFieldInput(
+                                key: ValueKey('create-field-${field.id}'),
+                                controller: _customFieldControllers[field.id]!,
+                                label: _createIssueFieldLabel(
+                                  project,
+                                  field,
+                                  metadataLocale,
+                                ),
                                 enabled: canEditFields,
                                 collaboratorSuggestions:
                                     collaboratorSuggestions,
+                                fieldDefinition: field,
+                                minLines: field.type == 'markdown' ? 3 : 1,
+                                maxLines: field.type == 'markdown' ? null : 1,
+                                alignLabelWithHint: field.type == 'markdown',
                               ),
-                              const SizedBox(height: 12),
-                              _LabelTokenField(
-                                label: labelsLabel,
-                                controller: _labelEntryController,
-                                labels: _labels,
-                                enabled: canEditFields,
-                                helperText: l10n.labelsTokenHelper,
-                                onChanged: (_) => _commitLabels(),
-                                onSubmitted: (_) =>
-                                    _commitLabels(commitRemainder: true),
-                                onRemove: (label) {
-                                  setState(() {
-                                    _labels.remove(label);
-                                  });
-                                },
-                              ),
-                              for (final field in createFields) ...[
-                                const SizedBox(height: 12),
-                                _buildCreateIssueFieldInput(
-                                  key: ValueKey('create-field-${field.id}'),
-                                  controller:
-                                      _customFieldControllers[field.id]!,
-                                  label: _createIssueFieldLabel(
-                                    project,
-                                    field,
-                                    metadataLocale,
-                                  ),
-                                  enabled: canEditFields,
-                                  collaboratorSuggestions:
-                                      collaboratorSuggestions,
-                                  fieldDefinition: field,
-                                  minLines: field.type == 'markdown' ? 3 : 1,
-                                  maxLines: field.type == 'markdown' ? null : 1,
-                                  alignLabelWithHint: field.type == 'markdown',
-                                ),
-                              ],
                             ],
-                          ),
+                          ],
                         ),
-                      ),
+                      );
+                return _SurfaceCard(
+                  semanticLabel: l10n.createIssue,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: createContent),
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _IssueDetailActionButton(
-                            label: l10n.save,
-                            emphasized: true,
-                            onPressed: canSubmit ? _submitCreateIssue : null,
-                          ),
+                          if (!hasBlockedWriteAccess)
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              onPressed: canSubmit ? _submitCreateIssue : null,
+                            ),
                           _IssueDetailActionButton(
                             label: l10n.cancel,
                             onPressed: widget.viewModel.isSaving
