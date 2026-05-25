@@ -31,16 +31,20 @@ class PythonTrackStateCliJiraSearchFramework(
         *,
         config: TrackStateCliJiraSearchConfig,
     ) -> TrackStateCliJiraSearchValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-cli-jira-search-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-cli-jira-search-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-319 can run the exact ticket command from the "
-                    "seeded repository as the current working directory."
+                    "checkout so the ticket scenario can run the exact command from "
+                    "the seeded repository as the current working directory."
                 )
                 return TrackStateCliJiraSearchValidationResult(
                     ticket_command=self._observe_command(
@@ -101,16 +105,22 @@ class PythonTrackStateCliJiraSearchFramework(
         for issue in config.fixture_issues:
             self._seed_issue(repository_path, issue)
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-319 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState Search Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts319@example.com",
+            "search-tester@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-319 fixture")
+        self._git(repository_path, "commit", "-m", "Seed CLI search fixture")
 
     def _seed_issue(
         self,

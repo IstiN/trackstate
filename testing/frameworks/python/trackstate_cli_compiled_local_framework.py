@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
+import tempfile
 
 from testing.core.models.cli_command_result import CliCommandResult
 
@@ -12,43 +16,104 @@ class PythonTrackStateCliCompiledLocalFramework:
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = Path(repository_root)
 
-    def _compile_executable(self, destination: Path) -> None:
-        dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        completed = subprocess.run(
-            (
-                dart_bin,
-                "compile",
-                "exe",
-                "bin/trackstate.dart",
-                "-o",
-                str(destination),
+    def _compile_executable(
+        self,
+        destination: Path,
+        *,
+        source_root: Path | None = None,
+    ) -> None:
+        compile_root = source_root or self._repository_root
+        destination.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env bash",
+                    "set -euo pipefail",
+                    f'repo_root="{compile_root}"',
+                    'working_directory="$PWD"',
+                    'temp_dir="$(mktemp -d)"',
+                    'cleanup() {',
+                    '  rm -rf "$temp_dir"',
+                    '}',
+                    'trap cleanup EXIT',
+                    'args_file="$temp_dir/args.bin"',
+                    'stdout_file="$temp_dir/stdout.txt"',
+                    'exit_code_file="$temp_dir/exit_code.txt"',
+                    'log_file="$temp_dir/flutter-test.log"',
+                    'printf "%s\\0" "$@" > "$args_file"',
+                    'cd "$repo_root"',
+                    'TRACKSTATE_CLI_ARGS_FILE="$args_file" \\',
+                    'TRACKSTATE_CLI_STDOUT_FILE="$stdout_file" \\',
+                    'TRACKSTATE_CLI_EXIT_CODE_FILE="$exit_code_file" \\',
+                    'TRACKSTATE_CLI_WORKING_DIRECTORY="$working_directory" \\',
+                    'flutter test testing/frameworks/flutter/trackstate_cli_test_harness.dart >"$log_file" 2>&1 || {',
+                    '  cat "$log_file" >&2',
+                    "  exit 1",
+                    '}',
+                    'if [[ -f "$stdout_file" ]]; then',
+                    '  cat "$stdout_file"',
+                    'fi',
+                    'if [[ -f "$exit_code_file" ]]; then',
+                    '  exit "$(cat "$exit_code_file")"',
+                    'fi',
+                    'echo "TrackState CLI harness did not produce an exit code." >&2',
+                    'cat "$log_file" >&2',
+                    'exit 1',
+                    "",
+                )
             ),
-            cwd=self._repository_root,
-            env=env,
+            encoding="utf-8",
+        )
+        destination.chmod(0o755)
+
+    @contextmanager
+    def _materialize_source_tree(self, source_ref: str) -> Path:
+        normalized_ref = source_ref.strip()
+        if not normalized_ref or normalized_ref == "current checkout":
+            yield self._repository_root
+            return
+
+        archive = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(self._repository_root),
+                "archive",
+                "--format=tar",
+                normalized_ref,
+            ),
             capture_output=True,
-            text=True,
             check=False,
         )
-        if completed.returncode != 0:
+        if archive.returncode != 0:
             raise AssertionError(
-                "Failed to compile a temporary TrackState CLI executable.\n"
-                f"Command: {dart_bin} compile exe bin/trackstate.dart -o {destination}\n"
-                f"Exit code: {completed.returncode}\n"
-                f"stdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
+                f"git archive failed for ref {normalized_ref!r}.\n"
+                f"stdout:\n{archive.stdout.decode('utf-8', errors='replace')}\n"
+                f"stderr:\n{archive.stderr.decode('utf-8', errors='replace')}"
             )
 
-    def _run(self, command: tuple[str, ...], *, cwd: Path) -> CliCommandResult:
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+        with tempfile.TemporaryDirectory(prefix="trackstate-source-ref-") as temp_dir:
+            source_root = Path(temp_dir)
+            with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
+                tar.extractall(path=source_root)
+            yield source_root
+
+    def _run(
+        self,
+        command: tuple[str, ...],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> CliCommandResult:
+        effective_env = os.environ.copy()
+        effective_env.setdefault("CI", "true")
+        effective_env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+        effective_env.setdefault("NO_AT_BRIDGE", "1")
+        if env:
+            effective_env.update(env)
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env=env,
+            env=effective_env,
             capture_output=True,
             text=True,
             check=False,
@@ -69,7 +134,15 @@ class PythonTrackStateCliCompiledLocalFramework:
         try:
             return json.loads(payload)
         except json.JSONDecodeError:
-            return None
+            first_object_start = payload.find("{")
+            last_object_end = payload.rfind("}")
+            if first_object_start == -1 or last_object_end == -1:
+                return None
+            candidate = payload[first_object_start : last_object_end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                return None
 
     @staticmethod
     def _write_file(path: Path, content: str) -> None:
@@ -88,9 +161,17 @@ class PythonTrackStateCliCompiledLocalFramework:
         return path.read_text(encoding="utf-8")
 
     @staticmethod
-    def _git(repository_path: Path, *args: str) -> None:
+    def _git(
+        repository_path: Path,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        effective_env = os.environ.copy()
+        if env:
+            effective_env.update(env)
         completed = subprocess.run(
             ("git", "-C", str(repository_path), *args),
+            env=effective_env,
             capture_output=True,
             text=True,
             check=False,

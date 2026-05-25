@@ -60,6 +60,22 @@ class MutableTrackStateProviderAdapter implements TrackStateProviderAdapter {
   Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'mock-revision',
+      sessionRevision:
+          '${_permission.canRead}:${_permission.canWrite}:${_permission.canCreateBranch}',
+      connectionState: _authenticationGate.isCompleted
+          ? ProviderConnectionState.connected
+          : ProviderConnectionState.disconnected,
+      permission: _permission,
+    ),
+  );
+
+  @override
   Future<bool> isLfsTracked(String path) async => false;
 
   @override

@@ -154,22 +154,33 @@ def main() -> None:
                         observed=attachments_body_text,
                     )
 
-                    choose_button_count = page.visible_button_count(
-                        "Choose attachment",
+                    upload_controls = page.observe_attachment_upload_controls()
+                    result["choose_attachment_button_count"] = (
+                        upload_controls.choose_button_count
                     )
-                    upload_button_count = page.visible_button_count(
-                        "Upload attachment",
+                    result["choose_attachment_button_enabled"] = (
+                        upload_controls.choose_button_enabled
                     )
-                    result["choose_attachment_button_count"] = choose_button_count
-                    result["upload_attachment_button_count"] = upload_button_count
-                    if choose_button_count != 1 or upload_button_count != 1:
+                    result["upload_attachment_button_count"] = (
+                        upload_controls.upload_button_count
+                    )
+                    result["upload_attachment_button_enabled"] = (
+                        upload_controls.upload_button_enabled
+                    )
+                    if (
+                        upload_controls.choose_button_count != 1
+                        or upload_controls.upload_button_count != 1
+                        or not upload_controls.choose_button_enabled
+                    ):
                         raise AssertionError(
                             "Step 2 failed: the live Attachments tab stayed in a limited or "
                             "download-only state and did not expose the visible `Choose "
                             "attachment` and `Upload attachment` controls required for the "
                             "duplicate replacement flow.\n"
-                            f"Observed choose button count: {choose_button_count}\n"
-                            f"Observed upload button count: {upload_button_count}\n"
+                            f"Observed choose button count: {upload_controls.choose_button_count}\n"
+                            f"Observed choose button enabled: {upload_controls.choose_button_enabled}\n"
+                            f"Observed upload button count: {upload_controls.upload_button_count}\n"
+                            f"Observed upload button enabled: {upload_controls.upload_button_enabled}\n"
                             f"Observed body text:\n{attachments_body_text}",
                         )
 
@@ -529,6 +540,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    product_failure = _is_product_failure(result)
+    result["failure_classification"] = (
+        "product" if product_failure else "precondition/setup"
+    )
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -546,7 +561,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if product_failure:
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -582,13 +600,26 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
         ),
         f"* Screenshot: {{{{{screenshot_path}}}}}",
-        "",
-        "*Step results*",
-        *_step_lines(result, jira=True),
-        "",
-        "*Human-style verification*",
-        *_human_lines(result, jira=True),
     ]
+    if not passed:
+        lines.append(
+            "* Failure classification: "
+            + (
+                "product-facing TS-389 failure after reaching the Attachments flow."
+                if _is_product_failure(result)
+                else "precondition/setup failure before the attachment replacement boundary; no downstream product bug output was generated."
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "*Step results*",
+            *_step_lines(result, jira=True),
+            "",
+            "*Human-style verification*",
+            *_human_lines(result, jira=True),
+        ]
+    )
     if not passed:
         lines.extend(
             [
@@ -634,13 +665,26 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
         ),
         f"- Screenshot: `{screenshot_path}`",
-        "",
-        "### Step results",
-        *_step_lines(result, jira=False),
-        "",
-        "### Human-style verification",
-        *_human_lines(result, jira=False),
     ]
+    if not passed:
+        lines.append(
+            "- Failure classification: "
+            + (
+                "product-facing TS-389 failure after reaching the Attachments flow."
+                if _is_product_failure(result)
+                else "precondition/setup failure before the attachment replacement boundary; no downstream product bug output was generated."
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "### Step results",
+            *_step_lines(result, jira=False),
+            "",
+            "### Human-style verification",
+            *_human_lines(result, jira=False),
+        ]
+    )
     if not passed:
         lines.extend(
             [
@@ -673,6 +717,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     if not passed:
         lines.extend(
             [
+                (
+                    "- Failure classification: product-facing TS-389 failure."
+                    if _is_product_failure(result)
+                    else "- Failure classification: precondition/setup failure before the attachment replacement boundary; no product bug output was generated."
+                ),
                 "",
                 "## Error",
                 "```text",
@@ -736,6 +785,10 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- Cleanup: `{result.get('cleanup')}`",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _is_product_failure(result: dict[str, object]) -> bool:
+    return _step_status(result, 1) == "passed"
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
