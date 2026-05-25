@@ -9627,21 +9627,30 @@ class _BasicConfigEntryEditor extends StatefulWidget {
 }
 
 class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
-  late final TextEditingController _idController;
-  late final TextEditingController _nameController;
+  late String _idValue;
+  late String _nameValue;
 
   @override
   void initState() {
     super.initState();
-    _idController = TextEditingController(text: widget.initial?.id ?? '');
-    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _idValue = widget.initial?.id ?? '';
+    _nameValue = widget.initial?.name ?? '';
   }
 
   @override
-  void dispose() {
-    _idController.dispose();
-    _nameController.dispose();
-    super.dispose();
+  void didUpdateWidget(covariant _BasicConfigEntryEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previousId = oldWidget.initial?.id ?? '';
+    final nextId = widget.initial?.id ?? '';
+    if (previousId != nextId) {
+      _idValue = nextId;
+    }
+
+    final previousName = oldWidget.initial?.name ?? '';
+    final nextName = widget.initial?.name ?? '';
+    if (previousName != nextName) {
+      _nameValue = nextName;
+    }
   }
 
   @override
@@ -9650,19 +9659,32 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        _SettingsTextField(
+          fieldKey: ValueKey('basic-config-entry-id-${widget.initial?.id ?? 'new'}'),
+          label: l10n.catalogId,
+          autofocus: widget.initial != null,
+          initialValue: _idValue,
+          onChanged: (value) => _idValue = value,
+        ),
         const SizedBox(height: 12),
-        _SettingsTextField(label: l10n.name, controller: _nameController),
+        _SettingsTextField(
+          fieldKey: ValueKey(
+            'basic-config-entry-name-${widget.initial?.id ?? 'new'}',
+          ),
+          label: l10n.name,
+          initialValue: _nameValue,
+          onChanged: (value) => _nameValue = value,
+        ),
         const SizedBox(height: 16),
         _SettingsEditorActions(
           onSave: () {
             Navigator.of(context).pop(
               TrackStateConfigEntry(
                 id: _normalizedEditorId(
-                  _idController.text,
-                  _nameController.text,
+                  _idValue,
+                  _nameValue,
                 ),
-                name: _nameController.text.trim(),
+                name: _nameValue.trim(),
               ),
             );
           },
@@ -12354,6 +12376,7 @@ class _SettingsTextField extends StatelessWidget {
     this.controller,
     this.initialValue,
     this.focusNode,
+    this.autofocus = false,
     this.helperText,
     this.onChanged,
     this.enabled = true,
@@ -12364,6 +12387,7 @@ class _SettingsTextField extends StatelessWidget {
   final TextEditingController? controller;
   final String? initialValue;
   final FocusNode? focusNode;
+  final bool autofocus;
   final String? helperText;
   final ValueChanged<String>? onChanged;
   final bool enabled;
@@ -12375,6 +12399,7 @@ class _SettingsTextField extends StatelessWidget {
       controller: controller,
       initialValue: controller == null ? initialValue : null,
       focusNode: focusNode,
+      autofocus: autofocus,
       enabled: enabled,
       onChanged: onChanged,
       decoration: InputDecoration(labelText: label, helperText: helperText),
