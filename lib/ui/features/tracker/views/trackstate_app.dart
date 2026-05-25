@@ -11346,12 +11346,14 @@ class _IssueDetailActionButton extends StatelessWidget {
     required this.onPressed,
     this.emphasized = false,
     this.sortOrder,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool emphasized;
   final double? sortOrder;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -11359,6 +11361,7 @@ class _IssueDetailActionButton extends StatelessWidget {
     final child = ExcludeSemantics(child: Text(label));
     final button = emphasized
         ? FilledButton(
+            focusNode: focusNode,
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
@@ -11371,6 +11374,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             child: child,
           )
         : OutlinedButton(
+            focusNode: focusNode,
             onPressed: onPressed,
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.text,
@@ -12994,6 +12998,7 @@ class _DropdownCreateField extends StatelessWidget {
     this.hintText,
     this.helperText,
     this.errorText,
+    this.focusNode,
   });
 
   final String label;
@@ -13004,6 +13009,7 @@ class _DropdownCreateField extends StatelessWidget {
   final String? errorText;
   final List<DropdownMenuItem<String>> items;
   final ValueChanged<String?>? onChanged;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -13011,6 +13017,7 @@ class _DropdownCreateField extends StatelessWidget {
       label: label,
       child: DropdownButtonFormField<String>(
         key: ValueKey('$label-${value ?? 'empty'}'),
+        focusNode: focusNode,
         initialValue: items.any((item) => item.value == value) ? value : null,
         isExpanded: true,
         items: items,
@@ -13058,6 +13065,8 @@ class _SelectableChipField extends StatelessWidget {
     required this.onToggle,
     this.enabled = true,
     this.optionLabelBuilder,
+    this.onEditRequested,
+    this.focusNode,
   });
 
   final String label;
@@ -13066,36 +13075,68 @@ class _SelectableChipField extends StatelessWidget {
   final ValueChanged<String> onToggle;
   final bool enabled;
   final String Function(TrackStateConfigEntry option)? optionLabelBuilder;
+  final VoidCallback? onEditRequested;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: label,
       container: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.labelMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in options)
-                FilterChip(
-                  label: Text(
-                    optionLabelBuilder?.call(option) ?? option.label(),
+      readOnly: true,
+      explicitChildNodes: true,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (onEditRequested == null)
+              Text(label, style: Theme.of(context).textTheme.labelMedium)
+            else
+              Semantics(
+                button: true,
+                enabled: enabled,
+                focusable: enabled,
+                label: label,
+                child: ExcludeSemantics(
+                  child: TextButton(
+                    focusNode: focusNode,
+                    onPressed: enabled ? onEditRequested : null,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: Size.zero,
+                      alignment: Alignment.centerLeft,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
                   ),
-                  selected: selectedValues.any(
-                    (value) =>
-                        _canonicalConfigId(value) ==
-                        _canonicalConfigId(option.id),
-                  ),
-                  onSelected: enabled ? (_) => onToggle(option.id) : null,
                 ),
-            ],
-          ),
-        ],
+              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in options)
+                  FilterChip(
+                    label: Text(
+                      optionLabelBuilder?.call(option) ?? option.label(),
+                    ),
+                    selected: selectedValues.any(
+                      (value) =>
+                          _canonicalConfigId(value) ==
+                          _canonicalConfigId(option.id),
+                    ),
+                    onSelected: enabled ? (_) => onToggle(option.id) : null,
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -13111,6 +13152,7 @@ class _LabelTokenField extends StatelessWidget {
     required this.onChanged,
     required this.onSubmitted,
     required this.onRemove,
+    this.focusNode,
   });
 
   final String label;
@@ -13121,6 +13163,7 @@ class _LabelTokenField extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
   final ValueChanged<String> onRemove;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -13134,6 +13177,7 @@ class _LabelTokenField extends StatelessWidget {
           value: controller.text,
           child: TextField(
             controller: controller,
+            focusNode: focusNode,
             enabled: enabled,
             onChanged: onChanged,
             onSubmitted: onSubmitted,
@@ -13770,6 +13814,15 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   late final TextEditingController _descriptionController;
   late final TextEditingController _assigneeController;
   late final TextEditingController _labelEntryController;
+  final GlobalKey _summaryFieldKey = GlobalKey(
+    debugLabel: 'edit-issue-summary',
+  );
+  late final FocusNode _labelsFocusNode;
+  late final FocusNode _summaryFocusNode;
+  late final FocusNode _componentsFocusNode;
+  late final FocusNode _fixVersionsFocusNode;
+  late final FocusNode _hierarchyFocusNode;
+  late final FocusNode _saveFocusNode;
   late String _selectedPriorityId;
   late final List<String> _labels;
   late final List<String> _components;
@@ -13798,6 +13851,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     );
     _assigneeController = TextEditingController(text: widget.issue.assignee);
     _labelEntryController = TextEditingController();
+    _summaryFocusNode = FocusNode(debugLabel: 'edit-issue-summary');
+    _labelsFocusNode = FocusNode(debugLabel: 'edit-issue-labels');
+    _componentsFocusNode = FocusNode(debugLabel: 'edit-issue-components');
+    _fixVersionsFocusNode = FocusNode(debugLabel: 'edit-issue-fix-versions');
+    _hierarchyFocusNode = FocusNode(debugLabel: 'edit-issue-hierarchy');
+    _saveFocusNode = FocusNode(debugLabel: 'edit-issue-save');
     _selectedPriorityId = widget.issue.priorityId;
     _labels = [...widget.issue.labels];
     _components = [...widget.issue.components];
@@ -13814,6 +13873,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     _descriptionController.dispose();
     _assigneeController.dispose();
     _labelEntryController.dispose();
+    _summaryFocusNode.dispose();
+    _labelsFocusNode.dispose();
+    _componentsFocusNode.dispose();
+    _fixVersionsFocusNode.dispose();
+    _hierarchyFocusNode.dispose();
+    _saveFocusNode.dispose();
     super.dispose();
   }
 
@@ -13895,6 +13960,77 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     });
   }
 
+  Future<void> _editConfigSelections({
+    required String label,
+    required List<TrackStateConfigEntry> options,
+    required List<String> values,
+    required String Function(TrackStateConfigEntry option) optionLabelBuilder,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    final selectedIds = {for (final value in values) _canonicalConfigId(value)};
+    final updatedSelection = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) {
+        final draftSelection = {...selectedIds};
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(label),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final option in options)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: draftSelection.contains(
+                          _canonicalConfigId(option.id),
+                        ),
+                        title: Text(optionLabelBuilder(option)),
+                        onChanged: (selected) {
+                          final optionId = _canonicalConfigId(option.id);
+                          setDialogState(() {
+                            if (selected ?? false) {
+                              draftSelection.add(optionId);
+                            } else {
+                              draftSelection.remove(optionId);
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(l10n.cancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(draftSelection),
+                  child: Text(l10n.save),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (!mounted || updatedSelection == null) {
+      return;
+    }
+    setState(() {
+      values
+        ..clear()
+        ..addAll([
+          for (final option in options)
+            if (updatedSelection.contains(_canonicalConfigId(option.id)))
+              option.id,
+        ]);
+    });
+  }
+
   bool _requiresHierarchyConfirmation() {
     if (_selectedParentKey == widget.issue.parentKey &&
         _selectedEpicKey == widget.issue.epicKey) {
@@ -13948,18 +14084,40 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     return confirmed ?? false;
   }
 
+  void _announceSummaryValidationError(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      final summaryContext = _summaryFieldKey.currentContext;
+      if (summaryContext != null) {
+        await Scrollable.ensureVisible(
+          summaryContext,
+          duration: Duration.zero,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      _summaryFocusNode.requestFocus();
+      SemanticsService.announce(message, Directionality.of(context));
+    });
+  }
+
   Future<void> _submit() async {
     setState(() {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    final l10n = AppLocalizations.of(context)!;
     if (_summaryController.text.trim().isEmpty) {
+      _announceSummaryValidationError(l10n.summaryRequired);
       return;
     }
     if (_isSubtaskType && _selectedParentKey == null) {
       return;
     }
-    final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
     final resolutionOptions =
         project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
@@ -14085,6 +14243,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         _selectedTransitionStatusId != null &&
         _canonicalConfigId(_selectedTransitionStatusId) == 'done' &&
         resolutionOptions.length > 1;
+    final nextAfterFixVersionsFocusNode = _isEpicType
+        ? _saveFocusNode
+        : _hierarchyFocusNode;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -14122,331 +14283,473 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                   semanticLabel: widget.workflowOnly
                       ? l10n.transitionIssue
                       : l10n.editIssue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (widget.viewModel.message != null) ...[
-                                _MessageBanner(
-                                  message: widget.viewModel.message!,
-                                  onDismiss: widget.viewModel.dismissMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              if (widget
-                                  .viewModel
-                                  .hasPendingWorkspaceSyncRefresh) ...[
-                                _InlineInfoBanner(
-                                  message: l10n.workspaceSyncPendingMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              _SectionTitle(
-                                widget.workflowOnly
-                                    ? l10n.transitionIssue
-                                    : l10n.editIssue,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${widget.issue.key} · $issueTypeLabel',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 12),
-                              _ReadOnlyCreateField(
-                                label: l10n.currentStatus,
-                                value:
-                                    project?.statusLabel(
-                                      widget.issue.statusId,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    widget.issue.status.label,
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: l10n.status,
-                                value: _selectedTransitionStatusId,
-                                enabled: canEditFields && !_loadingTransitions,
-                                hintText: _transitionOptions.isEmpty
-                                    ? l10n.noTransitionsAvailable
-                                    : l10n.optional,
-                                helperText: l10n.statusTransitionHelper,
-                                items: [
-                                  for (final option in _transitionOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.statusLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                  explicitChildNodes: true,
+                  child: FocusTraversalGroup(
+                    policy: OrderedTraversalPolicy(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (widget.viewModel.message != null) ...[
+                                  _MessageBanner(
+                                    message: widget.viewModel.message!,
+                                    onDismiss: widget.viewModel.dismissMessage,
+                                  ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedTransitionStatusId = value;
-                                    _selectedResolutionId =
-                                        _canonicalConfigId(value) != 'done'
-                                        ? null
-                                        : (resolutionOptions.length == 1
-                                              ? resolutionOptions.single.id
-                                              : _selectedResolutionId);
-                                  });
-                                },
-                              ),
-                              if (showResolution) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: resolutionLabel,
-                                  value: _selectedResolutionId,
-                                  enabled: canEditFields,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedResolutionId == null
-                                      ? l10n.resolutionRequired
-                                      : null,
-                                  items: [
-                                    for (final option in resolutionOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.id,
-                                        child: Text(
-                                          project?.resolutionLabel(
-                                                option.id,
-                                                locale: metadataLocale,
-                                              ) ??
-                                              option.name,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedResolutionId = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                              const SizedBox(height: 20),
-                              Semantics(
-                                label: summaryLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
-                                    errorText:
-                                        _didAttemptSubmit &&
-                                            _summaryController.text
-                                                .trim()
-                                                .isEmpty
-                                        ? l10n.summaryRequired
-                                        : null,
+                                if (widget
+                                    .viewModel
+                                    .hasPendingWorkspaceSyncRefresh) ...[
+                                  _InlineInfoBanner(
+                                    message: l10n.workspaceSyncPendingMessage,
                                   ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: l10n.description,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 4,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: priorityLabel,
-                                value: _selectedPriorityId,
-                                enabled: canEditFields,
-                                items: [
-                                  for (final option in priorityOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.priorityLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _selectedPriorityId = value;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: assigneeLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                    hintText: l10n.unassigned,
-                                  ),
+                                _SectionTitle(
+                                  widget.workflowOnly
+                                      ? l10n.transitionIssue
+                                      : l10n.editIssue,
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              _LabelTokenField(
-                                label: labelsLabel,
-                                controller: _labelEntryController,
-                                labels: _labels,
-                                enabled: canEditFields,
-                                helperText: l10n.labelsTokenHelper,
-                                onChanged: (_) => _commitLabels(),
-                                onSubmitted: (_) =>
-                                    _commitLabels(commitRemainder: true),
-                                onRemove: (label) {
-                                  setState(() {
-                                    _labels.remove(label);
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: componentsLabel,
-                                options: componentOptions,
-                                selectedValues: _components,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.componentLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_components, value),
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: fixVersionsLabel,
-                                options: versionOptions,
-                                selectedValues: _fixVersions,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.versionLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_fixVersions, value),
-                              ),
-                              if (!_isEpicType && !_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: epicLabel,
-                                  value: _selectedEpicKey ?? '',
-                                  enabled: canEditFields,
-                                  items: [
-                                    DropdownMenuItem<String>(
-                                      value: '',
-                                      child: Text(l10n.noEpic),
-                                    ),
-                                    for (final option in epicOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedEpicKey = _emptyToNull(value);
-                                    });
-                                  },
-                                ),
-                              ],
-                              if (_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: parentLabel,
-                                  value: _selectedParentKey,
-                                  enabled: canEditFields,
-                                  hintText: parentOptions.isEmpty
-                                      ? l10n.noEligibleParents
-                                      : null,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedParentKey == null
-                                      ? l10n.subTaskParentRequired
-                                      : null,
-                                  items: [
-                                    for (final option in parentOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: parentOptions.isEmpty
-                                      ? null
-                                      : (value) {
-                                          setState(() {
-                                            _selectedParentKey = value;
-                                          });
-                                        },
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${widget.issue.key} · $issueTypeLabel',
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 const SizedBox(height: 12),
                                 _ReadOnlyCreateField(
-                                  label: epicLabel,
-                                  value: derivedEpic == null
-                                      ? l10n.derivedFromParent
-                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
-                                  helperText: l10n.epicDerivedFromParent,
+                                  label: l10n.currentStatus,
+                                  value:
+                                      project?.statusLabel(
+                                        widget.issue.statusId,
+                                        locale: metadataLocale,
+                                      ) ??
+                                      widget.issue.status.label,
                                 ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 1,
+                                  child: _DropdownCreateField(
+                                    label: l10n.status,
+                                    value: _selectedTransitionStatusId,
+                                    enabled:
+                                        canEditFields && !_loadingTransitions,
+                                    hintText: _transitionOptions.isEmpty
+                                        ? l10n.noTransitionsAvailable
+                                        : l10n.optional,
+                                    helperText: l10n.statusTransitionHelper,
+                                    items: [
+                                      for (final option in _transitionOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.statusLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedTransitionStatusId = value;
+                                        _selectedResolutionId =
+                                            _canonicalConfigId(value) != 'done'
+                                            ? null
+                                            : (resolutionOptions.length == 1
+                                                  ? resolutionOptions.single.id
+                                                  : _selectedResolutionId);
+                                      });
+                                    },
+                                  ),
+                                ),
+                                if (showResolution) ...[
+                                  const SizedBox(height: 12),
+                                  _OrderedFocusAction(
+                                    order: 2,
+                                    child: _DropdownCreateField(
+                                      label: resolutionLabel,
+                                      value: _selectedResolutionId,
+                                      enabled: canEditFields,
+                                      errorText:
+                                          _didAttemptSubmit &&
+                                              _selectedResolutionId == null
+                                          ? l10n.resolutionRequired
+                                          : null,
+                                      items: [
+                                        for (final option in resolutionOptions)
+                                          DropdownMenuItem<String>(
+                                            value: option.id,
+                                            child: Text(
+                                              project?.resolutionLabel(
+                                                    option.id,
+                                                    locale: metadataLocale,
+                                                  ) ??
+                                                  option.name,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _selectedResolutionId = value;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 20),
+                                _OrderedFocusAction(
+                                  order: 3,
+                                  child: Semantics(
+                                    key: _summaryFieldKey,
+                                    label: summaryLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _summaryController.text,
+                                    child: TextField(
+                                      controller: _summaryController,
+                                      focusNode: _summaryFocusNode,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: summaryLabel,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _summaryController.text
+                                                    .trim()
+                                                    .isEmpty
+                                            ? l10n.summaryRequired
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 4,
+                                  child: Semantics(
+                                    label: l10n.description,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _descriptionController.text,
+                                    child: TextField(
+                                      controller: _descriptionController,
+                                      minLines: 4,
+                                      maxLines: null,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: l10n.description,
+                                        alignLabelWithHint: true,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 5,
+                                  child: _DropdownCreateField(
+                                    label: priorityLabel,
+                                    value: _selectedPriorityId,
+                                    enabled: canEditFields,
+                                    items: [
+                                      for (final option in priorityOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.priorityLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value == null) {
+                                        return;
+                                      }
+                                      setState(() {
+                                        _selectedPriorityId = value;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 6,
+                                  child: Semantics(
+                                    label: assigneeLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _assigneeController.text,
+                                    child: TextField(
+                                      controller: _assigneeController,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: assigneeLabel,
+                                        hintText: l10n.unassigned,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 7,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _LabelTokenField(
+                                      label: labelsLabel,
+                                      controller: _labelEntryController,
+                                      labels: _labels,
+                                      enabled: canEditFields,
+                                      helperText: l10n.labelsTokenHelper,
+                                      focusNode: _labelsFocusNode,
+                                      onChanged: (_) => _commitLabels(),
+                                      onSubmitted: (_) =>
+                                          _commitLabels(commitRemainder: true),
+                                      onRemove: (label) {
+                                        setState(() {
+                                          _labels.remove(label);
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 8,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _fixVersionsFocusNode.requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _labelsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: componentsLabel,
+                                      options: componentOptions,
+                                      selectedValues: _components,
+                                      enabled: canEditFields,
+                                      focusNode: _componentsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: componentsLabel,
+                                            options: componentOptions,
+                                            values: _components,
+                                            optionLabelBuilder: (option) =>
+                                                project?.componentLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.componentLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _components,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 9,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () => nextAfterFixVersionsFocusNode
+                                          .requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: fixVersionsLabel,
+                                      options: versionOptions,
+                                      selectedValues: _fixVersions,
+                                      enabled: canEditFields,
+                                      focusNode: _fixVersionsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: fixVersionsLabel,
+                                            options: versionOptions,
+                                            values: _fixVersions,
+                                            optionLabelBuilder: (option) =>
+                                                project?.versionLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.versionLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _fixVersions,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                if (!_isEpicType && !_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: epicLabel,
+                                        value: _selectedEpicKey ?? '',
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        items: [
+                                          DropdownMenuItem<String>(
+                                            value: '',
+                                            child: Text(l10n.noEpic),
+                                          ),
+                                          for (final option in epicOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedEpicKey = _emptyToNull(
+                                              value,
+                                            );
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                if (_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: parentLabel,
+                                        value: _selectedParentKey,
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        hintText: parentOptions.isEmpty
+                                            ? l10n.noEligibleParents
+                                            : null,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _selectedParentKey == null
+                                            ? l10n.subTaskParentRequired
+                                            : null,
+                                        items: [
+                                          for (final option in parentOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: parentOptions.isEmpty
+                                            ? null
+                                            : (value) {
+                                                setState(() {
+                                                  _selectedParentKey = value;
+                                                });
+                                              },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _ReadOnlyCreateField(
+                                    label: epicLabel,
+                                    value: derivedEpic == null
+                                        ? l10n.derivedFromParent
+                                        : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                    helperText: l10n.epicDerivedFromParent,
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _IssueDetailActionButton(
-                            label: l10n.save,
-                            emphasized: true,
-                            onPressed: canEditFields ? _submit : null,
-                          ),
-                          _IssueDetailActionButton(
-                            label: l10n.cancel,
-                            onPressed: widget.viewModel.isSaving
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              sortOrder: 20,
+                              focusNode: _saveFocusNode,
+                              onPressed: canEditFields ? _submit : null,
+                            ),
+                            _IssueDetailActionButton(
+                              label: l10n.cancel,
+                              sortOrder: 21,
+                              onPressed: widget.viewModel.isSaving
+                                  ? null
+                                  : () => Navigator.of(context).pop(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
