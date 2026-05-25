@@ -345,6 +345,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         writeBranch: writeBranch,
       );
     }
+
     return LocalTrackStateRepository(
       repositoryPath: repositoryPath,
       dataRef: defaultBranch,
@@ -5221,6 +5222,25 @@ String _hostedWorkspaceAccessModeLabel(
   };
 }
 
+Future<void> _showIssueEditDialog(
+  BuildContext context, {
+  required TrackStateIssue issue,
+  required TrackerViewModel viewModel,
+  required bool workflowOnly,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.12),
+    builder: (dialogContext) {
+      return _IssueEditDialog(
+        issue: issue,
+        viewModel: viewModel,
+        workflowOnly: workflowOnly,
+      );
+    },
+  );
+}
+
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel, {
@@ -6403,6 +6423,10 @@ class _Board extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
+            final canEditFromBoard =
+                !compact &&
+                !viewModel.hasBlockedWriteAccess &&
+                !viewModel.isSaving;
             final columns = IssueStatus.values.map((status) {
               final title =
                   project?.statusLabel(status.id, locale: metadataLocale) ??
@@ -6415,6 +6439,14 @@ class _Board extends StatelessWidget {
                   issue,
                   returnSection: TrackerSection.board,
                 ),
+                onEdit: canEditFromBoard
+                    ? (issue) => _showIssueEditDialog(
+                        context,
+                        issue: issue,
+                        viewModel: viewModel,
+                        workflowOnly: false,
+                      )
+                    : null,
                 onMove: viewModel.moveIssue,
               );
             }).toList();
@@ -10975,16 +11007,11 @@ class _IssueDetailState extends State<_IssueDetail> {
   }
 
   Future<void> _openEditDialog({required bool workflowOnly}) async {
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.12),
-      builder: (dialogContext) {
-        return _IssueEditDialog(
-          issue: widget.issue,
-          viewModel: widget.viewModel,
-          workflowOnly: workflowOnly,
-        );
-      },
+    await _showIssueEditDialog(
+      context,
+      issue: widget.issue,
+      viewModel: widget.viewModel,
+      workflowOnly: workflowOnly,
     );
   }
 
@@ -11620,6 +11647,7 @@ class _BoardColumn extends StatelessWidget {
     required this.targetStatus,
     required this.issues,
     required this.onSelect,
+    this.onEdit,
     required this.onMove,
   });
 
@@ -11627,6 +11655,7 @@ class _BoardColumn extends StatelessWidget {
   final IssueStatus targetStatus;
   final List<TrackStateIssue> issues;
   final ValueChanged<TrackStateIssue> onSelect;
+  final ValueChanged<TrackStateIssue>? onEdit;
   final void Function(TrackStateIssue issue, IssueStatus status) onMove;
 
   @override
@@ -11680,6 +11709,9 @@ class _BoardColumn extends StatelessWidget {
                           child: _IssueCard(
                             issue: issue,
                             onTap: () => onSelect(issue),
+                            onEdit: onEdit == null
+                                ? null
+                                : () => onEdit!(issue),
                           ),
                         ),
                       if (issues.isEmpty)
@@ -11708,67 +11740,101 @@ class _BoardColumn extends StatelessWidget {
 }
 
 class _IssueCard extends StatelessWidget {
-  const _IssueCard({required this.issue, required this.onTap});
+  const _IssueCard({required this.issue, required this.onTap, this.onEdit});
 
   final TrackStateIssue issue;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final card = Semantics(
-      button: true,
-      label: 'Open ${issue.key} ${issue.summary}',
-      child: InkWell(
+    final card = Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: ExcludeSemantics(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surface,
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            button: true,
+            label: 'Open ${issue.key} ${issue.summary}',
+            child: InkWell(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _IssueTypeGlyph(issue.issueType),
-                    const SizedBox(width: 8),
-                    Text(
-                      issue.key,
-                      style: TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 12,
-                        color: colors.muted,
+              onTap: onTap,
+              child: ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _IssueTypeGlyph(issue.issueType),
+                          const SizedBox(width: 8),
+                          Text(
+                            issue.key,
+                            style: TextStyle(
+                              fontFamily: 'JetBrains Mono',
+                              fontSize: 12,
+                              color: colors.muted,
+                            ),
+                          ),
+                          const Spacer(),
+                          _Avatar(name: issue.assignee),
+                        ],
                       ),
-                    ),
-                    const Spacer(),
-                    _Avatar(name: issue.assignee),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        issue.summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _Chip(label: issue.issueType.label),
+                          _PriorityBadge(priority: issue.priority),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  issue.summary,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _Chip(label: issue.issueType.label),
-                    _PriorityBadge(priority: issue.priority),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (onEdit != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Semantics(
+                  button: true,
+                  label: l10n.edit,
+                  child: TextButton(
+                    key: ValueKey('board-edit-${issue.key}'),
+                    onPressed: onEdit,
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: ExcludeSemantics(child: Text(l10n.edit)),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
     return Draggable<TrackStateIssue>(
