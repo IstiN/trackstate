@@ -1551,6 +1551,67 @@ void main() {
     );
 
     test(
+      'local attachment upload preserves a custom display name and source media type',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/sample.pdf');
+        final uploadBytes = '%PDF-1.4\nlocal cli attachment\n'.codeUnits;
+        await uploadFile.writeAsBytes(uploadBytes);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'Spec Document',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final attachment = data['attachment']! as Map<String, Object?>;
+        final attachmentsDir = Directory('${repo.path}/DEMO/DEMO-1/attachments');
+        final storedFiles = await attachmentsDir
+            .list()
+            .where((entity) => entity is File)
+            .cast<File>()
+            .toList();
+        final storedRelativePath = storedFiles.single.path
+            .substring(repo.path.length + 1)
+            .replaceAll('\\', '/');
+        final metadata =
+            jsonDecode(
+                  File(
+                    '${repo.path}/DEMO/DEMO-1/attachments.json',
+                  ).readAsStringSync(),
+                )
+                as List<Object?>;
+        final metadataEntry = metadata.single as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(data['issue'], 'DEMO-1');
+        expect(attachment['name'], 'Spec Document');
+        expect(attachment['mediaType'], 'application/pdf');
+        expect(attachment['id'], storedRelativePath);
+        expect(metadataEntry['name'], 'Spec Document');
+        expect(metadataEntry['mediaType'], 'application/pdf');
+        expect(await storedFiles.single.readAsBytes(), uploadBytes);
+      },
+    );
+
+    test(
       'local release-backed attachment uploads forward optional GitHub credentials',
       () async {
         final uploadFile = File(
@@ -3118,6 +3179,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     final uploadException = this.uploadException;
     if (uploadException != null) {
