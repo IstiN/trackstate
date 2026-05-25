@@ -875,18 +875,14 @@ class TrackStateCli {
           const <String>[],
     );
     final body = _parseJsonBody(results['body']?.toString());
-    final normalizedRequestPath = requestPath.trim().toLowerCase();
-    if (normalizedRequestPath.contains('/attachment/')) {
-      throw _mapCompatibilityError(
-        const JiraCompatibilityRequestException(
-          code: 'UNSUPPORTED_REQUEST',
-          message:
-              'Attachment and binary Jira paths are not supported through jira_execute_request. Use the dedicated attachment commands instead.',
-        ),
-      );
-    }
 
     try {
+      _jiraCompatibilityService.validate(
+        method: method,
+        path: requestPath,
+        query: query,
+        body: body,
+      );
       return await switch (target.type) {
         TrackStateCliTargetType.local => _runLocalExecuteRequest(
           target,
@@ -903,6 +899,14 @@ class TrackStateCli {
           body: body,
         ),
       };
+    } on JiraCompatibilityRequestException catch (error) {
+      return _error(
+        _mapCompatibilityError(error),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: TrackStateCliOutput.json,
+      );
     } on _TrackStateCliException catch (error) {
       return _error(
         error,
