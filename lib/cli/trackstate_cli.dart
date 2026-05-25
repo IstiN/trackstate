@@ -662,11 +662,12 @@ class TrackStateCli {
       );
     }
     final bytes = await sourceFile.readAsBytes();
+    final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
         results['name']?.toString().trim().ifEmpty(
-          _fileNameFromPath(resolvedFilePath),
+          sourceName,
         ) ??
-        _fileNameFromPath(resolvedFilePath);
+        sourceName;
 
     try {
       return await switch (target.type) {
@@ -675,6 +676,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
         TrackStateCliTargetType.hosted => _runHostedAttachmentUpload(
@@ -682,6 +684,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
       };
@@ -3367,6 +3370,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final branch = await _resolveLocalBranch(target);
@@ -3403,6 +3407,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3431,6 +3436,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final credential = await _resolveHostedCredential(target);
@@ -3465,6 +3471,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
