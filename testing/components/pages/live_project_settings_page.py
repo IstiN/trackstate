@@ -92,6 +92,13 @@ class ProjectSettingsNavigationState:
 
 
 @dataclass(frozen=True)
+class ProjectSettingsSaveState:
+    body_text: str
+    save_button_enabled: bool
+    save_failure_text: str | None
+
+
+@dataclass(frozen=True)
 class ProjectSettingsAdminTabObservation:
     label: str
     selected_tab_label: str
@@ -607,6 +614,54 @@ class LiveProjectSettingsPage:
         self._session.click(self._save_settings_selector, timeout_ms=30_000)
         self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
         return self.body_text()
+
+    def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
+        self._scroll_into_view(self._save_settings_selector)
+        self._session.click(self._save_settings_selector, timeout_ms=timeout_ms)
+        return self.body_text()
+
+    def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
+        self._session.wait_for_function(
+            """
+            (selector) => {
+              const button = document.querySelector(selector);
+              return !!button && button.getAttribute('aria-disabled') !== 'true';
+            }
+            """,
+            arg=self._save_settings_selector,
+            timeout_ms=timeout_ms,
+        )
+        return self.body_text()
+
+    def read_save_state(self) -> ProjectSettingsSaveState:
+        payload = self._session.evaluate(
+            r"""
+            (selector) => {
+              const bodyText = document.body?.innerText ?? '';
+              const button = document.querySelector(selector);
+              const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
+              return {
+                bodyText,
+                saveButtonEnabled: !!button && button.getAttribute('aria-disabled') !== 'true',
+                saveFailureText: saveFailureMatch ? saveFailureMatch[0].trim() : null,
+              };
+            }
+            """,
+            arg=self._save_settings_selector,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted Settings page did not expose a readable save-state snapshot.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        save_failure_text = payload.get("saveFailureText")
+        return ProjectSettingsSaveState(
+            body_text=str(payload.get("bodyText", "")),
+            save_button_enabled=bool(payload.get("saveButtonEnabled")),
+            save_failure_text=(
+                str(save_failure_text).strip() if save_failure_text is not None else None
+            ),
+        )
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)

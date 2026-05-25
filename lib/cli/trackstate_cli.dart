@@ -195,7 +195,10 @@ class TrackStateCli {
       'versions list' => 'versions',
       'profile get' => 'profile',
       'user get' => 'user',
-      'link-types list' || 'link-type list' => 'link-types',
+      'link-types list' ||
+      'link-type list' ||
+      'issue-link-types list' ||
+      'issue-link-type list' => 'link-types',
       'account-by-email get' => 'account-by-email',
       _ => null,
     };
@@ -662,11 +665,12 @@ class TrackStateCli {
       );
     }
     final bytes = await sourceFile.readAsBytes();
+    final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
         results['name']?.toString().trim().ifEmpty(
-          _fileNameFromPath(resolvedFilePath),
+          sourceName,
         ) ??
-        _fileNameFromPath(resolvedFilePath);
+        sourceName;
 
     try {
       return await switch (target.type) {
@@ -675,6 +679,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
         TrackStateCliTargetType.hosted => _runHostedAttachmentUpload(
@@ -682,6 +687,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
       };
@@ -872,18 +878,14 @@ class TrackStateCli {
           const <String>[],
     );
     final body = _parseJsonBody(results['body']?.toString());
-    final normalizedRequestPath = requestPath.trim().toLowerCase();
-    if (normalizedRequestPath.contains('/attachment/')) {
-      throw _mapCompatibilityError(
-        const JiraCompatibilityRequestException(
-          code: 'UNSUPPORTED_REQUEST',
-          message:
-              'Attachment and binary Jira paths are not supported through jira_execute_request. Use the dedicated attachment commands instead.',
-        ),
-      );
-    }
 
     try {
+      _jiraCompatibilityService.validate(
+        method: method,
+        path: requestPath,
+        query: query,
+        body: body,
+      );
       return await switch (target.type) {
         TrackStateCliTargetType.local => _runLocalExecuteRequest(
           target,
@@ -900,6 +902,14 @@ class TrackStateCli {
           body: body,
         ),
       };
+    } on JiraCompatibilityRequestException catch (error) {
+      return _error(
+        _mapCompatibilityError(error),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: TrackStateCliOutput.json,
+      );
     } on _TrackStateCliException catch (error) {
       return _error(
         error,
@@ -2455,7 +2465,10 @@ class TrackStateCli {
     'versions' => 'versions',
     'profile' => 'profile',
     'user' => 'user',
-    'link-types' || 'link-type' => 'link-types',
+    'link-types' ||
+    'link-type' ||
+    'issue-link-types' ||
+    'issue-link-type' => 'link-types',
     'account-by-email' => 'account-by-email',
     _ => null,
   };
@@ -3367,6 +3380,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final branch = await _resolveLocalBranch(target);
@@ -3403,6 +3417,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3431,6 +3446,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final credential = await _resolveHostedCredential(target);
@@ -3465,6 +3481,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -6385,6 +6402,7 @@ class TrackStateCli {
         '  trackstate profile get',
         '  trackstate user get --login octocat',
         '  trackstate link-types list',
+        '  trackstate issue-link-types list',
       ].join('\n');
     }
 
@@ -6401,7 +6419,9 @@ class TrackStateCli {
         '  trackstate read components [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'versions' =>
         '  trackstate read versions [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
-      'link-types' => '  trackstate read link-types [--output json|text]',
+      'link-types' =>
+        '  trackstate read link-types [--output json|text]\n'
+            '  trackstate read issue-link-types [--output json|text]',
       'profile' =>
         '  trackstate read profile [--path /repo|--target hosted --provider github --repository owner/name] [--output json|text]',
       'user' =>

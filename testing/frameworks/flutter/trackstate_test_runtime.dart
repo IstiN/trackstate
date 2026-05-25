@@ -199,6 +199,11 @@ class _PreloadedLocalGitRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) =>
-      repository.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+    String? sourceName,
+  }) => repository.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 }

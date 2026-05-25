@@ -188,6 +188,22 @@ void main() {
     expect(viewModel.hasMoreSearchResults, isFalse);
   });
 
+  test('empty JQL query shows all issues instead of the first page only', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 8);
+    expect(viewModel.searchResults.length, 8);
+    expect(viewModel.searchResults.last.key, 'TRACK-8');
+    expect(viewModel.hasMoreSearchResults, isFalse);
+  });
+
   test(
     'view model restores the last valid query after a search failure',
     () async {
@@ -1101,7 +1117,7 @@ void main() {
       expect(viewModel.selectedIssue?.attachments, isNotEmpty);
       expect(
         viewModel.selectedIssue?.attachments.first.name,
-        'release-notes.pdf',
+        'release notes.pdf',
       );
       expect(viewModel.selectedIssue?.attachments.first.sizeBytes, 4);
     },
@@ -1793,6 +1809,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -2191,6 +2208,7 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     final sanitizedName = sanitizeAttachmentName(name);
     final updated = issue.copyWith(
@@ -2860,6 +2878,7 @@ class _StartupRecoveryRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
