@@ -455,7 +455,9 @@ class ProjectSettingsValidationService {
           );
         }
       }
-      if (field.type == 'option' && field.options.isEmpty) {
+      if (field.type == 'option' &&
+          field.options.isEmpty &&
+          !_allowsCatalogBackedOptions(id)) {
         throw TrackStateProviderException(
           'Field "$id" must define at least one option because it uses type "option".',
         );
@@ -488,4 +490,6 @@ class ProjectSettingsValidationService {
       );
     }
   }
+
+  bool _allowsCatalogBackedOptions(String fieldId) => fieldId == 'priority';
 }
