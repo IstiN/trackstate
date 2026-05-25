@@ -60,27 +60,17 @@ class IssueDetailAccessibilityRobot
     };
 
     final order = <String>[];
-    final visitedLabels = <String>{};
-    for (var index = 0; index < 18; index += 1) {
+    var enteredCollaborationStrip = false;
+    for (var index = 0; index < 24; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       final label = _focusedLabel(candidates);
       if (label != null) {
         order.add(label);
-        visitedLabels.add(label);
-        break;
+        enteredCollaborationStrip = true;
+        continue;
       }
-    }
-
-    for (var index = 0; index < candidates.length * 2; index += 1) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.pump();
-      final label = _focusedLabel(candidates);
-      if (label != null) {
-        order.add(label);
-        visitedLabels.add(label);
-      }
-      if (visitedLabels.length == candidates.length) {
+      if (enteredCollaborationStrip) {
         break;
       }
     }
