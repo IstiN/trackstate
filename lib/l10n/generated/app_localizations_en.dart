@@ -229,6 +229,9 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get commentPlaceholder => 'Add a comment...';
+
+  @override
   String get postComment => 'Post comment';
 
   @override
