@@ -11,10 +11,27 @@ The automation:
 5. enters draft text and verifies typed content remains visually distinct from the
    placeholder styling
 
+## Install dependencies
+
+```bash
+flutter pub get
+```
+
 ## Run this test
 
 ```bash
-flutter test testing/tests/TS-393/test_ts_393.dart
+flutter test testing/tests/TS-393/test_ts_393.dart --reporter expanded
+```
+
+## Required environment and config
+
+- Flutter SDK available on `PATH`
+- No extra environment variables are required
+
+## Expected output when the test passes
+
+```text
+00:00 +1: All tests passed!
 ```
 
 ## Expected result
