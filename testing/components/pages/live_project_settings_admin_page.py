@@ -171,17 +171,27 @@ class LiveProjectSettingsAdminPage:
         return label
 
     def save_project_settings(self) -> str:
-        save_selector = f'{self.BUTTON_SELECTOR}[aria-label="Save settings"]'
-        self._scroll_into_view(save_selector)
-        self.session.click(save_selector, timeout_ms=30_000)
+        save_label = "Save settings"
+        self._scroll_into_view(self.BUTTON_SELECTOR, has_text=save_label)
+        self.session.click(
+            self.BUTTON_SELECTOR,
+            has_text=save_label,
+            timeout_ms=30_000,
+        )
         self.session.wait_for_function(
             """
-            (selector) => {
-              const button = document.querySelector(selector);
+            ({ selector, label }) => {
+              const button = Array.from(document.querySelectorAll(selector)).find(
+                (element) => {
+                  const text = element.innerText ?? element.textContent ?? '';
+                  const ariaLabel = element.getAttribute('aria-label') ?? '';
+                  return text.includes(label) || ariaLabel.includes(label);
+                }
+              );
               return !!button && button.getAttribute('aria-disabled') !== 'true';
             }
             """,
-            arg=save_selector,
+            arg={"selector": self.BUTTON_SELECTOR, "label": save_label},
             timeout_ms=120_000,
         )
         return self.current_body_text()
