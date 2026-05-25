@@ -316,6 +316,56 @@ void main() {
     },
   );
 
+  testWidgets(
+    'simple catalog editor preloads selected component after adding a priority',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      Finder fieldInput(String label) => find.descendant(
+        of: find.widgetWithText(TextFormField, label),
+        matching: find.byType(EditableText),
+      );
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Priorities'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add priority'));
+        await tester.pumpAndSettle();
+        await tester.enterText(fieldInput('ID'), 'ultra');
+        await tester.enterText(fieldInput('Name'), 'Ultra High');
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Components'));
+        await tester.pumpAndSettle();
+        final editAutomation = find.bySemanticsLabel('Edit component Automation');
+        await tester.ensureVisible(editAutomation);
+        await tester.tap(editAutomation, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<EditableText>(fieldInput('ID')).controller.text,
+          'automation',
+        );
+        expect(
+          tester.widget<EditableText>(fieldInput('Name')).controller.text,
+          'Automation',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
   testWidgets('settings locale editor exposes a validated locale selector', (
     tester,
   ) async {
