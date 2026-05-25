@@ -25,10 +25,12 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
 
     def test_multi_field_update_uses_one_success_envelope_and_one_commit(self) -> None:
         observation = self.validator.validate(config=self.config).observation
+        failures: list[str] = []
 
-        self.assertEqual(
-            observation.requested_command,
-            (
+        self._check_equal(
+            failures=failures,
+            actual=observation.requested_command,
+            expected=(
                 *self.config.requested_command_prefix,
                 "--path",
                 observation.repository_path,
@@ -43,169 +45,242 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
                 "--field",
                 self.config.field_assignments[3],
             ),
-            "Precondition failed: TS-460 did not execute the expected multi-field "
-            "update command against the disposable Local Git repository.\n"
-            f"Requested command: {observation.requested_command_text}",
+            message=(
+                "Precondition failed: TS-460 did not execute the expected "
+                "multi-field update command against the disposable Local Git "
+                "repository.\n"
+                f"Requested command: {observation.requested_command_text}"
+            ),
         )
 
-        payload = self._assert_successful_envelope(
+        payload = self._successful_envelope_or_failures(
             result=observation.result,
             failure_prefix="Step 1 failed",
+            failures=failures,
         )
-        data = payload["data"]
-        assert isinstance(data, dict)
-        issue = data["issue"]
-        self.assertIsInstance(
-            issue,
-            dict,
-            "Step 2 failed: the success envelope did not include an updated issue "
-            "object.\n"
-            f"Observed payload: {payload}",
-        )
-        assert isinstance(issue, dict)
+        data = payload.get("data") if payload is not None else None
+        issue = data.get("issue") if isinstance(data, dict) else None
 
-        self.assertEqual(
-            data["command"],
-            self.config.expected_command_name,
-            "Step 1 failed: the success envelope did not identify the canonical "
-            "multi-field update command.\n"
-            f"Observed payload: {payload}",
-        )
-        self.assertEqual(
-            data["operation"],
-            "update-fields",
-            "Expected result failed: the update did not report the shared field "
-            "mutation operation.\n"
-            f"Observed payload: {payload}",
-        )
-        self.assertEqual(
-            data["revision"],
-            observation.final_head_revision,
-            "Expected result failed: the reported revision did not match the final "
-            "repository HEAD after the multi-field update.\n"
-            f"Envelope revision: {data['revision']}\n"
-            f"Final HEAD: {observation.final_head_revision}",
-        )
-        self.assertEqual(
-            issue["summary"],
-            self.config.updated_summary,
-            "Step 2 failed: the returned issue payload did not preserve the updated "
-            "summary.\n"
-            f"Observed issue: {issue}",
-        )
-        self.assertEqual(
-            issue["priority"],
-            self.config.updated_priority_id,
-            "Step 2 failed: the returned issue payload did not resolve the updated "
-            "priority to the canonical id.\n"
-            f"Observed issue: {issue}",
-        )
-        self.assertEqual(
-            issue["assignee"],
-            self.config.updated_assignee,
-            "Step 2 failed: the returned issue payload did not preserve the updated "
-            "assignee.\n"
-            f"Observed issue: {issue}",
-        )
-        self.assertEqual(
-            issue["labels"],
-            list(self.config.updated_labels),
-            "Step 2 failed: the returned issue payload did not preserve the updated "
-            "labels.\n"
-            f"Observed issue: {issue}",
-        )
-        self.assertEqual(
-            issue["storagePath"],
-            observation.main_file_relative_path,
-            "Expected result failed: the updated issue payload did not point to the "
-            "canonical markdown file path.\n"
-            f"Observed issue: {issue}",
-        )
+        if isinstance(data, dict):
+            self._check_equal(
+                failures=failures,
+                actual=data.get("command"),
+                expected=self.config.expected_command_name,
+                message=(
+                    "Step 1 failed: the success envelope did not identify the "
+                    "canonical multi-field update command.\n"
+                    f"Observed payload: {payload}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=data.get("operation"),
+                expected="update-fields",
+                message=(
+                    "Expected result failed: the update did not report the shared "
+                    "field mutation operation.\n"
+                    f"Observed payload: {payload}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=data.get("revision"),
+                expected=observation.final_head_revision,
+                message=(
+                    "Expected result failed: the reported revision did not match "
+                    "the final repository HEAD after the multi-field update.\n"
+                    f"Envelope revision: {data.get('revision')}\n"
+                    f"Final HEAD: {observation.final_head_revision}"
+                ),
+            )
+        if isinstance(issue, dict):
+            self._check_equal(
+                failures=failures,
+                actual=issue.get("summary"),
+                expected=self.config.updated_summary,
+                message=(
+                    "Step 2 failed: the returned issue payload did not preserve "
+                    "the updated summary.\n"
+                    f"Observed issue: {issue}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=issue.get("priority"),
+                expected=self.config.updated_priority_id,
+                message=(
+                    "Step 2 failed: the returned issue payload did not resolve "
+                    "the updated priority to the canonical id.\n"
+                    f"Observed issue: {issue}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=issue.get("assignee"),
+                expected=self.config.updated_assignee,
+                message=(
+                    "Step 2 failed: the returned issue payload did not preserve "
+                    "the updated assignee.\n"
+                    f"Observed issue: {issue}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=issue.get("labels"),
+                expected=list(self.config.updated_labels),
+                message=(
+                    "Step 2 failed: the returned issue payload did not preserve "
+                    "the updated labels.\n"
+                    f"Observed issue: {issue}"
+                ),
+            )
+            self._check_equal(
+                failures=failures,
+                actual=issue.get("storagePath"),
+                expected=observation.main_file_relative_path,
+                message=(
+                    "Expected result failed: the updated issue payload did not "
+                    "point to the canonical markdown file path.\n"
+                    f"Observed issue: {issue}"
+                ),
+            )
+        elif payload is not None:
+            failures.append(
+                "Step 2 failed: the success envelope did not include an updated "
+                f"issue object.\nObserved payload: {payload}"
+            )
 
-        self.assertEqual(
-            observation.final_commit_count,
-            observation.initial_commit_count + 1,
-            "Step 3 failed: the multi-field update did not persist as exactly one new "
-            "Git commit.\n"
-            f"Initial commit count: {observation.initial_commit_count}\n"
-            f"Final commit count: {observation.final_commit_count}\n"
-            f"Latest commit subject: {observation.latest_commit_subject}",
+        self._check_equal(
+            failures=failures,
+            actual=observation.final_commit_count,
+            expected=observation.initial_commit_count + 1,
+            message=(
+                "Step 3 failed: the multi-field update did not persist as exactly "
+                "one new Git commit.\n"
+                f"Initial commit count: {observation.initial_commit_count}\n"
+                f"Final commit count: {observation.final_commit_count}\n"
+                f"Latest commit subject: {observation.latest_commit_subject}"
+            ),
         )
-        self.assertNotEqual(
-            observation.initial_head_revision,
-            observation.final_head_revision,
-            "Step 3 failed: the repository HEAD did not change after the multi-field "
-            "update command completed.\n"
-            f"Initial HEAD: {observation.initial_head_revision}\n"
-            f"Final HEAD: {observation.final_head_revision}",
+        self._check_not_equal(
+            failures=failures,
+            actual=observation.initial_head_revision,
+            unexpected=observation.final_head_revision,
+            message=(
+                "Step 3 failed: the repository HEAD did not change after the "
+                "multi-field update command completed.\n"
+                f"Initial HEAD: {observation.initial_head_revision}\n"
+                f"Final HEAD: {observation.final_head_revision}"
+            ),
         )
-        self.assertEqual(
-            observation.latest_commit_subject,
-            self.config.expected_commit_subject,
-            "Expected result failed: the latest Git commit was not dedicated to the "
-            "single issue field update.\n"
-            f"Observed commit subject: {observation.latest_commit_subject}",
+        self._check_equal(
+            failures=failures,
+            actual=observation.latest_commit_subject,
+            expected=self.config.expected_commit_subject,
+            message=(
+                "Expected result failed: the latest Git commit was not dedicated "
+                "to the single issue field update.\n"
+                f"Observed commit subject: {observation.latest_commit_subject}"
+            ),
         )
-        self.assertFalse(
-            observation.git_status.strip(),
-            "Expected result failed: the repository worktree was not clean after the "
-            "update commit completed.\n"
-            f"git status --short:\n{observation.git_status}",
+        self._check_false(
+            failures=failures,
+            condition=bool(observation.git_status.strip()),
+            message=(
+                "Expected result failed: the repository worktree was not clean "
+                "after the update commit completed.\n"
+                f"git status --short:\n{observation.git_status}"
+            ),
         )
 
         main_file = observation.main_file_content
-        self.assertIn(
-            'summary: "New Title"',
-            main_file,
-            "Step 2 failed: main.md did not visibly show the updated summary.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member='summary: "New Title"',
+            container=main_file,
+            message=(
+                "Step 2 failed: main.md did not visibly show the updated "
+                "summary.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertIn(
-            "priority: high",
-            main_file,
-            "Step 2 failed: main.md did not visibly show the updated canonical "
-            "priority id.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member="priority: high",
+            container=main_file,
+            message=(
+                "Step 2 failed: main.md did not visibly show the updated "
+                "canonical priority id.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertIn(
-            "assignee: user1",
-            main_file,
-            "Step 2 failed: main.md did not visibly show the updated assignee.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member="assignee: user1",
+            container=main_file,
+            message=(
+                "Step 2 failed: main.md did not visibly show the updated "
+                "assignee.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertIn(
-            'labels: ["bug","ai"]',
-            main_file,
-            "Step 2 failed: main.md did not visibly show the updated labels.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member='labels: ["bug","ai"]',
+            container=main_file,
+            message=(
+                "Step 2 failed: main.md did not visibly show the updated "
+                "labels.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertIn(
-            "# Summary",
-            main_file,
-            "Human-style verification failed: the issue markdown did not show the "
-            "rendered summary section after the update.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member="# Summary",
+            container=main_file,
+            message=(
+                "Human-style verification failed: the issue markdown did not "
+                "show the rendered summary section after the update.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertIn(
-            self.config.updated_summary,
-            main_file,
-            "Human-style verification failed: the updated issue markdown did not show "
-            "the new summary text in the rendered content.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_in(
+            failures=failures,
+            member=self.config.updated_summary,
+            container=main_file,
+            message=(
+                "Human-style verification failed: the updated issue markdown "
+                "did not show the new summary text in the rendered content.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertNotIn(
-            self.config.initial_summary,
-            main_file,
-            "Expected result failed: main.md still showed the original summary after "
-            "the update completed.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_not_in(
+            failures=failures,
+            member=self.config.initial_summary,
+            container=main_file,
+            message=(
+                "Expected result failed: main.md still showed the original "
+                "summary after the update completed.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
-        self.assertNotIn(
-            f"assignee: {self.config.initial_assignee}",
-            main_file,
-            "Expected result failed: main.md still showed the original assignee after "
-            "the update completed.\n"
-            f"Observed {observation.main_file_relative_path} contents:\n{main_file}",
+        self._check_not_in(
+            failures=failures,
+            member=f"assignee: {self.config.initial_assignee}",
+            container=main_file,
+            message=(
+                "Expected result failed: main.md still showed the original "
+                "assignee after the update completed.\n"
+                f"Observed {observation.main_file_relative_path} contents:\n"
+                f"{main_file}"
+            ),
         )
 
         for fragment in (
@@ -218,73 +293,157 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
             '"ai"',
             f'"revision": "{observation.final_head_revision}"',
         ):
-            self.assertIn(
-                fragment,
-                observation.result.stdout,
-                "Human-style verification failed: the visible CLI JSON response did "
-                "not show the expected updated issue details.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Observed stdout:\n{observation.result.stdout}",
+            self._check_in(
+                failures=failures,
+                member=fragment,
+                container=observation.result.stdout,
+                message=(
+                    "Human-style verification failed: the visible CLI JSON "
+                    "response did not show the expected updated issue "
+                    "details.\n"
+                    f"Missing fragment: {fragment}\n"
+                    f"Observed stdout:\n{observation.result.stdout}"
+                ),
             )
 
-    def _assert_successful_envelope(
+        if failures:
+            self.fail("\n\n".join(failures))
+
+    def _successful_envelope_or_failures(
         self,
         *,
         result: CliCommandResult,
         failure_prefix: str,
-    ) -> dict[str, object]:
-        self.assertTrue(
-            result.succeeded,
-            f"{failure_prefix}: the multi-field update command did not complete "
-            "successfully.\n"
-            f"Executed command: {result.command_text}\n"
-            f"Exit code: {result.exit_code}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}",
+        failures: list[str],
+    ) -> dict[str, object] | None:
+        self._check_true(
+            failures=failures,
+            condition=result.succeeded,
+            message=(
+                f"{failure_prefix}: the multi-field update command did not "
+                "complete successfully.\n"
+                f"Executed command: {result.command_text}\n"
+                f"Exit code: {result.exit_code}\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            ),
         )
         payload = result.json_payload
-        self.assertIsInstance(
-            payload,
-            dict,
-            f"{failure_prefix}: the CLI did not return a single JSON success "
-            "envelope.\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}",
-        )
-        assert isinstance(payload, dict)
+        if not isinstance(payload, dict):
+            failures.append(
+                f"{failure_prefix}: the CLI did not return a single JSON success "
+                "envelope.\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            )
+            return None
         missing_top_level_keys = [
             key for key in self.config.required_top_level_keys if key not in payload
         ]
-        self.assertFalse(
-            missing_top_level_keys,
-            f"{failure_prefix}: the success envelope was missing required top-level "
-            "keys.\n"
-            f"Missing keys: {missing_top_level_keys}\n"
-            f"Observed payload: {payload}",
+        self._check_false(
+            failures=failures,
+            condition=bool(missing_top_level_keys),
+            message=(
+                f"{failure_prefix}: the success envelope was missing required "
+                "top-level keys.\n"
+                f"Missing keys: {missing_top_level_keys}\n"
+                f"Observed payload: {payload}"
+            ),
         )
-        self.assertTrue(
-            payload["ok"],
-            f"{failure_prefix}: the envelope reported a non-success result.\n"
-            f"Observed payload: {payload}",
+        self._check_true(
+            failures=failures,
+            condition=payload.get("ok") is True,
+            message=(
+                f"{failure_prefix}: the envelope reported a non-success "
+                "result.\n"
+                f"Observed payload: {payload}"
+            ),
         )
-        data = payload["data"]
-        self.assertIsInstance(
-            data,
-            dict,
-            f"{failure_prefix}: the envelope data payload was not an object.\n"
-            f"Observed payload: {payload}",
-        )
-        assert isinstance(data, dict)
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            failures.append(
+                f"{failure_prefix}: the envelope data payload was not an "
+                f"object.\nObserved payload: {payload}"
+            )
+            return payload
         missing_data_keys = [
             key for key in self.config.required_data_keys if key not in data
         ]
-        self.assertFalse(
-            missing_data_keys,
-            f"{failure_prefix}: the envelope data object was missing required keys.\n"
-            f"Missing keys: {missing_data_keys}\n"
-            f"Observed payload: {payload}",
+        self._check_false(
+            failures=failures,
+            condition=bool(missing_data_keys),
+            message=(
+                f"{failure_prefix}: the envelope data object was missing "
+                "required keys.\n"
+                f"Missing keys: {missing_data_keys}\n"
+                f"Observed payload: {payload}"
+            ),
         )
         return payload
+
+    @staticmethod
+    def _check_true(
+        *,
+        failures: list[str],
+        condition: bool,
+        message: str,
+    ) -> None:
+        if not condition:
+            failures.append(message)
+
+    @classmethod
+    def _check_false(
+        cls,
+        *,
+        failures: list[str],
+        condition: bool,
+        message: str,
+    ) -> None:
+        cls._check_true(failures=failures, condition=not condition, message=message)
+
+    @staticmethod
+    def _check_equal(
+        *,
+        failures: list[str],
+        actual: object,
+        expected: object,
+        message: str,
+    ) -> None:
+        if actual != expected:
+            failures.append(message)
+
+    @staticmethod
+    def _check_not_equal(
+        *,
+        failures: list[str],
+        actual: object,
+        unexpected: object,
+        message: str,
+    ) -> None:
+        if actual == unexpected:
+            failures.append(message)
+
+    @staticmethod
+    def _check_in(
+        *,
+        failures: list[str],
+        member: str,
+        container: str,
+        message: str,
+    ) -> None:
+        if member not in container:
+            failures.append(message)
+
+    @staticmethod
+    def _check_not_in(
+        *,
+        failures: list[str],
+        member: str,
+        container: str,
+        message: str,
+    ) -> None:
+        if member in container:
+            failures.append(message)
 
 
 if __name__ == "__main__":
