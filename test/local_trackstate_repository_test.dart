@@ -873,8 +873,21 @@ void main() {
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     final snapshot = await repository.loadSnapshot();
+    final issueTypesFile = File('${repo.path}/DEMO/config/issue-types.json');
+    final largeIssueTypes = <TrackStateConfigEntry>[
+      ...snapshot.project.issueTypeDefinitions,
+      for (var index = 0; index < 2500; index += 1)
+        TrackStateConfigEntry(
+          id: 'catalog-$index',
+          name: 'Catalog $index ${'Story '.padRight(512, 'x')}',
+          hierarchyLevel: 0,
+          icon: 'story',
+          workflowId: 'delivery-workflow',
+        ),
+    ];
 
-    final updatedSnapshot = await repository.saveProjectSettings(
+    var saveCompleted = false;
+    final saveFuture = repository.saveProjectSettings(
       snapshot.project.settingsCatalog.copyWith(
         statusDefinitions: [
           ...snapshot.project.statusDefinitions,
@@ -907,7 +920,7 @@ void main() {
           ),
         ],
         issueTypeDefinitions: [
-          ...snapshot.project.issueTypeDefinitions,
+          ...largeIssueTypes,
           const TrackStateConfigEntry(
             id: 'bug',
             name: 'Bug',
@@ -926,6 +939,18 @@ void main() {
         ],
       ),
     );
+    saveFuture.whenComplete(() {
+      saveCompleted = true;
+    });
+    String? malformedIssueTypesRead;
+    while (!saveCompleted) {
+      malformedIssueTypesRead = _readMalformedJsonDescription(issueTypesFile);
+      if (malformedIssueTypesRead != null) {
+        break;
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+    final updatedSnapshot = await saveFuture;
 
     expect(
       updatedSnapshot.project.statusDefinitions.map((status) => status.id),
@@ -950,6 +975,13 @@ void main() {
     expect(
       File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
       contains('"bug-workflow"'),
+    );
+    expect(
+      malformedIssueTypesRead,
+      isNull,
+      reason:
+          'Saving project settings must never expose issue-types.json in a '
+          'malformed intermediate state to concurrent readers.',
     );
   });
 
@@ -2033,6 +2065,19 @@ Future<void> _git(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
+  }
+}
+
+String? _readMalformedJsonDescription(File file) {
+  try {
+    final raw = file.readAsStringSync();
+    if (raw.trim().isEmpty) {
+      return 'empty file';
+    }
+    jsonDecode(raw);
+    return null;
+  } on Object catch (error) {
+    return error.toString();
   }
 }
 

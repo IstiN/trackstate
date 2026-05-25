@@ -174,39 +174,6 @@ class IssueEditAccessibilityRobot {
     return _screenReaderTargets().map((target) => target.label).toList();
   }
 
-  List<String> accessibilityFeedbackTexts() {
-    expectEditIssueSurfaceVisible();
-    final rootNode = tester.getSemantics(editIssueSurface.first);
-    final values = <String>[];
-
-    void collect(String? value) {
-      final normalized = _normalizedLabel(value);
-      if (normalized.isNotEmpty) {
-        values.add(normalized);
-      }
-    }
-
-    void visit(SemanticsNode node) {
-      if (node.isInvisible) {
-        return;
-      }
-
-      final data = node.getSemanticsData();
-      collect(data.label);
-      collect(data.value);
-      collect(data.hint);
-      collect(data.tooltip);
-      for (final child in node.debugListChildrenInOrder(
-        DebugSemanticsDumpOrder.traversalOrder,
-      )) {
-        visit(child);
-      }
-    }
-
-    visit(rootNode);
-    return _dedupeConsecutive(values).toList(growable: false);
-  }
-
   List<String> semanticsTraversal() {
     expectEditIssueSurfaceVisible();
     return _dedupeConsecutive(

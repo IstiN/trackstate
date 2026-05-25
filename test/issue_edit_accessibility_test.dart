@@ -120,16 +120,10 @@ void main() {
         );
 
         final focusedLabel = screen.focusedSemanticsLabel();
-        final feedback = screen.accessibilityFeedbackTexts();
         final focusReturnedToSummary =
             focusedLabel == 'Summary' ||
             (focusedLabel ?? '').startsWith('Summary ');
-        final summaryRequiredAnnounced = feedback.any((value) {
-          final normalized = value.toLowerCase();
-          return normalized.contains('summary') &&
-              normalized.contains('required');
-        });
-        expect(focusReturnedToSummary || summaryRequiredAnnounced, isTrue);
+        expect(focusReturnedToSummary, isTrue);
       } finally {
         await screen?.dispose();
         semantics.dispose();
