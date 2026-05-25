@@ -44,6 +44,7 @@ abstract interface class TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   });
   Future<Uint8List> downloadAttachment(IssueAttachment attachment);
   Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue);
@@ -79,7 +80,11 @@ abstract interface class HostedWorkspaceCatalogRepository {
 enum IssueHydrationScope { detail, comments, attachments }
 
 extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
-  String resolveIssueAttachmentPath(TrackStateIssue issue, String name) {
+  String resolveIssueAttachmentPath(
+    TrackStateIssue issue,
+    String name, {
+    String? sourceName,
+  }) {
     final normalizedName = name.trim();
     if (normalizedName.isEmpty) {
       return _joinPath(
@@ -89,7 +94,7 @@ extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
     }
     return _joinPath(
       _issueRoot(issue.storagePath),
-      'attachments/${sanitizeAttachmentName(normalizedName)}',
+      'attachments/${resolveAttachmentStorageName(normalizedName, sourceName: sourceName)}',
     );
   }
 
@@ -968,6 +973,7 @@ class ProviderBackedTrackStateRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     if (issue.storagePath.isEmpty) {
       throw const TrackStateRepositoryException(
@@ -1030,7 +1036,10 @@ class ProviderBackedTrackStateRepository
       if (!permission.supportsReleaseAttachmentWrites) {
         final inboxPath = _releaseAttachmentInboxPath(
           issue: currentIssue,
-          fileName: normalizedName,
+          fileName: resolveAttachmentStorageName(
+            normalizedName,
+            sourceName: sourceName,
+          ),
         );
         final existingInboxRevision = await _existingRevision(
           path: inboxPath,
@@ -1062,6 +1071,7 @@ class ProviderBackedTrackStateRepository
       final attachmentPath = resolveIssueAttachmentPath(
         currentIssue,
         normalizedName,
+        sourceName: sourceName,
       );
       final attachmentMetadataPath = _attachmentMetadataPath(
         _issueRoot(currentIssue.storagePath),
@@ -1074,7 +1084,7 @@ class ProviderBackedTrackStateRepository
       final timestamp = DateTime.now().toUtc().toIso8601String();
       final author = _defaultAuthor(_session.resolvedUserIdentity);
       final releaseTag = githubReleases.releaseTagForIssue(currentIssue.key);
-      final assetName = sanitizeAttachmentName(normalizedName);
+      final assetName = attachmentPath.split('/').last;
       final releaseAssetNames = {
         for (final attachment in currentIssue.attachments)
           if (attachment.storageBackend ==
@@ -1117,7 +1127,7 @@ class ProviderBackedTrackStateRepository
       final updatedAttachment = IssueAttachment(
         id: attachmentPath,
         name: normalizedName,
-        mediaType: _mediaTypeForPath(normalizedName),
+        mediaType: _mediaTypeForPath(attachmentPath),
         sizeBytes: bytes.length,
         author: author,
         createdAt: timestamp,
@@ -1202,6 +1212,7 @@ class ProviderBackedTrackStateRepository
     final attachmentPath = resolveIssueAttachmentPath(
       currentIssue,
       normalizedName,
+      sourceName: sourceName,
     );
     final attachmentMetadataPath = _attachmentMetadataPath(
       _issueRoot(currentIssue.storagePath),
@@ -1238,7 +1249,7 @@ class ProviderBackedTrackStateRepository
     );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
-      name: attachmentPath.split('/').last,
+      name: normalizedName,
       mediaType: _mediaTypeForPath(attachmentPath),
       sizeBytes: bytes.length,
       author: author,
@@ -3692,11 +3703,16 @@ class DemoTrackStateRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
-    final attachmentPath = resolveIssueAttachmentPath(issue, name);
+    final attachmentPath = resolveIssueAttachmentPath(
+      issue,
+      name,
+      sourceName: sourceName,
+    );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
-      name: attachmentPath.split('/').last,
+      name: name.trim(),
       mediaType: _mediaTypeForPath(attachmentPath),
       sizeBytes: bytes.length,
       author: 'demo-user',
@@ -4782,6 +4798,18 @@ String sanitizeAttachmentName(String value) => value
     .replaceAll(RegExp(r'^-|-$'), '')
     .ifEmpty('attachment.bin');
 
+String resolveAttachmentStorageName(String value, {String? sourceName}) {
+  final sanitizedValue = sanitizeAttachmentName(value);
+  if (_attachmentPathExtension(sanitizedValue).isNotEmpty) {
+    return sanitizedValue;
+  }
+  final sourceExtension = _attachmentPathExtension(sourceName ?? '');
+  if (sourceExtension.isEmpty) {
+    return sanitizedValue;
+  }
+  return '$sanitizedValue$sourceExtension';
+}
+
 String _releaseAttachmentInboxPath({
   required TrackStateIssue issue,
   required String fileName,
@@ -5158,6 +5186,7 @@ RepositoryIndex _normalizeRepositoryIndex(
 
 String _mediaTypeForPath(String path) {
   final normalized = path.toLowerCase();
+  if (normalized.endsWith('.pdf')) return 'application/pdf';
   if (normalized.endsWith('.svg')) return 'image/svg+xml';
   if (normalized.endsWith('.png')) return 'image/png';
   if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) {
@@ -5167,6 +5196,18 @@ String _mediaTypeForPath(String path) {
   if (normalized.endsWith('.md')) return 'text/markdown';
   if (normalized.endsWith('.txt')) return 'text/plain';
   return 'application/octet-stream';
+}
+
+String _attachmentPathExtension(String path) {
+  final normalized = path.replaceAll('\\', '/').split('/').last.trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  final dotIndex = normalized.lastIndexOf('.');
+  if (dotIndex <= 0 || dotIndex == normalized.length - 1) {
+    return '';
+  }
+  return normalized.substring(dotIndex);
 }
 
 extension on String {

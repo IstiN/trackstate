@@ -2317,11 +2317,11 @@ size 6
       expect(updated.attachments, isEmpty);
       expect(
         provider.lastAttachmentWriteRequest?.path,
-        'DEMO/.trackstate/upload-inbox/DEMO-1/release plan.txt',
+        'DEMO/.trackstate/upload-inbox/DEMO-1/release-plan.txt',
       );
       expect(
         provider
-            .binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-1/release plan.txt'],
+            .binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-1/release-plan.txt'],
         Uint8List.fromList(utf8.encode('roadmap')),
       );
       expect(provider.files['DEMO/DEMO-1/attachments.json'], '[]\n');
@@ -2451,7 +2451,7 @@ Nested release-backed attachment issue.
         {
           'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
           'name': 'manual.pdf',
-          'mediaType': 'application/octet-stream',
+          'mediaType': 'application/pdf',
           'sizeBytes': utf8.encode('replacement attachment').length,
           'author': 'demo-user',
           'createdAt': updated.attachments.single.createdAt,
