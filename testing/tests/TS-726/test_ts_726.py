@@ -186,6 +186,7 @@ def main() -> None:
                 errors.append(error)
 
             opened_with_keyboard = False
+            step_2_recorded = False
             if page.workspace_trigger_reached(topbar_sequence):
                 try:
                     page.press_enter_on_active_element_and_wait_for_surface()
@@ -202,15 +203,9 @@ def main() -> None:
                         "Step 2 failed: pressing Enter on the focused workspace switcher "
                         f"trigger did not open the surface.\n{observed}"
                     )
+                    step_2_recorded = True
                 else:
                     opened_with_keyboard = True
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed="Pressing Enter on the focused trigger opened the visible workspace switcher surface.",
-                    )
             else:
                 _record_step(
                     result,
@@ -223,11 +218,56 @@ def main() -> None:
                         "used next only to collect diagnostic observations from the live surface."
                     ),
                 )
+                step_2_recorded = True
+            surface: WorkspaceSwitcherSurfaceObservation | None = None
+            if opened_with_keyboard:
+                try:
+                    surface = page.observe_surface(timeout_ms=30_000)
+                except AssertionError as error:
+                    observed = (
+                        "Step 2 failed: pressing Enter moved focus to the workspace switcher "
+                        "trigger, but the live surface still was not observable afterward.\n"
+                        f"{error}"
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=observed,
+                    )
+                    errors.append(observed)
+                    step_2_recorded = True
+                    opened_with_keyboard = False
+                else:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Pressing Enter on the focused trigger opened the visible "
+                            "workspace switcher surface."
+                        ),
+                    )
+                    step_2_recorded = True
 
-            if not opened_with_keyboard:
+            if surface is None:
                 page.open_surface_with_click()
+                surface = page.observe_surface(timeout_ms=30_000)
 
-            surface = page.observe_surface()
+            if not step_2_recorded:
+                _record_step(
+                    result,
+                    step=2,
+                    status="failed",
+                    action=REQUEST_STEPS[1],
+                    observed=(
+                        "The keyboard Enter step did not produce a conclusive observable "
+                        "surface result. A pointer click was used next only to collect "
+                        "diagnostic observations from the live surface."
+                    ),
+                )
             SURFACE_PROBE_SCREENSHOT_PATH.unlink(missing_ok=True)
             page.screenshot(str(SURFACE_PROBE_SCREENSHOT_PATH))
             surface = _enrich_badge_contrast(
@@ -466,12 +506,14 @@ def _assert_sheet_accessibility(
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
     labels = [step.after_label or "" for step in sequence]
-    has_workspace_list_control = any(label in {"Open", "Delete", "Active"} for label in labels)
+    has_workspace_list_control = any(
+        _is_workspace_list_control_label(label) for label in labels
+    )
     has_add_workspace_control = any(
-        label in {"Hosted", "Local", "Repository", "Branch", "Save and switch"}
+        _is_add_workspace_control_label(label) or label == "Save and switch"
         for label in labels
     )
-    has_remove_control = any(label == "Delete" for label in labels)
+    has_remove_control = any(_is_remove_control_label(label) for label in labels)
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
             "Step 3 failed: tabbing through the workspace switcher surface did not reach "
@@ -814,9 +856,9 @@ def _focus_group_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
 
 
 def _sheet_focus_group(label: str) -> str | None:
-    if label in {"Open", "Delete", "Active"}:
+    if _is_workspace_list_control_label(label):
         return "workspace-list"
-    if label in {"Hosted", "Local", "Repository", "Branch"}:
+    if _is_add_workspace_control_label(label):
         return "add-workspace"
     if label == "Save and switch":
         return "save"
@@ -831,6 +873,37 @@ def _sheet_focus_group_rank(group: str) -> int:
     if group == "save":
         return 2
     raise ValueError(f"Unknown sheet focus group: {group}")
+
+
+def _is_workspace_list_control_label(label: str) -> bool:
+    normalized = " ".join(label.split())
+    if not normalized or normalized.startswith("Workspace switcher:"):
+        return False
+    if normalized in {"Open", "Active"} or _is_remove_control_label(normalized):
+        return True
+    has_workspace_identity = "Hosted" in normalized or "Local" in normalized
+    has_workspace_state = any(
+        token in normalized
+        for token in (
+            "Active",
+            "Open",
+            "Unavailable",
+            "Needs sign-in",
+            "Attachments limited",
+            "Read-only",
+            "Connected",
+            "Branch:",
+        )
+    )
+    return has_workspace_identity and has_workspace_state
+
+
+def _is_add_workspace_control_label(label: str) -> bool:
+    return label in {"Hosted", "Local", "Repository", "Branch"}
+
+
+def _is_remove_control_label(label: str) -> bool:
+    return label == "Delete" or label.startswith("Delete:")
 
 
 def _badge_summary(badges: tuple[WorkspaceSwitcherBadgeObservation, ...]) -> str:
