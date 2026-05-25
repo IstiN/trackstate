@@ -14121,18 +14121,42 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         .length;
   }
 
+  String _issueDisplayLabel(TrackStateIssue issue) =>
+      '${issue.key} · ${issue.summary}';
+
+  String? _hierarchyDestinationLabel() {
+    final destinationIssue = _isSubtaskType
+        ? _issueByKey(_selectedParentKey)
+        : _issueByKey(_selectedEpicKey);
+    if (destinationIssue == null) {
+      return null;
+    }
+    return _issueDisplayLabel(destinationIssue);
+  }
+
   Future<bool> _confirmHierarchyMove(AppLocalizations l10n) async {
     if (!_requiresHierarchyConfirmation()) {
       return true;
     }
     final descendantCount = _descendantCount();
+    final movingIssueLabel = _issueDisplayLabel(widget.issue);
+    final destinationLabel = _hierarchyDestinationLabel();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(l10n.hierarchyChangeConfirmationTitle),
           content: Text(
-            l10n.hierarchyChangeConfirmationMessage(descendantCount),
+            destinationLabel == null
+                ? l10n.hierarchyChangeConfirmationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                  )
+                : l10n.hierarchyChangeConfirmationDestinationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                    destinationLabel,
+                  ),
           ),
           actions: [
             TextButton(
