@@ -4553,6 +4553,7 @@ class _Sidebar extends StatelessWidget {
                     child: _NavButton(
                       item: item,
                       selected: viewModel.section == item.section,
+                      selectedCanRequestFocus: viewModel.isInitialSearchLoading,
                       semanticsSortOrder: _desktopPrimaryNavigationOrder(
                         item.section,
                       ),
@@ -4670,10 +4671,17 @@ class _TopBar extends StatelessWidget {
             );
           }
 
+          final showHostedConnectAction =
+              !viewModel.usesLocalPersistence &&
+              viewModel.hostedRepositoryAccessMode ==
+                  HostedRepositoryAccessMode.disconnected &&
+              viewModel.isInitialSearchLoading;
           final condensedDesktop =
               !compact &&
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
-          final iconOnlyActions = compact || condensedDesktop;
+          final iconOnlyActions =
+              compact ||
+              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1180 : 1040);
           final actionGap = iconOnlyActions ? 8.0 : 12.0;
           final createIssueOrder = compact ? 2.0 : 1.0;
           final addWorkspaceOrder = compact ? 3.0 : 1.5;
@@ -4681,6 +4689,10 @@ class _TopBar extends StatelessWidget {
           final searchOrder = compact ? 2.0 : 8.0;
           final themeToggleOrder = compact ? null : 9.0;
           final syncPillOrder = compact ? null : 10.0;
+          final openHostedRepositoryAccess =
+              viewModel.isSaving || !showHostedConnectAction
+              ? null
+              : () => _showRepositoryAccessDialog(context, viewModel);
           final desktopWorkspaceSwitcherBindings =
               <ShortcutActivator, VoidCallback>{
                 if (!kIsWeb)
@@ -4974,18 +4986,30 @@ class _TopBar extends StatelessWidget {
 
           return Row(
             children: [
-              orderedControl(
-                syncPillOrder ?? searchOrder + 1,
-                _SyncPill(
-                  label: _workspaceSyncLabel(l10n, viewModel),
-                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
-                  tone: _workspaceSyncTone(viewModel),
-                  height: _desktopTopBarControlHeight,
-                  onPressed: () =>
-                      viewModel.selectSection(TrackerSection.settings),
-                  semanticsSortOrder: syncPillOrder,
+              if (showHostedConnectAction)
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SecondaryButton(
+                    label: l10n.connectGitHub,
+                    icon: TrackStateIconGlyph.repository,
+                    onPressed: openHostedRepositoryAccess,
+                    height: _desktopTopBarControlHeight,
+                    semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+                  ),
+                )
+              else
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SyncPill(
+                    label: _workspaceSyncLabel(l10n, viewModel),
+                    semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                    tone: _workspaceSyncTone(viewModel),
+                    height: _desktopTopBarControlHeight,
+                    onPressed: () =>
+                        viewModel.selectSection(TrackerSection.settings),
+                    semanticsSortOrder: syncPillOrder,
+                  ),
                 ),
-              ),
               const SizedBox(width: 12),
               buildPrimaryHeaderActions(),
               const SizedBox(width: 8),
@@ -5042,6 +5066,8 @@ class _TopBar extends StatelessWidget {
                                     height: _desktopTopBarControlHeight,
                                   ),
                               hintText: l10n.jqlPlaceholder,
+                              hintStyle: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.muted, height: 1),
                             ),
                           );
                           if (kIsWeb) {
@@ -9660,7 +9686,9 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SettingsTextField(
-          fieldKey: ValueKey('basic-config-entry-id-${widget.initial?.id ?? 'new'}'),
+          fieldKey: ValueKey(
+            'basic-config-entry-id-${widget.initial?.id ?? 'new'}',
+          ),
           label: l10n.catalogId,
           autofocus: widget.initial != null,
           initialValue: _idValue,
@@ -9680,10 +9708,7 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
           onSave: () {
             Navigator.of(context).pop(
               TrackStateConfigEntry(
-                id: _normalizedEditorId(
-                  _idValue,
-                  _nameValue,
-                ),
+                id: _normalizedEditorId(_idValue, _nameValue),
                 name: _nameValue.trim(),
               ),
             );
@@ -11346,6 +11371,9 @@ class _IssueList extends StatelessWidget {
                   decoration: InputDecoration(
                     labelText: l10n.searchIssues,
                     hintText: l10n.jqlPlaceholder,
+                    hintStyle: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: colors.muted),
                   ),
                 ),
               ),
@@ -12786,36 +12814,65 @@ class _IconButtonSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final enabled = onPressed != null;
+    final controlSize = size ?? 40.0;
     return Semantics(
       button: true,
       enabled: enabled,
+      focusable: enabled,
       identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        excludeFromSemantics: true,
-        onTap: onPressed,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          padding: size == null ? const EdgeInsets.all(11) : null,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.border),
-          ),
-          foregroundDecoration: enabled
-              ? null
-              : BoxDecoration(
-                  color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-          child: TrackStateIcon(
-            glyph,
-            color: enabled ? colors.text : colors.muted,
-            size: size == null ? 18 : _desktopTopBarIconSize,
+      child: ExcludeSemantics(
+        child: SizedBox(
+          width: controlSize,
+          height: controlSize,
+          child: OutlinedButton(
+            onPressed: onPressed,
+            style: ButtonStyle(
+              animationDuration: Duration.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+              minimumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              maximumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.disabled)) {
+                  return colors.surfaceAlt.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.pressed)) {
+                  return colors.primarySoft.withValues(alpha: .84);
+                }
+                if (states.contains(WidgetState.focused)) {
+                  return colors.primarySoft.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return colors.surfaceAlt;
+                }
+                return colors.surface;
+              }),
+              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+              side: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return BorderSide(color: colors.primary, width: 2);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return BorderSide(
+                    color: Color.alphaBlend(
+                      colors.primary.withValues(alpha: .24),
+                      colors.border,
+                    ),
+                  );
+                }
+                return BorderSide(color: colors.border);
+              }),
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            child: TrackStateIcon(
+              glyph,
+              color: enabled ? colors.text : colors.muted,
+              size: size == null ? 18 : _desktopTopBarIconSize,
+            ),
           ),
         ),
       ),
@@ -14355,6 +14412,7 @@ class _NavButton extends StatelessWidget {
   const _NavButton({
     required this.item,
     required this.selected,
+    this.selectedCanRequestFocus = false,
     this.semanticsSortOrder,
     this.semanticsIdentifier,
     this.focusNode,
@@ -14364,6 +14422,7 @@ class _NavButton extends StatelessWidget {
 
   final _NavItem item;
   final bool selected;
+  final bool selectedCanRequestFocus;
   final double? semanticsSortOrder;
   final String? semanticsIdentifier;
   final FocusNode? focusNode;
@@ -14373,6 +14432,9 @@ class _NavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final selectedBackground = Theme.of(context).brightness == Brightness.light
+        ? Color.alphaBlend(colors.text.withValues(alpha: .12), colors.secondary)
+        : colors.secondary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Semantics(
@@ -14389,7 +14451,7 @@ class _NavButton extends StatelessWidget {
                 },
           child: InkWell(
             focusNode: focusNode,
-            canRequestFocus: !selected,
+            canRequestFocus: !selected || selectedCanRequestFocus,
             borderRadius: BorderRadius.circular(10),
             excludeFromSemantics: true,
             onTap: onPressed,
@@ -14400,7 +14462,7 @@ class _NavButton extends StatelessWidget {
                   vertical: 11,
                 ),
                 decoration: BoxDecoration(
-                  color: selected ? colors.secondary : Colors.transparent,
+                  color: selected ? selectedBackground : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
