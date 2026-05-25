@@ -84,6 +84,84 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             json_payload=payload,
         )
 
+    def community_profile(self, repository: str) -> CliCommandResult:
+        command = ("gh", "api", f"repos/{repository}/community/profile")
+        result = self._run(command)
+        payload: dict[str, object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
+    def list_branches(self, repository: str) -> CliCommandResult:
+        command = ("gh", "api", f"repos/{repository}/branches?per_page=100")
+        result = self._run(command)
+        payload: list[object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
+    def pull_requests(
+        self,
+        repository: str,
+        *,
+        state: str = "open",
+    ) -> CliCommandResult:
+        command = ("gh", "api", f"repos/{repository}/pulls?state={state}&per_page=100")
+        result = self._run(command)
+        payload: list[object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
+    def pull_request_templates(self, repository: str) -> CliCommandResult:
+        owner, name = repository.split("/", maxsplit=1)
+        query = (
+            "query($owner:String!, $name:String!) { "
+            "repository(owner:$owner, name:$name) { "
+            "pullRequestTemplates { filename body } "
+            "} }"
+        )
+        command = (
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+        )
+        result = self._run(command)
+        payload: dict[str, object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
     def get_contents(
         self,
         repository: str,

@@ -115,91 +115,81 @@ class TrackStateCliInverseLinkCanonicalStorageTest(unittest.TestCase):
             link_payload["data"]["command"],
             "ticket-link",
             "Step 1 failed: the inverse-link CLI response did not report the "
-            "canonical `ticket-link` operation.\n"
+            "`ticket-link` operation.\n"
             f"Observed payload: {link_payload}",
         )
 
-        failures: list[str] = []
         observed_link_payload = link_payload["data"].get("link")
-        if not isinstance(observed_link_payload, dict):
-            failures.append(
-                "Human-style verification failed: the visible CLI response did not "
-                "include a `data.link` object a user can inspect after running the "
-                "inverse-label command.\n"
-                f"Observed payload: {link_payload}"
-            )
-        elif observed_link_payload != self.config.expected_canonical_link_payload:
-            failures.append(
-                "Human-style verification failed: the visible CLI response did not "
-                "show the canonical normalized relationship metadata.\n"
-                f"Expected data.link: {self.config.expected_canonical_link_payload}\n"
-                f"Observed data.link: {observed_link_payload}\n"
-                f"Observed stdout:\n{observation.inverse_link_observation.result.stdout}"
+        self.assertIsInstance(
+            observed_link_payload,
+            dict,
+            "Step 1 failed: the visible CLI response did not include a `data.link` "
+            "object a user can inspect after running the inverse-label command.\n"
+            f"Observed payload: {link_payload}",
+        )
+        assert isinstance(observed_link_payload, dict)
+        for field_name in ("type", "target", "direction"):
+            self.assertIsInstance(
+                observed_link_payload.get(field_name),
+                str,
+                "Step 1 failed: the visible CLI response did not include the normal "
+                "relationship metadata fields expected for `data.link`.\n"
+                f"Missing or invalid field: {field_name}\n"
+                f"Observed data.link: {observed_link_payload}",
             )
 
-        for fragment in (
-            '"command": "ticket-link"',
-            f'"key": "{self.config.issue_a_key}"',
-            f'"type": "{self.config.expected_canonical_link_payload["type"]}"',
-            f'"target": "{self.config.expected_canonical_link_payload["target"]}"',
-            (
-                '"direction": '
-                f'"{self.config.expected_canonical_link_payload["direction"]}"'
-            ),
-        ):
-            if fragment not in observation.inverse_link_observation.result.stdout:
-                failures.append(
-                    "Human-style verification failed: the visible CLI response did "
-                    "not show the expected ticket-link confirmation details a user "
-                    "would see immediately after running the inverse-label command.\n"
-                    f"Missing fragment: {fragment}\n"
-                    "Observed stdout:\n"
-                    f"{observation.inverse_link_observation.result.stdout}"
-                )
+        for fragment in ('"command": "ticket-link"', f'"key": "{self.config.issue_a_key}"'):
+            self.assertIn(
+                fragment,
+                observation.inverse_link_observation.result.stdout,
+                "Human-style verification failed: the visible CLI response did not "
+                "show the expected ticket-link confirmation details a user would "
+                "see immediately after running the inverse-label command.\n"
+                f"Missing fragment: {fragment}\n"
+                f"Observed stdout:\n{observation.inverse_link_observation.result.stdout}",
+            )
 
         target_links_payload = observation.target_links_json_payload
-        if not isinstance(target_links_payload, list):
-            failures.append(
-                "Step 2 failed: inspecting the target issue `links.json` did not "
-                "yield a JSON array at the canonical storage location.\n"
-                f"Expected canonical path: {observation.target_links_json_relative_path}\n"
-                f"Observed source path: {observation.source_links_json_relative_path}\n"
-                f"Discovered links.json files: {observation.discovered_links_json_files}\n"
-                f"Observed files:\n{self._format_links_json_snapshots(observation)}"
-            )
-        elif target_links_payload != [self.config.expected_canonical_link_payload]:
-            failures.append(
-                "Step 2 failed: the persisted `links.json` content was not normalized "
-                "to the canonical stored `blocks` relation from Issue B back to "
-                "Issue A.\n"
-                f"Expected canonical path: {observation.target_links_json_relative_path}\n"
-                f"Expected payload: {[self.config.expected_canonical_link_payload]}\n"
-                f"Observed payload: {target_links_payload}\n"
-                f"Discovered links.json files: {observation.discovered_links_json_files}\n"
-                f"Observed files:\n{self._format_links_json_snapshots(observation)}"
-            )
-        if observation.discovered_links_json_files != (
+        self.assertIsInstance(
+            target_links_payload,
+            list,
+            "Step 2 failed: inspecting the target issue `links.json` did not yield "
+            "a JSON array at the canonical storage location.\n"
+            f"Expected canonical path: {observation.target_links_json_relative_path}\n"
+            f"Observed source path: {observation.source_links_json_relative_path}\n"
+            f"Discovered links.json files: {observation.discovered_links_json_files}\n"
+            f"Observed files:\n{self._format_links_json_snapshots(observation)}",
+        )
+        assert isinstance(target_links_payload, list)
+        self.assertEqual(
+            target_links_payload,
+            [self.config.expected_canonical_link_payload],
+            "Step 2 failed: the persisted `links.json` content was not normalized to "
+            "the canonical stored `blocks` relation from Issue B back to Issue A.\n"
+            f"Expected canonical path: {observation.target_links_json_relative_path}\n"
+            f"Expected payload: {[self.config.expected_canonical_link_payload]}\n"
+            f"Observed payload: {target_links_payload}\n"
+            f"Discovered links.json files: {observation.discovered_links_json_files}\n"
+            f"Observed files:\n{self._format_links_json_snapshots(observation)}",
+        )
+        self.assertIn(
             observation.target_links_json_relative_path,
-        ):
-            failures.append(
-                "Expected result failed: the repository did not store exactly one "
-                "`links.json` file at the canonical target issue location after "
-                "inverse normalization.\n"
-                f"Expected path: {observation.target_links_json_relative_path}\n"
-                f"Observed files: {observation.discovered_links_json_files}\n"
-                f"Observed files detail:\n{self._format_links_json_snapshots(observation)}"
-            )
-        if observation.source_links_json_content is not None:
-            failures.append(
-                "Expected result failed: the source issue still has a `links.json` "
-                "file, so the inverse wording was not rewritten into canonical stored "
-                "form on Issue B.\n"
-                f"Unexpected source path: {observation.source_links_json_relative_path}\n"
-                f"Observed content:\n{observation.source_links_json_content}\n"
-                f"Observed files detail:\n{self._format_links_json_snapshots(observation)}"
-            )
-        if failures:
-            self.fail("\n\n".join(failures))
+            observation.discovered_links_json_files,
+            "Expected result failed: the repository did not persist the canonical "
+            "`links.json` artifact at the normalized target issue location.\n"
+            f"Expected path: {observation.target_links_json_relative_path}\n"
+            f"Observed files: {observation.discovered_links_json_files}\n"
+            f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
+        )
+        self.assertIsNone(
+            observation.source_links_json_content,
+            "Expected result failed: the source issue still has a `links.json` file, "
+            "so the inverse wording was not rewritten into canonical stored form on "
+            "Issue B.\n"
+            f"Unexpected source path: {observation.source_links_json_relative_path}\n"
+            f"Observed content:\n{observation.source_links_json_content}\n"
+            f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
+        )
 
     def _assert_command_was_executed_exactly(
         self,

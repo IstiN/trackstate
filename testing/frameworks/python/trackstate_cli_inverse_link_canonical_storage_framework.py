@@ -35,16 +35,21 @@ class PythonTrackStateCliInverseLinkCanonicalStorageFramework(
         *,
         config: TrackStateCliInverseLinkCanonicalStorageConfig,
     ) -> TrackStateCliInverseLinkCanonicalStorageValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-624-bin-") as bin_dir:
+        test_prefix = config.test_id.lower()
+        with tempfile.TemporaryDirectory(
+            prefix=f"trackstate-{test_prefix}-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-624-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix=f"trackstate-{test_prefix}-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-624 exercises the live local CLI against a seeded "
-                    "disposable repository."
+                    f"checkout so {config.test_id} exercises the live local CLI against "
+                    "a seeded disposable repository."
                 )
                 issue_a_create_observation = self._observe_command(
                     requested_command=config.issue_a_create_command(str(repository_path)),
@@ -176,7 +181,13 @@ Initial issue so the local mutation service can open the repository.
 """,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-624 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            f"{config.test_id} Tester",
+        )
         self._git(
             repository_path,
             "config",
@@ -185,7 +196,7 @@ Initial issue so the local mutation service can open the repository.
             config.expected_author_email,
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-624 fixture")
+        self._git(repository_path, "commit", "-m", f"Seed {config.test_id} fixture")
 
     @staticmethod
     def _read_json_if_exists(path: Path) -> object | None:

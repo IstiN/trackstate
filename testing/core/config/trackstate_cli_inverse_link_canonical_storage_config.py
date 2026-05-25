@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TrackStateCliInverseLinkCanonicalStorageConfig:
+    test_id: str
     project_key: str
     project_name: str
     seed_issue_key: str
@@ -44,6 +45,7 @@ class TrackStateCliInverseLinkCanonicalStorageConfig:
     @classmethod
     def from_defaults(cls) -> "TrackStateCliInverseLinkCanonicalStorageConfig":
         return cls(
+            test_id="TS-624",
             project_key="TS",
             project_name="TS-624 Inverse Link Canonical Storage Project",
             seed_issue_key="TS-0",
