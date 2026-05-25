@@ -41,6 +41,7 @@ class HeaderObservation:
     body_text: str
     sync_status_pill: HeaderControlObservation
     search_field: HeaderControlObservation
+    search_input: HeaderControlObservation
     create_issue_button: HeaderControlObservation
     repository_access_button: HeaderControlObservation
     theme_toggle: HeaderControlObservation
@@ -235,7 +236,7 @@ class LiveTrackerHeaderPage:
                   }
                   return chain;
                 });
-                return ancestorChains[0].find((candidate) => {
+                const commonCandidates = ancestorChains[0].filter((candidate) => {
                   if (!candidate || meaningfulControls.includes(candidate)) {
                     return false;
                   }
@@ -250,7 +251,28 @@ class LiveTrackerHeaderPage:
                     && area(candidate) < (viewportArea * 0.6)
                     && ancestorChains.every((chain) => chain.includes(candidate))
                   );
-                }) ?? null;
+                });
+                if (commonCandidates.length === 0) {
+                  return null;
+                }
+                const displayScore = (candidate) => {
+                  const style = window.getComputedStyle(candidate);
+                  let score = 0;
+                  if (!['flex', 'inline-flex'].includes(style.display)) {
+                    score += 2;
+                  }
+                  if (style.alignItems !== 'center') {
+                    score += 1;
+                  }
+                  return score;
+                };
+                return [...commonCandidates].sort((left, right) => {
+                  const scoreDelta = displayScore(left) - displayScore(right);
+                  if (scoreDelta !== 0) {
+                    return scoreDelta;
+                  }
+                  return area(left) - area(right);
+                })[0] ?? null;
               };
 
               const searchField = smallest(
@@ -274,7 +296,12 @@ class LiveTrackerHeaderPage:
               ) ?? null;
               const createIssueButton = smallest(
                 Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
-                  (element) => isVisible(element) && labelFor(element).label === 'Create issue',
+                  (element) =>
+                    isVisible(element)
+                    && (
+                      element.getAttribute('aria-label') === 'Create issue'
+                      || labelFor(element).label === 'Create issue'
+                    ),
                 ),
               );
               const repositoryAccessButton = smallest(
@@ -349,7 +376,7 @@ class LiveTrackerHeaderPage:
               const headerContainer = findHeaderContainer(
                 [
                   syncStatusPill,
-                  searchField,
+                  searchInput,
                   createIssueButton,
                   repositoryAccessButton,
                   themeToggle,
@@ -399,6 +426,7 @@ class LiveTrackerHeaderPage:
             body_text=str(payload.get("bodyText", "")),
             sync_status_pill=_control_from_payload(payload.get("syncStatusPill")),
             search_field=_control_from_payload(payload.get("searchField")),
+            search_input=_control_from_payload(payload.get("searchInput")),
             create_issue_button=_control_from_payload(payload.get("createIssueButton")),
             repository_access_button=_control_from_payload(
                 payload.get("repositoryAccessButton"),

@@ -122,7 +122,7 @@ def main() -> None:
                 ),
                 observed=(
                     f"sync={_label(header.sync_status_pill)!r}; "
-                    f"search={_label(header.search_field)!r}; "
+                    f"search={_label(header.search_input)!r}; "
                     f"create={_label(header.create_issue_button)!r}; "
                     f"repository_access={_label(header.repository_access_button)!r}; "
                     f"theme={_label(header.theme_toggle)!r}; "
@@ -185,7 +185,7 @@ def _evaluate_expectations(
 
     search_message = _height_assertion_message(
         "JQL search field",
-        header.search_field,
+        header.search_input,
     )
     _record_step(
         result,
@@ -194,8 +194,8 @@ def _evaluate_expectations(
         action="Inspect the JQL search field height.",
         observed=(
             f"expected={EXPECTED_CONTROL_HEIGHT:.0f}px; "
-            f"observed={header.search_field.height:.2f}px; "
-            f"label={_label(header.search_field)!r}"
+            f"observed={header.search_input.height:.2f}px; "
+            f"label={_label(header.search_input)!r}"
         ),
     )
     if search_message:
@@ -309,7 +309,11 @@ def _container_assertion_message(
     observation: HeaderContainerObservation | None,
 ) -> str | None:
     if observation is None:
-        return None
+        return (
+            "the live DOM did not expose a reliable shared parent header container for the "
+            "audited controls, so the required flex / align-items: center assertion could "
+            "not be verified."
+        )
     if observation.display not in {"flex", "inline-flex"}:
         return (
             "expected the exposed header container to use a flex layout, "
@@ -336,7 +340,7 @@ def _vertical_alignment_message(center_spread: float) -> str | None:
 def _center_spread(header: HeaderObservation) -> float:
     centers = [
         header.sync_status_pill.center_y,
-        header.search_field.center_y,
+        header.search_input.center_y,
         header.create_issue_button.center_y,
         header.repository_access_button.center_y,
         header.theme_toggle.center_y,
@@ -348,7 +352,7 @@ def _center_spread(header: HeaderObservation) -> float:
 def _height_summary(header: HeaderObservation) -> dict[str, float]:
     return {
         "sync_status_pill": round(header.sync_status_pill.height, 2),
-        "search_field": round(header.search_field.height, 2),
+        "search_field": round(header.search_input.height, 2),
         "create_issue_button": round(header.create_issue_button.height, 2),
         "repository_access_button": round(header.repository_access_button.height, 2),
         "theme_toggle": round(header.theme_toggle.height, 2),
@@ -358,7 +362,7 @@ def _height_summary(header: HeaderObservation) -> dict[str, float]:
 
 def _container_summary(observation: HeaderContainerObservation | None) -> str:
     if observation is None:
-        return "header_container=not_exposed; css_assertion=omitted"
+        return "header_container=not_exposed; css_assertion=required_parent_not_found"
     return (
         f"tag={observation.tag_name}; display={observation.display}; "
         f"align_items={observation.align_items}; "
