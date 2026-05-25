@@ -6,11 +6,15 @@ from unittest.mock import patch
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
     DelayedAuthWorkspaceProfilesRuntime,
 )
+from testing.tests.support.live_tracker_app_factory import (
+    create_live_tracker_app_with_stored_token,
+)
 from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
     WorkspaceProfilesRuntime,
     _build_preload_script,
 )
+from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 
 
 class _FakeScriptTarget:
@@ -41,6 +45,46 @@ class _FakePollingPage:
 
 
 class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
+    def test_live_tracker_factory_bootstraps_workspace_aware_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(config, token="token")
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(
+            runtime,
+            StoredWorkspaceProfilesRuntime,
+            "Live stored-token flows must preload hosted workspace state so the app "
+            "restores the correct repository session on first load.",
+        )
+        self.assertEqual(
+            runtime._workspace_token_profile_ids,
+            ("hosted:istin/trackstate-setup@main",),
+        )
+        self.assertEqual(
+            runtime._workspace_state,
+            {
+                "activeWorkspaceId": "hosted:istin/trackstate-setup@main",
+                "migrationComplete": True,
+                "profiles": [
+                    {
+                        "id": "hosted:istin/trackstate-setup@main",
+                        "displayName": "",
+                        "targetType": "hosted",
+                        "target": "IstiN/trackstate-setup",
+                        "defaultBranch": "main",
+                        "writeBranch": "main",
+                    },
+                ],
+            },
+        )
+
     def test_workspace_profiles_runtime_applies_preload_script_to_existing_page(self) -> None:
         runtime = WorkspaceProfilesRuntime(
             workspace_state={"activeWorkspaceId": "hosted:repo@main", "profiles": []},
