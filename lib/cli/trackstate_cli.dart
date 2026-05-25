@@ -171,6 +171,16 @@ class TrackStateCli {
   }
 
   List<String> _normalizeCommandArguments(List<String> arguments) {
+    if (arguments.isEmpty) {
+      return arguments;
+    }
+    final rewrittenCommand = switch (arguments.first.toLowerCase()) {
+      'jiraattachfiletoticket' => 'jira_attach_file_to_ticket',
+      _ => null,
+    };
+    if (rewrittenCommand != null) {
+      return [rewrittenCommand, ...arguments.skip(1)];
+    }
     if (arguments.length < 2) {
       return arguments;
     }
@@ -6136,6 +6146,7 @@ class TrackStateCli {
     '',
     'Compatibility aliases:',
     '  jira_attach_file_to_ticket',
+    '  jiraattachfiletoticket',
     '  jira_download_attachment',
     '',
     'Use "trackstate attachment <command> --help" for command-specific options.',
@@ -6150,8 +6161,9 @@ class TrackStateCli {
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png [--name architecture.png] [--output json|text]',
     '  trackstate attachment upload --target hosted --provider github --repository owner/name --issue TRACK-1 --file ./design.png [--branch main] [--token <token>] [--output json|text]',
     '',
-    'Compatibility alias:',
+    'Compatibility aliases:',
     '  jira_attach_file_to_ticket --issueKey TRACK-1 --file ./design.png',
+    '  jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
     '',
     'Options:',
     parser.usage,

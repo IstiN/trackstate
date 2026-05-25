@@ -46,6 +46,29 @@ void main() {
       );
     });
 
+    test(
+      'prints attachment upload help for the jiraattachfiletoticket alias',
+      () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>[
+          'jiraattachfiletoticket',
+          '--help',
+        ]);
+
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('trackstate attachment upload'));
+        expect(result.stdout, contains('--issue'));
+        expect(result.stdout, contains('--file'));
+        expect(
+          result.stdout,
+          contains(
+            'jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
+          ),
+        );
+      },
+    );
+
     test('reports validation errors in the JSON envelope', () async {
       final cli = TrackStateCli();
 
