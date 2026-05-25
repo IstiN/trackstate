@@ -15451,7 +15451,12 @@ class _CommentsTab extends StatelessWidget {
             enabled: !isSaving && !isLoading && !writeBlocked,
             decoration: InputDecoration(
               labelText: l10n.comments,
+              hintText: l10n.commentPlaceholder,
+              hintStyle: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
               alignLabelWithHint: true,
+              floatingLabelBehavior: FloatingLabelBehavior.always,
             ),
           ),
         ),
