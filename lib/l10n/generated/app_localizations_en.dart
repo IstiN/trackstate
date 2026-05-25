@@ -1016,6 +1016,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retry => 'Retry';
 
   @override
+  String get retryStartup => 'Retry startup';
+
+  @override
   String get editIssue => 'Edit issue';
 
   @override
