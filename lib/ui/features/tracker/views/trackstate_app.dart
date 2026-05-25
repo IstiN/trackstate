@@ -10284,29 +10284,43 @@ class _FieldEditorState extends State<_FieldEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        _SettingsTextField(
+          label: l10n.catalogId,
+          controller: _idController,
+          enabled: !_isReserved,
+        ),
         const SizedBox(height: 12),
         _SettingsTextField(label: l10n.name, controller: _nameController),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: _type,
-          decoration: InputDecoration(labelText: l10n.catalogType),
-          items: const [
-            DropdownMenuItem(value: 'string', child: Text('string')),
-            DropdownMenuItem(value: 'markdown', child: Text('markdown')),
-            DropdownMenuItem(value: 'option', child: Text('option')),
-            DropdownMenuItem(value: 'user', child: Text('user')),
-            DropdownMenuItem(value: 'array', child: Text('array')),
-            DropdownMenuItem(value: 'number', child: Text('number')),
-          ],
-          onChanged: _isReserved
-              ? null
-              : (value) {
+        _isReserved
+            ? TextButton(
+                onPressed: null,
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 16,
+                  ),
+                ),
+                child: Text('${l10n.catalogType} $_type'),
+              )
+            : DropdownButtonFormField<String>(
+                initialValue: _type,
+                decoration: InputDecoration(labelText: l10n.catalogType),
+                items: const [
+                  DropdownMenuItem(value: 'string', child: Text('string')),
+                  DropdownMenuItem(value: 'markdown', child: Text('markdown')),
+                  DropdownMenuItem(value: 'option', child: Text('option')),
+                  DropdownMenuItem(value: 'user', child: Text('user')),
+                  DropdownMenuItem(value: 'array', child: Text('array')),
+                  DropdownMenuItem(value: 'number', child: Text('number')),
+                ],
+                onChanged: (value) {
                   setState(() {
                     _type = value ?? 'string';
                   });
                 },
-        ),
+              ),
         const SizedBox(height: 12),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
