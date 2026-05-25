@@ -13,12 +13,63 @@ import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_focusable_control_web.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:web/web.dart' as web;
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  testWidgets(
+    'browser focus bridge suppresses late-added matching semantics nodes from tab order',
+    (tester) async {
+      const focusTargetId = 'trackstate-browser-focus-late-semantics';
+
+      await tester.pumpWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: 160,
+              height: 48,
+              child: BrowserFocusableControl(
+                label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+                focusTargetId: focusTargetId,
+                onPressed: null,
+                child: SizedBox.expand(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final lateSemanticsNode = web.HTMLDivElement()
+        ..setAttribute('flt-semantics-identifier', focusTargetId)
+        ..setAttribute('tabindex', '0');
+      web.document.body!.append(lateSemanticsNode);
+      addTearDown(() {
+        lateSemanticsNode.remove();
+      });
+
+      web.window.dispatchEvent(
+        web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        ),
+      );
+      await tester.pump();
+
+      expect(lateSemanticsNode.getAttribute('tabindex'), '-1');
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+
+      expect(lateSemanticsNode.getAttribute('tabindex'), '0');
+    },
+  );
 
   testWidgets(
     'web startup clears the saved active local workspace when the browser handle is missing',

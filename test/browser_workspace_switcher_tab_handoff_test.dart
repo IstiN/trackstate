@@ -219,6 +219,71 @@ void main() {
     },
   );
 
+  test(
+    'Tab from the selected row uses visual order when post-row controls are earlier in DOM order',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: true,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 120,
+              visualLeft: 112,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 216,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 0,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+          ],
+          currentIndex: 4,
+          backwards: false,
+        ),
+        1,
+      );
+    },
+  );
+
   test('non-boundary tab stops do not trigger a manual handoff', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
@@ -260,7 +325,7 @@ void main() {
   });
 
   test(
-    'Tab from the open trigger hands focus to the selected workspace row',
+    'Tab from the open trigger hands focus to the first external control',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -297,7 +362,7 @@ void main() {
           currentIndex: 0,
           backwards: false,
         ),
-        1,
+        3,
       );
     },
   );

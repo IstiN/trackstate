@@ -171,13 +171,21 @@ class _JqlParser {
       if (field == _SupportedField.project && !_isQuoted(rawValue)) {
         final parts = rawValue.split(RegExp(r'\s+'));
         if (parts.length > 1) {
+          final trailingValue = parts.skip(1).join(' ');
           return _CompoundJqlClause([
             _ComparisonJqlClause(
               field: field,
               isNegated: equalityMatch.group(2) == '!=',
               value: parts.first,
             ),
-            _TextSearchClause(parts.skip(1).join(' ')),
+            if (_looksLikeIssueKey(trailingValue))
+              _ComparisonJqlClause(
+                field: _SupportedField.key,
+                isNegated: false,
+                value: trailingValue,
+              )
+            else
+              _TextSearchClause(trailingValue),
           ]);
         }
       }
@@ -263,6 +271,9 @@ class _JqlParser {
     final last = value[value.length - 1];
     return (first == '"' && last == '"') || (first == '\'' && last == '\'');
   }
+
+  bool _looksLikeIssueKey(String value) =>
+      RegExp(r'^[A-Za-z][A-Za-z0-9]*-\d+$').hasMatch(value);
 
   List<String> _splitByKeywordOutsideQuotes(String source, String keyword) {
     final segments = <String>[];

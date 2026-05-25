@@ -1850,7 +1850,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return false;
     }
     await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save' || label == 'Post comment') {
+    if (label == 'Save' || label == 'Save settings') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 2000));
+      });
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+      }
+      return true;
+    }
+    if (label == 'Create' || label == 'Post comment') {
       await tester.runAsync(() async {
         await tester.tap(target.first, warnIfMissed: false);
         await tester.pump();
