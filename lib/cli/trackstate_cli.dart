@@ -2751,7 +2751,12 @@ class TrackStateCli {
     switch (resource) {
       case 'ticket':
         final snapshot = await repository.loadSnapshot();
-        final key = _requiredTrimmedOption(results, 'key');
+        final key = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['key'],
+          results.rest,
+          0,
+        );
         final locale = _optionalLocale(results);
         TrackStateIssue? issue;
         for (final item in snapshot.issues) {
@@ -4531,10 +4536,7 @@ class TrackStateCli {
       category: TrackStateCliErrorCategory.validation,
       message: message,
       exitCode: 2,
-      details: <String, Object?>{
-        'option': option,
-        'occurrences': occurrences,
-      },
+      details: <String, Object?>{'option': option, 'occurrences': occurrences},
     );
   }
 
@@ -6268,7 +6270,7 @@ class TrackStateCli {
         '  trackstate read profile --target hosted --provider github --repository owner/name',
         '',
         'Compatibility aliases:',
-        '  trackstate ticket get --key TRACK-1',
+        '  trackstate ticket get TRACK-1',
         '  trackstate fields list',
         '  trackstate statuses list',
         '  trackstate issue-types list',
