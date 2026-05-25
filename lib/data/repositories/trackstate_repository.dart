@@ -391,7 +391,9 @@ class ProviderBackedTrackStateRepository
         ? await _loadComments(
             blobPaths: _snapshotBlobPaths,
             issueRoot: issueRoot,
-            existingComments: currentIssue.comments,
+            existingComments: force
+                ? const <IssueComment>[]
+                : currentIssue.comments,
           )
         : _CommentHydrationResult(comments: currentIssue.comments);
     final links = shouldLoadDetail
@@ -417,8 +419,7 @@ class ProviderBackedTrackStateRepository
           resolutionDefinitions: currentSnapshot.project.resolutionDefinitions,
         ).copyWith(
           hasDetailLoaded: shouldLoadDetail,
-          hasCommentsLoaded:
-              shouldLoadComments && commentsResult.error == null,
+          hasCommentsLoaded: shouldLoadComments && commentsResult.error == null,
           hasAttachmentsLoaded: shouldLoadAttachments,
         );
     _replaceIssueInSnapshot(hydratedIssue);
@@ -1793,9 +1794,10 @@ class ProviderBackedTrackStateRepository
       final acceptance = blobPaths.contains(acceptancePath)
           ? await _getRepositoryText(acceptancePath)
           : null;
-      final comments =
-          (await _loadComments(blobPaths: blobPaths, issueRoot: issueRoot))
-              .comments;
+      final comments = (await _loadComments(
+        blobPaths: blobPaths,
+        issueRoot: issueRoot,
+      )).comments;
       final links = await _loadLinks(
         blobPaths: blobPaths,
         issueRoot: issueRoot,
@@ -3745,7 +3747,8 @@ class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
 }
 
-class TrackStatePartialHydrationException extends TrackStateRepositoryException {
+class TrackStatePartialHydrationException
+    extends TrackStateRepositoryException {
   const TrackStatePartialHydrationException({
     required String message,
     required this.partialIssue,
