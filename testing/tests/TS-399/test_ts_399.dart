@@ -134,41 +134,51 @@ void main() {
         );
 
         final dialogTexts = screen.visibleDialogTextsSnapshot();
-        expect(
-          _containsFragment(
-                dialogTexts,
-                Ts399HierarchyMoveConfirmationFixture.storyAKey,
-              ) ||
-              _containsFragment(
-                dialogTexts,
-                Ts399HierarchyMoveConfirmationFixture.storyASummary,
-              ),
-          isTrue,
-          reason:
-              'Step 5 failed: the confirmation summary did not identify Story-A as the moved issue. '
-              'Visible dialog texts: ${_formatSnapshot(dialogTexts)}.',
+        final failures = <String>[];
+        final formattedDialogTexts = _formatSnapshot(dialogTexts);
+
+        final identifiesMovedIssue =
+            _containsFragment(
+              dialogTexts,
+              Ts399HierarchyMoveConfirmationFixture.storyAKey,
+            ) ||
+            _containsFragment(
+              dialogTexts,
+              Ts399HierarchyMoveConfirmationFixture.storyASummary,
+            );
+        if (!identifiesMovedIssue) {
+          failures.add(
+            'Step 5 failed: the confirmation summary did not identify Story-A as the moved issue. '
+            'Visible dialog texts: $formattedDialogTexts.',
+          );
+        }
+
+        final identifiesDescendantCount = _containsFragment(
+          dialogTexts,
+          '3 descendants',
         );
-        expect(
-          _containsFragment(dialogTexts, '3 descendants'),
-          isTrue,
-          reason:
-              'Step 5 failed: the confirmation summary did not state that three descendants would move with Story-A. '
-              'Visible dialog texts: ${_formatSnapshot(dialogTexts)}.',
-        );
-        expect(
-          _containsFragment(
-                dialogTexts,
-                Ts399HierarchyMoveConfirmationFixture.epic2Key,
-              ) ||
-              _containsFragment(
-                dialogTexts,
-                Ts399HierarchyMoveConfirmationFixture.epic2Summary,
-              ),
-          isTrue,
-          reason:
-              'Expected result failed: the confirmation summary did not identify Epic-2 as the destination hierarchy owner. '
-              'Visible dialog texts: ${_formatSnapshot(dialogTexts)}.',
-        );
+        if (!identifiesDescendantCount) {
+          failures.add(
+            'Step 5 failed: the confirmation summary did not state that three descendants would move with Story-A. '
+            'Visible dialog texts: $formattedDialogTexts.',
+          );
+        }
+
+        final identifiesDestinationEpic =
+            _containsFragment(
+              dialogTexts,
+              Ts399HierarchyMoveConfirmationFixture.epic2Key,
+            ) ||
+            _containsFragment(
+              dialogTexts,
+              Ts399HierarchyMoveConfirmationFixture.epic2Summary,
+            );
+        if (!identifiesDestinationEpic) {
+          failures.add(
+            'Expected result failed: the confirmation summary did not identify Epic-2 as the destination hierarchy owner. '
+            'Visible dialog texts: $formattedDialogTexts.',
+          );
+        }
 
         final afterInitialSave = await tester.runAsync(
           fixture.observeHierarchy,
@@ -176,24 +186,27 @@ void main() {
         if (afterInitialSave == null) {
           throw StateError('TS-399 post-save hierarchy observation failed.');
         }
-        expect(
-          afterInitialSave.headRevision,
-          beforeSave.headRevision,
-          reason:
-              'Expected result failed: clicking Save opened the prompt, but the repository head revision still changed before the move was confirmed.',
-        );
-        expect(
-          afterInitialSave.storyStoragePath,
-          Ts399HierarchyMoveConfirmationFixture.oldStoryPath,
-          reason:
-              'Expected result failed: Story-A moved to Epic-2 before the user confirmed the hierarchy change.',
-        );
-        expect(
-          afterInitialSave.storyEpicKey,
-          Ts399HierarchyMoveConfirmationFixture.epic1Key,
-          reason:
-              'Expected result failed: Story-A started reporting Epic-2 before the user confirmed the move.',
-        );
+        if (afterInitialSave.headRevision != beforeSave.headRevision) {
+          failures.add(
+            'Expected result failed: clicking Save opened the prompt, but the repository head revision still changed before the move was confirmed.',
+          );
+        }
+        if (afterInitialSave.storyStoragePath !=
+            Ts399HierarchyMoveConfirmationFixture.oldStoryPath) {
+          failures.add(
+            'Expected result failed: Story-A moved to Epic-2 before the user confirmed the hierarchy change. '
+            'Observed path: ${afterInitialSave.storyStoragePath}.',
+          );
+        }
+        if (afterInitialSave.storyEpicKey !=
+            Ts399HierarchyMoveConfirmationFixture.epic1Key) {
+          failures.add(
+            'Expected result failed: Story-A started reporting Epic-2 before the user confirmed the move. '
+            'Observed epic: ${afterInitialSave.storyEpicKey}.',
+          );
+        }
+
+        expect(failures, isEmpty, reason: failures.join('\n'));
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
