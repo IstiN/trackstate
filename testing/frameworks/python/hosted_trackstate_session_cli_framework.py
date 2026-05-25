@@ -23,12 +23,7 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         branch: str = "main",
         provider: str = "github",
     ) -> CliCommandResult:
-        executable = shutil.which("trackstate")
-        if executable is None:
-            raise AssertionError(
-                "Precondition failed: TS-409 requires the installed `trackstate` CLI "
-                "to be available on PATH for the hosted session parity check."
-            )
+        command_prefix = self._resolve_command_prefix()
 
         token = (
             os.environ.get("TRACKSTATE_TOKEN")
@@ -42,7 +37,7 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
             env.setdefault("TRACKSTATE_TOKEN", token)
 
         command = (
-            executable,
+            *command_prefix,
             "session",
             "--target",
             "hosted",
@@ -74,4 +69,23 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
             stdout=completed.stdout,
             stderr=completed.stderr,
             json_payload=payload,
+        )
+
+    def _resolve_command_prefix(self) -> tuple[str, ...]:
+        executable = shutil.which("trackstate")
+        if executable is not None:
+            return (executable,)
+
+        dart = shutil.which("dart")
+        if dart is not None:
+            return (dart, "run", "trackstate")
+
+        flutter = shutil.which("flutter")
+        if flutter is not None:
+            return (flutter, "pub", "run", "trackstate")
+
+        raise AssertionError(
+            "Precondition failed: TS-409 requires either an installed `trackstate` "
+            "CLI on PATH or a local Dart/Flutter toolchain that can run "
+            "`trackstate` from this repository."
         )

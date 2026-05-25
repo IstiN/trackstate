@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import sys
 import traceback
 import uuid
@@ -50,6 +51,8 @@ FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_success.png"
 STATUSES_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_statuses_commit.png"
 WORKFLOWS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_workflows_commit.png"
+TEST_FILE_PATH = f"testing/tests/{TICKET_KEY}/test_ts_409.py"
+TEST_RUN_COMMAND = f"python {TEST_FILE_PATH}"
 STATUSES_PATH = "DEMO/config/statuses.json"
 WORKFLOWS_PATH = "DEMO/config/workflows.json"
 WORKFLOW_NAME = "Delivery Workflow"
@@ -258,6 +261,14 @@ def main() -> None:
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
+        if str(error).startswith("Step 4 failed:"):
+            _capture_failed_save_repository_state(
+                result,
+                repository_service=repository_service,
+                expected_status_id=status_id,
+                expected_status_name=status_name,
+                expected_transition_name=transition_name,
+            )
         _record_failed_step_from_error(result)
         _write_failure_outputs(result)
         raise
@@ -626,6 +637,55 @@ def _record_failed_step_from_error(result: dict[str, object]) -> None:
     )
 
 
+def _capture_failed_save_repository_state(
+    result: dict[str, object],
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    expected_status_id: str,
+    expected_status_name: str,
+    expected_transition_name: str,
+) -> None:
+    try:
+        current_head_sha = repository_service.branch_head_sha()
+        current_statuses = repository_service.fetch_file(STATUSES_PATH)
+        current_workflows = repository_service.fetch_file(WORKFLOWS_PATH)
+    except Exception as capture_error:  # pragma: no cover - best-effort evidence
+        result["failure_state_capture_error"] = (
+            f"{type(capture_error).__name__}: {capture_error}"
+        )
+        return
+
+    failure_state = {
+        "head_sha": current_head_sha,
+        "statuses_path": STATUSES_PATH,
+        "workflows_path": WORKFLOWS_PATH,
+        "statuses_contains_expected_status": (
+            expected_status_id in current_statuses.content
+            and expected_status_name in current_statuses.content
+        ),
+        "workflows_contains_expected_transition": (
+            expected_transition_name in current_workflows.content
+        ),
+        "statuses_content": current_statuses.content,
+        "workflows_content": current_workflows.content,
+    }
+    result["failure_repository_state"] = failure_state
+    _record_human_verification(
+        result,
+        check=(
+            "Verified the live repository state after the Save action to confirm "
+            "whether the user-visible Settings change actually persisted."
+        ),
+        observed=(
+            f"head_sha={current_head_sha!r}; "
+            f"statuses_contains_expected_status="
+            f"{failure_state['statuses_contains_expected_status']!r}; "
+            f"workflows_contains_expected_transition="
+            f"{failure_state['workflows_contains_expected_transition']!r}"
+        ),
+    )
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -672,84 +732,109 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
-    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    screenshot_path = result.get(
+        "settings_screenshot" if passed else "screenshot",
+        SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
+    )
     lines = [
-        f"h3. {TICKET_KEY} {status}",
+        "h3. Test Automation Result",
         "",
-        "*Automation coverage*",
+        f"*Status:* {status}",
+        (
+            "*Test Case:* TS-409 — Settings persistence — Atomic multi-file write and "
+            "CLI parity"
+        ),
+        "",
+        "h4. What was tested",
         "* Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to *Project Settings*.",
         "* Added a unique status, edited the existing *Delivery Workflow* transition, and saved through the visible hosted Settings UI.",
         "* Verified the save result through the live GitHub repository commit/file state.",
         "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block.",
         "",
-        "*Observed result*",
+        "h4. Result",
         (
             "* Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
             if passed
-            else "* Did not match the expected result."
+            else "* Did not match the expected result: Step 4 failed because the hosted Save action never produced a new Git commit."
         ),
-        (
-            f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
-            f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
-            f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
-        ),
-        f"* Screenshot: {{{{{screenshot_path}}}}}",
+        *(_result_detail_lines(result, jira=True, passed=passed)),
         "",
-        "*Step results*",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        TEST_RUN_COMMAND,
+        "{code}",
+        "",
+        "h4. Step results",
         *_step_lines(result, jira=True),
         "",
-        "*Human-style verification*",
+        "h4. Human-style verification",
         *_human_lines(result, jira=True),
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "*Exact error*",
+                "h4. Exact error",
                 "{code}",
                 str(result.get("traceback", result.get("error", ""))),
                 "{code}",
             ]
         )
-    return "\n".join(lines) + "\n"
+    return _jira_markup("\n".join(lines) + "\n")
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
-    status = "Passed" if passed else "Failed"
-    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    status = "✅ PASSED" if passed else "❌ FAILED"
     lines = [
-        f"## {TICKET_KEY} {status}",
+        "## Test Automation Result",
         "",
-        "### Automation",
+        f"**Status:** {status}",
+        (
+            "**Test Case:** TS-409 — Settings persistence — Atomic multi-file write and "
+            "CLI parity"
+        ),
+        "",
+        "## What was automated",
         "- Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to `Project Settings`.",
         "- Added a unique status, edited the existing `Delivery Workflow` transition, and saved through the visible hosted Settings UI.",
         "- Verified the save result through the live GitHub repository commit/file state.",
         "- Ran the installed `trackstate session` CLI against the same hosted repository and checked the returned `projectConfig` block.",
         "",
-        "### Observed result",
+        "## Result",
         (
             "- Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
             if passed
-            else "- Did not match the expected result."
+            else "- Did not match the expected result: Step 4 failed because the hosted Save action never produced a new Git commit."
         ),
-        (
-            f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
-            f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
-        ),
-        f"- Screenshot: `{screenshot_path}`",
+        *(_result_detail_lines(result, jira=False, passed=passed)),
         "",
-        "### Step results",
+        "## Test file",
+        "```text",
+        TEST_FILE_PATH,
+        "```",
+        "",
+        "## Step results",
         *_step_lines(result, jira=False),
         "",
-        "### Human-style verification",
+        "## Human-style verification",
         *_human_lines(result, jira=False),
+        "",
+        "## How to run",
+        "```bash",
+        TEST_RUN_COMMAND,
+        "```",
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "### Exact error",
+                "## Exact error",
                 "```text",
                 str(result.get("traceback", result.get("error", ""))),
                 "```",
@@ -767,8 +852,14 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             "Verified the hosted Settings save created one atomic commit and the installed "
             "`trackstate session` CLI immediately returned the updated `projectConfig`."
             if passed
-            else "The hosted Settings persistence / CLI parity scenario did not match the expected result."
+            else (
+                "The hosted Settings persistence / CLI parity scenario failed because "
+                "the live Save action returned to the Settings screen but never created "
+                "a new repository commit."
+            )
         ),
+        "",
+        *(_result_detail_lines(result, jira=False, passed=passed)),
         "",
         "## Step results",
         *_step_lines(result, jira=False),
@@ -798,43 +889,49 @@ def _bug_description(result: dict[str, object]) -> str:
         if isinstance(cli_observation, dict)
         else "CLI step was not reached."
     )
-    return "\n".join(
+    failure_state = result.get("failure_repository_state")
+    notes = _failure_repository_notes(failure_state)
+    return _jira_markup(
+        "\n".join(
         [
-            f"# {TICKET_KEY} product defect",
+            f"h3. {TICKET_KEY} product defect",
             "",
-            "## Steps to reproduce",
+            "h4. Environment",
+            f"* URL: {{{{{result['app_url']}}}}}",
+            f"* Repository: {{{{{result['repository']}}}}}",
+            f"* Branch/ref: {{{{{result['repository_ref']}}}}}",
+            "* Browser: {{Chromium (Playwright)}}",
+            f"* OS: {{{{{platform.system()}}}}}",
+            "",
+            "h4. Steps to Reproduce",
             *_ticket_step_lines(result),
             "",
-            "## Expected result",
+            "h4. Expected Result",
             (
                 "Approved changes are written in one atomic Git commit via `applyFileChanges`. "
                 "The CLI `session` output immediately reflects the updated status catalog and "
                 "workflow summaries in the `projectConfig` block."
             ),
             "",
-            "## Actual result",
+            "h4. Actual Result",
             actual,
             "",
-            "## Exact error message or assertion failure",
-            "```text",
+            "h4. Logs / Error Output",
+            "{code}",
             str(result.get("traceback", result.get("error", ""))),
-            "```",
+            "{code}",
             "",
-            "## Environment details",
-            f"- URL: `{result['app_url']}`",
-            f"- Repository: `{result['repository']}`",
-            f"- Branch/ref: `{result['repository_ref']}`",
-            f"- Browser: `Chromium (Playwright)`",
-            f"- OS: `{platform.system()}`",
-            "",
-            "## Screenshots or logs",
-            f"- Screenshot: `{screenshot_path}`",
-            "- CLI observation:",
-            "```json",
+            "h4. Notes",
+            f"* Screenshot: {{{{{screenshot_path}}}}}",
+            *notes,
+            "* CLI observation:",
+            "{code:json}",
             cli_text,
-            "```",
+            "{code}",
         ]
-    ) + "\n"
+        )
+        + "\n"
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -850,7 +947,9 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
             f"{prefix} Step {step.get('step')}: {step.get('status', 'unknown').upper()} - "
             f"{step.get('action', '')}"
         )
-        rendered.append(f"{prefix} Observed: {step.get('observed', '')}")
+        rendered.append(
+            f"{prefix} Observed: {_compact_text(str(step.get('observed', '')))}"
+        )
     return rendered
 
 
@@ -864,7 +963,9 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         if not isinstance(entry, dict):
             continue
         rendered.append(f"{prefix} {entry.get('check', '')}")
-        rendered.append(f"{prefix} Observed: {entry.get('observed', '')}")
+        rendered.append(
+            f"{prefix} Observed: {_compact_text(str(entry.get('observed', '')))}"
+        )
     return rendered
 
 
@@ -879,18 +980,33 @@ def _ticket_step_lines(result: dict[str, object]) -> list[str]:
     for index, action in enumerate(REQUEST_STEPS, start=1):
         step = step_lookup.get(index)
         if step is None:
-            lines.append(f"{index}. {action} - not reached.")
+            lines.append(f"# {action} - not reached.")
             continue
         status = str(step.get("status", "unknown")).upper()
         icon = "✅" if status == "PASSED" else "❌"
-        lines.append(f"{index}. {action} - {icon} {status}")
-        lines.append(f"   - Observed: {step.get('observed', '')}")
+        lines.append(f"# {action} - {icon} {status}")
+        lines.append(f"Observed: {_compact_text(str(step.get('observed', '')), limit=900)}")
     return lines
 
 
 def _actual_result_text(result: dict[str, object]) -> str:
     error = str(result.get("error", ""))
     if error.startswith("Step 4 failed:"):
+        failure_state = result.get("failure_repository_state")
+        if isinstance(failure_state, dict):
+            head_sha = failure_state.get("head_sha", "")
+            statuses_present = failure_state.get("statuses_contains_expected_status")
+            workflows_present = failure_state.get(
+                "workflows_contains_expected_transition"
+            )
+            return (
+                "After clicking Save in the hosted Settings UI, the application returned "
+                "to the Project settings administration screen, but the repository head "
+                f"remained `{head_sha}` and the saved catalog markers were still missing "
+                f"from `{STATUSES_PATH}` and `{WORKFLOWS_PATH}` "
+                f"(status persisted: {statuses_present}, workflow persisted: "
+                f"{workflows_present})."
+            )
         return (
             "After the hosted Settings save, the repository branch head did not change "
             "within the polling window, so no new atomic commit was available for the "
@@ -946,6 +1062,84 @@ def _is_product_failure(result: dict[str, object]) -> bool:
     if "requires GH_TOKEN" in error or "available on PATH" in error:
         return False
     return error.startswith("Step ")
+
+
+def _result_detail_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+    passed: bool,
+) -> list[str]:
+    prefix = "*" if jira else "-"
+    screenshot_path = result.get(
+        "settings_screenshot" if passed else "screenshot",
+        SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
+    )
+    lines = [
+        (
+            f"{prefix} Environment: URL "
+            f"{'{{' + result['app_url'] + '}}' if jira else '`' + str(result['app_url']) + '`'}, "
+            f"repository "
+            f"{'{{' + result['repository'] + '}}' if jira else '`' + str(result['repository']) + '`'} "
+            f"@ {'{{' + result['repository_ref'] + '}}' if jira else '`' + str(result['repository_ref']) + '`'}, "
+            f"browser {'{{Chromium (Playwright)}}' if jira else '`Chromium (Playwright)`'}, "
+            f"OS {'{{' + platform.system() + '}}' if jira else '`' + platform.system() + '`'}."
+        ),
+        (
+            f"{prefix} Screenshot: "
+            f"{'{{' + str(screenshot_path) + '}}' if jira else '`' + str(screenshot_path) + '`'}"
+        ),
+    ]
+    failure_state = result.get("failure_repository_state")
+    if not passed and isinstance(failure_state, dict):
+        head_sha = str(failure_state.get("head_sha", "")).strip()
+        statuses_present = failure_state.get("statuses_contains_expected_status")
+        workflows_present = failure_state.get("workflows_contains_expected_transition")
+        lines.extend(
+            [
+                f"{prefix} Repository head after Save: "
+                f"{'{{' + head_sha + '}}' if jira else '`' + head_sha + '`'}",
+                (
+                    f"{prefix} Repository files after Save still missing the expected "
+                    f"markers: status persisted = {statuses_present}, workflow "
+                    f"persisted = {workflows_present}."
+                ),
+            ]
+        )
+    return lines
+
+
+def _failure_repository_notes(failure_state: object) -> list[str]:
+    if not isinstance(failure_state, dict):
+        return ["* Live repository state could not be captured after the failed Save."]
+    return [
+        f"* Repository head after Save: {{{{{failure_state.get('head_sha', '')}}}}}",
+        (
+            "* statuses.json contained expected new status: "
+            f"{failure_state.get('statuses_contains_expected_status')}"
+        ),
+        (
+            "* workflows.json contained expected renamed transition: "
+            f"{failure_state.get('workflows_contains_expected_transition')}"
+        ),
+        "{code:json}",
+        str(failure_state.get("statuses_content", "")),
+        "{code}",
+        "{code:json}",
+        str(failure_state.get("workflows_content", "")),
+        "{code}",
+    ]
+
+
+def _compact_text(value: str, *, limit: int = 500) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
+
+
+def _jira_markup(value: str) -> str:
+    return re.sub(r"`([^`]+)`", r"{{\1}}", value)
 
 
 if __name__ == "__main__":
