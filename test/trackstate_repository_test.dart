@@ -2401,6 +2401,52 @@ size 6
   );
 
   test(
+    'provider-backed repository queues hosted release-backed uploads through the inbox when direct release writes are unavailable',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.full,
+          supportsReleaseAttachmentWrites: false,
+          canCheckCollaborators: false,
+        ),
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap')),
+      );
+
+      expect(updated.attachments, isEmpty);
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/.trackstate/upload-inbox/DEMO-1/release plan.txt',
+      );
+      expect(
+        provider
+            .binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-1/release plan.txt'],
+        Uint8List.fromList(utf8.encode('roadmap')),
+      );
+      expect(provider.files['DEMO/DEMO-1/attachments.json'], '[]\n');
+    },
+  );
+
+  test(
     'provider-backed repository replaces a legacy repository-path attachment with github-releases metadata',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
@@ -3843,7 +3889,9 @@ class _FakeReleaseAttachmentProvider
 
   final RepositoryPermission permission;
   final Map<String, String> files;
+  final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryConnection? _connection;
 
   @override
@@ -3865,6 +3913,8 @@ class _FakeReleaseAttachmentProvider
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     return [
       for (final path in files.keys)
+        RepositoryTreeEntry(path: path, type: 'blob'),
+      for (final path in binaryFiles.keys)
         RepositoryTreeEntry(path: path, type: 'blob'),
     ];
   }
@@ -3941,6 +3991,15 @@ class _FakeReleaseAttachmentProvider
     String path, {
     required String ref,
   }) async {
+    final binary = binaryFiles[path];
+    if (binary != null) {
+      return RepositoryAttachment(
+        path: path,
+        bytes: Uint8List.fromList(binary),
+        revision: 'attachment-sha',
+        declaredSizeBytes: binary.length,
+      );
+    }
     final content = files[path];
     if (content == null) {
       throw TrackStateProviderException('Attachment not found: $path');
@@ -3957,7 +4016,13 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
-    throw UnimplementedError();
+    lastAttachmentWriteRequest = request;
+    binaryFiles[request.path] = Uint8List.fromList(request.bytes);
+    return RepositoryAttachmentWriteResult(
+      path: request.path,
+      branch: request.branch,
+      revision: 'attachment-sha',
+    );
   }
 
   @override
