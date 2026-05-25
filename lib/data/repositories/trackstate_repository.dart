@@ -645,7 +645,23 @@ class ProviderBackedTrackStateRepository
         ),
       );
     }
-    return loadSnapshot();
+    final currentSnapshot = _snapshot;
+    if (currentSnapshot == null) {
+      return loadSnapshot();
+    }
+    final updatedSnapshot = TrackerSnapshot(
+      project: _projectConfigWithSavedSettings(
+        current: currentSnapshot.project,
+        settings: persistedSettings,
+      ),
+      issues: currentSnapshot.issues,
+      repositoryIndex: currentSnapshot.repositoryIndex,
+      loadWarnings: currentSnapshot.loadWarnings,
+      readiness: currentSnapshot.readiness,
+      startupRecovery: currentSnapshot.startupRecovery,
+    );
+    _snapshot = updatedSnapshot;
+    return updatedSnapshot;
   }
 
   @override
@@ -967,7 +983,9 @@ class ProviderBackedTrackStateRepository
           'GitHub Releases attachment storage requires a non-empty tag prefix.',
         );
       }
-      if (!permission.supportsReleaseAttachmentWrites) {
+      if (!permission.supportsReleaseAttachmentWrites &&
+          !(permission.canManageAttachments &&
+              _provider.providerType == ProviderType.github)) {
         throw TrackStateRepositoryException(
           permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
                   true
@@ -1007,6 +1025,32 @@ class ProviderBackedTrackStateRepository
     }
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
       final githubReleases = attachmentStorage.githubReleases!;
+      final writeBranch = await _provider.resolveWriteBranch();
+      if (!permission.supportsReleaseAttachmentWrites) {
+        final inboxPath = _releaseAttachmentInboxPath(
+          issue: currentIssue,
+          fileName: normalizedName,
+        );
+        final existingInboxRevision = await _existingRevision(
+          path: inboxPath,
+          ref: writeBranch,
+          blobPaths: _snapshotBlobPaths,
+        );
+        final inboxWriteResult = await _provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: inboxPath,
+            bytes: bytes,
+            message: 'Queue release attachment upload for ${currentIssue.key}',
+            branch: writeBranch,
+            expectedRevision: existingInboxRevision,
+          ),
+        );
+        _snapshotArtifactRevisions[inboxPath] = inboxWriteResult.revision;
+        _snapshotBlobPaths = {..._snapshotBlobPaths, inboxPath};
+        final updatedIssue = currentIssue.copyWith(hasAttachmentsLoaded: true);
+        _replaceCachedIssue(updatedIssue);
+        return updatedIssue;
+      }
       final releaseStore = switch (_provider) {
         final RepositoryReleaseAttachmentStore supported => supported,
         _ => throw const TrackStateRepositoryException(
@@ -1014,7 +1058,6 @@ class ProviderBackedTrackStateRepository
           'attachment uploads.',
         ),
       };
-      final writeBranch = await _provider.resolveWriteBranch();
       final attachmentPath = resolveIssueAttachmentPath(
         currentIssue,
         normalizedName,
@@ -4298,6 +4341,29 @@ Map<String, Object?> _localizedLabelsJson(
   ),
 };
 
+ProjectConfig _projectConfigWithSavedSettings({
+  required ProjectConfig current,
+  required ProjectSettingsCatalog settings,
+}) {
+  return ProjectConfig(
+    key: current.key,
+    name: current.name,
+    repository: current.repository,
+    branch: current.branch,
+    defaultLocale: settings.defaultLocale,
+    supportedLocales: settings.effectiveSupportedLocales,
+    issueTypeDefinitions: settings.issueTypeDefinitions,
+    statusDefinitions: settings.statusDefinitions,
+    fieldDefinitions: settings.fieldDefinitions,
+    workflowDefinitions: settings.workflowDefinitions,
+    priorityDefinitions: settings.priorityDefinitions,
+    versionDefinitions: settings.versionDefinitions,
+    componentDefinitions: settings.componentDefinitions,
+    resolutionDefinitions: settings.resolutionDefinitions,
+    attachmentStorage: settings.attachmentStorage,
+  );
+}
+
 Map<String, Object?> _configLocalizedLabelsJson(
   List<TrackStateConfigEntry> entries,
   String locale,
@@ -4713,6 +4779,38 @@ String sanitizeAttachmentName(String value) => value
     .replaceAll(RegExp(r'^-|-$'), '')
     .ifEmpty('attachment.bin');
 
+String _releaseAttachmentInboxPath({
+  required TrackStateIssue issue,
+  required String fileName,
+}) {
+  final normalizedFileName = fileName
+      .replaceAll('\\', '/')
+      .split('/')
+      .last
+      .trim()
+      .ifEmpty('attachment.bin');
+  final dataRoot = _dataRootFromIssueStoragePath(issue.storagePath);
+  return _joinPath(
+    dataRoot,
+    '.trackstate/upload-inbox/${issue.key}/$normalizedFileName',
+  );
+}
+
+String _dataRootFromIssueStoragePath(String storagePath) {
+  final normalized = storagePath.replaceAll('\\', '/').trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  final segments = normalized.split('/');
+  final issueKeyIndex = segments.indexWhere(
+    (segment) => RegExp(r'^[A-Z][A-Z0-9]+-\d+$').hasMatch(segment.trim()),
+  );
+  if (issueKeyIndex <= 0) {
+    return '';
+  }
+  return segments.take(issueKeyIndex).join('/');
+}
+
 String _attachmentMetadataPath(String issueRoot) =>
     _joinPath(issueRoot, 'attachments.json');
 
@@ -5093,7 +5191,7 @@ const _issueTypeDefinitions = [
     id: 'task',
     name: 'Task',
     hierarchyLevel: 0,
-    icon: 'task',
+    icon: 'issue',
     workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Task'},
   ),
@@ -5109,7 +5207,7 @@ const _issueTypeDefinitions = [
     id: 'bug',
     name: 'Bug',
     hierarchyLevel: 0,
-    icon: 'bug',
+    icon: 'issue',
     workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Bug'},
   ),

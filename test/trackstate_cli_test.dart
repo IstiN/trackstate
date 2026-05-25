@@ -25,6 +25,50 @@ void main() {
       expect(result.stdout, contains('trackstate read ticket --key TRACK-1'));
     });
 
+    test('prints attachment upload and download examples in root help', () async {
+      final cli = TrackStateCli();
+
+      final result = await cli.run(const <String>['--help']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('Upload or download one attachment.'));
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+        ),
+      );
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
+        ),
+      );
+    });
+
+    test(
+      'prints attachment upload help for the jiraattachfiletoticket alias',
+      () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>[
+          'jiraattachfiletoticket',
+          '--help',
+        ]);
+
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('trackstate attachment upload'));
+        expect(result.stdout, contains('--issue'));
+        expect(result.stdout, contains('--file'));
+        expect(
+          result.stdout,
+          contains(
+            'jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
+          ),
+        );
+      },
+    );
+
     test('reports validation errors in the JSON envelope', () async {
       final cli = TrackStateCli();
 
@@ -1400,6 +1444,72 @@ void main() {
         expect(attachment['sizeBytes'], 4);
         expect(repository.lastUploadIssue?.key, 'TRACK-1');
         expect(repository.lastUploadName, 'design.png');
+      },
+    );
+
+    test(
+      'attachment upload rejects duplicate file flags before mutating the repository',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-upload-duplicate-file',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final firstFile = File('${tempDir.path}/file1.png');
+        final secondFile = File('${tempDir.path}/file2.png');
+        await firstFile.writeAsBytes(const <int>[1]);
+        await secondFile.writeAsBytes(const <int>[2]);
+        final repository = _FakeSearchRepository(snapshot: _sampleSnapshot());
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          firstFile.path,
+          '--file',
+          secondFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 2);
+        expect(json['ok'], false);
+        expect(json['error'], isA<Map<String, Object?>>());
+        final error = json['error']! as Map<String, Object?>;
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          allOf(contains('file'), contains('Only one file')),
+        );
+        expect(repository.lastUploadIssue, isNull);
+        expect(repository.lastUploadName, isNull);
       },
     );
 

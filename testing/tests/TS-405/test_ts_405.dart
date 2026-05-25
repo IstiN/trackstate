@@ -107,7 +107,7 @@ void main() {
               'Step 4 failed: saving the Add status dialog should close the editor overlay before repository validation runs.',
         );
 
-        await robot.tapActionButton('Save settings');
+        await robot.tapSaveSettingsButton();
         final duplicateAttemptHead =
             await tester.runAsync(fixture.headRevision) ?? '';
         final duplicateAttemptStatus =
@@ -141,6 +141,7 @@ void main() {
               'the duplicate-ID validation attempt should not write project settings',
         );
 
+        await robot.tapActionButton('Reset');
         await robot.openProjectStatuses();
 
         await robot.tapActionButton('Add status');
@@ -161,7 +162,7 @@ void main() {
         );
 
         await robot.tapActionButton('Save');
-        await robot.tapActionButton('Save settings');
+        await robot.tapSaveSettingsButton();
 
         expect(
           robot.isVisibleText(missingNameError),

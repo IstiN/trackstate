@@ -345,6 +345,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         writeBranch: writeBranch,
       );
     }
+
     return LocalTrackStateRepository(
       repositoryPath: repositoryPath,
       dataRef: defaultBranch,
@@ -4553,6 +4554,7 @@ class _Sidebar extends StatelessWidget {
                     child: _NavButton(
                       item: item,
                       selected: viewModel.section == item.section,
+                      selectedCanRequestFocus: viewModel.isInitialSearchLoading,
                       semanticsSortOrder: _desktopPrimaryNavigationOrder(
                         item.section,
                       ),
@@ -4670,10 +4672,17 @@ class _TopBar extends StatelessWidget {
             );
           }
 
+          final showHostedConnectAction =
+              !viewModel.usesLocalPersistence &&
+              viewModel.hostedRepositoryAccessMode ==
+                  HostedRepositoryAccessMode.disconnected &&
+              viewModel.isInitialSearchLoading;
           final condensedDesktop =
               !compact &&
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
-          final iconOnlyActions = compact || condensedDesktop;
+          final iconOnlyActions =
+              compact ||
+              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1180 : 1040);
           final actionGap = iconOnlyActions ? 8.0 : 12.0;
           final createIssueOrder = compact ? 2.0 : 1.0;
           final addWorkspaceOrder = compact ? 3.0 : 1.5;
@@ -4681,6 +4690,10 @@ class _TopBar extends StatelessWidget {
           final searchOrder = compact ? 2.0 : 8.0;
           final themeToggleOrder = compact ? null : 9.0;
           final syncPillOrder = compact ? null : 10.0;
+          final openHostedRepositoryAccess =
+              viewModel.isSaving || !showHostedConnectAction
+              ? null
+              : () => _showRepositoryAccessDialog(context, viewModel);
           final desktopWorkspaceSwitcherBindings =
               <ShortcutActivator, VoidCallback>{
                 if (!kIsWeb)
@@ -4974,18 +4987,30 @@ class _TopBar extends StatelessWidget {
 
           return Row(
             children: [
-              orderedControl(
-                syncPillOrder ?? searchOrder + 1,
-                _SyncPill(
-                  label: _workspaceSyncLabel(l10n, viewModel),
-                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
-                  tone: _workspaceSyncTone(viewModel),
-                  height: _desktopTopBarControlHeight,
-                  onPressed: () =>
-                      viewModel.selectSection(TrackerSection.settings),
-                  semanticsSortOrder: syncPillOrder,
+              if (showHostedConnectAction)
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SecondaryButton(
+                    label: l10n.connectGitHub,
+                    icon: TrackStateIconGlyph.repository,
+                    onPressed: openHostedRepositoryAccess,
+                    height: _desktopTopBarControlHeight,
+                    semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+                  ),
+                )
+              else
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SyncPill(
+                    label: _workspaceSyncLabel(l10n, viewModel),
+                    semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                    tone: _workspaceSyncTone(viewModel),
+                    height: _desktopTopBarControlHeight,
+                    onPressed: () =>
+                        viewModel.selectSection(TrackerSection.settings),
+                    semanticsSortOrder: syncPillOrder,
+                  ),
                 ),
-              ),
               const SizedBox(width: 12),
               buildPrimaryHeaderActions(),
               const SizedBox(width: 8),
@@ -5042,6 +5067,8 @@ class _TopBar extends StatelessWidget {
                                     height: _desktopTopBarControlHeight,
                                   ),
                               hintText: l10n.jqlPlaceholder,
+                              hintStyle: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.muted, height: 1),
                             ),
                           );
                           if (kIsWeb) {
@@ -5193,6 +5220,25 @@ String _hostedWorkspaceAccessModeLabel(
     HostedWorkspaceAccessMode.attachmentRestricted =>
       l10n.repositoryAccessAttachmentsRestricted,
   };
+}
+
+Future<void> _showIssueEditDialog(
+  BuildContext context, {
+  required TrackStateIssue issue,
+  required TrackerViewModel viewModel,
+  required bool workflowOnly,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.12),
+    builder: (dialogContext) {
+      return _IssueEditDialog(
+        issue: issue,
+        viewModel: viewModel,
+        workflowOnly: workflowOnly,
+      );
+    },
+  );
 }
 
 Future<void> _showRepositoryAccessDialog(
@@ -6377,6 +6423,10 @@ class _Board extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
+            final canEditFromBoard =
+                !compact &&
+                !viewModel.hasBlockedWriteAccess &&
+                !viewModel.isSaving;
             final columns = IssueStatus.values.map((status) {
               final title =
                   project?.statusLabel(status.id, locale: metadataLocale) ??
@@ -6389,6 +6439,14 @@ class _Board extends StatelessWidget {
                   issue,
                   returnSection: TrackerSection.board,
                 ),
+                onEdit: canEditFromBoard
+                    ? (issue) => _showIssueEditDialog(
+                        context,
+                        issue: issue,
+                        viewModel: viewModel,
+                        workflowOnly: false,
+                      )
+                    : null,
                 onMove: viewModel.moveIssue,
               );
             }).toList();
@@ -9381,10 +9439,10 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
     final activeTab = ProjectSettingsTab.values[_tabController.index];
-    final canEdit =
+    final canManageCatalogs =
         widget.viewModel.supportsProjectSettingsAdmin &&
-        !widget.viewModel.hasBlockedWriteAccess &&
-        !widget.viewModel.isSaving;
+        !widget.viewModel.hasBlockedWriteAccess;
+    final canSaveSettings = canManageCatalogs && !widget.viewModel.isSaving;
     final tabBar = FocusTraversalOrder(
       order: const NumericFocusOrder(0),
       child: TabBar(
@@ -9404,18 +9462,26 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ),
     );
     final content = switch (activeTab) {
-      ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      ProjectSettingsTab.statuses => _buildStatusTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
       ProjectSettingsTab.issueTypes => _buildIssueTypeTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      ProjectSettingsTab.fields => _buildFieldTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.priorities => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.priorities,
@@ -9423,7 +9489,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editPriority,
         deleteLabel: l10n.deletePriority,
         entries: settings.priorityDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addPriority,
           editTitle: l10n.editPriority,
@@ -9442,7 +9508,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editComponent,
         deleteLabel: l10n.deleteComponent,
         entries: settings.componentDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addComponent,
           editTitle: l10n.editComponent,
@@ -9461,7 +9527,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editVersion,
         deleteLabel: l10n.deleteVersion,
         entries: settings.versionDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addVersion,
           editTitle: l10n.editVersion,
@@ -9476,9 +9542,13 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ProjectSettingsTab.attachments => _buildAttachmentsTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.locales => _buildLocalesTab(l10n, settings, canEdit),
+      ProjectSettingsTab.locales => _buildLocalesTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -9512,9 +9582,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       emphasized: false,
                       child: _IssueDetailActionButton(
                         label: l10n.resetSettings,
-                        onPressed: widget.viewModel.isSaving
-                            ? null
-                            : () => _resetDraft(project),
+                        onPressed: canSaveSettings
+                            ? () => _resetDraft(project)
+                            : null,
                       ),
                     ),
                     _orderedSettingsAction(
@@ -9524,7 +9594,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       child: _IssueDetailActionButton(
                         label: l10n.saveSettings,
                         emphasized: true,
-                        onPressed: canEdit ? _saveSettings : null,
+                        onPressed: canSaveSettings ? _saveSettings : null,
                       ),
                     ),
                   ],
@@ -10122,7 +10192,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
   late final TextEditingController _idController;
   late final TextEditingController _nameController;
   late final TextEditingController _hierarchyLevelController;
-  late final TextEditingController _iconController;
+  late String _iconId;
   String? _workflowId;
 
   @override
@@ -10133,7 +10203,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _hierarchyLevelController = TextEditingController(
       text: widget.initial?.hierarchyLevel?.toString() ?? '0',
     );
-    _iconController = TextEditingController(text: widget.initial?.icon ?? '');
+    _iconId = _normalizedIssueTypeIconId(widget.initial?.icon);
     _workflowId =
         widget.initial?.workflowId ??
         (widget.workflows.isNotEmpty ? widget.workflows.first.id : null);
@@ -10144,7 +10214,6 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _idController.dispose();
     _nameController.dispose();
     _hierarchyLevelController.dispose();
-    _iconController.dispose();
     super.dispose();
   }
 
@@ -10163,9 +10232,21 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
           controller: _hierarchyLevelController,
         ),
         const SizedBox(height: 12),
-        _SettingsTextField(
-          label: l10n.catalogIcon,
-          controller: _iconController,
+        DropdownButtonFormField<String>(
+          initialValue: _iconId,
+          decoration: InputDecoration(labelText: l10n.catalogIcon),
+          items: [
+            for (final option in _supportedIssueTypeIconOptions)
+              DropdownMenuItem<String>(
+                value: option.id,
+                child: Text(option.label),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _iconId = _normalizedIssueTypeIconId(value);
+            });
+          },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -10193,7 +10274,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
                 name: _nameController.text.trim(),
                 hierarchyLevel:
                     int.tryParse(_hierarchyLevelController.text.trim()) ?? 0,
-                icon: _iconController.text.trim(),
+                icon: _iconId,
                 workflowId: _workflowId,
               ),
             );
@@ -10212,6 +10293,35 @@ class _FieldEditor extends StatefulWidget {
 
   @override
   State<_FieldEditor> createState() => _FieldEditorState();
+}
+
+class _IssueTypeIconOption {
+  const _IssueTypeIconOption({required this.id, required this.label});
+
+  final String id;
+  final String label;
+}
+
+const List<_IssueTypeIconOption> _supportedIssueTypeIconOptions = [
+  _IssueTypeIconOption(id: 'epic', label: 'Epic'),
+  _IssueTypeIconOption(id: 'story', label: 'Story'),
+  _IssueTypeIconOption(id: 'subtask', label: 'Sub-task'),
+  _IssueTypeIconOption(id: 'hierarchy', label: 'Hierarchy'),
+  _IssueTypeIconOption(id: 'settings', label: 'Settings'),
+  _IssueTypeIconOption(id: 'issue', label: 'Issue'),
+];
+
+String _normalizedIssueTypeIconId(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return switch (normalized) {
+    'epic' => 'epic',
+    'story' => 'story',
+    'subtask' => 'subtask',
+    'hierarchy' => 'hierarchy',
+    'settings' => 'settings',
+    'task' || 'bug' || 'issue' => 'issue',
+    _ => 'issue',
+  };
 }
 
 class _FieldEditorState extends State<_FieldEditor> {
@@ -10905,16 +11015,11 @@ class _IssueDetailState extends State<_IssueDetail> {
   }
 
   Future<void> _openEditDialog({required bool workflowOnly}) async {
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.12),
-      builder: (dialogContext) {
-        return _IssueEditDialog(
-          issue: widget.issue,
-          viewModel: widget.viewModel,
-          workflowOnly: workflowOnly,
-        );
-      },
+    await _showIssueEditDialog(
+      context,
+      issue: widget.issue,
+      viewModel: widget.viewModel,
+      workflowOnly: workflowOnly,
     );
   }
 
@@ -11290,12 +11395,14 @@ class _IssueDetailActionButton extends StatefulWidget {
     required this.onPressed,
     this.emphasized = false,
     this.sortOrder,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool emphasized;
   final double? sortOrder;
+  final FocusNode? focusNode;
 
   @override
   State<_IssueDetailActionButton> createState() =>
@@ -11304,6 +11411,8 @@ class _IssueDetailActionButton extends StatefulWidget {
 
 class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
   late final FocusNode _focusNode = FocusNode(debugLabel: widget.label);
+
+  FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode;
 
   @override
   void dispose() {
@@ -11317,7 +11426,7 @@ class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
     final child = ExcludeSemantics(child: Text(widget.label));
     final button = widget.emphasized
         ? FilledButton(
-            focusNode: _focusNode,
+            focusNode: _effectiveFocusNode,
             onPressed: widget.onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
@@ -11330,7 +11439,7 @@ class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
             child: child,
           )
         : OutlinedButton(
-            focusNode: _focusNode,
+            focusNode: _effectiveFocusNode,
             onPressed: widget.onPressed,
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.text,
@@ -11343,13 +11452,13 @@ class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
             child: child,
           );
     final semanticButton = AnimatedBuilder(
-      animation: _focusNode,
+      animation: _effectiveFocusNode,
       child: button,
       builder: (context, child) => Semantics(
         button: true,
         enabled: widget.onPressed != null,
         focusable: widget.onPressed != null,
-        focused: _focusNode.hasFocus,
+        focused: _effectiveFocusNode.hasFocus,
         label: widget.label,
         sortKey: _semanticsSortKey(widget.sortOrder),
         onTap: widget.onPressed,
@@ -11405,6 +11514,9 @@ class _IssueList extends StatelessWidget {
                   decoration: InputDecoration(
                     labelText: l10n.searchIssues,
                     hintText: l10n.jqlPlaceholder,
+                    hintStyle: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: colors.muted),
                   ),
                 ),
               ),
@@ -11581,6 +11693,7 @@ class _BoardColumn extends StatelessWidget {
     required this.targetStatus,
     required this.issues,
     required this.onSelect,
+    this.onEdit,
     required this.onMove,
   });
 
@@ -11588,6 +11701,7 @@ class _BoardColumn extends StatelessWidget {
   final IssueStatus targetStatus;
   final List<TrackStateIssue> issues;
   final ValueChanged<TrackStateIssue> onSelect;
+  final ValueChanged<TrackStateIssue>? onEdit;
   final void Function(TrackStateIssue issue, IssueStatus status) onMove;
 
   @override
@@ -11641,6 +11755,9 @@ class _BoardColumn extends StatelessWidget {
                           child: _IssueCard(
                             issue: issue,
                             onTap: () => onSelect(issue),
+                            onEdit: onEdit == null
+                                ? null
+                                : () => onEdit!(issue),
                           ),
                         ),
                       if (issues.isEmpty)
@@ -11669,67 +11786,101 @@ class _BoardColumn extends StatelessWidget {
 }
 
 class _IssueCard extends StatelessWidget {
-  const _IssueCard({required this.issue, required this.onTap});
+  const _IssueCard({required this.issue, required this.onTap, this.onEdit});
 
   final TrackStateIssue issue;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final card = Semantics(
-      button: true,
-      label: 'Open ${issue.key} ${issue.summary}',
-      child: InkWell(
+    final card = Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: ExcludeSemantics(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surface,
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            button: true,
+            label: 'Open ${issue.key} ${issue.summary}',
+            child: InkWell(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _IssueTypeGlyph(issue.issueType),
-                    const SizedBox(width: 8),
-                    Text(
-                      issue.key,
-                      style: TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 12,
-                        color: colors.muted,
+              onTap: onTap,
+              child: ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _IssueTypeGlyph(issue.issueType),
+                          const SizedBox(width: 8),
+                          Text(
+                            issue.key,
+                            style: TextStyle(
+                              fontFamily: 'JetBrains Mono',
+                              fontSize: 12,
+                              color: colors.muted,
+                            ),
+                          ),
+                          const Spacer(),
+                          _Avatar(name: issue.assignee),
+                        ],
                       ),
-                    ),
-                    const Spacer(),
-                    _Avatar(name: issue.assignee),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        issue.summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _Chip(label: issue.issueType.label),
+                          _PriorityBadge(priority: issue.priority),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  issue.summary,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _Chip(label: issue.issueType.label),
-                    _PriorityBadge(priority: issue.priority),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (onEdit != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Semantics(
+                  button: true,
+                  label: l10n.edit,
+                  child: TextButton(
+                    key: ValueKey('board-edit-${issue.key}'),
+                    onPressed: onEdit,
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: ExcludeSemantics(child: Text(l10n.edit)),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
     return Draggable<TrackStateIssue>(
@@ -12845,36 +12996,65 @@ class _IconButtonSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final enabled = onPressed != null;
+    final controlSize = size ?? 40.0;
     return Semantics(
       button: true,
       enabled: enabled,
+      focusable: enabled,
       identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        excludeFromSemantics: true,
-        onTap: onPressed,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          padding: size == null ? const EdgeInsets.all(11) : null,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.border),
-          ),
-          foregroundDecoration: enabled
-              ? null
-              : BoxDecoration(
-                  color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-          child: TrackStateIcon(
-            glyph,
-            color: enabled ? colors.text : colors.muted,
-            size: size == null ? 18 : _desktopTopBarIconSize,
+      child: ExcludeSemantics(
+        child: SizedBox(
+          width: controlSize,
+          height: controlSize,
+          child: OutlinedButton(
+            onPressed: onPressed,
+            style: ButtonStyle(
+              animationDuration: Duration.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+              minimumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              maximumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.disabled)) {
+                  return colors.surfaceAlt.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.pressed)) {
+                  return colors.primarySoft.withValues(alpha: .84);
+                }
+                if (states.contains(WidgetState.focused)) {
+                  return colors.primarySoft.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return colors.surfaceAlt;
+                }
+                return colors.surface;
+              }),
+              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+              side: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return BorderSide(color: colors.primary, width: 2);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return BorderSide(
+                    color: Color.alphaBlend(
+                      colors.primary.withValues(alpha: .24),
+                      colors.border,
+                    ),
+                  );
+                }
+                return BorderSide(color: colors.border);
+              }),
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            child: TrackStateIcon(
+              glyph,
+              color: enabled ? colors.text : colors.muted,
+              size: size == null ? 18 : _desktopTopBarIconSize,
+            ),
           ),
         ),
       ),
@@ -12930,6 +13110,7 @@ class _DropdownCreateField extends StatelessWidget {
     this.hintText,
     this.helperText,
     this.errorText,
+    this.focusNode,
   });
 
   final String label;
@@ -12940,6 +13121,7 @@ class _DropdownCreateField extends StatelessWidget {
   final String? errorText;
   final List<DropdownMenuItem<String>> items;
   final ValueChanged<String?>? onChanged;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -12947,6 +13129,7 @@ class _DropdownCreateField extends StatelessWidget {
       label: label,
       child: DropdownButtonFormField<String>(
         key: ValueKey('$label-${value ?? 'empty'}'),
+        focusNode: focusNode,
         initialValue: items.any((item) => item.value == value) ? value : null,
         isExpanded: true,
         items: items,
@@ -12994,6 +13177,8 @@ class _SelectableChipField extends StatelessWidget {
     required this.onToggle,
     this.enabled = true,
     this.optionLabelBuilder,
+    this.onEditRequested,
+    this.focusNode,
   });
 
   final String label;
@@ -13002,36 +13187,68 @@ class _SelectableChipField extends StatelessWidget {
   final ValueChanged<String> onToggle;
   final bool enabled;
   final String Function(TrackStateConfigEntry option)? optionLabelBuilder;
+  final VoidCallback? onEditRequested;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: label,
       container: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.labelMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in options)
-                FilterChip(
-                  label: Text(
-                    optionLabelBuilder?.call(option) ?? option.label(),
+      readOnly: true,
+      explicitChildNodes: true,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (onEditRequested == null)
+              Text(label, style: Theme.of(context).textTheme.labelMedium)
+            else
+              Semantics(
+                button: true,
+                enabled: enabled,
+                focusable: enabled,
+                label: label,
+                child: ExcludeSemantics(
+                  child: TextButton(
+                    focusNode: focusNode,
+                    onPressed: enabled ? onEditRequested : null,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: Size.zero,
+                      alignment: Alignment.centerLeft,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
                   ),
-                  selected: selectedValues.any(
-                    (value) =>
-                        _canonicalConfigId(value) ==
-                        _canonicalConfigId(option.id),
-                  ),
-                  onSelected: enabled ? (_) => onToggle(option.id) : null,
                 ),
-            ],
-          ),
-        ],
+              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in options)
+                  FilterChip(
+                    label: Text(
+                      optionLabelBuilder?.call(option) ?? option.label(),
+                    ),
+                    selected: selectedValues.any(
+                      (value) =>
+                          _canonicalConfigId(value) ==
+                          _canonicalConfigId(option.id),
+                    ),
+                    onSelected: enabled ? (_) => onToggle(option.id) : null,
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -13047,6 +13264,7 @@ class _LabelTokenField extends StatelessWidget {
     required this.onChanged,
     required this.onSubmitted,
     required this.onRemove,
+    this.focusNode,
   });
 
   final String label;
@@ -13057,6 +13275,7 @@ class _LabelTokenField extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
   final ValueChanged<String> onRemove;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -13070,6 +13289,7 @@ class _LabelTokenField extends StatelessWidget {
           value: controller.text,
           child: TextField(
             controller: controller,
+            focusNode: focusNode,
             enabled: enabled,
             onChanged: onChanged,
             onSubmitted: onSubmitted,
@@ -13706,6 +13926,15 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   late final TextEditingController _descriptionController;
   late final TextEditingController _assigneeController;
   late final TextEditingController _labelEntryController;
+  final GlobalKey _summaryFieldKey = GlobalKey(
+    debugLabel: 'edit-issue-summary',
+  );
+  late final FocusNode _labelsFocusNode;
+  late final FocusNode _summaryFocusNode;
+  late final FocusNode _componentsFocusNode;
+  late final FocusNode _fixVersionsFocusNode;
+  late final FocusNode _hierarchyFocusNode;
+  late final FocusNode _saveFocusNode;
   late String _selectedPriorityId;
   late final List<String> _labels;
   late final List<String> _components;
@@ -13734,6 +13963,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     );
     _assigneeController = TextEditingController(text: widget.issue.assignee);
     _labelEntryController = TextEditingController();
+    _summaryFocusNode = FocusNode(debugLabel: 'edit-issue-summary');
+    _labelsFocusNode = FocusNode(debugLabel: 'edit-issue-labels');
+    _componentsFocusNode = FocusNode(debugLabel: 'edit-issue-components');
+    _fixVersionsFocusNode = FocusNode(debugLabel: 'edit-issue-fix-versions');
+    _hierarchyFocusNode = FocusNode(debugLabel: 'edit-issue-hierarchy');
+    _saveFocusNode = FocusNode(debugLabel: 'edit-issue-save');
     _selectedPriorityId = widget.issue.priorityId;
     _labels = [...widget.issue.labels];
     _components = [...widget.issue.components];
@@ -13750,6 +13985,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     _descriptionController.dispose();
     _assigneeController.dispose();
     _labelEntryController.dispose();
+    _summaryFocusNode.dispose();
+    _labelsFocusNode.dispose();
+    _componentsFocusNode.dispose();
+    _fixVersionsFocusNode.dispose();
+    _hierarchyFocusNode.dispose();
+    _saveFocusNode.dispose();
     super.dispose();
   }
 
@@ -13831,6 +14072,77 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     });
   }
 
+  Future<void> _editConfigSelections({
+    required String label,
+    required List<TrackStateConfigEntry> options,
+    required List<String> values,
+    required String Function(TrackStateConfigEntry option) optionLabelBuilder,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    final selectedIds = {for (final value in values) _canonicalConfigId(value)};
+    final updatedSelection = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) {
+        final draftSelection = {...selectedIds};
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(label),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final option in options)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: draftSelection.contains(
+                          _canonicalConfigId(option.id),
+                        ),
+                        title: Text(optionLabelBuilder(option)),
+                        onChanged: (selected) {
+                          final optionId = _canonicalConfigId(option.id);
+                          setDialogState(() {
+                            if (selected ?? false) {
+                              draftSelection.add(optionId);
+                            } else {
+                              draftSelection.remove(optionId);
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(l10n.cancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(draftSelection),
+                  child: Text(l10n.save),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (!mounted || updatedSelection == null) {
+      return;
+    }
+    setState(() {
+      values
+        ..clear()
+        ..addAll([
+          for (final option in options)
+            if (updatedSelection.contains(_canonicalConfigId(option.id)))
+              option.id,
+        ]);
+    });
+  }
+
   bool _requiresHierarchyConfirmation() {
     if (_selectedParentKey == widget.issue.parentKey &&
         _selectedEpicKey == widget.issue.epicKey) {
@@ -13855,18 +14167,42 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         .length;
   }
 
+  String _issueDisplayLabel(TrackStateIssue issue) =>
+      '${issue.key} · ${issue.summary}';
+
+  String? _hierarchyDestinationLabel() {
+    final destinationIssue = _isSubtaskType
+        ? _issueByKey(_selectedParentKey)
+        : _issueByKey(_selectedEpicKey);
+    if (destinationIssue == null) {
+      return null;
+    }
+    return _issueDisplayLabel(destinationIssue);
+  }
+
   Future<bool> _confirmHierarchyMove(AppLocalizations l10n) async {
     if (!_requiresHierarchyConfirmation()) {
       return true;
     }
     final descendantCount = _descendantCount();
+    final movingIssueLabel = _issueDisplayLabel(widget.issue);
+    final destinationLabel = _hierarchyDestinationLabel();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(l10n.hierarchyChangeConfirmationTitle),
           content: Text(
-            l10n.hierarchyChangeConfirmationMessage(descendantCount),
+            destinationLabel == null
+                ? l10n.hierarchyChangeConfirmationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                  )
+                : l10n.hierarchyChangeConfirmationDestinationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                    destinationLabel,
+                  ),
           ),
           actions: [
             TextButton(
@@ -13884,18 +14220,40 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     return confirmed ?? false;
   }
 
+  void _announceSummaryValidationError(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      final summaryContext = _summaryFieldKey.currentContext;
+      if (summaryContext != null) {
+        await Scrollable.ensureVisible(
+          summaryContext,
+          duration: Duration.zero,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      _summaryFocusNode.requestFocus();
+      SemanticsService.announce(message, Directionality.of(context));
+    });
+  }
+
   Future<void> _submit() async {
     setState(() {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    final l10n = AppLocalizations.of(context)!;
     if (_summaryController.text.trim().isEmpty) {
+      _announceSummaryValidationError(l10n.summaryRequired);
       return;
     }
     if (_isSubtaskType && _selectedParentKey == null) {
       return;
     }
-    final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
     final resolutionOptions =
         project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
@@ -14021,6 +14379,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         _selectedTransitionStatusId != null &&
         _canonicalConfigId(_selectedTransitionStatusId) == 'done' &&
         resolutionOptions.length > 1;
+    final nextAfterFixVersionsFocusNode = _isEpicType
+        ? _saveFocusNode
+        : _hierarchyFocusNode;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -14058,331 +14419,473 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                   semanticLabel: widget.workflowOnly
                       ? l10n.transitionIssue
                       : l10n.editIssue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (widget.viewModel.message != null) ...[
-                                _MessageBanner(
-                                  message: widget.viewModel.message!,
-                                  onDismiss: widget.viewModel.dismissMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              if (widget
-                                  .viewModel
-                                  .hasPendingWorkspaceSyncRefresh) ...[
-                                _InlineInfoBanner(
-                                  message: l10n.workspaceSyncPendingMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              _SectionTitle(
-                                widget.workflowOnly
-                                    ? l10n.transitionIssue
-                                    : l10n.editIssue,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${widget.issue.key} · $issueTypeLabel',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 12),
-                              _ReadOnlyCreateField(
-                                label: l10n.currentStatus,
-                                value:
-                                    project?.statusLabel(
-                                      widget.issue.statusId,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    widget.issue.status.label,
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: l10n.status,
-                                value: _selectedTransitionStatusId,
-                                enabled: canEditFields && !_loadingTransitions,
-                                hintText: _transitionOptions.isEmpty
-                                    ? l10n.noTransitionsAvailable
-                                    : l10n.optional,
-                                helperText: l10n.statusTransitionHelper,
-                                items: [
-                                  for (final option in _transitionOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.statusLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                  explicitChildNodes: true,
+                  child: FocusTraversalGroup(
+                    policy: OrderedTraversalPolicy(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (widget.viewModel.message != null) ...[
+                                  _MessageBanner(
+                                    message: widget.viewModel.message!,
+                                    onDismiss: widget.viewModel.dismissMessage,
+                                  ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedTransitionStatusId = value;
-                                    _selectedResolutionId =
-                                        _canonicalConfigId(value) != 'done'
-                                        ? null
-                                        : (resolutionOptions.length == 1
-                                              ? resolutionOptions.single.id
-                                              : _selectedResolutionId);
-                                  });
-                                },
-                              ),
-                              if (showResolution) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: resolutionLabel,
-                                  value: _selectedResolutionId,
-                                  enabled: canEditFields,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedResolutionId == null
-                                      ? l10n.resolutionRequired
-                                      : null,
-                                  items: [
-                                    for (final option in resolutionOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.id,
-                                        child: Text(
-                                          project?.resolutionLabel(
-                                                option.id,
-                                                locale: metadataLocale,
-                                              ) ??
-                                              option.name,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedResolutionId = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                              const SizedBox(height: 20),
-                              Semantics(
-                                label: summaryLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
-                                    errorText:
-                                        _didAttemptSubmit &&
-                                            _summaryController.text
-                                                .trim()
-                                                .isEmpty
-                                        ? l10n.summaryRequired
-                                        : null,
+                                if (widget
+                                    .viewModel
+                                    .hasPendingWorkspaceSyncRefresh) ...[
+                                  _InlineInfoBanner(
+                                    message: l10n.workspaceSyncPendingMessage,
                                   ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: l10n.description,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 4,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: priorityLabel,
-                                value: _selectedPriorityId,
-                                enabled: canEditFields,
-                                items: [
-                                  for (final option in priorityOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.priorityLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _selectedPriorityId = value;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: assigneeLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                    hintText: l10n.unassigned,
-                                  ),
+                                _SectionTitle(
+                                  widget.workflowOnly
+                                      ? l10n.transitionIssue
+                                      : l10n.editIssue,
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              _LabelTokenField(
-                                label: labelsLabel,
-                                controller: _labelEntryController,
-                                labels: _labels,
-                                enabled: canEditFields,
-                                helperText: l10n.labelsTokenHelper,
-                                onChanged: (_) => _commitLabels(),
-                                onSubmitted: (_) =>
-                                    _commitLabels(commitRemainder: true),
-                                onRemove: (label) {
-                                  setState(() {
-                                    _labels.remove(label);
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: componentsLabel,
-                                options: componentOptions,
-                                selectedValues: _components,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.componentLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_components, value),
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: fixVersionsLabel,
-                                options: versionOptions,
-                                selectedValues: _fixVersions,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.versionLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_fixVersions, value),
-                              ),
-                              if (!_isEpicType && !_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: epicLabel,
-                                  value: _selectedEpicKey ?? '',
-                                  enabled: canEditFields,
-                                  items: [
-                                    DropdownMenuItem<String>(
-                                      value: '',
-                                      child: Text(l10n.noEpic),
-                                    ),
-                                    for (final option in epicOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedEpicKey = _emptyToNull(value);
-                                    });
-                                  },
-                                ),
-                              ],
-                              if (_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: parentLabel,
-                                  value: _selectedParentKey,
-                                  enabled: canEditFields,
-                                  hintText: parentOptions.isEmpty
-                                      ? l10n.noEligibleParents
-                                      : null,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedParentKey == null
-                                      ? l10n.subTaskParentRequired
-                                      : null,
-                                  items: [
-                                    for (final option in parentOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: parentOptions.isEmpty
-                                      ? null
-                                      : (value) {
-                                          setState(() {
-                                            _selectedParentKey = value;
-                                          });
-                                        },
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${widget.issue.key} · $issueTypeLabel',
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 const SizedBox(height: 12),
                                 _ReadOnlyCreateField(
-                                  label: epicLabel,
-                                  value: derivedEpic == null
-                                      ? l10n.derivedFromParent
-                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
-                                  helperText: l10n.epicDerivedFromParent,
+                                  label: l10n.currentStatus,
+                                  value:
+                                      project?.statusLabel(
+                                        widget.issue.statusId,
+                                        locale: metadataLocale,
+                                      ) ??
+                                      widget.issue.status.label,
                                 ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 1,
+                                  child: _DropdownCreateField(
+                                    label: l10n.status,
+                                    value: _selectedTransitionStatusId,
+                                    enabled:
+                                        canEditFields && !_loadingTransitions,
+                                    hintText: _transitionOptions.isEmpty
+                                        ? l10n.noTransitionsAvailable
+                                        : l10n.optional,
+                                    helperText: l10n.statusTransitionHelper,
+                                    items: [
+                                      for (final option in _transitionOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.statusLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedTransitionStatusId = value;
+                                        _selectedResolutionId =
+                                            _canonicalConfigId(value) != 'done'
+                                            ? null
+                                            : (resolutionOptions.length == 1
+                                                  ? resolutionOptions.single.id
+                                                  : _selectedResolutionId);
+                                      });
+                                    },
+                                  ),
+                                ),
+                                if (showResolution) ...[
+                                  const SizedBox(height: 12),
+                                  _OrderedFocusAction(
+                                    order: 2,
+                                    child: _DropdownCreateField(
+                                      label: resolutionLabel,
+                                      value: _selectedResolutionId,
+                                      enabled: canEditFields,
+                                      errorText:
+                                          _didAttemptSubmit &&
+                                              _selectedResolutionId == null
+                                          ? l10n.resolutionRequired
+                                          : null,
+                                      items: [
+                                        for (final option in resolutionOptions)
+                                          DropdownMenuItem<String>(
+                                            value: option.id,
+                                            child: Text(
+                                              project?.resolutionLabel(
+                                                    option.id,
+                                                    locale: metadataLocale,
+                                                  ) ??
+                                                  option.name,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _selectedResolutionId = value;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 20),
+                                _OrderedFocusAction(
+                                  order: 3,
+                                  child: Semantics(
+                                    key: _summaryFieldKey,
+                                    label: summaryLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _summaryController.text,
+                                    child: TextField(
+                                      controller: _summaryController,
+                                      focusNode: _summaryFocusNode,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: summaryLabel,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _summaryController.text
+                                                    .trim()
+                                                    .isEmpty
+                                            ? l10n.summaryRequired
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 4,
+                                  child: Semantics(
+                                    label: l10n.description,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _descriptionController.text,
+                                    child: TextField(
+                                      controller: _descriptionController,
+                                      minLines: 4,
+                                      maxLines: null,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: l10n.description,
+                                        alignLabelWithHint: true,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 5,
+                                  child: _DropdownCreateField(
+                                    label: priorityLabel,
+                                    value: _selectedPriorityId,
+                                    enabled: canEditFields,
+                                    items: [
+                                      for (final option in priorityOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.priorityLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value == null) {
+                                        return;
+                                      }
+                                      setState(() {
+                                        _selectedPriorityId = value;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 6,
+                                  child: Semantics(
+                                    label: assigneeLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _assigneeController.text,
+                                    child: TextField(
+                                      controller: _assigneeController,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: assigneeLabel,
+                                        hintText: l10n.unassigned,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 7,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _LabelTokenField(
+                                      label: labelsLabel,
+                                      controller: _labelEntryController,
+                                      labels: _labels,
+                                      enabled: canEditFields,
+                                      helperText: l10n.labelsTokenHelper,
+                                      focusNode: _labelsFocusNode,
+                                      onChanged: (_) => _commitLabels(),
+                                      onSubmitted: (_) =>
+                                          _commitLabels(commitRemainder: true),
+                                      onRemove: (label) {
+                                        setState(() {
+                                          _labels.remove(label);
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 8,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _fixVersionsFocusNode.requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _labelsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: componentsLabel,
+                                      options: componentOptions,
+                                      selectedValues: _components,
+                                      enabled: canEditFields,
+                                      focusNode: _componentsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: componentsLabel,
+                                            options: componentOptions,
+                                            values: _components,
+                                            optionLabelBuilder: (option) =>
+                                                project?.componentLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.componentLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _components,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 9,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () => nextAfterFixVersionsFocusNode
+                                          .requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: fixVersionsLabel,
+                                      options: versionOptions,
+                                      selectedValues: _fixVersions,
+                                      enabled: canEditFields,
+                                      focusNode: _fixVersionsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: fixVersionsLabel,
+                                            options: versionOptions,
+                                            values: _fixVersions,
+                                            optionLabelBuilder: (option) =>
+                                                project?.versionLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.versionLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _fixVersions,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                if (!_isEpicType && !_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: epicLabel,
+                                        value: _selectedEpicKey ?? '',
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        items: [
+                                          DropdownMenuItem<String>(
+                                            value: '',
+                                            child: Text(l10n.noEpic),
+                                          ),
+                                          for (final option in epicOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedEpicKey = _emptyToNull(
+                                              value,
+                                            );
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                if (_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: parentLabel,
+                                        value: _selectedParentKey,
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        hintText: parentOptions.isEmpty
+                                            ? l10n.noEligibleParents
+                                            : null,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _selectedParentKey == null
+                                            ? l10n.subTaskParentRequired
+                                            : null,
+                                        items: [
+                                          for (final option in parentOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: parentOptions.isEmpty
+                                            ? null
+                                            : (value) {
+                                                setState(() {
+                                                  _selectedParentKey = value;
+                                                });
+                                              },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _ReadOnlyCreateField(
+                                    label: epicLabel,
+                                    value: derivedEpic == null
+                                        ? l10n.derivedFromParent
+                                        : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                    helperText: l10n.epicDerivedFromParent,
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _IssueDetailActionButton(
-                            label: l10n.save,
-                            emphasized: true,
-                            onPressed: canEditFields ? _submit : null,
-                          ),
-                          _IssueDetailActionButton(
-                            label: l10n.cancel,
-                            onPressed: widget.viewModel.isSaving
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              sortOrder: 20,
+                              focusNode: _saveFocusNode,
+                              onPressed: canEditFields ? _submit : null,
+                            ),
+                            _IssueDetailActionButton(
+                              label: l10n.cancel,
+                              sortOrder: 21,
+                              onPressed: widget.viewModel.isSaving
+                                  ? null
+                                  : () => Navigator.of(context).pop(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -14414,6 +14917,7 @@ class _NavButton extends StatelessWidget {
   const _NavButton({
     required this.item,
     required this.selected,
+    this.selectedCanRequestFocus = false,
     this.semanticsSortOrder,
     this.semanticsIdentifier,
     this.focusNode,
@@ -14423,6 +14927,7 @@ class _NavButton extends StatelessWidget {
 
   final _NavItem item;
   final bool selected;
+  final bool selectedCanRequestFocus;
   final double? semanticsSortOrder;
   final String? semanticsIdentifier;
   final FocusNode? focusNode;
@@ -14432,6 +14937,9 @@ class _NavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final selectedBackground = Theme.of(context).brightness == Brightness.light
+        ? Color.alphaBlend(colors.text.withValues(alpha: .12), colors.secondary)
+        : colors.secondary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Semantics(
@@ -14448,7 +14956,7 @@ class _NavButton extends StatelessWidget {
                 },
           child: InkWell(
             focusNode: focusNode,
-            canRequestFocus: !selected,
+            canRequestFocus: !selected || selectedCanRequestFocus,
             borderRadius: BorderRadius.circular(10),
             excludeFromSemantics: true,
             onTap: onPressed,
@@ -14459,7 +14967,7 @@ class _NavButton extends StatelessWidget {
                   vertical: 11,
                 ),
                 decoration: BoxDecoration(
-                  color: selected ? colors.secondary : Colors.transparent,
+                  color: selected ? selectedBackground : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -14997,7 +15505,12 @@ class _CommentsTab extends StatelessWidget {
             enabled: !isSaving && !isLoading && !writeBlocked,
             decoration: InputDecoration(
               labelText: l10n.comments,
+              hintText: l10n.commentPlaceholder,
+              hintStyle: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
               alignLabelWithHint: true,
+              floatingLabelBehavior: FloatingLabelBehavior.always,
             ),
           ),
         ),

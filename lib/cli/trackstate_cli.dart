@@ -171,6 +171,16 @@ class TrackStateCli {
   }
 
   List<String> _normalizeCommandArguments(List<String> arguments) {
+    if (arguments.isEmpty) {
+      return arguments;
+    }
+    final rewrittenCommand = switch (arguments.first.toLowerCase()) {
+      'jiraattachfiletoticket' => 'jira_attach_file_to_ticket',
+      _ => null,
+    };
+    if (rewrittenCommand != null) {
+      return [rewrittenCommand, ...arguments.skip(1)];
+    }
     if (arguments.length < 2) {
       return arguments;
     }
@@ -606,6 +616,14 @@ class TrackStateCli {
         content: _attachmentUploadHelpText(parser),
       );
     }
+
+    _validateSingleOptionOccurrence(
+      arguments,
+      option: 'file',
+      code: 'INVALID_ATTACHMENT',
+      message:
+          'Only one file may be provided per invocation; duplicate "--file" options are not allowed.',
+    );
 
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
@@ -4491,6 +4509,39 @@ class TrackStateCli {
           .map((value) => value?.toString() ?? '')
           .toList(growable: false);
 
+  void _validateSingleOptionOccurrence(
+    List<String> arguments, {
+    required String option,
+    required String code,
+    required String message,
+  }) {
+    final occurrences = _countOptionOccurrences(arguments, option);
+    if (occurrences <= 1) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: code,
+      category: TrackStateCliErrorCategory.validation,
+      message: message,
+      exitCode: 2,
+      details: <String, Object?>{
+        'option': option,
+        'occurrences': occurrences,
+      },
+    );
+  }
+
+  int _countOptionOccurrences(List<String> arguments, String option) {
+    final flag = '--$option';
+    var occurrences = 0;
+    for (final argument in arguments) {
+      if (argument == flag || argument.startsWith('$flag=')) {
+        occurrences += 1;
+      }
+    }
+    return occurrences;
+  }
+
   String _firstRequiredTrimmedOption(
     ArgResults results,
     List<String> optionNames,
@@ -6136,6 +6187,7 @@ class TrackStateCli {
     '',
     'Compatibility aliases:',
     '  jira_attach_file_to_ticket',
+    '  jiraattachfiletoticket',
     '  jira_download_attachment',
     '',
     'Use "trackstate attachment <command> --help" for command-specific options.',
@@ -6150,8 +6202,9 @@ class TrackStateCli {
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png [--name architecture.png] [--output json|text]',
     '  trackstate attachment upload --target hosted --provider github --repository owner/name --issue TRACK-1 --file ./design.png [--branch main] [--token <token>] [--output json|text]',
     '',
-    'Compatibility alias:',
+    'Compatibility aliases:',
     '  jira_attach_file_to_ticket --issueKey TRACK-1 --file ./design.png',
+    '  jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
     '',
     'Options:',
     parser.usage,
@@ -6617,6 +6670,7 @@ class TrackStateCli {
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
     '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+    '  trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',
     'Use "trackstate <command> --help" for command-specific options.',
