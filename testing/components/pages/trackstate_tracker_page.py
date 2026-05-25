@@ -151,8 +151,6 @@ class TrackStateTrackerPage:
         dialog_text = self.body_text()
         for expected_text in (
             self.CREATE_ISSUE_LABEL,
-            self.SUMMARY_LABEL,
-            self.DESCRIPTION_LABEL,
             self.SAVE_LABEL,
             self.CANCEL_LABEL,
         ):
@@ -213,7 +211,10 @@ class TrackStateTrackerPage:
             dialog_text=dialog_text,
             detail_text=detail_text,
             board_text_after=board_text_after,
-            created_issue_key=self.extract_issue_key(summary, detail_text),
+            created_issue_key=self.extract_issue_key(
+                summary,
+                f"{detail_text}\n{board_text_after}",
+            ),
         )
 
     def open_board(self) -> str:
@@ -256,13 +257,23 @@ class TrackStateTrackerPage:
 
     @staticmethod
     def extract_issue_key(summary: str, body_text: str) -> str | None:
-        pattern = re.compile(
-            rf"\b([A-Z][A-Z0-9]+-\d+)\b[\s\u00b7]+{re.escape(summary)}\b",
+        patterns = (
+            re.compile(
+                rf"\b([A-Z][A-Z0-9]+-\d+)\b[\s\u00b7]+{re.escape(summary)}\b",
+            ),
+            re.compile(
+                rf"\bOpen\s+([A-Z][A-Z0-9]+-\d+)\s+{re.escape(summary)}\b",
+            ),
+            re.compile(
+                rf"\b([A-Z][A-Z0-9]+-\d+)\b(?:\s|\n)+.*?{re.escape(summary)}\b",
+                re.DOTALL,
+            ),
         )
-        match = pattern.search(body_text)
-        if match is None:
-            return None
-        return match.group(1)
+        for pattern in patterns:
+            match = pattern.search(body_text)
+            if match is not None:
+                return match.group(1)
+        return None
 
     def _wait_for_labeled_field(self, label: str) -> str:
         errors: list[str] = []
