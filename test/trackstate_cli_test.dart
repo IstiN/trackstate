@@ -911,6 +911,43 @@ void main() {
     );
 
     test(
+      'supports the ticket get shorthand with a positional issue key',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final aliasResult = await cli.run(const <String>[
+          'ticket',
+          'get',
+          'TRACK-2',
+        ]);
+        final canonicalResult = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final aliasJson =
+            jsonDecode(aliasResult.stdout) as Map<String, Object?>;
+        final canonicalJson =
+            jsonDecode(canonicalResult.stdout) as Map<String, Object?>;
+
+        expect(aliasResult.exitCode, 0);
+        expect(aliasJson, canonicalJson);
+        expect(aliasResult.stdout, canonicalResult.stdout);
+      },
+    );
+
+    test(
       'supports compatibility aliases and returns Jira field metadata',
       () async {
         final cli = TrackStateCli(
@@ -1602,6 +1639,82 @@ void main() {
 
         expect(data['authSource'], 'env');
         expect(repository.connection?.token, 'env-token');
+      },
+    );
+
+    test(
+      'hosted attachment upload returns an explicit unsupported error for LFS-tracked files',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-hosted-lfs-upload.zip',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsBytes(const <int>[1, 2, 3, 4]);
+        final repository = _FakeSearchRepository(snapshot: _sampleSnapshot());
+        final hostedProvider = _FakeHostedTrackStateProvider(
+          user: const RepositoryUser(login: 'octocat', displayName: 'Octo Cat'),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+            canManageAttachments: true,
+            attachmentUploadMode: AttachmentUploadMode.noLfs,
+          ),
+          lfsTrackedPaths: const <String>{
+            'TRACK/TRACK-1/attachments/design.zip',
+          },
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+            environment: const <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'design.zip',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(json['ok'], isFalse);
+        expect(error['code'], 'UNSUPPORTED_OPERATION');
+        expect(error['category'], 'unsupported');
+        expect(error['message'], contains('Git LFS'));
+        expect(error['message'], contains('not implemented'));
+        expect(details['repository'], 'owner/repo');
+        expect(details['issue'], 'TRACK-1');
+        expect(details['attachmentPath'], 'TRACK/TRACK-1/attachments/design.zip');
+        expect(repository.lastUploadIssue, isNull);
+        expect(repository.lastUploadName, isNull);
       },
     );
 
@@ -3133,12 +3246,14 @@ class _FakeHostedTrackStateProvider
     required this.permission,
     this.usersByLogin = const {},
     this.usersByEmail = const {},
+    this.lfsTrackedPaths = const <String>{},
   });
 
   final RepositoryUser user;
   final RepositoryPermission permission;
   final Map<String, RepositoryUser> usersByLogin;
   final Map<String, RepositoryUser> usersByEmail;
+  final Set<String> lfsTrackedPaths;
   RepositoryConnection? connection;
 
   @override
@@ -3236,7 +3351,7 @@ class _FakeHostedTrackStateProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async => lfsTrackedPaths.contains(path);
 }
 
 class _ThrowingHostedTrackStateProvider extends _FakeHostedTrackStateProvider {
