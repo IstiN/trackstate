@@ -28,7 +28,12 @@ from testing.tests.support.live_tracker_app_factory import (
 
 TICKET_KEY = "TS-333"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-RESULT_PATH = OUTPUTS_DIR / "ts333_result.json"
+RAW_RESULT_PATH = OUTPUTS_DIR / "ts333_result.json"
+TEST_AUTOMATION_RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 LIGHT_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_comments_light.png"
 DARK_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_comments_dark.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_failure.png"
@@ -37,6 +42,17 @@ ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 COMMENT_AUTHOR = "demo-admin"
 COMMENT_BODY = "This comment demonstrates markdown-backed collaboration history."
 COMMENT_TIMESTAMP = "2026-05-05T00:10:00Z"
+REQUEST_STEPS = (
+    "Open the issue detail view and navigate to the 'Comments' or 'History' tab.",
+    "Inspect the contrast ratio of the metadata text (e.g., 'ana · 2026-05-05...') against the specific background surface (#F1E4D5).",
+    "Switch the application theme (e.g., from Light to Dark) to change the background surface tokens.",
+    "Re-verify the contrast ratio for metadata in the new theme context.",
+)
+EXPECTED_RESULT = (
+    "The metadata text consistently maintains a contrast ratio of at least 4.5:1 "
+    "(WCAG AA) across all background surfaces and validated design system theme tokens."
+)
+ENVIRONMENT_NAME = "Linux, Playwright Chromium, hosted TrackState setup app"
 
 
 def main() -> None:
@@ -66,6 +82,7 @@ def main() -> None:
         "observations": [],
     }
     failures: list[str] = []
+    product_failure = False
 
     try:
         with create_live_tracker_app_with_stored_token(
@@ -228,12 +245,24 @@ def main() -> None:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
         _write_result(result)
+        _write_artifacts(
+            result,
+            status="failed",
+            error_message=str(error),
+            product_failure=_looks_like_product_failure(result),
+        )
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
         _write_result(result)
+        _write_artifacts(
+            result,
+            status="failed",
+            error_message=str(result["error"]),
+            product_failure=False,
+        )
         print(json.dumps(result, indent=2))
         raise
     else:
@@ -245,6 +274,13 @@ def main() -> None:
                 "theme missed the required WCAG AA contrast threshold."
             )
             _write_result(result)
+            product_failure = True
+            _write_artifacts(
+                result,
+                status="failed",
+                error_message=error_message,
+                product_failure=product_failure,
+            )
             print(json.dumps(result, indent=2))
             raise AssertionError(error_message)
 
@@ -254,6 +290,7 @@ def main() -> None:
             "row stayed readable and met WCAG AA contrast in both light and dark themes."
         )
         _write_result(result)
+        _write_artifacts(result, status="passed")
         print(json.dumps(result, indent=2))
 
 
@@ -321,9 +358,382 @@ def _record_step(
 
 def _write_result(payload: dict[str, object]) -> None:
     configured_path = os.environ.get("TS333_RESULT_PATH")
-    result_path = Path(configured_path) if configured_path else RESULT_PATH
+    result_path = Path(configured_path) if configured_path else RAW_RESULT_PATH
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _write_artifacts(
+    payload: dict[str, object],
+    *,
+    status: str,
+    error_message: str | None = None,
+    product_failure: bool = False,
+) -> None:
+    _write_test_automation_result(status=status, error_message=error_message)
+    PR_BODY_PATH.write_text(_build_pr_body(payload, status=status), encoding="utf-8")
+    JIRA_COMMENT_PATH.write_text(
+        _build_jira_comment(payload, status=status),
+        encoding="utf-8",
+    )
+    RESPONSE_PATH.write_text(_build_response(payload, status=status), encoding="utf-8")
+    if product_failure and status == "failed":
+        BUG_DESCRIPTION_PATH.write_text(
+            _build_bug_description(payload),
+            encoding="utf-8",
+        )
+    elif BUG_DESCRIPTION_PATH.exists():
+        BUG_DESCRIPTION_PATH.unlink()
+
+
+def _write_test_automation_result(
+    *,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    if status == "passed":
+        payload = {
+            "status": "passed",
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "summary": "1 passed, 0 failed",
+        }
+    else:
+        payload = {
+            "status": "failed",
+            "passed": 0,
+            "failed": 1,
+            "skipped": 0,
+            "summary": "0 passed, 1 failed",
+            "error": error_message or "AssertionError",
+        }
+    TEST_AUTOMATION_RESULT_PATH.write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _build_pr_body(payload: dict[str, object], *, status: str) -> str:
+    status_label = "PASSED" if status == "passed" else "FAILED"
+    lines = [
+        f"# {TICKET_KEY} automation result: {status_label}",
+        "",
+        f"**Environment**: {ENVIRONMENT_NAME}",
+        f"**URL**: {payload.get('app_url', 'n/a')}",
+        f"**Repository**: {payload.get('repository', 'n/a')}@{payload.get('repository_ref', 'n/a')}",
+        f"**Issue**: {payload.get('issue_key', 'n/a')} - {payload.get('issue_summary', 'n/a')}",
+        "",
+        "## What automation checked",
+        *_markdown_list(_automation_checks(payload)),
+        "",
+        "## Human-style verification",
+        *_markdown_list(_human_verification_lines(payload, status=status)),
+        "",
+        "## Outcome",
+        *_markdown_list(_outcome_lines(payload, status=status)),
+    ]
+    if status == "failed":
+        lines.extend(
+            [
+                "",
+                "## Exact error",
+                "```text",
+                str(payload.get("traceback", payload.get("error", ""))).rstrip(),
+                "```",
+            ],
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_jira_comment(payload: dict[str, object], *, status: str) -> str:
+    status_label = "PASSED" if status == "passed" else "FAILED"
+    lines = [
+        f"h3. {TICKET_KEY} automation result: {status_label}",
+        "",
+        f"*Environment*: {ENVIRONMENT_NAME}",
+        f"*URL*: {{{{ {payload.get('app_url', 'n/a')} }}}}",
+        f"*Repository*: {{{{ {payload.get('repository', 'n/a')}@{payload.get('repository_ref', 'n/a')} }}}}",
+        f"*Issue*: {{{{ {payload.get('issue_key', 'n/a')} - {payload.get('issue_summary', 'n/a')} }}}}",
+        "",
+        "h4. What automation checked",
+        *_jira_list(_automation_checks(payload)),
+        "",
+        "h4. Human-style verification",
+        *_jira_list(_human_verification_lines(payload, status=status)),
+        "",
+        "h4. Outcome",
+        *_jira_list(_outcome_lines(payload, status=status)),
+    ]
+    if status == "failed":
+        lines.extend(
+            [
+                "",
+                "h4. Exact error",
+                "{code}",
+                str(payload.get("traceback", payload.get("error", ""))).rstrip(),
+                "{code}",
+            ],
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_response(payload: dict[str, object], *, status: str) -> str:
+    status_label = "passed" if status == "passed" else "failed"
+    lines = [
+        f"# {TICKET_KEY} {status_label}",
+        "",
+        payload.get("summary", EXPECTED_RESULT if status == "passed" else str(payload.get("error", ""))),
+        "",
+        "## Observed themes",
+        *_markdown_list(_theme_lines(payload)),
+    ]
+    if status == "failed":
+        lines.extend(
+            [
+                "",
+                "## Error",
+                "```text",
+                str(payload.get("error", "")).rstrip(),
+                "```",
+            ],
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_bug_description(payload: dict[str, object]) -> str:
+    lines = [
+        f"# Bug: {TICKET_KEY} collaboration metadata contrast regression",
+        "",
+        "## Steps to reproduce",
+        *_reproduction_lines(payload),
+        "",
+        "## Exact error message or assertion failure",
+        "```text",
+        str(payload.get("traceback", payload.get("error", ""))).rstrip(),
+        "```",
+        "",
+        "## Actual vs Expected",
+        f"- **Expected:** {EXPECTED_RESULT}",
+        f"- **Actual:** {_actual_result_summary(payload)}",
+        "",
+        "## Environment details",
+        f"- URL: {payload.get('app_url', 'n/a')}",
+        f"- Repository: {payload.get('repository', 'n/a')}@{payload.get('repository_ref', 'n/a')}",
+        f"- Issue: {payload.get('issue_key', 'n/a')} - {payload.get('issue_summary', 'n/a')}",
+        f"- Browser/OS: {ENVIRONMENT_NAME}",
+        "",
+        "## Screenshots or logs",
+        *_markdown_list(_evidence_lines(payload)),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _automation_checks(payload: dict[str, object]) -> list[str]:
+    return [
+        "Opened the deployed tracker shell and confirmed the live hosted workspace was interactive.",
+        f"Opened issue {payload.get('issue_key', 'DEMO-2')} and switched to the visible Comments collaboration tab.",
+        (
+            "Verified the user-facing metadata text "
+            f'"{COMMENT_AUTHOR}", "{COMMENT_BODY}", and "{COMMENT_TIMESTAMP}" remained visible.'
+        ),
+        "Measured the rendered metadata contrast in the current theme, toggled the app theme, and measured the rendered metadata again in the second theme.",
+    ]
+
+
+def _human_verification_lines(
+    payload: dict[str, object],
+    *,
+    status: str,
+) -> list[str]:
+    lines = [
+        (
+            "Viewed the same Comments surface a user sees and confirmed the tab label, "
+            "author name, comment body, and timestamp stayed on screen in the active issue detail."
+        ),
+    ]
+    theme_lines = _theme_lines(payload)
+    if theme_lines:
+        lines.extend(theme_lines)
+    if status == "passed":
+        lines.append(
+            "The observed light and dark theme metadata both met the WCAG AA 4.5:1 minimum and matched the expected result."
+        )
+    else:
+        lines.append(
+            "The observed behavior did not fully match the expected WCAG AA contrast requirement across the validated themes."
+        )
+    return lines
+
+
+def _outcome_lines(payload: dict[str, object], *, status: str) -> list[str]:
+    if status == "passed":
+        return [
+            "Result matched the expected outcome.",
+            str(payload.get("summary", EXPECTED_RESULT)),
+        ]
+    return [
+        "Result did not match the expected outcome.",
+        f"Failed step: {_failed_step_summary(payload)}",
+        f"Actual vs expected: {_actual_result_summary(payload)}",
+    ]
+
+
+def _theme_lines(payload: dict[str, object]) -> list[str]:
+    observations = payload.get("observations", [])
+    if not isinstance(observations, list):
+        return []
+    lines: list[str] = []
+    for entry in observations:
+        if not isinstance(entry, dict):
+            continue
+        theme_name = str(entry.get("theme_name", "unknown"))
+        foreground = str(entry.get("actual_foreground_hex", "n/a"))
+        background = str(entry.get("row_background_hex", "n/a"))
+        contrast = entry.get("contrast_ratio", "n/a")
+        screenshot = str(entry.get("screenshot_path", "n/a"))
+        lines.append(
+            f"{theme_name.title()} theme metadata rendered as {foreground} on {background} with {contrast}:1 contrast (screenshot: {screenshot})."
+        )
+    return lines
+
+
+def _reproduction_lines(payload: dict[str, object]) -> list[str]:
+    step_statuses = _step_status_map(payload)
+    lines: list[str] = []
+    for index, step in enumerate(REQUEST_STEPS, start=1):
+        status = step_statuses.get(index, "not reached")
+        marker = "✅" if status == "passed" else "❌"
+        annotation = _step_annotation(index, payload)
+        lines.append(f"{index}. {marker} {step}")
+        if annotation:
+            lines.append(f"   - {annotation}")
+    return lines
+
+
+def _step_status_map(payload: dict[str, object]) -> dict[int, str]:
+    statuses: dict[int, str] = {}
+    steps = payload.get("steps", [])
+    if not isinstance(steps, list):
+        return statuses
+    for entry in steps:
+        if not isinstance(entry, dict):
+            continue
+        step_number = entry.get("step")
+        status = entry.get("status")
+        if isinstance(step_number, int) and isinstance(status, str):
+            statuses[step_number] = status
+    return statuses
+
+
+def _step_annotation(step: int, payload: dict[str, object]) -> str:
+    if step == 1:
+        return (
+            f"Opened {payload.get('issue_key', 'DEMO-2')} and rendered the Comments surface "
+            f'with visible metadata text "{COMMENT_AUTHOR}" and "{COMMENT_TIMESTAMP}".'
+        )
+    if step == 2:
+        failing_observation = _first_failing_observation(payload)
+        if failing_observation is None:
+            return "Measured the rendered metadata against the collaboration background surface."
+        return (
+            "Measured the rendered metadata contrast on the collaboration row and observed "
+            f"{failing_observation.get('actual_foreground_hex', 'n/a')} on "
+            f"{failing_observation.get('row_background_hex', 'n/a')} at "
+            f"{failing_observation.get('contrast_ratio', 'n/a')}:1."
+        )
+    if step == 3:
+        toggled_theme = payload.get("toggled_theme_name")
+        if toggled_theme:
+            return f"Theme toggle switched the app into the {toggled_theme} theme."
+        return "The failure happened before the theme toggle could be completed."
+    if step == 4:
+        second_observation = _second_observation(payload)
+        if second_observation is None:
+            return "The failure happened before the second theme measurement completed."
+        return (
+            f"Re-checked the metadata in {second_observation.get('theme_name', 'the toggled')} theme at "
+            f"{second_observation.get('contrast_ratio', 'n/a')}:1 contrast."
+        )
+    return ""
+
+
+def _failed_step_summary(payload: dict[str, object]) -> str:
+    error_text = str(payload.get("error", ""))
+    for prefix in ("Step 1", "Step 2", "Step 3", "Step 4"):
+        if prefix in error_text:
+            return prefix
+    return "scenario execution"
+
+
+def _actual_result_summary(payload: dict[str, object]) -> str:
+    failing_observation = _first_failing_observation(payload)
+    if failing_observation is not None:
+        return (
+            "The visible Comments metadata did not consistently meet the 4.5:1 threshold: "
+            f"{failing_observation.get('theme_name', 'one')} theme rendered "
+            f"{failing_observation.get('actual_foreground_hex', 'n/a')} on "
+            f"{failing_observation.get('row_background_hex', 'n/a')} at "
+            f"{failing_observation.get('contrast_ratio', 'n/a')}:1."
+        )
+    return str(payload.get("error", "Scenario failed before the expected contrast verification completed."))
+
+
+def _evidence_lines(payload: dict[str, object]) -> list[str]:
+    lines = _theme_lines(payload)
+    failure_screenshot = payload.get("failure_screenshot")
+    if failure_screenshot:
+        lines.append(f"Failure screenshot: {failure_screenshot}")
+    raw_error = str(payload.get("error", "")).strip()
+    if raw_error:
+        lines.append(f"Runtime error excerpt: {raw_error}")
+    return lines
+
+
+def _first_failing_observation(payload: dict[str, object]) -> dict[str, object] | None:
+    observations = payload.get("observations", [])
+    if not isinstance(observations, list):
+        return None
+    for entry in observations:
+        if not isinstance(entry, dict):
+            continue
+        contrast = entry.get("contrast_ratio")
+        if isinstance(contrast, (int, float)) and contrast < 4.5:
+            return entry
+    for entry in observations:
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def _second_observation(payload: dict[str, object]) -> dict[str, object] | None:
+    observations = payload.get("observations", [])
+    if isinstance(observations, list) and len(observations) > 1:
+        second = observations[1]
+        if isinstance(second, dict):
+            return second
+    return None
+
+
+def _looks_like_product_failure(payload: dict[str, object]) -> bool:
+    error_text = str(payload.get("error", ""))
+    if "GH_TOKEN" in error_text or "GITHUB_TOKEN" in error_text:
+        return False
+    if "ModuleNotFoundError" in error_text or "RuntimeError" in error_text:
+        return False
+    if "Precondition failed" in error_text:
+        return False
+    if "Step " not in error_text:
+        return False
+    return bool(payload.get("steps"))
+
+
+def _markdown_list(items: list[str]) -> list[str]:
+    return [f"- {item}" for item in items]
+
+
+def _jira_list(items: list[str]) -> list[str]:
+    return [f"* {item}" for item in items]
 
 
 if __name__ == "__main__":

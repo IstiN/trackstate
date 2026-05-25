@@ -36,13 +36,20 @@ class LiveIssueDetailCollaborationPage:
             user_login=user_login,
             repository=repository,
         )
-        if self._is_connected(connected_banner):
+        connected_message = self._connected_message(
+            user_login=user_login,
+            repository=repository,
+        )
+        if self._is_connected(
+            connected_banner=connected_banner,
+            connected_message=connected_message,
+        ):
             return
         if self._session.count(self._connect_button_selector) == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
+                "precondition.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
@@ -58,14 +65,15 @@ class LiveIssueDetailCollaborationPage:
         wait_match = self._session.wait_for_any_text(
             [
                 connected_banner,
+                connected_message,
                 "GitHub connection failed:",
             ],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text == "GitHub connection failed:":
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
+                "connected state required for the collaboration scenario.\n"
                 f"Observed body text:\n{wait_match.body_text}",
             )
 
@@ -269,11 +277,22 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
-    def _is_connected(self, connected_banner: str) -> bool:
+    def _is_connected(
+        self,
+        *,
+        connected_banner: str,
+        connected_message: str,
+    ) -> bool:
+        body_text = self.current_body_text()
         return (
             self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
+            or connected_banner in body_text
+            or connected_message in body_text
         )
+
+    @staticmethod
+    def _connected_message(*, user_login: str, repository: str) -> str:
+        return f"Connected as {user_login} to {repository}."
 
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
