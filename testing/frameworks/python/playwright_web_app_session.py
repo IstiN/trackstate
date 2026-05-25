@@ -411,6 +411,70 @@ class PlaywrightWebAppSession(WebAppSession):
         payload = self._page.evaluate(
             """
             () => {
+                const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+                const labelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const ariaLabel = normalize(element.getAttribute("aria-label"));
+                    if (ariaLabel) {
+                        return ariaLabel;
+                    }
+                    const placeholder = normalize(element.getAttribute("placeholder"));
+                    if (placeholder) {
+                        return placeholder;
+                    }
+                    const title = normalize(element.getAttribute("title"));
+                    if (title) {
+                        return title;
+                    }
+                    if (
+                        element instanceof HTMLInputElement
+                        || element instanceof HTMLTextAreaElement
+                        || element instanceof HTMLSelectElement
+                    ) {
+                        const value = normalize(element.value);
+                        if (value) {
+                            return value;
+                        }
+                    }
+                    const text = normalize(element.textContent);
+                    return text || null;
+                };
+                const derivedOwnedLabelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const visited = new Set();
+                    const queue = [element];
+                    while (queue.length > 0) {
+                        const candidate = queue.shift();
+                        if (!(candidate instanceof Element) || visited.has(candidate)) {
+                            continue;
+                        }
+                        visited.add(candidate);
+                        const candidateLabel = labelFor(candidate);
+                        if (candidateLabel && candidate !== element) {
+                            return candidateLabel;
+                        }
+                        const ownedIds = normalize(candidate.getAttribute("aria-owns"))
+                            .split(" ")
+                            .map((value) => value.trim())
+                            .filter(Boolean);
+                        for (const ownedId of ownedIds) {
+                            const ownedElement = document.getElementById(ownedId);
+                            if (ownedElement instanceof Element) {
+                                queue.push(ownedElement);
+                            }
+                        }
+                        for (const descendant of candidate.querySelectorAll("*")) {
+                            if (descendant instanceof Element) {
+                                queue.push(descendant);
+                            }
+                        }
+                    }
+                    return null;
+                };
                 const active = document.activeElement;
                 if (!active) {
                     return {
@@ -422,12 +486,15 @@ class PlaywrightWebAppSession(WebAppSession):
                         outerHtml: "",
                     };
                 }
-                const text = (active.textContent || "").trim();
-                const ariaLabel = active.getAttribute("aria-label");
+                const text = normalize(active.textContent);
+                const accessibleName =
+                    labelFor(active)
+                    || derivedOwnedLabelFor(active)
+                    || null;
                 return {
                     tagName: active.tagName,
                     role: active.getAttribute("role"),
-                    accessibleName: ariaLabel || text || null,
+                    accessibleName,
                     text,
                     tabindex: active.getAttribute("tabindex"),
                     outerHtml: active.outerHTML.slice(0, 400),
@@ -600,8 +667,8 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out selecting files after clicking selector "{trigger_selector}".',
             ) from error
 
-    def screenshot(self, path: str) -> None:
-        self._page.screenshot(path=path, full_page=True)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._page.screenshot(path=path, full_page=full_page)
 
     def bounding_box(
         self,

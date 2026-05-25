@@ -55,14 +55,17 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
+      final preconditionRepository = ReactiveIssueDetailTrackStateRepository(
+        textFixtures: const <String, String>{_linksPath: _invalidLinksJson},
+      );
       final repository = ReactiveIssueDetailTrackStateRepository(
         textFixtures: const <String, String>{_linksPath: _invalidLinksJson},
       );
-      final logCapture = _UiWarningLogCapture()..install();
+      final logCapture = _UiWarningLogCapture();
       IssueDetailAccessibilityScreenHandle? screen;
 
       try {
-        final seededIssue = await _hydrateIssue(repository);
+        final seededIssue = await _hydrateIssue(preconditionRepository);
         result['hydrated_links'] = _formatIssueLinks(seededIssue.links);
         if (!_containsInvalidLink(seededIssue.links)) {
           throw AssertionError(
@@ -72,11 +75,14 @@ void main() {
           );
         }
 
+        screen = await launchIssueDetailAccessibilityFixture(
+          tester,
+          repository: repository,
+        );
+        await tester.pumpAndSettle();
+
+        logCapture.install();
         await logCapture.capture(() async {
-          screen = await launchIssueDetailAccessibilityFixture(
-            tester,
-            repository: repository,
-          );
           await screen!.openSearch();
           await screen!.selectIssue(_issueKey, _issueSummary);
           await tester.pump(const Duration(milliseconds: 300));
@@ -513,7 +519,6 @@ String _formatLogBlock(List<String> lines) {
 }
 
 String _inlineJson(String jsonSource) => jsonEncode(jsonDecode(jsonSource));
-
 bool _containsSnapshot(List<String> values, String expected) {
   return values.any((value) => value.contains(expected));
 }
