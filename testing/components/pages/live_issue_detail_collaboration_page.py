@@ -19,7 +19,7 @@ class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+    _connect_button_label = "Connect GitHub"
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _selected_button_selector = _active_tab_button_selector
@@ -35,21 +35,25 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
+        connected_banners = self._connected_banners(
             repository=repository,
+            user_login=user_login,
         )
-        if self._is_connected(connected_banner):
+        if self._is_connected(connected_banners):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        if self._session.count(self._button_selector, has_text=self._connect_button_label) == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
+                "precondition for the live hosted scenario.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        self._session.click(
+            self._button_selector,
+            has_text=self._connect_button_label,
+            timeout_ms=30_000,
+        )
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
@@ -60,15 +64,15 @@ class LiveIssueDetailCollaborationPage:
         )
         wait_match = self._session.wait_for_any_text(
             [
-                connected_banner,
+                *connected_banners,
                 "GitHub connection failed:",
             ],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
+                "connected state required for the live hosted scenario.\n"
                 f"Observed body text:\n{wait_match.body_text}",
             )
 
@@ -345,10 +349,21 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
-    def _is_connected(self, connected_banner: str) -> bool:
+    def _is_connected(self, connected_banners: tuple[str, ...]) -> bool:
+        body_text = self.current_body_text()
         return (
             self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
+            or any(banner in body_text for banner in connected_banners)
+        )
+
+    @staticmethod
+    def _connected_banners(*, repository: str, user_login: str) -> tuple[str, ...]:
+        return (
+            TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+                user_login=user_login,
+                repository=repository,
+            ),
+            f"Connected as {user_login} to {repository}.",
         )
 
     @staticmethod
