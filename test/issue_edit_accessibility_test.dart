@@ -56,9 +56,10 @@ void main() {
           );
         }
 
+        final semanticsTraversal = screen.semanticsTraversal();
         expect(
           _orderedSubsequenceFailure(
-            screen.semanticsTraversal(),
+            semanticsTraversal,
             expectedOrder: const [
               'Status',
               'Summary',
@@ -66,16 +67,22 @@ void main() {
               'Priority',
               'Assignee',
               'Labels',
+              'Components',
+              'Fix versions',
+              'Epic',
               'Save',
               'Cancel',
             ],
           ),
           isNull,
+          reason:
+              'Observed screen-reader order: ${semanticsTraversal.join(' -> ')}',
         );
 
+        final focusOrder = await screen.collectForwardFocusOrder();
         expect(
           _orderedSubsequenceFailure(
-            await screen.collectForwardFocusOrder(),
+            focusOrder,
             expectedOrder: const [
               'Status',
               'Summary',
@@ -83,11 +90,15 @@ void main() {
               'Priority',
               'Assignee',
               'Labels',
+              'Components',
+              'Fix versions',
+              'Epic',
               'Save',
               'Cancel',
             ],
           ),
           isNull,
+          reason: 'Observed Tab order: ${focusOrder.join(' -> ')}',
         );
 
         await screen.clearSummary();
