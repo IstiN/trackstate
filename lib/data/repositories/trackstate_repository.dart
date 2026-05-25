@@ -1548,16 +1548,13 @@ class ProviderBackedTrackStateRepository
           'Could not resolve the project root for the issue being deleted.',
         );
       }
-      final issueRoot = currentIssue.storagePath.substring(
-        0,
-        currentIssue.storagePath.lastIndexOf('/'),
-      );
       final issueArtifactPaths =
           blobPaths
               .where(
-                (path) =>
-                    path == currentIssue.storagePath ||
-                    path.startsWith('$issueRoot/'),
+                (path) => _isIssueArtifactPath(
+                  issueStoragePath: currentIssue.storagePath,
+                  candidatePath: path,
+                ),
               )
               .toList()
             ..sort();
@@ -3494,7 +3491,10 @@ class ProviderBackedTrackStateRepository
           continue;
         }
         final issueRoot = _issueRoot(issue.storagePath);
-        if (path == issue.storagePath || path.startsWith('$issueRoot/')) {
+        if (_isIssueArtifactPath(
+          issueStoragePath: issue.storagePath,
+          candidatePath: path,
+        )) {
           if (bestMatch == null ||
               issueRoot.length > _issueRoot(bestMatch.storagePath).length) {
             bestMatch = issue;
@@ -4986,6 +4986,24 @@ String _joinPath(String left, String right) {
 
 String _issueRoot(String storagePath) =>
     storagePath.substring(0, storagePath.lastIndexOf('/'));
+
+bool _isIssueArtifactPath({
+  required String issueStoragePath,
+  required String candidatePath,
+}) {
+  if (candidatePath == issueStoragePath) {
+    return true;
+  }
+  final issueRoot = _issueRoot(issueStoragePath);
+  if (!candidatePath.startsWith('$issueRoot/')) {
+    return false;
+  }
+  final relativePath = candidatePath.substring(issueRoot.length + 1);
+  return !_isTrackStateMetadataPath(relativePath);
+}
+
+bool _isTrackStateMetadataPath(String path) =>
+    path == '.trackstate' || path.startsWith('.trackstate/');
 
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   final childKeys = entry['children'];
