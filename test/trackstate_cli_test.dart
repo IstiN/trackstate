@@ -1448,6 +1448,72 @@ void main() {
     );
 
     test(
+      'attachment upload rejects duplicate file flags before mutating the repository',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-upload-duplicate-file',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final firstFile = File('${tempDir.path}/file1.png');
+        final secondFile = File('${tempDir.path}/file2.png');
+        await firstFile.writeAsBytes(const <int>[1]);
+        await secondFile.writeAsBytes(const <int>[2]);
+        final repository = _FakeSearchRepository(snapshot: _sampleSnapshot());
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          firstFile.path,
+          '--file',
+          secondFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 2);
+        expect(json['ok'], false);
+        expect(json['error'], isA<Map<String, Object?>>());
+        final error = json['error']! as Map<String, Object?>;
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          allOf(contains('file'), contains('Only one file')),
+        );
+        expect(repository.lastUploadIssue, isNull);
+        expect(repository.lastUploadName, isNull);
+      },
+    );
+
+    test(
       'local release-backed attachment uploads forward optional GitHub credentials',
       () async {
         final uploadFile = File(

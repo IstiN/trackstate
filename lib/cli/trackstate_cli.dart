@@ -617,6 +617,14 @@ class TrackStateCli {
       );
     }
 
+    _validateSingleOptionOccurrence(
+      arguments,
+      option: 'file',
+      code: 'INVALID_ATTACHMENT',
+      message:
+          'Only one file may be provided per invocation; duplicate "--file" options are not allowed.',
+    );
+
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
@@ -4500,6 +4508,39 @@ class TrackStateCli {
       ((results[option] as List<Object?>?) ?? const <Object?>[])
           .map((value) => value?.toString() ?? '')
           .toList(growable: false);
+
+  void _validateSingleOptionOccurrence(
+    List<String> arguments, {
+    required String option,
+    required String code,
+    required String message,
+  }) {
+    final occurrences = _countOptionOccurrences(arguments, option);
+    if (occurrences <= 1) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: code,
+      category: TrackStateCliErrorCategory.validation,
+      message: message,
+      exitCode: 2,
+      details: <String, Object?>{
+        'option': option,
+        'occurrences': occurrences,
+      },
+    );
+  }
+
+  int _countOptionOccurrences(List<String> arguments, String option) {
+    final flag = '--$option';
+    var occurrences = 0;
+    for (final argument in arguments) {
+      if (argument == flag || argument.startsWith('$flag=')) {
+        occurrences += 1;
+      }
+    }
+    return occurrences;
+  }
 
   String _firstRequiredTrimmedOption(
     ArgResults results,
