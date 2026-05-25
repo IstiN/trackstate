@@ -100,43 +100,62 @@ void main() {
           );
         }
 
-        if (!localeCodeSelectorVisible) {
-          fail(
+        var localePreparedForSave = false;
+        if (localeCodeSelectorVisible) {
+          final localeCodeOptions = await screen.readDropdownOptions(
+            'Locale code',
+          );
+          if (!localeCodeOptions.contains('fr')) {
+            failures.add(
+              'Step 3 failed: the validated Locale code list did not offer "fr". '
+              'Observed options: ${_formatSnapshot(localeCodeOptions)}.',
+            );
+          } else {
+            await screen.selectDropdownOption('Locale code', optionText: 'fr');
+            final selectedLocaleCode = await screen.readDropdownFieldValue(
+              'Locale code',
+            );
+            if (selectedLocaleCode != 'fr') {
+              failures.add(
+                'Step 3 failed: the Add locale dialog did not keep the validated Locale code selection as "fr" before confirmation. '
+                'Observed value: "${selectedLocaleCode ?? '<missing>'}". Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
+              );
+            } else {
+              localePreparedForSave = true;
+            }
+          }
+        } else if (localeCodeFieldVisible) {
+          failures.add(
             'Step 3 failed: the Add locale flow does not expose a validated Locale code list. '
             'The ticket requires selecting "fr" from a validated locale-code list before confirmation, '
             'but the production-visible dialog exposed only a free-text Locale code field. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
           );
+          await screen.enterLabeledTextField('Locale code', text: 'fr');
+          final enteredLocaleCode = await screen.readLabeledTextFieldValue(
+            'Locale code',
+          );
+          if (enteredLocaleCode != 'fr') {
+            failures.add(
+              'Step 3 follow-up failed: after typing "fr" into the visible free-text Locale code field, the dialog did not keep the entered value. '
+              'Observed value: "${enteredLocaleCode ?? '<missing>'}". Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
+            );
+          } else {
+            localePreparedForSave = true;
+          }
         }
 
-        final localeCodeOptions = await screen.readDropdownOptions(
-          'Locale code',
-        );
-        if (!localeCodeOptions.contains('fr')) {
-          fail(
-            'Step 3 failed: the validated Locale code list did not offer "fr". '
-            'Observed options: ${_formatSnapshot(localeCodeOptions)}.',
+        if (localePreparedForSave) {
+          final localeSaved = await screen.tapVisibleControl('Save');
+          if (!localeSaved) {
+            failures.add(
+              'Step 3 failed: the Add locale dialog did not expose a tappable Save control.',
+            );
+          }
+          await screen.waitWithoutInteraction(
+            const Duration(milliseconds: 300),
           );
         }
-
-        await screen.selectDropdownOption('Locale code', optionText: 'fr');
-        final selectedLocaleCode = await screen.readDropdownFieldValue(
-          'Locale code',
-        );
-        if (selectedLocaleCode != 'fr') {
-          failures.add(
-            'Step 3 failed: the Add locale dialog did not keep the validated Locale code selection as "fr" before confirmation. '
-            'Observed value: "${selectedLocaleCode ?? '<missing>'}". Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
-          );
-        }
-
-        final localeSaved = await screen.tapVisibleControl('Save');
-        if (!localeSaved) {
-          failures.add(
-            'Step 3 failed: the Add locale dialog did not expose a tappable Save control.',
-          );
-        }
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
         final localeTextsAfterAdd = robot.visibleTexts();
         if (!localeTextsAfterAdd.contains('fr')) {
