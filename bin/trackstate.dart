@@ -1,6 +1,7 @@
 import 'dart:io';
 
-import 'package:trackstate/cli/trackstate_cli.dart';
+// ignore: avoid_relative_lib_imports
+import '../lib/cli/trackstate_cli.dart';
 
 Future<void> main(List<String> arguments) async {
   final cli = TrackStateCli(
