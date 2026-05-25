@@ -49,7 +49,21 @@ SIMULATED_SYNC_DELAY_SECONDS = 31
 TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
 TIMEOUT_RENDER_GRACE_SECONDS = 1.5
 OBSERVATION_INTERVAL_SECONDS = 0.1
-LINKED_BUGS = ["TS-996", "TS-973", "TS-971"]
+LINKED_BUGS = [
+    "TS-1046",
+    "TS-1040",
+    "TS-1038",
+    "TS-1029",
+    "TS-1027",
+    "TS-1022",
+    "TS-1014",
+    "TS-1013",
+    "TS-1012",
+    "TS-996",
+    "TS-992",
+    "TS-973",
+    "TS-971",
+]
 REWORK_SUMMARY = (
     "Added a live startup regression for TS-984 that delays the initial GitHub "
     "`/user` probe beyond 30 seconds and now requires the first recorded "
