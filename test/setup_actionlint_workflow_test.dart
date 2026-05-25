@@ -30,8 +30,11 @@ void main() {
     expect(workflow, contains('Run actionlint'));
   });
 
-  test('setup repository exposes an actionlint pass gate for non-workflow PRs', () {
+  test('setup repository uses a single actionlint workflow for all PRs', () {
     final workflowFile = repositoryFile(
+      'trackstate-setup/.github/workflows/actionlint.yml',
+    );
+    final fallbackWorkflowFile = repositoryFile(
       'trackstate-setup/.github/workflows/actionlint-non-workflow-pr.yml',
     );
 
@@ -39,16 +42,31 @@ void main() {
       workflowFile.existsSync(),
       isTrue,
       reason:
-          'trackstate-setup needs a contributor-visible actionlint check for '
-          'non-workflow pull requests because actionlint remains required on '
-          'the protected main branch.',
+          'trackstate-setup needs one contributor-visible actionlint workflow '
+          'that can handle both workflow and non-workflow pull requests.',
+    );
+    expect(
+      fallbackWorkflowFile.existsSync(),
+      isFalse,
+      reason:
+          'trackstate-setup must not publish a second actionlint workflow for '
+          'non-workflow pull requests because mixed PRs would surface two '
+          'ambiguous actionlint checks.',
     );
 
     final workflow = workflowFile.readAsStringSync();
-    expect(workflow, contains('pull_request_target:'));
-    expect(workflow, contains('paths-ignore:'));
-    expect(workflow, contains('.github/workflows/**'));
-    expect(workflow, contains('jobs:'));
-    expect(workflow, contains('name: actionlint'));
+    expect(workflow, contains('pull_request:'));
+    expect(workflow, isNot(contains('pull_request_target:')));
+    expect(
+      workflow,
+      contains('Determine whether this PR changes workflow files'),
+    );
+    expect(workflow, contains('git diff --name-only'));
+    expect(workflow, contains('.github/workflows/'));
+    expect(workflow, contains('No workflow file changes in this pull request'));
+    expect(
+      workflow,
+      contains("steps.workflow-changes.outputs.changed == 'true'"),
+    );
   });
 }
