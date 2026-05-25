@@ -172,6 +172,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get detail => 'Detail';
 
   @override
+  String get comment => 'Comment';
+
+  @override
   String get comments => 'Comments';
 
   @override
@@ -179,7 +182,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsDownloadOnlyMessage =>
-      'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
+      'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.';
 
   @override
   String get attachmentsLimitedUploadMessage =>
