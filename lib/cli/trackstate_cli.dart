@@ -665,11 +665,12 @@ class TrackStateCli {
       );
     }
     final bytes = await sourceFile.readAsBytes();
+    final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
         results['name']?.toString().trim().ifEmpty(
-          _fileNameFromPath(resolvedFilePath),
+          sourceName,
         ) ??
-        _fileNameFromPath(resolvedFilePath);
+        sourceName;
 
     try {
       return await switch (target.type) {
@@ -678,6 +679,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
         TrackStateCliTargetType.hosted => _runHostedAttachmentUpload(
@@ -685,6 +687,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
       };
@@ -3373,6 +3376,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final branch = await _resolveLocalBranch(target);
@@ -3409,6 +3413,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3437,6 +3442,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final credential = await _resolveHostedCredential(target);
@@ -3459,10 +3465,19 @@ class TrackStateCli {
       );
       final snapshot = await repository.loadSnapshot();
       final issue = _findIssue(snapshot, issueKey);
+      await _ensureHostedAttachmentUploadSupported(
+        target: target,
+        branch: branch,
+        credential: credential,
+        repository: repository,
+        issue: issue,
+        attachmentName: attachmentName,
+      );
       final updatedIssue = await repository.uploadIssueAttachment(
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3484,6 +3499,73 @@ class TrackStateCli {
         action: 'Attachment upload failed for "${target.value}".',
       );
     }
+  }
+
+  Future<void> _ensureHostedAttachmentUploadSupported({
+    required _ResolvedTarget target,
+    required String branch,
+    required TrackStateCliCredential credential,
+    required TrackStateRepository repository,
+    required TrackStateIssue issue,
+    required String attachmentName,
+  }) async {
+    final attachmentPath = repository.resolveIssueAttachmentPath(
+      issue,
+      attachmentName,
+    );
+    if (!await _isHostedAttachmentLfsTracked(
+      target: target,
+      branch: branch,
+      credential: credential,
+      repository: repository,
+      issue: issue,
+      attachmentName: attachmentName,
+      attachmentPath: attachmentPath,
+    )) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: 'UNSUPPORTED_OPERATION',
+      category: TrackStateCliErrorCategory.unsupported,
+      message:
+          'Hosted Git LFS attachment upload is not implemented yet for '
+          '$attachmentPath.',
+      exitCode: 5,
+      details: <String, Object?>{
+        'provider': target.provider,
+        'repository': target.value,
+        'issue': issue.key,
+        'attachmentPath': attachmentPath,
+      },
+    );
+  }
+
+  Future<bool> _isHostedAttachmentLfsTracked({
+    required _ResolvedTarget target,
+    required String branch,
+    required TrackStateCliCredential credential,
+    required TrackStateRepository repository,
+    required TrackStateIssue issue,
+    required String attachmentName,
+    required String attachmentPath,
+  }) async {
+    if (await repository.isIssueAttachmentLfsTracked(issue, attachmentName)) {
+      return true;
+    }
+    final provider = _providerFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+    await provider.authenticate(
+      RepositoryConnection(
+        repository: target.value,
+        branch: branch,
+        token: credential.token,
+      ),
+    );
+    return provider.isLfsTracked(attachmentPath);
   }
 
   Future<TrackStateCliExecution> _runLocalAttachmentDownload(
@@ -3942,6 +4024,20 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (target.type == TrackStateCliTargetType.hosted &&
+          _looksLikeUnsupportedHostedLfsUpload(error.message)) {
+        return _TrackStateCliException(
+          code: 'UNSUPPORTED_OPERATION',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: error.message,
+          exitCode: 5,
+          details: <String, Object?>{
+            'provider': target.provider,
+            'repository': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       final releaseCreationFailure = _mapReleaseCreationProviderError(
         error,
         target,
@@ -4005,6 +4101,20 @@ class TrackStateCli {
             );
     }
     if (error is TrackStateRepositoryException) {
+      if (target.type == TrackStateCliTargetType.hosted &&
+          _looksLikeUnsupportedHostedLfsUpload(error.message)) {
+        return _TrackStateCliException(
+          code: 'UNSUPPORTED_OPERATION',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: error.message,
+          exitCode: 5,
+          details: <String, Object?>{
+            'provider': target.provider,
+            'repository': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       return _TrackStateCliException(
         code: 'REPOSITORY_OPEN_FAILED',
         category: TrackStateCliErrorCategory.repository,
@@ -4032,6 +4142,16 @@ class TrackStateCli {
         .split('/')
         .where((segment) => segment.isNotEmpty);
     return segments.isEmpty ? path : segments.last;
+  }
+
+  bool _looksLikeUnsupportedHostedLfsUpload(String message) {
+    final normalized = message.toLowerCase();
+    if (!normalized.contains('git lfs')) {
+      return false;
+    }
+    return normalized.contains('not implemented') ||
+        normalized.contains('not yet implemented') ||
+        normalized.contains('download-only');
   }
 
   String _sanitizeAttachmentName(String value) => value
