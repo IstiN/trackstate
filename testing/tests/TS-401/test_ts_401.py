@@ -29,22 +29,25 @@ TICKET_KEY = "TS-401"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_success.png"
-TARGET_ISSUE_KEY = "DEMO-5"
 TARGET_STATUS_LABEL = "Done"
 TARGET_PRIORITY_LABEL = "Highest"
 EXPECTED_BOARD_COLUMN = "Done"
 SETUP_STATUS_LABEL = "In Progress"
 KNOWN_STATUS_LABELS = (
     TARGET_STATUS_LABEL,
+    "To Do",
     SETUP_STATUS_LABEL,
     "In Review",
-    "To Do",
 )
 KNOWN_PRIORITY_LABELS = (
     TARGET_PRIORITY_LABEL,
     "Medium",
+    "High",
     "Low",
 )
+PREFERRED_ISSUE_KEYS = ("DEMO-5",)
+NON_EPIC_ISSUE_TYPES = {"story", "task", "bug", "sub-task", "subtask"}
+MAX_SETUP_TRANSITIONS = 3
 
 
 def main() -> None:
@@ -59,7 +62,7 @@ def main() -> None:
         )
 
     user = service.fetch_authenticated_user()
-    issue_fixture = _find_issue_fixture(service=service, issue_key=TARGET_ISSUE_KEY)
+    issue_fixture = _select_issue_fixture(service=service)
 
     result: dict[str, object] = {
         "status": "failed",
@@ -134,7 +137,7 @@ def main() -> None:
                     result,
                     step=3,
                     status="passed",
-                    action="Open the Edit issue surface for DEMO-5 from Board.",
+                    action=f"Open the Edit issue surface for {issue_fixture.key} from Board.",
                     observed=dialog_text,
                 )
 
@@ -157,36 +160,16 @@ def main() -> None:
                 result["available_status_transitions_before_edit"] = list(
                     available_status_transitions,
                 )
-                if (
-                    TARGET_STATUS_LABEL not in available_status_transitions
-                    and current_status == "To Do"
-                    and SETUP_STATUS_LABEL in available_status_transitions
-                ):
-                    setup_status_control = page.change_status_transition(
-                        SETUP_STATUS_LABEL,
-                    )
-                    result["setup_status_control_after_edit"] = _control_payload(
-                        setup_status_control,
-                    )
-                    setup_detail_text = page.save_issue_edits(
-                        issue_key=issue_fixture.key,
-                        expected_status=SETUP_STATUS_LABEL,
-                    )
-                    result["setup_post_save_detail_text"] = setup_detail_text
-                    setup_projection_text = page.wait_for_issue_detail_state(
-                        issue_key=issue_fixture.key,
-                        issue_summary=issue_fixture.summary,
-                        expected_status=SETUP_STATUS_LABEL,
-                        expected_priority=current_priority,
-                        step_number=3,
-                    )
-                    result["setup_detail_projection_text"] = setup_projection_text
-                    current_status = SETUP_STATUS_LABEL
-                    result["setup_transition"] = (
-                        f"Moved {issue_fixture.key} from {initial_status} to "
-                        f"{SETUP_STATUS_LABEL} so the live workflow exposed the required "
-                        f"{TARGET_STATUS_LABEL} transition before the ticketed edit."
-                    )
+                setup_transitions = _stage_issue_until_done_is_available(
+                    page=page,
+                    issue_fixture=issue_fixture,
+                    current_priority=current_priority,
+                    initial_status=current_status,
+                    available_status_transitions=available_status_transitions,
+                    result=result,
+                )
+                if setup_transitions:
+                    current_status = setup_transitions[-1]["to_status"]
                     dialog_text = page.open_edit_dialog_for_issue(
                         issue_key=issue_fixture.key,
                         issue_summary=issue_fixture.summary,
@@ -265,7 +248,10 @@ def main() -> None:
                     result,
                     step=8,
                     status="passed",
-                    action="Verify Board refreshes DEMO-3 into Done with Highest priority.",
+                    action=(
+                        f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
+                        "priority."
+                    ),
                     observed=board_projection_text,
                 )
 
@@ -345,7 +331,7 @@ def main() -> None:
     else:
         result["status"] = "passed"
         result["summary"] = (
-            "Verified the live hosted edit flow for DEMO-3 end-to-end: Priority "
+            f"Verified the live hosted edit flow for {issue_fixture.key} end-to-end: Priority "
             "changed to Highest, Status changed to Done, and the refreshed issue "
             "state was observed from issue detail, Board, Hierarchy, and JQL Search."
         )
@@ -353,21 +339,110 @@ def main() -> None:
         print(json.dumps(result, indent=2))
 
 
-def _find_issue_fixture(
-    *,
-    service: LiveSetupRepositoryService,
-    issue_key: str,
-) -> LiveHostedIssueFixture:
-    issue_path = next(
-        (path for path in service.list_issue_paths("DEMO") if path.split("/")[-1] == issue_key),
-        None,
+def _select_issue_fixture(*, service: LiveSetupRepositoryService) -> LiveHostedIssueFixture:
+    fixtures = [
+        service.fetch_issue_fixture(path)
+        for path in service.list_issue_paths("DEMO")
+    ]
+    candidates = [
+        fixture
+        for fixture in fixtures
+        if fixture.issue_type.lower() in NON_EPIC_ISSUE_TYPES
+        and fixture.status.lower() != "done"
+        and fixture.priority.lower() != "highest"
+    ]
+    for issue_key in PREFERRED_ISSUE_KEYS:
+        preferred = next((fixture for fixture in candidates if fixture.key == issue_key), None)
+        if preferred is not None:
+            return preferred
+    if candidates:
+        return candidates[0]
+    raise AssertionError(
+        "Precondition failed: the live hosted repository did not expose any non-epic issue "
+        "that still requires a fresh Highest/Done edit for TS-401.",
     )
-    if issue_path is None:
-        raise AssertionError(
-            "Precondition failed: the live hosted repository does not contain the issue "
-            f"{issue_key} needed for TS-401.",
+
+
+def _stage_issue_until_done_is_available(
+    *,
+    page: LiveMultiViewRefreshPage,
+    issue_fixture: LiveHostedIssueFixture,
+    current_priority: str,
+    initial_status: str,
+    available_status_transitions: tuple[str, ...],
+    result: dict[str, object],
+) -> list[dict[str, str]]:
+    current_status = initial_status
+    transitions = available_status_transitions
+    setup_transitions: list[dict[str, str]] = []
+
+    while TARGET_STATUS_LABEL not in transitions:
+        if not transitions:
+            raise AssertionError(
+                "Precondition failed: the live Edit issue surface did not expose any visible "
+                f"workflow transition from {current_status}, so TS-401 could not stage "
+                f"{issue_fixture.key} to a state where Done becomes available.\n"
+                f"Observed body text:\n{page.current_body_text()}",
+            )
+        if len(transitions) != 1:
+            raise AssertionError(
+                "Precondition failed: the live workflow exposed multiple setup transitions "
+                f"from {current_status}, but TS-401 has no ticket-backed rule for which path "
+                f"should be taken before the final Done edit.\n"
+                f"Visible transitions: {list(transitions)}\n"
+                f"Observed body text:\n{page.current_body_text()}",
+            )
+        if len(setup_transitions) >= MAX_SETUP_TRANSITIONS:
+            raise AssertionError(
+                "Precondition failed: TS-401 exceeded the allowed number of setup workflow "
+                f"transitions while trying to expose {TARGET_STATUS_LABEL}.\n"
+                f"Completed setup transitions: {setup_transitions}\n"
+                f"Latest visible transitions: {list(transitions)}",
+            )
+
+        setup_target = transitions[0]
+        setup_status_control = page.change_status_transition(setup_target)
+        setup_detail_text = page.save_issue_edits(
+            issue_key=issue_fixture.key,
+            expected_status=setup_target,
         )
-    return service.fetch_issue_fixture(issue_path)
+        setup_projection_text = page.wait_for_issue_detail_state(
+            issue_key=issue_fixture.key,
+            issue_summary=issue_fixture.summary,
+            expected_status=setup_target,
+            expected_priority=current_priority,
+            step_number=3,
+        )
+        setup_transitions.append(
+            {
+                "from_status": current_status,
+                "to_status": setup_target,
+                "status_control_text": setup_status_control.text,
+                "detail_text": setup_detail_text,
+                "projection_text": setup_projection_text,
+            },
+        )
+        current_status = setup_target
+        result["setup_transitions"] = setup_transitions
+        _record_step(
+            result,
+            step=3,
+            status="passed",
+            action=(
+                f"Use the live workflow to move {issue_fixture.key} from {setup_transitions[-1]['from_status']} "
+                f"to {setup_target} so the final Done transition becomes available."
+            ),
+            observed=setup_projection_text,
+        )
+
+        dialog_text = page.open_edit_dialog_for_issue(
+            issue_key=issue_fixture.key,
+            issue_summary=issue_fixture.summary,
+        )
+        result["latest_setup_dialog_text"] = dialog_text
+        transitions = page.available_status_transitions()
+
+    return setup_transitions
 
 
 def _normalized_issue_summary(issue_summary: str) -> str:

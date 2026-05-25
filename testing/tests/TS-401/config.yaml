@@ -5,4 +5,5 @@ platform: chromium
 dependencies: []
 notes:
   - Exercises the hosted tracker at https://istin.github.io/trackstate-setup/ using the stored GitHub token flow.
-  - Uses the live DEMO-5 issue and the current Board edit flow as the production-visible reproduction for the multi-view refresh scenario.
+  - Prefers the live DEMO-5 issue and falls back to another non-epic issue that is not already Done/Highest so reruns still prove a fresh mutation.
+  - Uses the current Board edit flow and, when needed, visible setup transitions to stage the issue until the final Done transition is available.

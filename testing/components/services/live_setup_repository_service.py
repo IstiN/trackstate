@@ -34,6 +34,9 @@ class GitHubAuthenticatedUser:
 class LiveHostedIssueFixture:
     key: str
     path: str
+    issue_type: str
+    status: str
+    priority: str
     summary: str
     description: str
     acceptance_criteria: list[str]
@@ -81,6 +84,9 @@ class LiveSetupRepositoryService:
         entries = self._read_repo_directory(issue_path)
         issue_key = issue_path.rstrip("/").split("/")[-1]
         main_markdown = self._read_repo_text(f"{issue_path}/main.md")
+        issue_type = self._front_matter_value(main_markdown, key="issueType")
+        status = self._front_matter_value(main_markdown, key="status")
+        priority = self._front_matter_value(main_markdown, key="priority")
         summary = self._front_matter_value(main_markdown, key="summary")
         entry_names = {
             str(entry.get("name", ""))
@@ -113,6 +119,9 @@ class LiveSetupRepositoryService:
         return LiveHostedIssueFixture(
             key=issue_key,
             path=issue_path,
+            issue_type=issue_type or "",
+            status=status or "",
+            priority=priority or "",
             summary=summary or issue_key,
             description=self._markdown_section(main_markdown, heading="Description"),
             acceptance_criteria=self._markdown_bullets(acceptance_markdown),

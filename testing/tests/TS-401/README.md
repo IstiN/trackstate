@@ -1,19 +1,21 @@
 # TS-401
 
-Validates the live hosted multi-view edit flow for `DEMO-5` against the deployed
-tracker at `https://istin.github.io/trackstate-setup/`.
+Validates the live hosted multi-view edit flow against the deployed tracker at
+`https://istin.github.io/trackstate-setup/`.
 
 The automation:
-1. opens the production **Edit issue** surface for `DEMO-5` from the live
+1. prefers the live `DEMO-5` issue and falls back to another non-epic live issue
+   that is not already `Done` / `Highest`
+2. opens the production **Edit issue** surface for that issue from the live
    **Board** view
-2. uses the live workflow path to reach a real **Done** transition when the
-   current demo issue starts in **To Do**
-3. attempts the real user workflow to change **Priority** to `Highest` and
+3. uses the live workflow path to reach a real **Done** transition when the
+   current issue is still one or more workflow steps away from **Done**
+4. attempts the real user workflow to change **Priority** to `Highest` and
    **Status** to `Done`
-4. saves the edit when the hosted UI exposes the required controls
-5. verifies the refreshed projections from **Board**, **Hierarchy**, and
+5. saves the edit when the hosted UI exposes the required controls
+6. verifies the refreshed projections from **Board**, **Hierarchy**, and
    **JQL Search**
-6. fails with product-visible evidence when the hosted app does not expose the
+7. fails with product-visible evidence when the hosted app does not expose the
    required mutation capability
 
 ## Install dependencies
@@ -37,8 +39,8 @@ python testing/tests/TS-401/test_ts_401.py
 ## Expected result
 
 ```text
-Pass: DEMO-5 can be edited from the live hosted app, saved, and the updated
-Priority/Status state propagates across Board, Hierarchy, and JQL Search
+Pass: the selected live issue can be edited from the hosted app, saved, and the
+updated Priority/Status state propagates across Board, Hierarchy, and JQL Search
 without a manual reload.
 
 Fail: the hosted app does not expose the required transition or edit controls,
