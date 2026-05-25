@@ -31,6 +31,13 @@ class HeaderActiveElementObservation:
 
 
 @dataclass(frozen=True)
+class HeaderThemeToggleCycleObservation:
+    initial_label: str
+    toggled_label: str
+    restored_label: str
+
+
+@dataclass(frozen=True)
 class DesktopHeaderObservation:
     viewport_width: float
     viewport_height: float
@@ -216,6 +223,68 @@ class LiveDesktopHeaderLayoutPage:
     def click_create_issue(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(self._create_issue_selector, timeout_ms=timeout_ms)
         self._session.wait_for_selector(self._create_issue_selector, timeout_ms=timeout_ms)
+
+    def observe_button(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> HeaderControlObservation:
+        payload = self._session.wait_for_function(
+            """
+            (label) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).filter(isVisible).find((candidate) =>
+                normalize(candidate.getAttribute('aria-label') || candidate.innerText) === label,
+              );
+              if (!button) {
+                return null;
+              }
+              const rect = button.getBoundingClientRect();
+              return {
+                label,
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+                centerY: rect.top + (rect.height / 2),
+              };
+            }
+            """,
+            arg=label,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f'The hosted desktop header did not expose a visible "{label}" button.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return self._control_from_payload(payload)
+
+    def click_observed_button(
+        self,
+        button: HeaderControlObservation,
+        *,
+        delay_ms: int = 0,
+    ) -> None:
+        self._session.mouse_click(
+            button.left + (button.width / 2),
+            button.top + (button.height / 2),
+            delay_ms=delay_ms,
+        )
 
     def focus_search_field(self, *, timeout_ms: int = 30_000) -> None:
         self._session.focus(self._search_input_selector, timeout_ms=timeout_ms)

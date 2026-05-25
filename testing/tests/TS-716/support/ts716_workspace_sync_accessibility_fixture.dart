@@ -15,13 +15,11 @@ class Ts716WorkspaceSyncAccessibilityRepository
   static const String hostedTokenKey =
       'trackstate.githubToken.trackstate.trackstate';
   static const String hostedTokenValue = 'ts716-read-only-token';
-  static const String topBarStatusLabel = 'Sync unavailable';
-  static const String legacyTopBarStatusLabel = 'Attention needed';
+  static const String topBarStatusLabel = 'Attention needed';
   static const String syncError =
-      'GitHub authentication failed because the saved token was revoked.';
+      'Hosted workspace sync could not refresh the latest repository snapshot.';
   static const String syncErrorMessage =
       'The latest sync check failed: $syncError';
-  static const String nextRetryPrefix = 'Next retry at';
   static const String retryLabel = 'Retry';
   static const String reconnectLabel = 'Reconnect for write access';
   static const String readOnlyLabel = 'Read-only';

@@ -22,7 +22,8 @@
   "syncStatus": "Synced with Git",
   "workspaceSyncSettings": "Workspace sync",
   "workspaceSyncChecking": "Syncing",
-  "workspaceSyncAttentionNeeded": "Attention needed",
+  "workspaceSyncAttentionNeededVisibleLabel": "Attention needed",
+  "workspaceSyncAttentionNeededSemanticLabel": "Sync error, attention needed",
   "workspaceSyncUnavailable": "Sync unavailable",
   "workspaceSyncPending": "Updates pending",
   "workspaceSyncPendingTitle": "Updates pending",
@@ -122,6 +123,7 @@
       }
     }
   },
+  "commentPlaceholder": "Add a comment...",
   "postComment": "Post comment",
   "editedAt": "Edited {timestamp}",
   "@editedAt": {
@@ -416,7 +418,7 @@
       }
     }
   },
-  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "repositoryConfigFallback": "TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}",
   "@repositoryConfigFallback": {
     "placeholders": {
       "error": {
@@ -453,6 +455,14 @@
         "type": "String"
       },
       "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "selectedIssueUnavailable": "{issueKey} is no longer available in this workspace.",
+  "@selectedIssueUnavailable": {
+    "placeholders": {
+      "issueKey": {
         "type": "String"
       }
     }
@@ -586,9 +596,11 @@
   "configuredRepositoryFallback": "configured repository",
   "currentBranchFallback": "current branch",
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
+  "localGitHostedAccessDescription": "Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
   "retry": "Retry",
+  "retryStartup": "Retry startup",
   "editIssue": "Edit issue",
   "optional": "Optional",
   "unassigned": "Unassigned",
@@ -599,11 +611,28 @@
   "noTransitionsAvailable": "No workflow transitions available.",
   "resolutionRequired": "Resolution is required for this transition.",
   "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
-  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
   "@hierarchyChangeConfirmationMessage": {
     "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
       "descendantCount": {
         "type": "int"
+      }
+    }
+  },
+  "hierarchyChangeConfirmationDestinationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.",
+  "@hierarchyChangeConfirmationDestinationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      },
+      "destinationLabel": {
+        "type": "String"
       }
     }
   },
