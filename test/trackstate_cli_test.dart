@@ -46,6 +46,23 @@ void main() {
       );
     });
 
+    test('documents shared target selection options in root help', () async {
+      final cli = TrackStateCli();
+
+      final result = await cli.run(const <String>['--help']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('--target'));
+      expect(result.stdout, contains('Target type: local or hosted.'));
+      expect(result.stdout, contains('--provider'));
+      expect(
+        result.stdout,
+        contains('Provider name. Supported values: local-git, github.'),
+      );
+      expect(result.stdout, contains('--repository'));
+      expect(result.stdout, contains('Hosted repository in owner/name form.'));
+    });
+
     test(
       'prints attachment upload help for the jiraattachfiletoticket alias',
       () async {
