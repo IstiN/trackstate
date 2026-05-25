@@ -190,6 +190,13 @@ void main() {
             observed:
                 'accessible_list_visible=${selectionState.visibleTexts.contains(_accessibleRepositoriesHeading)}; helper_visible=${selectionState.visibleTexts.contains(_manualFallbackHint)}; visible_texts=${selectionState.visibleTexts.join(' || ')}',
           );
+          _recordHumanVerification(
+            result,
+            check:
+                'Verified the hosted onboarding sheet the way an authenticated user would see it: the screen exposed a repository selector, showed repository buttons with branch labels, and also kept the manual owner/repo fallback helper text visible.',
+            observed:
+                'accessible_list_visible=${selectionState.visibleTexts.contains(_accessibleRepositoriesHeading)}; suggested_repository_visible=${selectionState.visibleTexts.contains(_suggestedRepository)}; suggested_branch_label_visible=${selectionState.visibleTexts.contains('$_branchLabel: $_suggestedBranch')}; fallback_hint_visible=${selectionState.visibleTexts.contains(_manualFallbackHint)}',
+          );
           if (step1Failures.isNotEmpty) {
             throw AssertionError(step1Failures.join('\n'));
           }
@@ -289,6 +296,13 @@ void main() {
             observed:
                 'repository_value=${manualState.hostedRepositoryValue}; branch_value=${manualState.hostedBranchValue}; repository_preview_visible=${manualState.visibleTexts.contains(_manualRepository)}; branch_preview_visible=${manualState.visibleTexts.contains(_manualBranchPreview)}; visible_texts=${manualState.visibleTexts.join(' || ')}',
           );
+          _recordHumanVerification(
+            result,
+            check:
+                'Verified the manual fallback path from the user perspective by typing a custom owner/repo and free-text branch, then checking whether the onboarding form showed the required identity preview before save.',
+            observed:
+                'repository_field=${manualState.hostedRepositoryValue}; branch_field=${manualState.hostedBranchValue}; repository_preview_visible=${manualState.visibleTexts.contains(_manualRepository)}; branch_preview_visible=${manualState.visibleTexts.contains(_manualBranchPreview)}; visible_texts=${manualState.visibleTexts.join(' || ')}',
+          );
           final manualPathFailures = <String>[
             ...step3Failures,
             ...step4Failures,
@@ -337,16 +351,9 @@ void main() {
           _recordHumanVerification(
             result,
             check:
-                'Verified the hosted onboarding sheet the way an authenticated user would see it: the screen exposed a repository selector, showed repository buttons with branch labels, and also kept the manual owner/repo fallback helper text visible.',
+                'Verified the completed manual fallback flow from the user perspective by opening the workspace after the preview check and confirming the saved workspace matched the entered repository and branch.',
             observed:
-                'accessible_list_visible=${selectionState.visibleTexts.contains(_accessibleRepositoriesHeading)}; suggested_repository_visible=${selectionState.visibleTexts.contains(_suggestedRepository)}; suggested_branch_label_visible=${selectionState.visibleTexts.contains('$_branchLabel: $_suggestedBranch')}; fallback_hint_visible=${selectionState.visibleTexts.contains(_manualFallbackHint)}',
-          );
-          _recordHumanVerification(
-            result,
-            check:
-                'Verified the manual fallback path from the user perspective by typing a custom owner/repo and free-text branch, confirming the required identity preview was visible before save, and opening the workspace with those exact values.',
-            observed:
-                'repository_field=${manualState.hostedRepositoryValue}; branch_field=${manualState.hostedBranchValue}; repository_preview_visible=${manualState.visibleTexts.contains(_manualRepository)}; branch_preview_visible=${manualState.visibleTexts.contains(_manualBranchPreview)}; active_workspace=${workspaceState.activeWorkspace?.target}@${workspaceState.activeWorkspace?.defaultBranch}',
+                'active_workspace=${workspaceState.activeWorkspace?.target}@${workspaceState.activeWorkspace?.defaultBranch}; onboarding_visible_after_submit=${postOpenState.isOnboardingVisible}; dashboard_visible=${postOpenState.isDashboardVisible}',
           );
 
           _writePassOutputs(result);
@@ -439,7 +446,9 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '* Seeded the production hosted workspace state with an active GitHub-backed workspace for {noformat}$_currentWorkspaceRepository{noformat} on {noformat}$_currentWorkspaceBranch{noformat}.',
     '* Opened Add workspace, switched the onboarding flow to {noformat}Hosted repository{noformat}, and verified the authenticated repository discovery list plus the manual fallback helper copy.',
     '* Selected the visible {noformat}$_suggestedRepository{noformat} suggestion and verified the visible branch identity label {noformat}$_branchLabel: $_suggestedBranch{noformat}.',
-    '* Entered manual fallback values {noformat}$_manualRepository{noformat} and {noformat}$_manualBranch{noformat}, then clicked {noformat}Open{noformat} and verified the production WorkspaceProfileService opened {noformat}$_manualWorkspaceId{noformat}.',
+    passed
+        ? '* Entered manual fallback values {noformat}$_manualRepository{noformat} and {noformat}$_manualBranch{noformat}, verified the identity preview, then clicked {noformat}Open{noformat} and confirmed the production WorkspaceProfileService opened {noformat}$_manualWorkspaceId{noformat}.'
+        : '* Entered manual fallback values {noformat}$_manualRepository{noformat} and {noformat}$_manualBranch{noformat}, then verified whether the required identity preview became visible before submit.',
     '',
     'h4. Result',
     passed
@@ -493,7 +502,9 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '- Seeded the production hosted workspace state with an active GitHub-backed workspace for `$_currentWorkspaceRepository` on `$_currentWorkspaceBranch`.',
     '- Opened Add workspace, switched the onboarding flow to `Hosted repository`, and verified the authenticated repository discovery list plus the manual fallback helper copy.',
     '- Selected the visible `$_suggestedRepository` suggestion and verified the visible branch identity label `$_branchLabel: $_suggestedBranch`.',
-    '- Entered manual fallback values `$_manualRepository` and `$_manualBranch`, then clicked `Open` and verified the production `WorkspaceProfileService` opened `$_manualWorkspaceId`.',
+    passed
+        ? '- Entered manual fallback values `$_manualRepository` and `$_manualBranch`, verified the identity preview, then clicked `Open` and confirmed the production `WorkspaceProfileService` opened `$_manualWorkspaceId`.'
+        : '- Entered manual fallback values `$_manualRepository` and `$_manualBranch`, then verified whether the required identity preview became visible before submit.',
     '',
     '## Result',
     passed
@@ -539,7 +550,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     ..writeln(
       passed
           ? 'Passed: hosted onboarding showed authenticated repository discovery, preserved the manual owner/repo fallback, accepted a free-text branch, and opened the workspace with the exact manual details.'
-          : 'Failed: hosted onboarding did not expose authenticated discovery and manual fallback exactly as expected.',
+          : 'Failed: hosted onboarding showed authenticated discovery and accepted manual owner/repo and branch entry, but it did not render the required manual identity preview before save.',
     )
     ..writeln()
     ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
@@ -565,13 +576,13 @@ String _bugDescription(Map<String, Object?> result) {
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'The hosted repository onboarding flow does not fully expose or honor authenticated repository discovery and manual fallback entry the way the ticket requires.',
+    'The hosted repository onboarding flow does not render the required manual identity preview before save after the user types a custom owner/repo and branch.',
     '',
     '## Steps to Reproduce',
     ..._bugStepLines(result),
     '',
     '## Actual vs Expected',
-    '- **Expected:** after selecting `Hosted repository`, an authenticated user should see a repository selector plus manual `owner/repo` fallback, the `Branch` field should accept free-text input, and opening the workspace with `$_manualRepository` on `$_manualBranch` should use those exact values.',
+    '- **Expected:** after selecting `Hosted repository`, an authenticated user should see a repository selector plus manual `owner/repo` fallback, the `Branch` field should accept free-text input, and the onboarding form should show the identity preview `$_manualRepository` and `$_manualBranchPreview` before save.',
     '- **Actual:** ${_actualResultLine(result)}',
     '',
     '## Exact error message or assertion failure',
