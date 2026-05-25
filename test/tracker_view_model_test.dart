@@ -188,6 +188,22 @@ void main() {
     expect(viewModel.hasMoreSearchResults, isFalse);
   });
 
+  test('empty JQL query shows all issues instead of the first page only', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 8);
+    expect(viewModel.searchResults.length, 8);
+    expect(viewModel.searchResults.last.key, 'TRACK-8');
+    expect(viewModel.hasMoreSearchResults, isFalse);
+  });
+
   test(
     'view model restores the last valid query after a search failure',
     () async {
