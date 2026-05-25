@@ -42,7 +42,7 @@ class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+    _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = '[aria-label*="Choose attachment"]'
@@ -66,7 +66,10 @@ class LiveIssueDetailCollaborationPage:
         )
         if self._is_connected(connected_banner):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        if (
+            self._session.count(self._connect_button_selector) == 0
+            and self.button_label_fragment_count("Connect GitHub") == 0
+        ):
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
@@ -74,7 +77,14 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        if self._session.count(self._connect_button_selector) > 0:
+            self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        else:
+            self._session.click(
+                self._button_selector,
+                has_text="Connect GitHub",
+                timeout_ms=30_000,
+            )
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)

@@ -43,7 +43,7 @@ class TrackStateTrackerPage:
     )
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -76,7 +76,10 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        if (
+            self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0
+            and self.session.count(self.BUTTON_SELECTOR, has_text="Connect GitHub") == 0
+        ):
             return ConnectionObservation(
                 dialog_text="",
                 body_text=self.body_text(),
