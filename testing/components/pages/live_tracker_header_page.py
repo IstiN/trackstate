@@ -69,6 +69,7 @@ class RepositoryAccessStateObservation:
     trigger_width: float
     trigger_height: float
     state_found: bool
+    state_source: str
     state_label: str
     state_visible_text: str
     state_x: float
@@ -724,6 +725,7 @@ class LiveTrackerHeaderPage:
                 if (!element) {
                   return {
                     stateFound: false,
+                    stateSource: '',
                     stateLabel: '',
                     stateVisibleText: '',
                     stateX: 0,
@@ -783,7 +785,15 @@ class LiveTrackerHeaderPage:
                   );
                 }),
               );
-              const stateSurface = exactMatch || partialMatch;
+              const triggerTextMatch =
+                visibleText(trigger).includes(expectedState) ? trigger : null;
+              const stateSurface = exactMatch || partialMatch || triggerTextMatch;
+              const stateSource =
+                stateSurface === trigger
+                  ? 'trigger'
+                  : stateSurface
+                    ? 'descendant'
+                    : '';
 
               return {
                 triggerLabel: labelFor(trigger),
@@ -792,6 +802,7 @@ class LiveTrackerHeaderPage:
                 triggerY: triggerRect.top,
                 triggerWidth: triggerRect.width,
                 triggerHeight: triggerRect.height,
+                stateSource,
                 ...describeState(stateSurface),
               };
             }
@@ -813,6 +824,7 @@ class LiveTrackerHeaderPage:
             trigger_width=float(payload.get("triggerWidth", 0.0)),
             trigger_height=float(payload.get("triggerHeight", 0.0)),
             state_found=bool(payload.get("stateFound")),
+            state_source=str(payload.get("stateSource", "")),
             state_label=str(payload.get("stateLabel", "")),
             state_visible_text=str(payload.get("stateVisibleText", "")),
             state_x=float(payload.get("stateX", 0.0)),

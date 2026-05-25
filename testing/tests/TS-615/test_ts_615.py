@@ -269,12 +269,12 @@ def _assert_repository_access_button(
             "rendered `Attachments limited` state surface in the desktop header.\n"
             f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
         )
-    if (
-        state_observation.state_label != expected_state
-        and state_observation.state_visible_text != expected_state
-    ):
+    rendered_state_text = _normalize_visible_text(
+        state_observation.state_visible_text or state_observation.trigger_visible_text
+    )
+    if expected_state not in rendered_state_text:
         raise AssertionError(
-            "Step 2 failed: the rendered repository access state surface did not show "
+            "Step 2 failed: the rendered repository access trigger did not show "
             "the expected `Attachments limited` text clearly.\n"
             f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
         )
@@ -282,6 +282,12 @@ def _assert_repository_access_button(
         raise AssertionError(
             "Step 2 failed: the rendered `Attachments limited` state surface overflowed "
             "the workspace-switcher trigger instead of fitting clearly within it.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    if not state_observation.center_hit_within_trigger:
+        raise AssertionError(
+            "Step 2 failed: the detected `Attachments limited` text was not hit-test "
+            "visible within the workspace-switcher trigger.\n"
             f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
         )
 
@@ -692,6 +698,7 @@ def _repository_access_visibility_summary(
         f"workspace_switcher_label={observation.repository_access.accessible_label!r}; "
         f"workspace_switcher_visible_text={observation.repository_access.visible_text!r}; "
         f"state_found={state_observation.state_found}; "
+        f"state_source={state_observation.state_source!r}; "
         f"state_label={state_observation.state_label!r}; "
         f"state_visible_text={state_observation.state_visible_text!r}; "
         f"state_bounds=({state_observation.state_x:.1f},{state_observation.state_y:.1f},"
@@ -728,6 +735,10 @@ def _spacing_summary(observation: RenderedHeaderObservation) -> str:
 
 def _within(value: float, expected: float, tolerance: float) -> bool:
     return abs(value - expected) <= tolerance
+
+
+def _normalize_visible_text(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _observe_rendered_header(
