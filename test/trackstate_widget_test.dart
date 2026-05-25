@@ -251,6 +251,44 @@ void main() {
     }
   });
 
+  testWidgets('empty JQL query shows every issue without needing load more', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Showing 6 of 8 issues'), findsOneWidget);
+      expect(find.text('Paged issue 8'), findsNothing);
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, '');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('8 issues'), findsOneWidget);
+      expect(find.text('Showing 6 of 8 issues'), findsNothing);
+      expect(find.text('Paged issue 8'), findsOneWidget);
+      expect(find.bySemanticsLabel('Load more issues'), findsNothing);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
   testWidgets(
     'first hosted load keeps the shell visible and shows bootstrap-backed placeholders',
     (tester) async {
