@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import FocusedElementObservation
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 class LiveIssueDetailCollaborationPage:
@@ -22,21 +25,40 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_messages = TrackStateTrackerPage.connected_messages(
             user_login=user_login,
             repository=repository,
         )
-        if self._is_connected(connected_banner):
+        if self._is_connected(connected_messages):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+
+        wait_match = self._session.wait_for_any_text(
+            [*connected_messages, "Connect GitHub", "Connect token"],
+            timeout_ms=60_000,
+        )
+        if wait_match.matched_text in connected_messages or self._is_connected(
+            connected_messages,
+        ):
+            return
+
+        try:
+            self._session.wait_for_any_text(
+                connected_messages,
+                timeout_ms=15_000,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        if self._connect_button_count() == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
-                "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
+                "state or a visible GitHub connect action needed to prove the hosted "
+                "authentication precondition.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        self._click_connect_button()
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
@@ -47,15 +69,15 @@ class LiveIssueDetailCollaborationPage:
         )
         wait_match = self._session.wait_for_any_text(
             [
-                connected_banner,
+                *connected_messages,
                 "GitHub connection failed:",
             ],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_messages:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
+                "connected state required for the collaboration scenario.\n"
                 f"Observed body text:\n{wait_match.body_text}",
             )
 
@@ -170,10 +192,29 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
-    def _is_connected(self, connected_banner: str) -> bool:
-        return (
-            self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
+    def _is_connected(self, connected_messages: tuple[str, ...]) -> bool:
+        body_text = self.current_body_text()
+        return self._session.count(self._connected_button_selector) > 0 or any(
+            message in body_text for message in connected_messages
+        )
+
+    def _connect_button_count(self) -> int:
+        exact_button_count = self._session.count(self._connect_button_selector)
+        if exact_button_count > 0:
+            return exact_button_count
+        return self._session.count(
+            self._button_selector,
+            has_text=TrackStateTrackerPage.CONNECT_BUTTON_LABEL,
+        )
+
+    def _click_connect_button(self) -> None:
+        if self._session.count(self._connect_button_selector) > 0:
+            self._session.click(self._connect_button_selector, timeout_ms=30_000)
+            return
+        self._session.click(
+            self._button_selector,
+            has_text=TrackStateTrackerPage.CONNECT_BUTTON_LABEL,
+            timeout_ms=30_000,
         )
 
     @staticmethod

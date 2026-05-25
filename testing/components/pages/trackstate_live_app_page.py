@@ -64,7 +64,15 @@ class TrackStateLiveAppPage:
         return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        self.session.click('flt-semantics[aria-label="Connect GitHub"]')
+        exact_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+        if self.session.count(exact_selector) > 0:
+            self.session.click(exact_selector)
+        else:
+            self.session.click(
+                self.CONNECT_BUTTON_SELECTOR,
+                has_text=self.CONNECT_READY_TEXT,
+                timeout_ms=30_000,
+            )
         self.session.wait_for_selector(self.TOKEN_INPUT_SELECTOR, timeout_ms=30_000)
 
     def read_connect_dialog_state(self) -> ConnectDialogState:

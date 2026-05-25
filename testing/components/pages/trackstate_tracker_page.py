@@ -41,9 +41,11 @@ class TrackStateTrackerPage:
     CONNECTED_BANNER_TEMPLATE = (
         "Connected as {user_login} to {repository}. Drag cards to commit status changes."
     )
+    CONNECTED_BANNER_FRAGMENT_TEMPLATE = "Connected as {user_login} to {repository}."
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_LABEL = "Connect GitHub"
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -76,7 +78,7 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        if not self._has_connect_button():
             return ConnectionObservation(
                 dialog_text="",
                 body_text=self.body_text(),
@@ -109,15 +111,15 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
+        connected_messages = self.connected_messages(
             user_login=user_login,
             repository=repository,
         )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_messages, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_messages:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
@@ -254,6 +256,19 @@ class TrackStateTrackerPage:
     def screenshot(self, path: str) -> None:
         self.session.screenshot(path)
 
+    @classmethod
+    def connected_messages(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return (
+            cls.CONNECTED_BANNER_TEMPLATE.format(
+                user_login=user_login,
+                repository=repository,
+            ),
+            cls.CONNECTED_BANNER_FRAGMENT_TEMPLATE.format(
+                user_login=user_login,
+                repository=repository,
+            ),
+        )
+
     @staticmethod
     def extract_issue_key(summary: str, body_text: str) -> str | None:
         pattern = re.compile(
@@ -280,6 +295,12 @@ class TrackStateTrackerPage:
     def _fill_labeled_field(self, label: str, value: str) -> None:
         selector = self._wait_for_labeled_field(label)
         self.session.fill(selector, value, timeout_ms=30_000)
+
+    def _has_connect_button(self) -> bool:
+        return self.session.count(self.CONNECT_BUTTON_SELECTOR) > 0 or self.session.count(
+            self.BUTTON_SELECTOR,
+            has_text=self.CONNECT_BUTTON_LABEL,
+        ) > 0
 
     @staticmethod
     def _candidate_field_selectors(label: str) -> tuple[str, ...]:
