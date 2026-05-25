@@ -35,8 +35,71 @@ void main() {
         jsonEncode(rawWorkspaceState),
       );
       expect(
+        storage.values['trackstate.workspaceProfiles.state'],
+        rawWorkspaceState,
+      );
+      expect(
         storage.values['flutter.trackstate.githubToken.IstiN.trackstate-setup'],
         jsonEncode('test-token'),
+      );
+    },
+  );
+
+  test(
+    'repairs a stale raw workspace state key from the newer shared_preferences web value',
+    () {
+      final staleRawWorkspaceState = jsonEncode({
+        'activeWorkspaceId': 'hosted:istin/trackstate-setup@main',
+        'migrationComplete': true,
+        'profiles': [
+          {
+            'id': 'hosted:istin/trackstate-setup@main',
+            'displayName': 'Hosted setup workspace',
+            'targetType': 'hosted',
+            'target': 'IstiN/trackstate-setup',
+            'defaultBranch': 'main',
+            'writeBranch': 'main',
+          },
+        ],
+      });
+      final updatedWorkspaceState = jsonEncode({
+        'activeWorkspaceId': 'local:/tmp/trackstate-ts980-workspace@main',
+        'migrationComplete': true,
+        'profiles': [
+          {
+            'id': 'local:/tmp/trackstate-ts980-workspace@main',
+            'displayName': 'Restorable local workspace',
+            'targetType': 'local',
+            'target': '/tmp/trackstate-ts980-workspace',
+            'defaultBranch': 'main',
+            'writeBranch': 'main',
+          },
+          {
+            'id': 'hosted:istin/trackstate-setup@main',
+            'displayName': 'Hosted setup workspace',
+            'targetType': 'hosted',
+            'target': 'IstiN/trackstate-setup',
+            'defaultBranch': 'main',
+            'writeBranch': 'main',
+          },
+        ],
+      });
+      final storage = _FakeBrowserPreferencesStorage({
+        'trackstate.workspaceProfiles.state': staleRawWorkspaceState,
+        'flutter.trackstate.workspaceProfiles.state': jsonEncode(
+          updatedWorkspaceState,
+        ),
+      });
+
+      repairBrowserPreferencesStorageEntries(storage);
+
+      expect(
+        storage.values['trackstate.workspaceProfiles.state'],
+        updatedWorkspaceState,
+      );
+      expect(
+        storage.values['flutter.trackstate.workspaceProfiles.state'],
+        jsonEncode(updatedWorkspaceState),
       );
     },
   );
@@ -56,6 +119,46 @@ void main() {
       repairBrowserPreferencesStorageEntries(storage);
 
       expect(storage.values[prefixedKey], jsonEncode('workspace-token'));
+    },
+  );
+
+  test(
+    'reports malformed preloaded browser storage repairs for startup diagnostics',
+    () {
+      final rawWorkspaceState = jsonEncode({
+        'activeWorkspaceId': 'hosted:istin/trackstate-setup@main',
+        'migrationComplete': true,
+        'profiles': [
+          {
+            'id': 'hosted:istin/trackstate-setup@main',
+            'displayName': '',
+            'targetType': 'hosted',
+            'target': 'IstiN/trackstate-setup',
+            'defaultBranch': 'main',
+            'writeBranch': 'main',
+          },
+        ],
+      });
+      final storage = _FakeBrowserPreferencesStorage({
+        'flutter.trackstate.workspaceProfiles.state': rawWorkspaceState,
+        'flutter.trackstate.githubToken.IstiN.trackstate-setup': 'test-token',
+      });
+
+      final dynamic repairReport =
+          (repairBrowserPreferencesStorageEntries as dynamic)(storage);
+
+      expect(repairReport, isNotNull);
+      expect(repairReport.hasRepairs, isTrue);
+
+      final diagnosticMessage =
+          repairReport.toDiagnosticMessage(includePrefix: false) as String;
+
+      expect(diagnosticMessage, contains('workspace'));
+      expect(diagnosticMessage, contains('storage'));
+      expect(diagnosticMessage, contains('schema'));
+      expect(diagnosticMessage, contains('shared_preferences'));
+      expect(diagnosticMessage, contains('malformed'));
+      expect(diagnosticMessage, contains('repair'));
     },
   );
 }

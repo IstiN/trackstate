@@ -56,9 +56,10 @@ void main() {
           );
         }
 
+        final semanticsTraversal = screen.semanticsTraversal();
         expect(
           _orderedSubsequenceFailure(
-            screen.semanticsTraversal(),
+            semanticsTraversal,
             expectedOrder: const [
               'Status',
               'Summary',
@@ -66,16 +67,22 @@ void main() {
               'Priority',
               'Assignee',
               'Labels',
+              'Components',
+              'Fix versions',
+              'Epic',
               'Save',
               'Cancel',
             ],
           ),
           isNull,
+          reason:
+              'Observed screen-reader order: ${semanticsTraversal.join(' -> ')}',
         );
 
+        final focusOrder = await screen.collectForwardFocusOrder();
         expect(
           _orderedSubsequenceFailure(
-            await screen.collectForwardFocusOrder(),
+            focusOrder,
             expectedOrder: const [
               'Status',
               'Summary',
@@ -83,11 +90,15 @@ void main() {
               'Priority',
               'Assignee',
               'Labels',
+              'Components',
+              'Fix versions',
+              'Epic',
               'Save',
               'Cancel',
             ],
           ),
           isNull,
+          reason: 'Observed Tab order: ${focusOrder.join(' -> ')}',
         );
 
         await screen.clearSummary();
@@ -109,16 +120,10 @@ void main() {
         );
 
         final focusedLabel = screen.focusedSemanticsLabel();
-        final feedback = screen.accessibilityFeedbackTexts();
         final focusReturnedToSummary =
             focusedLabel == 'Summary' ||
             (focusedLabel ?? '').startsWith('Summary ');
-        final summaryRequiredAnnounced = feedback.any((value) {
-          final normalized = value.toLowerCase();
-          return normalized.contains('summary') &&
-              normalized.contains('required');
-        });
-        expect(focusReturnedToSummary || summaryRequiredAnnounced, isTrue);
+        expect(focusReturnedToSummary, isTrue);
       } finally {
         await screen?.dispose();
         semantics.dispose();

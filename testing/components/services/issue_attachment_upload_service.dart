@@ -29,9 +29,11 @@ class IssueAttachmentUploadService implements IssueAttachmentUploadPort {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => _attachmentDriver.uploadIssueAttachment(
     issue: issue,
     name: name,
     bytes: bytes,
+    sourceName: sourceName,
   );
 }

@@ -39,9 +39,12 @@ void main() {
 
       expect(find.text('Project Settings'), findsOneWidget);
       expect(find.text('GitHub startup limit reached'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+      expect(
+        find.widgetWithText(OutlinedButton, 'Retry startup'),
+        findsOneWidget,
+      );
 
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
       await tester.pumpAndSettle();
 
       expect(repository.loadCount, 2);
@@ -130,7 +133,7 @@ void main() {
 
         expect(find.text('GitHub startup limit reached'), findsOneWidget);
 
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
         await tester.pumpAndSettle();
 
         final savedState = await workspaceProfiles.loadState();
@@ -214,13 +217,19 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('GitHub startup limit reached'), findsOneWidget);
-        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
 
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
         await tester.pump();
 
         expect(find.text('GitHub startup limit reached'), findsOneWidget);
-        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
         expect(find.byType(CircularProgressIndicator), findsNothing);
         expect(find.text('Saved workspaces'), findsNothing);
         expect(find.text('Add workspace'), findsNothing);
@@ -235,7 +244,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('GitHub startup limit reached'), findsOneWidget);
-        expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
         expect(find.text('Saved workspaces'), findsNothing);
         expect(find.text('Add workspace'), findsNothing);
         expect(find.text('Save and switch'), findsNothing);
@@ -448,6 +460,7 @@ class _WidgetStartupRecoveryRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

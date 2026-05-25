@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 
 import '../../../domain/models/trackstate_models.dart';
 import '../../services/startup_auth_probe_diagnostics.dart';
@@ -29,6 +30,7 @@ class GitHubTrackStateProvider
     caseSensitive: false,
     multiLine: true,
   );
+  static final RegExp _fullGitShaPattern = RegExp(r'^[0-9a-fA-F]{40}$');
   static const _releaseAssetDeletionVisibilityMaxAttempts = 8;
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
@@ -268,8 +270,22 @@ class GitHubTrackStateProvider
   }
 
   @override
-  Future<String> resolveWriteBranch() async =>
-      _connection?.branch.isNotEmpty == true ? _connection!.branch : sourceRef;
+  Future<String> resolveWriteBranch() async {
+    final configuredBranch = _connection?.branch.trim() ?? '';
+    if (configuredBranch.isEmpty ||
+        _fullGitShaPattern.hasMatch(configuredBranch)) {
+      return sourceRef;
+    }
+    if (configuredBranch.startsWith('refs/heads/')) {
+      final branchName = configuredBranch
+          .substring('refs/heads/'.length)
+          .trim();
+      if (branchName.isNotEmpty) {
+        return branchName;
+      }
+    }
+    return configuredBranch;
+  }
 
   @override
   Future<RepositoryBranch> getBranch(String name) async {
@@ -896,12 +912,18 @@ class GitHubTrackStateProvider
       allowMissing: true,
     );
     if (existing != null) {
-      _ensureAllowedReleaseAssets(
+      final normalized = await _normalizeReleaseContainer(
+        repository: repository,
         release: existing,
+        issueKey: issueKey,
+        releaseTitle: releaseTitle,
+      );
+      _ensureAllowedReleaseAssets(
+        release: normalized,
         releaseTag: releaseTag,
         allowedAssetNames: allowedAssetNames,
       );
-      return existing;
+      return normalized;
     }
     final created = await _createReleaseContainer(
       repository: repository,
@@ -1049,12 +1071,6 @@ class GitHubTrackStateProvider
         'releases in $repository.',
       );
     }
-    if (response.statusCode == 422) {
-      throw TrackStateProviderException(
-        'GitHub release $releaseTag could not be created for issue $issueKey. '
-        'Resolve the existing tag or release conflict and try again.',
-      );
-    }
     if (response.statusCode != 201) {
       _throwGitHubResponseException(
         path: '/repos/$repository/releases',
@@ -1066,6 +1082,54 @@ class GitHubTrackStateProvider
     return _parseReleaseSummary(
       jsonDecode(response.body) as Map<String, Object?>,
       fallbackTagName: releaseTag,
+    );
+  }
+
+  Future<_GitHubReleaseSummary> _normalizeReleaseContainer({
+    required String repository,
+    required _GitHubReleaseSummary release,
+    required String issueKey,
+    required String releaseTitle,
+  }) async {
+    final expectedBody = _releaseBodyForIssue(issueKey);
+    if (release.title == releaseTitle &&
+        release.body == expectedBody &&
+        release.isDraft &&
+        !release.isPrerelease) {
+      return release;
+    }
+    final response = await _http.patch(
+      _githubUri('/repos/$repository/releases/${release.id}'),
+      headers: {
+        ..._githubHeaders(_connection?.token),
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: jsonEncode({
+        'tag_name': release.tagName,
+        'name': releaseTitle,
+        'body': expectedBody,
+        'draft': true,
+        'prerelease': false,
+      }),
+    );
+    if (response.statusCode == 403 || response.statusCode == 404) {
+      throw TrackStateProviderException(
+        'GitHub Releases attachment storage requires permission to manage '
+        'releases in $repository.',
+      );
+    }
+    if (response.statusCode != 200) {
+      _throwGitHubResponseException(
+        path: '/repos/$repository/releases/${release.id}',
+        response: response,
+        prefix:
+            'Could not normalize GitHub release ${release.tagName} for '
+            'issue $issueKey',
+      );
+    }
+    return _parseReleaseSummary(
+      jsonDecode(response.body) as Map<String, Object?>,
+      fallbackTagName: release.tagName,
     );
   }
 
@@ -1199,11 +1263,15 @@ class GitHubTrackStateProvider
     final parsedTagName = json['tag_name']?.toString().trim() ?? '';
     final tagName = parsedTagName.isEmpty ? fallbackTagName : parsedTagName;
     final title = json['name']?.toString().trim() ?? '';
+    final body = json['body']?.toString() ?? '';
     final assetsJson = json['assets'] as List<Object?>? ?? const <Object?>[];
     return _GitHubReleaseSummary(
       id: releaseId,
       tagName: tagName,
       title: title,
+      body: body,
+      isDraft: json['draft'] == true,
+      isPrerelease: json['prerelease'] == true,
       assets: [
         for (final entry in assetsJson.whereType<Map<String, Object?>>())
           _parseReleaseAsset(entry),
@@ -1317,6 +1385,11 @@ class GitHubTrackStateProvider
       'Cannot save ${change.path} because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': change.path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 
@@ -1707,6 +1780,7 @@ _LfsPointerInfo? _parseLfsPointer(String content) {
   );
 }
 
+@immutable
 class _LfsPointerInfo {
   const _LfsPointerInfo({this.oid, this.sizeBytes});
 
@@ -1714,20 +1788,28 @@ class _LfsPointerInfo {
   final int? sizeBytes;
 }
 
+@immutable
 class _GitHubReleaseSummary {
   const _GitHubReleaseSummary({
     required this.id,
     required this.tagName,
     required this.title,
+    required this.body,
+    required this.isDraft,
+    required this.isPrerelease,
     required this.assets,
   });
 
   final String id;
   final String tagName;
   final String title;
+  final String body;
+  final bool isDraft;
+  final bool isPrerelease;
   final List<_GitHubReleaseAsset> assets;
 }
 
+@immutable
 class _GitHubReleaseAsset {
   const _GitHubReleaseAsset({
     required this.id,

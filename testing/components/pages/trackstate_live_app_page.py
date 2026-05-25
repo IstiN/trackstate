@@ -29,6 +29,7 @@ class TrackStateLiveAppPage:
     CONNECT_READY_TEXT = "Connect GitHub"
     TOKEN_INPUT_SELECTOR = 'input[aria-label="Fine-grained token"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]'
+    VISIBLE_CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]:visible'
     REMEMBER_BROWSER_SELECTOR = (
         'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
     )
@@ -85,14 +86,14 @@ class TrackStateLiveAppPage:
 
     def submit_connect_token(self) -> None:
         self.session.click(
-            self.CONNECT_BUTTON_SELECTOR,
+            self.VISIBLE_CONNECT_BUTTON_SELECTOR,
             has_text="Connect token",
             timeout_ms=30_000,
         )
 
     def open_settings(self) -> None:
         self.session.click(
-            self.CONNECT_BUTTON_SELECTOR,
+            self.VISIBLE_CONNECT_BUTTON_SELECTOR,
             has_text="Settings",
             timeout_ms=30_000,
         )

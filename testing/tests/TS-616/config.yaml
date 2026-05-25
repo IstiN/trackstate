@@ -4,5 +4,5 @@ framework: playwright
 platform: chromium
 dependencies: []
 notes:
-  - Opens the deployed hosted TrackState app in Chromium with a stored GitHub token and verifies the desktop top-bar controls in the live implementation.
-  - Audits hover, focus, theme-toggle, and desktop-resize interactions for the header search field, Create issue action, hosted access state, theme toggle, sync pill, and profile label.
+  - Opens the deployed hosted TrackState app in Chromium, navigates to Dashboard, and verifies the current desktop top-bar controls in the live implementation.
+  - Audits hover, focus, theme-toggle, and desktop-resize interactions for the sync pill, Create issue action, workspace switcher, Search issues field wrapper, and theme toggle.
