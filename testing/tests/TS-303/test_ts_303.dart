@@ -158,18 +158,36 @@ void main() {
         final createFormStillVisible = await screen.isTextFieldVisible(
           'Summary',
         );
-        final repositoryIssues =
-            await tester.runAsync(fixture.describeIssues) ?? const <String>[];
+        if (!parentValidationVisible) {
+          final repositoryIssues =
+              await tester.runAsync(fixture.describeIssues) ?? const <String>[];
+          fail(
+            'Step 5 failed: saving a Sub-task without Parent should surface the '
+            'visible parent-required validation message. Visible texts: '
+            '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}. '
+            'Create form still visible: $createFormStillVisible. Repository '
+            'issues: ${repositoryIssues.join(' | ')}.',
+          );
+        }
         expect(
-          parentValidationVisible,
+          createFormStillVisible,
           isTrue,
           reason:
-              'Step 5 failed: saving a Sub-task without Parent should surface the '
-              'visible parent-required validation message. Visible texts: '
+              'Step 5 failed: after showing the parent-required validation '
+              'message, the Create issue form should remain open so the user can '
+              'select Parent and continue. Visible texts: '
               '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}. '
-              'Create form still visible: $createFormStillVisible. Repository '
-              'issues: ${repositoryIssues.join(' | ')}.',
+              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          await screen.countDropdownFields('Parent'),
+          1,
+          reason:
+              'Step 5 failed: after the parent-required validation appears, the '
+              'visible Parent dropdown should remain available for correction. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
 
         await screen.selectDropdownOption(
