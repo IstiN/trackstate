@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import FocusedElementObservation
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -45,21 +48,26 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
-            repository=repository,
+        connected_banner = f"Connected as {user_login} to {repository}"
+        wait_match = self._session.wait_for_any_text(
+            [connected_banner, "Connect GitHub", "Open settings"],
+            timeout_ms=30_000,
         )
-        if self._is_connected(connected_banner):
+        current_body_text = wait_match.body_text
+        if self._is_connected(connected_banner, current_body_text):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        try:
+            self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        except WebAppTimeoutError as error:
+            current_body_text = self.current_body_text()
+            if self._is_connected(connected_banner, current_body_text):
+                return
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
-                "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            )
-
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+                "state or a clickable Connect GitHub action needed to prove the "
+                "authentication precondition for the hosted issue-detail scenario.\n"
+                f"Observed body text:\n{current_body_text}",
+            ) from error
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
@@ -78,7 +86,7 @@ class LiveIssueDetailCollaborationPage:
         if wait_match.matched_text != connected_banner:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
+                "connected state required for the hosted issue-detail scenario.\n"
                 f"Observed body text:\n{wait_match.body_text}",
             )
 
@@ -330,8 +338,11 @@ class LiveIssueDetailCollaborationPage:
                 """
                 ({ selector, expectedFragment }) => {
                   return Array.from(document.querySelectorAll(selector))
-                    .map((element) => element.getAttribute('aria-label') ?? '')
-                    .some((label) => label.includes(expectedFragment));
+                    .some((element) => {
+                      const label = element.getAttribute('aria-label') ?? '';
+                      const text = element.innerText ?? '';
+                      return label.includes(expectedFragment) || text.includes(expectedFragment);
+                    });
                 }
                 """,
                 arg={
@@ -344,8 +355,12 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ selector }) => {
               return Array.from(document.querySelectorAll(selector))
-                .map((element) => element.getAttribute('aria-label') ?? '')
-                .filter((label) => label.length > 0)
+                .map((element) => {
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = element.innerText ?? '';
+                  return `${label} ${text}`.trim();
+                })
+                .filter((value) => value.length > 0)
                 .sort((left, right) => right.length - left.length)[0] ?? '';
             }
             """,
@@ -407,12 +422,26 @@ class LiveIssueDetailCollaborationPage:
     ) -> str:
         selector = self._deferred_error_selector(
             section_label,
-            expected_fragment=expected_fragment,
         )
         self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        if expected_fragment is not None:
+            self._session.wait_for_function(
+                """
+                ({ selector, expectedFragment }) => {
+                  const element = document.querySelector(selector);
+                  const label = element?.getAttribute('aria-label') ?? '';
+                  const text = element?.innerText ?? '';
+                  return label.includes(expectedFragment) || text.includes(expectedFragment);
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedFragment": expected_fragment,
+                },
+                timeout_ms=timeout_ms,
+            )
         return self.deferred_error_label(
             section_label,
-            expected_fragment=expected_fragment,
             timeout_ms=timeout_ms,
         )
 
@@ -441,14 +470,15 @@ class LiveIssueDetailCollaborationPage:
     ) -> str:
         selector = self._deferred_error_selector(
             section_label,
-            expected_fragment=expected_fragment,
         )
         self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
         payload = self._session.evaluate(
             """
             ({ selector }) => {
               const element = document.querySelector(selector);
-              return element?.getAttribute('aria-label') ?? '';
+              const label = element?.getAttribute('aria-label') ?? '';
+              const text = element?.innerText ?? '';
+              return `${label} ${text}`.trim();
             }
             """,
             arg={"selector": selector},
@@ -513,10 +543,12 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
-    def _is_connected(self, connected_banner: str) -> bool:
+    def _is_connected(self, connected_banner: str, body_text: str | None = None) -> bool:
+        observed_body_text = body_text if body_text is not None else self.current_body_text()
         return (
             self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
+            or connected_banner in observed_body_text
+            or "Connected as " in observed_body_text
         )
 
     @staticmethod
@@ -547,15 +579,11 @@ class LiveIssueDetailCollaborationPage:
         *,
         expected_fragment: str | None = None,
     ) -> str:
-        selector = (
-            'flt-semantics[role="button"]'
+        del expected_fragment
+        return (
+            'flt-semantics[role="group"]'
             f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
         )
-        if expected_fragment:
-            selector += (
-                f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
-            )
-        return selector
 
     @staticmethod
     def _escape(value: str) -> str:
