@@ -986,6 +986,117 @@ void main() {
   });
 
   test(
+    'local repository persists named workflow assignment when priority uses catalog-backed options',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story","workflow":"default-workflow"},'
+            '{"id":"bug","name":"Bug","workflow":"default-workflow"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"priority","name":"Priority","type":"option","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/priorities.json',
+        '[{"id":"high","name":"High"},{"id":"medium","name":"Medium"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"default-workflow":{"name":"Default Workflow","statuses":["todo","done"],'
+            '"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed named workflow assignment fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      final originalFields = File(
+        '${repo.path}/DEMO/config/fields.json',
+      ).readAsStringSync();
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          workflowDefinitions: [
+            ...snapshot.project.workflowDefinitions,
+            const TrackStateWorkflowDefinition(
+              id: 'bug-workflow',
+              name: 'Bug Workflow',
+              statusIds: ['todo', 'done'],
+              transitions: [
+                TrackStateWorkflowTransition(
+                  id: 'close-bug',
+                  name: 'Close bug',
+                  fromStatusId: 'todo',
+                  toStatusId: 'done',
+                ),
+              ],
+            ),
+          ],
+          issueTypeDefinitions: [
+            for (final issueType in snapshot.project.issueTypeDefinitions)
+              if (issueType.id == 'bug')
+                issueType.copyWith(workflowId: 'bug-workflow')
+              else
+                issueType,
+          ],
+        ),
+      );
+
+      expect(
+        updatedSnapshot.project.workflowDefinitions.map(
+          (workflow) => workflow.id,
+        ),
+        contains('bug-workflow'),
+      );
+      expect(
+        updatedSnapshot.project.issueTypeDefinitions
+            .singleWhere((issueType) => issueType.id == 'bug')
+            .workflowId,
+        'bug-workflow',
+      );
+      expect(
+        updatedSnapshot.project.workflowDefinitions
+            .singleWhere((workflow) => workflow.id == 'bug-workflow')
+            .transitions
+            .single
+            .name,
+        'Close bug',
+      );
+      expect(
+        File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+        contains('"bug-workflow"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/issue-types.json').readAsStringSync(),
+        contains('"workflow":"bug-workflow"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/fields.json').readAsStringSync(),
+        originalFields,
+      );
+    },
+  );
+
+  test(
     'local repository migrates legacy settings without workflows during save',
     () async {
       final repo = await _createLocalRepository();
