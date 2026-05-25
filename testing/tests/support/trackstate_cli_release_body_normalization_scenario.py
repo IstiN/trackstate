@@ -264,34 +264,45 @@ class TrackStateCliReleaseBodyNormalizationScenario:
             observed=f"matching_entry={json.dumps(manifest_state.get('matching_entry'), sort_keys=True)}",
         )
 
+        gh_payload = gh_release_view.get("json_payload")
+        _record_human_verification(
+            result,
+            check=(
+                "Verified through `gh release view` what a user would observe for the "
+                "reused draft release after the upload."
+            ),
+            observed=(
+                _as_text(gh_release_view.get("stdout")).strip()
+                or _as_text(gh_release_view.get("stderr")).strip()
+                or "<empty>"
+            ),
+        )
+        step_4_failures: list[str] = []
         if release_state.get("matches_expected") is not True:
-            failures.append(
+            step_4_failures.append(
                 "Step 4 failed: the live GitHub Release did not converge to the expected normalized metadata.\n"
                 f"Observed release state:\n{json.dumps(release_state, indent=2, sort_keys=True)}"
             )
-            return failures
         if release_state.get("release_id") != seeded_release.get("id"):
-            failures.append(
+            step_4_failures.append(
                 "Step 4 failed: the upload did not reuse the seeded release id.\n"
                 f"Seeded release: {json.dumps(seeded_release, indent=2, sort_keys=True)}\n"
                 f"Observed release: {json.dumps(release_state, indent=2, sort_keys=True)}"
             )
-            return failures
         if release_state.get("release_body") != self.config.expected_release_body:
-            failures.append(
+            step_4_failures.append(
                 "Step 4 failed: the release body was not normalized to the standard machine-managed note.\n"
                 f"Expected body: {self.config.expected_release_body!r}\n"
                 f"Observed release: {json.dumps(release_state, indent=2, sort_keys=True)}"
             )
-            return failures
         if gh_release_view.get("matches_expected") is not True:
-            failures.append(
+            step_4_failures.append(
                 "Step 4 failed: `gh release view` did not expose the normalized body and uploaded asset.\n"
                 f"Observed gh release view:\n{json.dumps(gh_release_view, indent=2, sort_keys=True)}"
             )
-            return failures
+        if step_4_failures:
+            return step_4_failures
 
-        gh_payload = gh_release_view.get("json_payload")
         _record_step(
             result,
             step=4,
@@ -306,15 +317,6 @@ class TrackStateCliReleaseBodyNormalizationScenario:
                 f"gh_body={_as_text(gh_payload.get('body') if isinstance(gh_payload, dict) else '')!r}; "
                 f"gh_assets={list(gh_release_view.get('asset_names', []))}"
             ),
-        )
-        _record_human_verification(
-            result,
-            check=(
-                "Verified as a user through `gh release view` that the reused draft release still "
-                "showed the expected title, the uploaded `note.txt` asset, and the normalized "
-                "machine-managed body text in the visible release output."
-            ),
-            observed=_as_text(gh_release_view.get("stdout")).strip() or "<empty>",
         )
         return failures
 
