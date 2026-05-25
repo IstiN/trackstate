@@ -5,4 +5,4 @@ platform: widget
 dependencies: []
 notes:
   - Uses a hosted read-only provider-backed repository so the app exposes the real Workspace sync and Repository access settings surfaces.
-  - Forces the first background workspace-sync refresh to fail after the initial shell has already loaded, reproducing the user-visible Attention needed state without modifying production code.
+  - Forces the first background workspace-sync refresh to fail after the initial shell has already loaded, reproducing the user-visible hosted auth-failure state without modifying production code.

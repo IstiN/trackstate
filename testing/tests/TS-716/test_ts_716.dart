@@ -33,13 +33,7 @@ void main() {
           tester,
           condition: () =>
               _workspaceSyncPill.evaluate().isNotEmpty &&
-              find
-                  .text(
-                    Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
-                    findRichText: true,
-                  )
-                  .evaluate()
-                  .isNotEmpty &&
+              _visibleWorkspaceSyncErrorLabel().evaluate().isNotEmpty &&
               find
                   .textContaining(
                     'This repository session is read-only',
@@ -49,7 +43,7 @@ void main() {
                   .isNotEmpty,
           timeout: const Duration(seconds: 5),
           failureMessage:
-              'TS-716 could not reach the hosted read-only Attention needed state. '
+              'TS-716 could not reach the hosted read-only workspace-sync error state. '
               'Visible texts: ${_formatSnapshot(robot.visibleTexts())}. '
               'Visible semantics: ${_formatSnapshot(robot.visibleSemanticsLabelsSnapshot())}.',
         );
@@ -68,35 +62,47 @@ void main() {
           final semanticsLabel = tester
               .getSemantics(_workspaceSyncPill.first)
               .label;
-          if (!_hasDescriptiveSyncErrorSemantics(semanticsLabel)) {
+          if (!_hasDescriptiveSyncUnavailableSemantics(semanticsLabel)) {
             failures.add(
               'Step 2 failed: the top-bar sync pill semantics label was "$semanticsLabel", '
-              'which did not include both sync context and descriptive error-state wording '
-              '(for example "Sync error, attention needed").',
+              'which did not include both sync context and an unavailable/error description '
+              '(for example "Sync unavailable" or "Sync error, authentication required").',
             );
           }
 
-          final pillBackground = robot.decoratedContainerBackgroundColor(
-            _workspaceSyncPill,
+          final visibleStatus = find.text(
+            Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
+            findRichText: true,
           );
-          if (pillBackground == null) {
+          if (visibleStatus.evaluate().isEmpty) {
             failures.add(
-              'Step 3 failed: the top-bar sync pill did not expose a decorated error background, '
-              'so contrast could not be measured.',
+              'Step 3 failed: the top-bar sync pill did not expose the visible '
+              '"${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" status requested by the linked bug fix. '
+              'Visible texts: ${_formatSnapshot(topBarTexts)}.',
             );
           } else {
-            final contrast = contrastRatio(
-              robot.renderedTextColorWithin(
-                _workspaceSyncPill,
-                Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
-              ),
-              pillBackground,
+            final pillBackground = robot.decoratedContainerBackgroundColor(
+              _workspaceSyncPill,
             );
-            if (contrast < 4.5) {
+            if (pillBackground == null) {
               failures.add(
-                'Step 3 failed: the visible "${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" '
-                'label contrast was ${contrast.toStringAsFixed(2)}:1, below the WCAG AA 4.5:1 threshold.',
+                'Step 3 failed: the top-bar sync pill did not expose a decorated status background, '
+                'so contrast for "${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" could not be measured.',
               );
+            } else {
+              final contrast = contrastRatio(
+                robot.renderedTextColorWithin(
+                  _workspaceSyncPill,
+                  Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
+                ),
+                pillBackground,
+              );
+              if (contrast < 4.5) {
+                failures.add(
+                  'Step 3 failed: the visible "${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" '
+                  'label contrast was ${contrast.toStringAsFixed(2)}:1, below the WCAG AA 4.5:1 threshold.',
+                );
+              }
             }
           }
         }
@@ -128,14 +134,14 @@ void main() {
             text: Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
             step: 'Step 4',
             context:
-                'the Workspace sync card should keep the visible Attention needed state on screen',
+                'the Workspace sync card should keep the visible Sync unavailable state on screen',
           );
           _expectVisibleText(
             failures,
             text: Ts716WorkspaceSyncAccessibilityRepository.syncErrorMessage,
             step: 'Human-style verification',
             context:
-                'the Workspace sync card should show the user-facing sync error message',
+                'the Workspace sync card should show the user-facing authentication sync error message',
           );
           _expectVisibleText(
             failures,
@@ -150,6 +156,13 @@ void main() {
             step: 'Human-style verification',
             context:
                 'the Workspace sync diagnostics should surface the exact latest error text',
+          );
+          _expectVisibleText(
+            failures,
+            text: Ts716WorkspaceSyncAccessibilityRepository.nextRetryPrefix,
+            step: 'Human-style verification',
+            context:
+                'the Workspace sync message should surface the scheduled retry timing after the auth failure',
           );
         }
 
@@ -265,6 +278,16 @@ final Finder _workspaceSyncPill = find.byKey(
   const ValueKey<String>('workspace-sync-pill'),
 );
 
+Finder _visibleWorkspaceSyncErrorLabel() => find.byWidgetPredicate(
+  (widget) =>
+      widget is RichText &&
+      (widget.text.toPlainText() ==
+              Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel ||
+          widget.text.toPlainText() ==
+              Ts716WorkspaceSyncAccessibilityRepository.legacyTopBarStatusLabel),
+  description: 'visible workspace sync error label',
+);
+
 Finder _buttonByLabel(Finder? scope, String label) {
   final textMatch = find.ancestor(
     of: find.text(label, findRichText: true),
@@ -299,7 +322,7 @@ int _compareVisualOrder(Rect left, Rect right) {
   return left.left.compareTo(right.left);
 }
 
-bool _hasDescriptiveSyncErrorSemantics(String label) {
+bool _hasDescriptiveSyncUnavailableSemantics(String label) {
   final normalizedLabel = label
       .toLowerCase()
       .replaceAll(RegExp(r'\s+'), ' ')
@@ -313,6 +336,9 @@ bool _hasDescriptiveSyncErrorSemantics(String label) {
     'error',
     'failed',
     'failure',
+    'unavailable',
+    'authentication',
+    'auth',
     'attention needed',
     'attention',
     'warning',

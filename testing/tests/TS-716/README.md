@@ -2,14 +2,16 @@
 
 Verifies the hosted read-only workspace-sync error state in the production
 Flutter UI, including the top-bar sync-pill semantics label, visible
-`Attention needed` contrast, and keyboard focus order for the visible recovery
-actions in **Settings > Workspace sync**.
+`Sync unavailable` contrast, surfaced retry scheduling, and keyboard focus
+order for the visible recovery actions in **Settings > Workspace sync**.
 
 The automation only passes when a user can reproduce the real error state and
 observe:
-1. descriptive sync-error semantics on the top-bar pill,
-2. WCAG AA 4.5:1 contrast for the visible error-state label, and
-3. keyboard Tab traversal that follows the rendered top-to-bottom order of
+1. descriptive sync-unavailable/error semantics on the top-bar pill,
+2. the visible `Sync unavailable` status plus user-facing auth failure details
+   and retry scheduling,
+3. WCAG AA 4.5:1 contrast for the visible sync-unavailable label, and
+4. keyboard Tab traversal that follows the rendered top-to-bottom order of
    **Retry** and **Reconnect for write access**.
 
 ## Install dependencies
