@@ -1101,7 +1101,7 @@ void main() {
       expect(viewModel.selectedIssue?.attachments, isNotEmpty);
       expect(
         viewModel.selectedIssue?.attachments.first.name,
-        'release-notes.pdf',
+        'release notes.pdf',
       );
       expect(viewModel.selectedIssue?.attachments.first.sizeBytes, 4);
     },
@@ -1793,6 +1793,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -2191,6 +2192,7 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     final sanitizedName = sanitizeAttachmentName(name);
     final updated = issue.copyWith(
@@ -2860,6 +2862,7 @@ class _StartupRecoveryRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

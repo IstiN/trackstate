@@ -154,15 +154,15 @@ void main() {
               as List<Object?>;
       final uploadedMetadata = metadataJson
           .cast<Map<String, Object?>>()
-          .firstWhere((entry) => entry['name'] == 'release-plan.txt');
+          .firstWhere((entry) => entry['name'] == 'release plan.txt');
       final reloaded = await repository.loadSnapshot();
       final uploadedAttachment = reloaded.issues.single.attachments.firstWhere(
-        (attachment) => attachment.name == 'release-plan.txt',
+        (attachment) => attachment.name == 'release plan.txt',
       );
 
       expect(
         updated.attachments.map((attachment) => attachment.name),
-        contains('release-plan.txt'),
+        contains('release plan.txt'),
       );
       expect(uploadedMetadata['storageBackend'], 'repository-path');
       expect(
@@ -170,7 +170,7 @@ void main() {
         'DEMO/DEMO-1/attachments/release-plan.txt',
       );
       final updatedAttachment = updated.attachments.firstWhere(
-        (attachment) => attachment.name == 'release-plan.txt',
+        (attachment) => attachment.name == 'release plan.txt',
       );
 
       expect(uploadedMetadata['revisionOrOid'], isNotEmpty);
@@ -212,7 +212,7 @@ void main() {
         bytes: Uint8List.fromList(utf8.encode('roadmap v1')),
       );
       final firstRevision = firstUpload.attachments
-          .firstWhere((attachment) => attachment.name == 'release-plan.txt')
+          .firstWhere((attachment) => attachment.name == 'release plan.txt')
           .revisionOrOid;
 
       final secondUpload = await repository.uploadIssueAttachment(
@@ -221,7 +221,7 @@ void main() {
         bytes: Uint8List.fromList(utf8.encode('roadmap v2')),
       );
       final secondAttachment = secondUpload.attachments.firstWhere(
-        (attachment) => attachment.name == 'release-plan.txt',
+        (attachment) => attachment.name == 'release plan.txt',
       );
       final metadataJson =
           jsonDecode(
@@ -232,7 +232,7 @@ void main() {
               as List<Object?>;
       final uploadedMetadata = metadataJson
           .cast<Map<String, Object?>>()
-          .firstWhere((entry) => entry['name'] == 'release-plan.txt');
+          .firstWhere((entry) => entry['name'] == 'release plan.txt');
 
       expect(firstRevision, isNotEmpty);
       expect(secondAttachment.revisionOrOid, isNotEmpty);
