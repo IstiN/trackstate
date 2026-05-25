@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../testing/core/interfaces/create_issue_accessibility_screen.dart';
@@ -94,6 +95,53 @@ void main() {
         expect(compactLayout.heightFraction, greaterThanOrEqualTo(0.9));
         expect(screen.showsText('Save'), isTrue);
         expect(screen.showsText('Cancel'), isTrue);
+      } finally {
+        await screen?.dispose();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'create issue assignee field shows selectable collaborator suggestions',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      CreateIssueAccessibilityScreenHandle? screen;
+
+      try {
+        screen = await launchCreateIssueAccessibilityFixture(tester);
+
+        final assigneeField = find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField && widget.decoration?.labelText == 'Assignee',
+          description: 'Assignee text field',
+        );
+
+        expect(assigneeField, findsOneWidget);
+
+        await tester.tap(assigneeField);
+        await tester.pump();
+        await tester.enterText(assigneeField, 'local');
+        await tester.pumpAndSettle();
+
+        final suggestions = find.bySemanticsLabel(
+          RegExp('^Assignee suggestions\$'),
+        );
+        expect(suggestions, findsOneWidget);
+
+        final localAdminOption = find.descendant(
+          of: suggestions,
+          matching: find.text('local-admin'),
+        );
+        expect(localAdminOption, findsOneWidget);
+
+        await tester.tap(localAdminOption);
+        await tester.pumpAndSettle();
+
+        expect(
+          await screen.readLabeledTextFieldValue('Assignee'),
+          'local-admin',
+        );
       } finally {
         await screen?.dispose();
         semantics.dispose();
