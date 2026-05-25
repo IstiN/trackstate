@@ -5371,89 +5371,151 @@ Future<void> _showRepositoryAccessDialog(
     );
     return;
   }
-  final controller = TextEditingController();
-  var rememberToken = true;
   final accessMode = viewModel.hostedRepositoryAccessMode;
   final dialogTitle = accessMode == HostedRepositoryAccessMode.disconnected
       ? l10n.connectGitHub
       : l10n.manageGitHubAccess;
-  await showDialog<void>(
+  final connectionRequest = await showDialog<_HostedRepositoryAccessDialogResult>(
     context: context,
     builder: (context) {
-      final project = viewModel.project;
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(dialogTitle),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${l10n.repository}: '
-                  '${project?.repository ?? l10n.configuredRepositoryFallback}',
-                ),
-                const SizedBox(height: 12),
-                Text(_repositoryAccessMessage(l10n, viewModel)),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: l10n.fineGrainedToken,
-                    helperText: l10n.fineGrainedTokenHelper,
-                  ),
-                  onSubmitted: (_) {
-                    Navigator.of(context).pop();
-                    viewModel.connectGitHub(
-                      controller.text,
-                      remember: rememberToken,
-                    );
-                  },
-                ),
-                const SizedBox(height: 8),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: rememberToken,
-                  title: Text(l10n.rememberOnThisBrowser),
-                  subtitle: Text(l10n.rememberOnThisBrowserHelp),
-                  onChanged: (value) =>
-                      setDialogState(() => rememberToken = value ?? true),
-                ),
-                if (viewModel.isGitHubAppAuthAvailable) ...[
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      viewModel.startGitHubAppLogin();
-                    },
-                    child: Text(l10n.continueWithGitHubApp),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  viewModel.connectGitHub(
-                    controller.text,
-                    remember: rememberToken,
-                  );
-                },
-                child: Text(l10n.connectToken),
-              ),
-            ],
-          );
-        },
+      return _HostedRepositoryAccessDialog(
+        title: dialogTitle,
+        viewModel: viewModel,
       );
     },
   );
-  controller.dispose();
+  if (connectionRequest == null) {
+    return;
+  }
+  if (connectionRequest.useGitHubApp) {
+    viewModel.startGitHubAppLogin();
+    return;
+  }
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(
+      viewModel.connectGitHub(
+        connectionRequest.token,
+        remember: connectionRequest.remember,
+      ),
+    );
+  });
+}
+
+class _HostedRepositoryAccessDialogResult {
+  const _HostedRepositoryAccessDialogResult.connect({
+    required this.token,
+    required this.remember,
+  }) : useGitHubApp = false;
+
+  const _HostedRepositoryAccessDialogResult.githubApp()
+    : token = '',
+      remember = false,
+      useGitHubApp = true;
+
+  final String token;
+  final bool remember;
+  final bool useGitHubApp;
+}
+
+class _HostedRepositoryAccessDialog extends StatefulWidget {
+  const _HostedRepositoryAccessDialog({
+    required this.title,
+    required this.viewModel,
+  });
+
+  final String title;
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_HostedRepositoryAccessDialog> createState() =>
+      _HostedRepositoryAccessDialogState();
+}
+
+class _HostedRepositoryAccessDialogState
+    extends State<_HostedRepositoryAccessDialog> {
+  final TextEditingController _controller = TextEditingController();
+  bool _rememberToken = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submitToken() {
+    Navigator.of(context).pop(
+      _HostedRepositoryAccessDialogResult.connect(
+        token: _controller.text,
+        remember: _rememberToken,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${l10n.repository}: '
+              '${project?.repository ?? l10n.configuredRepositoryFallback}',
+            ),
+            const SizedBox(height: 12),
+            Text(_repositoryAccessMessage(l10n, widget.viewModel)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: l10n.fineGrainedToken,
+                helperText: l10n.fineGrainedTokenHelper,
+              ),
+              onSubmitted: (_) => _submitToken(),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _rememberToken,
+              title: Text(l10n.rememberOnThisBrowser),
+              subtitle: Text(l10n.rememberOnThisBrowserHelp),
+              onChanged: (value) {
+                setState(() {
+                  _rememberToken = value ?? true;
+                });
+              },
+            ),
+            if (widget.viewModel.isGitHubAppAuthAvailable) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () {
+                  Navigator.of(
+                    context,
+                  ).pop(const _HostedRepositoryAccessDialogResult.githubApp());
+                },
+                child: Text(l10n.continueWithGitHubApp),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: _submitToken,
+          child: Text(l10n.connectToken),
+        ),
+      ],
+    );
+  }
 }
 
 String _repositoryAccessLabel(
