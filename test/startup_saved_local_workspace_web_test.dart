@@ -71,10 +71,7 @@ void main() {
         ),
         select: false,
       );
-      await authStore.saveToken(
-        'github-token',
-        workspaceId: activeLocalWorkspaceId,
-      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _DelayedGitHubProbeRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
@@ -89,7 +86,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -103,9 +99,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -154,10 +148,7 @@ void main() {
         ),
         select: false,
       );
-      await authStore.saveToken(
-        'github-token',
-        workspaceId: activeLocalWorkspaceId,
-      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _DelayedGitHubProbeRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
@@ -172,7 +163,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -186,9 +176,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -244,10 +232,7 @@ void main() {
         ),
         select: false,
       );
-      await authStore.saveToken(
-        'github-token',
-        workspaceId: activeLocalWorkspaceId,
-      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _BrowserStartupAuthProbeRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
@@ -264,7 +249,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -278,9 +262,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -343,7 +325,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -357,9 +338,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -413,7 +392,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -427,9 +405,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -486,7 +462,6 @@ void main() {
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -797,11 +772,8 @@ void _expectRestrictedFallbackShell(
 ) {
   _expectShellReadySurface();
   expect(find.byType(CircularProgressIndicator), findsNothing);
-  expect(find.text('Connect GitHub'), findsOneWidget);
-  expect(
-    repository.session,
-    isNotNull,
-  );
+  expect(find.text('Connect GitHub'), findsWidgets);
+  expect(repository.session, isNotNull);
   expect(
     repository.session?.connectionState,
     isNot(ProviderConnectionState.connected),

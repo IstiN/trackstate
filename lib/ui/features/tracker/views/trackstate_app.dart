@@ -624,6 +624,60 @@ class _TrackStateAppState extends State<TrackStateApp>
     return kIsWeb && workspace.isHosted;
   }
 
+  Future<WorkspaceProfile?>
+  _resolvePreservedLocalHostedFallbackWorkspace() async {
+    final hostedWorkspaces = _workspaceState.profiles
+        .where((workspace) => workspace.isHosted)
+        .toList(growable: false);
+    if (hostedWorkspaces.isEmpty) {
+      return null;
+    }
+    for (final workspace in hostedWorkspaces) {
+      final token = await widget.authStore.readToken(
+        repository: workspace.target,
+        workspaceId: workspace.id,
+      );
+      if (token != null && token.trim().isNotEmpty) {
+        return workspace;
+      }
+    }
+    return hostedWorkspaces.first;
+  }
+
+  Future<TrackerViewModel?> _preparePreservedLocalHostedFallbackViewModel(
+    TrackerViewModel previousViewModel, {
+    required bool deferAccessRestore,
+  }) async {
+    final fallbackWorkspace =
+        await _resolvePreservedLocalHostedFallbackWorkspace();
+    if (fallbackWorkspace == null) {
+      return null;
+    }
+    try {
+      final repository = await _openWorkspaceRepository(fallbackWorkspace);
+      final fallbackViewModel = _createViewModel(
+        repository: repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: fallbackWorkspace.id,
+      );
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(
+          fallbackViewModel.load(deferAccessRestore: deferAccessRestore),
+        );
+      } else {
+        await fallbackViewModel.load(deferAccessRestore: deferAccessRestore);
+      }
+      return fallbackViewModel;
+    } on Object catch (error) {
+      _rememberWorkspaceValidationFailure(
+        fallbackWorkspace,
+        _normalizeWorkspaceFailureReason(error),
+      );
+      return null;
+    }
+  }
+
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
@@ -719,10 +773,29 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
     bool markUnavailable = false,
   }) async {
+    final hostedFallbackViewModel =
+        await _preparePreservedLocalHostedFallbackViewModel(
+          previousViewModel,
+          deferAccessRestore: deferAccessRestore,
+        );
+    if (hostedFallbackViewModel != null) {
+      if (markUnavailable) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+      } else {
+        _workspaceValidationFailures.remove(workspace.id);
+      }
+      return _PreparedWorkspaceSwitch(
+        viewModel: hostedFallbackViewModel,
+        workspace: workspace,
+        localConfigurationKey: null,
+      );
+    }
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
       if (deferAccessRestore && kIsWeb) {
-        unawaited(previousViewModel.load(deferAccessRestore: deferAccessRestore));
+        unawaited(
+          previousViewModel.load(deferAccessRestore: deferAccessRestore),
+        );
       } else {
         await previousViewModel.load(deferAccessRestore: deferAccessRestore);
       }
@@ -738,7 +811,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!identical(preservedViewModel, previousViewModel) &&
         preservedViewModel.snapshot == null) {
       if (deferAccessRestore && kIsWeb) {
-        unawaited(preservedViewModel.load(deferAccessRestore: deferAccessRestore));
+        unawaited(
+          preservedViewModel.load(deferAccessRestore: deferAccessRestore),
+        );
       } else {
         await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
       }
@@ -1722,7 +1797,10 @@ class _TrackStateAppState extends State<TrackStateApp>
           ? browser_workspace_switcher_focus_monitor
                 .captureBrowserViewportScrollSnapshot()
           : null;
-      _requestedWorkspaceSwitcherRowFocusId = null;
+      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
+      if (activeWorkspaceId != null) {
+        _workspaceSwitcherRowFocusRequestVersion += 1;
+      }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1733,6 +1811,12 @@ class _TrackStateAppState extends State<TrackStateApp>
             .syncBrowserWorkspaceSwitcherRowTabIndices(
               activeWorkspaceId: activeWorkspaceId,
             );
+        if (kIsWeb) {
+          _requestDesktopWorkspaceSwitcherBrowserFocus(
+            browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId),
+          );
+          return;
+        }
       }
       _workspaceSwitcherTriggerFocusNode.requestFocus();
       if (kIsWeb) {
@@ -1756,6 +1840,10 @@ class _TrackStateAppState extends State<TrackStateApp>
               },
               onBrowserFocusOutside: () {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                if (_desktopWorkspaceSwitcherBrowserFocusRequest != null) {
+                  _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck();
                   return;
                 }
                 _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
@@ -4490,7 +4578,7 @@ class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
         ignoring: !visible,
         child: TapRegion(
           groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
-          onTapOutside: visible ? (_) => onDismiss() : null,
+          onTapOutside: visible && !kIsWeb ? (_) => onDismiss() : null,
           child: Material(
             color: visible ? colors.surface : Colors.transparent,
             elevation: visible ? 16 : 0,
@@ -6097,6 +6185,7 @@ class _AccessCallout extends StatelessWidget {
         : colors.text;
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
       label: '$semanticLabel $title $message',
@@ -6142,6 +6231,23 @@ class _AccessCallout extends StatelessWidget {
                 ),
               ),
             ),
+            if (kIsWeb)
+              Opacity(
+                opacity: 0,
+                alwaysIncludeSemantics: true,
+                child: IgnorePointer(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title),
+                      Text(message),
+                      if (primaryActionLabel != null) Text(primaryActionLabel!),
+                      if (secondaryActionLabel != null)
+                        Text(secondaryActionLabel!),
+                    ],
+                  ),
+                ),
+              ),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
@@ -8140,10 +8246,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
       identifier: kIsWeb
           ? browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id)
           : null,
-      button: kIsWeb && onSelect != null,
-      enabled: kIsWeb && onSelect != null,
       selected: isActive,
-      onTap: kIsWeb ? onSelect : null,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -8225,6 +8328,25 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                   ),
               ],
             ),
+            if (kIsWeb)
+              Opacity(
+                opacity: 0,
+                alwaysIncludeSemantics: true,
+                child: IgnorePointer(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(browserSummaryLabel),
+                      if (primaryActionSemanticLabel != null)
+                        Text(primaryActionSemanticLabel),
+                      if (widget.showOpenAction && onOpen != null)
+                        Text('${l10n.openWorkspace}: ${workspace.displayName}'),
+                      if (!isActive)
+                        Text('${l10n.delete}: ${workspace.displayName}'),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -8389,12 +8511,21 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
             ),
             child: labelText,
           );
-    return browser_focusable_control.BrowserFocusableControl(
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      button: true,
+      enabled: onPressed != null,
       label: semanticsLabel,
-      onPressed: onPressed,
-      focusTargetId: focusTargetId,
-      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-      child: buttonChild,
+      child: ExcludeSemantics(
+        child: browser_focusable_control.BrowserFocusableControl(
+          label: semanticsLabel,
+          onPressed: onPressed,
+          focusTargetId: focusTargetId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          child: buttonChild,
+        ),
+      ),
     );
   }
 }

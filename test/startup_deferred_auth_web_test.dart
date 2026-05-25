@@ -46,10 +46,7 @@ void main() {
         ),
         select: false,
       );
-      await authStore.saveToken(
-        'github-token',
-        workspaceId: activeLocalWorkspaceId,
-      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _DelayedConnectRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
@@ -64,16 +61,13 @@ void main() {
       });
 
       final previousDiagnostics = startupAuthProbeDiagnostics;
-      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
-        logger: (_) {},
-      );
+      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(logger: (_) {});
       addTearDown(() {
         startupAuthProbeDiagnostics = previousDiagnostics;
       });
 
       await tester.pumpWidget(
         TrackStateApp(
-          repositoryFactory: () => delayedRepository,
           workspaceProfileService: service,
           authStore: authStore,
           openBrowserLocalRepository:
@@ -91,9 +85,7 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
+              }) async => delayedRepository,
         ),
       );
       await tester.pump();
@@ -122,7 +114,7 @@ void main() {
       );
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
-      expect(find.text('Connect GitHub'), findsOneWidget);
+      expect(find.text('Connect GitHub'), findsWidgets);
       final savedStateBeforeConnect = await service.loadState();
       expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
