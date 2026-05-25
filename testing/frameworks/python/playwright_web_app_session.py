@@ -533,18 +533,25 @@ class PlaywrightStoredTokenWebAppRuntime(
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_key = self._repository.replace("/", ".")
+        storage_keys = sorted(
+            {
+                self._repository.replace("/", "."),
+                self._repository.lower().replace("/", "."),
+            },
+        )
         self._context.add_init_script(
             script=(
                 "(() => {"
-                f"const repositoryStorageKey = {json.dumps(storage_key)};"
+                f"const repositoryStorageKeys = {json.dumps(storage_keys)};"
                 f"const token = {json.dumps(self._token)};"
-                "const keys = ["
-                "  `trackstate.githubToken.${repositoryStorageKey}`,"
-                "  `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
-                "];"
-                "for (const key of keys) {"
-                "  window.localStorage.setItem(key, token);"
+                "for (const repositoryStorageKey of repositoryStorageKeys) {"
+                "  const keys = ["
+                "    `trackstate.githubToken.${repositoryStorageKey}`,"
+                "    `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "  ];"
+                "  for (const key of keys) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
                 "}"
                 "})()"
             ),

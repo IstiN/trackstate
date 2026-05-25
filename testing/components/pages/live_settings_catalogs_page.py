@@ -181,11 +181,16 @@ class LiveSettingsCatalogsPage:
             )
 
     def save_settings(self) -> None:
-        self._click_button_by_aria_label("Save settings")
+        rect = self._session.bounding_box(
+            self._button_selector,
+            has_text="Save settings",
+            timeout_ms=30_000,
+        )
+        self._session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
         self._session.wait_for_function(
             """
-            () => Array.from(document.querySelectorAll('flt-semantics[aria-label]')).some(
-              (candidate) => (candidate.getAttribute('aria-label') ?? '').trim() === 'Save settings',
+            () => Array.from(document.querySelectorAll('flt-semantics[role="button"]')).some(
+              (candidate) => (candidate.innerText ?? '').trim() === 'Save settings',
             )
             """,
             timeout_ms=30_000,
@@ -235,9 +240,21 @@ class LiveSettingsCatalogsPage:
         )
 
     def _click_button_by_aria_label(self, label: str) -> None:
-        selector = self._nested_button_by_aria_label(label)
-        self._scroll_into_view(selector)
-        self._session.click(selector, timeout_ms=30_000)
+        selectors = (
+            self._button_by_aria_label(label),
+            self._nested_button_by_aria_label(label),
+        )
+        for selector in selectors:
+            if self._session.count(selector) == 0:
+                continue
+            self._scroll_into_view(selector)
+            rect = self._session.bounding_box(selector, timeout_ms=30_000)
+            self._session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
+            return
+        raise AssertionError(
+            f'The live settings page did not expose a button with aria-label "{label}".\n'
+            f"Observed body text:\n{self.current_body_text()}",
+        )
 
     def _tab_selector_for(self, label: str) -> str:
         return f'{self._tab_selector}[aria-label="{self._escape(label)}"]'

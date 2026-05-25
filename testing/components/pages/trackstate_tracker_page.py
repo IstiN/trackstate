@@ -41,9 +41,14 @@ class TrackStateTrackerPage:
     CONNECTED_BANNER_TEMPLATE = (
         "Connected as {user_login} to {repository}. Drag cards to commit status changes."
     )
+    CONNECTED_BANNER_COMPACT_TEMPLATE = "Connected as {user_login} to {repository}."
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    DISCONNECTED_MARKERS = (
+        "Needs sign-in",
+        "GitHub write access is not connected",
+    )
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -76,10 +81,15 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        connected_banners = self.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+        body_text = self.body_text()
+        if any(banner in body_text for banner in connected_banners):
             return ConnectionObservation(
                 dialog_text="",
-                body_text=self.body_text(),
+                body_text=body_text,
             )
 
         self._live_page.open_connect_dialog()
@@ -109,15 +119,11 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
-            repository=repository,
-        )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_banners, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
@@ -126,6 +132,30 @@ class TrackStateTrackerPage:
             dialog_text=dialog_text,
             body_text=wait_match.body_text,
         )
+
+    @classmethod
+    def connected_banner_variants(
+        cls,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> tuple[str, ...]:
+        repository_variants = {repository, repository.lower()}
+        banners: list[str] = []
+        for repository_variant in repository_variants:
+            banners.append(
+                cls.CONNECTED_BANNER_TEMPLATE.format(
+                    user_login=user_login,
+                    repository=repository_variant,
+                ),
+            )
+            banners.append(
+                cls.CONNECTED_BANNER_COMPACT_TEMPLATE.format(
+                    user_login=user_login,
+                    repository=repository_variant,
+                ),
+            )
+        return tuple(banners)
 
     def create_issue_from_board(
         self,
