@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from testing.core.models.trackstate_cli_http_request_observation import (
+    TrackStateCliHttpRequestObservation,
+)
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
@@ -77,6 +80,7 @@ class TrackStateCliReleaseReplacementValidationResult:
     initial_state: TrackStateCliReleaseReplacementRepositoryState
     final_state: TrackStateCliReleaseReplacementRepositoryState
     observation: TrackStateCliCommandObservation
+    api_requests: tuple[TrackStateCliHttpRequestObservation, ...]
     expected_release_tag: str
     release_tag_prefix: str
     remote_origin_url: str

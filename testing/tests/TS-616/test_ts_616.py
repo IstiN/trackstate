@@ -16,6 +16,7 @@ from testing.components.pages.live_desktop_header_layout_page import (  # noqa: 
     HeaderControlObservation,
     LiveDesktopHeaderLayoutPage,
 )
+from testing.components.pages.live_create_issue_gate_page import LiveCreateIssueGatePage  # noqa: E402
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
@@ -56,6 +57,7 @@ def main() -> None:
     try:
         with create_live_tracker_app(config) as tracker_page:
             page = LiveDesktopHeaderLayoutPage(tracker_page)
+            create_issue_gate_page = LiveCreateIssueGatePage(tracker_page)
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
@@ -102,18 +104,27 @@ def main() -> None:
                     ),
                 )
                 page.click_create_issue()
-                after_create = page.observe_header()
-                result["after_create_observation"] = _observation_payload(after_create)
-                page.dismiss_create_issue_dialog()
-                step_one_errors.extend(
-                    _geometry_stability_errors(
-                        reference=baseline,
-                        observed=after_create,
-                        step_number=1,
-                        context="clicking the visible Create issue button",
-                        compare_horizontal=True,
-                    ),
-                )
+                post_click_effect: str | None = None
+                after_create: DesktopHeaderObservation | None = None
+                try:
+                    post_click_effect = _wait_for_create_issue_post_click_effect(
+                        create_issue_gate_page=create_issue_gate_page,
+                    )
+                    after_create = page.observe_header()
+                    result["after_create_observation"] = _observation_payload(after_create)
+                    step_one_errors.extend(
+                        _geometry_stability_errors(
+                            reference=baseline,
+                            observed=after_create,
+                            step_number=1,
+                            context="clicking the visible Create issue button",
+                            compare_horizontal=True,
+                        ),
+                    )
+                except AssertionError as error:
+                    step_one_errors.append(str(error))
+                finally:
+                    _restore_dashboard_after_create_issue_click(page)
                 _record_step(
                     result,
                     step=1,
@@ -122,21 +133,29 @@ def main() -> None:
                     observed=(
                         f"baseline={_header_summary(baseline)}; "
                         f"hover_create={_control_summary(hovered.create)}; "
+                        f"post_click_effect={post_click_effect}; "
                         f"after_click_create={_control_summary(after_create.create)}"
-                        if not step_one_errors
+                        if not step_one_errors and after_create is not None and post_click_effect
                         else "\n".join(step_one_errors)
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the visible Create issue action stayed aligned in the desktop "
-                        "header during hover and after a real click."
+                        "Verified the visible Create issue action produced a real user-visible "
+                        "post-click effect and stayed aligned in the desktop header."
                     ),
                     observed=(
                         f"baseline={_control_summary(baseline.create)}; "
                         f"hover={_control_summary(hovered.create)}; "
+                        f"post_click_effect={post_click_effect or 'not observed'}; "
                         f"after_click={_control_summary(after_create.create)}"
+                        if after_create is not None and post_click_effect
+                        else (
+                            f"baseline={_control_summary(baseline.create)}; "
+                            f"hover={_control_summary(hovered.create)}; "
+                            f"post_click_effect={post_click_effect or 'not observed'}"
+                        )
                     ),
                 )
                 failures.extend(step_one_errors)
@@ -987,6 +1006,29 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
         if step_number > first_failed_step:
             return f"Not executed because step {first_failed_step} failed before this step ran."
     return "No observation recorded."
+
+
+def _wait_for_create_issue_post_click_effect(
+    *,
+    create_issue_gate_page: LiveCreateIssueGatePage,
+) -> str:
+    gate = create_issue_gate_page.wait_for_access_gate(
+        primary_action_label="Open settings",
+        timeout_ms=15_000,
+    )
+    return (
+        f'gate_panel_text="{gate.gate_panel_text}"; '
+        f"create_heading_visible={gate.create_heading_visible}; "
+        f"summary_field_count={gate.summary_field_count}; "
+        f"open_settings_button_count={gate.open_settings_button_count}; "
+        f"gate_open_settings_button_count={gate.gate_open_settings_button_count}"
+    )
+
+
+def _restore_dashboard_after_create_issue_click(page: LiveDesktopHeaderLayoutPage) -> None:
+    if page.dismiss_create_issue_dialog(timeout_ms=5_000):
+        return
+    page.open_dashboard()
 
 
 if __name__ == "__main__":
