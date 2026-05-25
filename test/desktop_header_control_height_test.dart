@@ -40,12 +40,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      const expectedHeight = 32.0;
       final syncPill = find.ancestor(
         of: find.text('Synced with Git').last,
         matching: find.byWidgetPredicate(
           (widget) =>
               widget is Container &&
-              widget.constraints?.minHeight == 58 &&
+              widget.constraints?.minHeight == expectedHeight &&
               widget.alignment == Alignment.center,
           description: 'desktop top bar sync pill container',
         ),
@@ -54,8 +55,10 @@ void main() {
       final createIssueButton = find
           .bySemanticsLabel(RegExp('^Create issue\$'))
           .last;
-      final repositoryAccessButton = find
-          .bySemanticsLabel(RegExp('^Attachments limited\$'))
+      final workspaceSwitcherButton = find
+          .bySemanticsLabel(
+            RegExp('^Workspace switcher: .*Attachments limited\$'),
+          )
           .last;
       final themeToggle = find
           .bySemanticsLabel(RegExp('^(Dark theme|Light theme)\$'))
@@ -67,15 +70,15 @@ void main() {
       expect(syncPill, findsOneWidget);
       expect(searchField, findsOneWidget);
       expect(createIssueButton, findsOneWidget);
-      expect(repositoryAccessButton, findsOneWidget);
+      expect(workspaceSwitcherButton, findsOneWidget);
       expect(themeToggle, findsOneWidget);
       expect(profileIdentity, findsWidgets);
 
-      final expectedHeight = tester.getRect(searchField).height;
       final controlHeights = <String, double>{
+        'search field': tester.getRect(searchField).height,
         'sync pill': tester.getRect(syncPill).height,
         'create issue': tester.getRect(createIssueButton).height,
-        'repository access': tester.getRect(repositoryAccessButton).height,
+        'workspace switcher': tester.getRect(workspaceSwitcherButton).height,
         'theme toggle': tester.getRect(themeToggle).height,
         'profile identity': tester.getRect(profileIdentity.last).height,
       };
@@ -85,7 +88,7 @@ void main() {
           entry.value,
           closeTo(expectedHeight, 1),
           reason:
-              'Expected ${entry.key} to match the desktop header search field height ($expectedHeight), but it rendered at ${entry.value}.',
+              'Expected ${entry.key} to stay at the required 32px desktop header height, but it rendered at ${entry.value}.',
         );
       }
     } finally {

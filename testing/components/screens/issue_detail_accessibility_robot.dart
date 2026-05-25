@@ -1212,6 +1212,19 @@ class IssueDetailAccessibilityRobot
   }
 
   Finder _collaborationTab(String issueKey, String label) {
+    final interactiveControl = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.byWidgetPredicate((widget) {
+          return widget is InkWell || widget is ButtonStyleButton;
+        }, description: 'interactive collaboration tab $label'),
+      ),
+    );
+    if (interactiveControl.evaluate().isNotEmpty) {
+      return _smallestByArea(interactiveControl);
+    }
+
     final semantics = find.descendant(
       of: _issueDetail(issueKey),
       matching: find.byWidgetPredicate((widget) {

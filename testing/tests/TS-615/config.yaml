@@ -5,4 +5,5 @@ platform: chromium
 dependencies: []
 notes:
   - Opens the deployed hosted TrackState web app and reaches a real GitHub session until the desktop workspace switcher exposes the `Attachments limited` repository access state.
-  - Verifies the documented 32px parity rule by comparing the live `Search issues` field baseline with the rendered `Create issue` and repository access controls without modifying production code.
+  - Verifies the rendered `Attachments limited` state is visibly present on the workspace-switcher trigger instead of being inferred only from accessibility metadata.
+  - Verifies the documented 32px parity rule by comparing the live `Search issues` input baseline with the rendered `Create issue` and repository access controls without modifying production code.

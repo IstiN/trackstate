@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
@@ -62,6 +63,16 @@ class RepositoryAccessFocusObservation:
 
 
 @dataclass(frozen=True)
+class RepositoryAccessActivationObservation:
+    key: str
+    matched_text: str
+    response_kind: str
+    response_text: str
+    body_text_before: str
+    body_text_after: str
+
+
+@dataclass(frozen=True)
 class ProjectSettingsTabObservation:
     body_text: str
     selected_tab_label: str
@@ -80,8 +91,25 @@ class ProjectSettingsNavigationState:
     add_status_visible: bool
 
 
+@dataclass(frozen=True)
+class ProjectSettingsSaveState:
+    body_text: str
+    save_button_enabled: bool
+    save_failure_text: str | None
+
+
+@dataclass(frozen=True)
+class ProjectSettingsAdminTabObservation:
+    label: str
+    selected_tab_label: str
+    body_text: str
+    expected_visible_text: str | None
+    signal_text: str
+
+
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_selector = 'flt-semantics[role="tab"]'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
@@ -111,15 +139,27 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
             return current_body
 
-        if self._session.count(self._connect_selector) == 0:
+        connect_via_aria = self._session.count(self._connect_selector) > 0
+        connect_via_text = (
+            self._session.count(
+                self._visible_button_selector,
+                has_text="Connect GitHub",
+            )
+            > 0
+        )
+        if not connect_via_aria and not connect_via_text:
             raise AssertionError(
                 "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
                 "action needed to enter the writable Settings flow.\n"
@@ -128,12 +168,19 @@ class LiveProjectSettingsPage:
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
-                self._session.click(self._connect_selector, timeout_ms=30_000)
+                if connect_via_aria:
+                    self._session.click(self._connect_selector, timeout_ms=30_000)
+                else:
+                    self._session.click(
+                        self._visible_button_selector,
+                        has_text="Connect GitHub",
+                        timeout_ms=30_000,
+                    )
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
             self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
             self._session.click(
-                self._button_selector,
+                self._visible_button_selector,
                 has_text="Connect token",
                 timeout_ms=30_000,
             )
@@ -141,7 +188,7 @@ class LiveProjectSettingsPage:
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                         "GitHub connection failed:",
@@ -153,7 +200,7 @@ class LiveProjectSettingsPage:
                 if any(
                     marker in current_body
                     for marker in (
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                     )
@@ -179,10 +226,131 @@ class LiveProjectSettingsPage:
             "Step 3 failed: the hosted token connect flow could not complete.",
         )
 
+    def ensure_write_capable_connection(
+        self,
+        *,
+        token: str,
+        repository: str,
+        user_login: str,
+        timeout_seconds: int = 240,
+    ) -> str:
+        connected_banners = TrackStateTrackerPage.connected_banners(
+            user_login=user_login,
+            repository=repository,
+        )
+        current_body = self.body_text()
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return current_body
+
+        connect_via_aria = self._session.count(self._connect_selector) > 0
+        connect_via_text = self._session.count(
+            self._visible_button_selector,
+            has_text="Connect GitHub",
+        ) > 0
+        if not connect_via_aria and not connect_via_text:
+            raise AssertionError(
+                "Step 2 failed: the hosted runtime did not expose the Connect GitHub "
+                "action needed to reach a write-capable session.\n"
+                f"Observed body text:\n{current_body}",
+            )
+
+        for attempt in range(2):
+            if self._session.count(self._token_input_selector) == 0:
+                if connect_via_aria:
+                    self._scroll_into_view(self._connect_selector)
+                    self._session.click(self._connect_selector, timeout_ms=30_000)
+                else:
+                    connect_button_selector = (
+                        'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+                    )
+                    self._scroll_into_view(connect_button_selector)
+                    self._session.click(
+                        self._visible_button_selector,
+                        has_text="Connect GitHub",
+                        timeout_ms=30_000,
+                    )
+            self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+            self._scroll_into_view(self._token_input_selector)
+            self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
+            if self._session.count(self._connect_token_selector) > 0:
+                self._scroll_into_view(self._connect_token_selector)
+                self._session.click(self._connect_token_selector, timeout_ms=30_000)
+            else:
+                self._session.click(
+                    self._visible_button_selector,
+                    has_text="Connect token",
+                    timeout_ms=30_000,
+                )
+
+            try:
+                wait_match = self._session.wait_for_any_text(
+                    [
+                        *connected_banners,
+                        "GitHub connection failed:",
+                    ],
+                    timeout_ms=timeout_seconds * 1_000,
+                )
+                if wait_match.matched_text == "GitHub connection failed:":
+                    raise AssertionError(
+                        "Step 2 failed: submitting the fine-grained token did not "
+                        "reach a write-capable hosted session.\n"
+                        f"Observed body text:\n{wait_match.body_text}",
+                    )
+                return self.body_text()
+            except WebAppTimeoutError:
+                current_body = self.body_text()
+                if "GitHub connection failed:" in current_body:
+                    raise AssertionError(
+                        "Step 2 failed: submitting the fine-grained token did not "
+                        "reach a write-capable hosted session.\n"
+                        f"Observed body text:\n{current_body}",
+                    ) from None
+                if attempt == 0:
+                    continue
+                raise AssertionError(
+                    "Step 2 failed: the hosted session never exposed the connected "
+                    "write-capable banner after the token submit.\n"
+                    f"Expected one of: {connected_banners}\n"
+                    f"Observed body text:\n{current_body}",
+                ) from None
+
+        raise AssertionError(
+            "Step 2 failed: the hosted write-capable connection flow could not complete.",
+        )
+
     def dismiss_connection_banner(self) -> None:
         if self._session.count(self._close_selector) == 0:
             return
         self._session.click(self._close_selector, timeout_ms=30_000)
+
+    def dismiss_if_open(self, *, timeout_ms: int = 30_000) -> None:
+        current_body = self.body_text()
+        if self._settings_heading not in current_body:
+            return
+        if self._session.count(self._close_selector) == 0:
+            raise AssertionError(
+                "The hosted app still showed Project Settings but did not expose the Close "
+                "action needed to return to the tracker shell.\n"
+                f"Observed body text:\n{current_body}",
+            )
+        self._session.click(self._close_selector, timeout_ms=timeout_ms)
+        try:
+            self._session.wait_for_function(
+                """
+                (settingsHeading) => !(document.body?.innerText ?? '').includes(settingsHeading)
+                """,
+                arg=self._settings_heading,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Closing the Project Settings surface did not return to the tracker shell.\n"
+                f"Observed body text:\n{self.body_text()}",
+            ) from error
 
     def open_settings(self) -> str:
         self._session.click(
@@ -244,6 +412,60 @@ class LiveProjectSettingsPage:
             timeout_ms=timeout_ms,
         )
         return str(payload)
+
+    def rendered_tab_labels(self, *, timeout_ms: int = 30_000) -> list[str]:
+        payload = self._session.wait_for_function(
+            """
+            () => {
+              const labels = Array.from(document.querySelectorAll('flt-semantics[role="tab"]'))
+                .map((tab) => (tab.getAttribute('aria-label') ?? '').trim())
+                .filter((label) => label.length > 0);
+              return labels.length > 0 ? labels : null;
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "The Settings surface did not expose readable admin tab labels.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return [str(item) for item in payload]
+
+    def observe_admin_tab(
+        self,
+        label: str,
+        *,
+        expected_visible_text: str | None = None,
+        signal_label: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> ProjectSettingsAdminTabObservation:
+        body_text = self.open_tab(
+            label,
+            expected_visible_text=expected_visible_text,
+            timeout_ms=timeout_ms,
+        )
+        selected_tab_label = self.selected_tab_label(timeout_ms=timeout_ms)
+        if selected_tab_label != label:
+            raise AssertionError(
+                "The Settings admin tab did not become the selected tab.\n"
+                f"Expected selected tab: {label}\n"
+                f"Observed selected tab: {selected_tab_label}\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        signal_text = ""
+        if signal_label:
+            signal_text = self._wait_for_visible_semantics_text(
+                signal_label,
+                timeout_ms=timeout_ms,
+            )
+        return ProjectSettingsAdminTabObservation(
+            label=label,
+            selected_tab_label=selected_tab_label,
+            body_text=body_text,
+            expected_visible_text=expected_visible_text,
+            signal_text=signal_text,
+        )
 
     def observe_attachment_settings_surface(
         self,
@@ -398,6 +620,54 @@ class LiveProjectSettingsPage:
         self._session.click(self._save_settings_selector, timeout_ms=30_000)
         self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
         return self.body_text()
+
+    def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
+        self._scroll_into_view(self._save_settings_selector)
+        self._session.click(self._save_settings_selector, timeout_ms=timeout_ms)
+        return self.body_text()
+
+    def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
+        self._session.wait_for_function(
+            """
+            (selector) => {
+              const button = document.querySelector(selector);
+              return !!button && button.getAttribute('aria-disabled') !== 'true';
+            }
+            """,
+            arg=self._save_settings_selector,
+            timeout_ms=timeout_ms,
+        )
+        return self.body_text()
+
+    def read_save_state(self) -> ProjectSettingsSaveState:
+        payload = self._session.evaluate(
+            r"""
+            (selector) => {
+              const bodyText = document.body?.innerText ?? '';
+              const button = document.querySelector(selector);
+              const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
+              return {
+                bodyText,
+                saveButtonEnabled: !!button && button.getAttribute('aria-disabled') !== 'true',
+                saveFailureText: saveFailureMatch ? saveFailureMatch[0].trim() : null,
+              };
+            }
+            """,
+            arg=self._save_settings_selector,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted Settings page did not expose a readable save-state snapshot.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        save_failure_text = payload.get("saveFailureText")
+        return ProjectSettingsSaveState(
+            body_text=str(payload.get("bodyText", "")),
+            save_button_enabled=bool(payload.get("saveButtonEnabled")),
+            save_failure_text=(
+                str(save_failure_text).strip() if save_failure_text is not None else None
+            ),
+        )
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
@@ -949,6 +1219,105 @@ class LiveProjectSettingsPage:
             body_text=str(payload.get("bodyText", "")),
         )
 
+    def focus_repository_access_connect_token_via_keyboard(
+        self,
+        *,
+        token: str,
+        timeout_ms: int = 30_000,
+    ) -> list[RepositoryAccessFocusObservation]:
+        self.focus_repository_access_token_field(timeout_ms=timeout_ms)
+        self._session.fill(self._token_input_selector, token, timeout_ms=timeout_ms)
+        initial_focus = self.wait_for_repository_access_focus(
+            "Fine-grained token",
+            timeout_ms=5_000,
+        )
+        self.press_tab_from_repository_access_focus(
+            "Fine-grained token",
+            timeout_ms=timeout_ms,
+        )
+        remember_focus = self.wait_for_repository_access_focus(
+            "Remember on this browser",
+            timeout_ms=5_000,
+        )
+        self.press_tab_from_repository_access_focus(
+            "Remember on this browser",
+            timeout_ms=timeout_ms,
+        )
+        connect_focus = self.wait_for_repository_access_focus(
+            "Connect token",
+            timeout_ms=5_000,
+        )
+        return [initial_focus, remember_focus, connect_focus]
+
+    def wait_for_repository_access_feedback_absence(
+        self,
+        feedback_texts: Sequence[str],
+        *,
+        timeout_ms: int = 5_000,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                (expectedTexts) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const matchedText = expectedTexts.find((text) => bodyText.includes(text));
+                  return matchedText ? null : bodyText;
+                }
+                """,
+                arg=list(feedback_texts),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            body_text = self.body_text()
+            raise AssertionError(
+                "The Repository access flow already showed visible connection feedback "
+                "before the keyboard activation started.\n"
+                f"Observed body text:\n{body_text}",
+            ) from None
+        if not isinstance(payload, str):
+            return self.body_text()
+        return payload
+
+    def activate_focused_repository_access_connect_token(
+        self,
+        *,
+        key: str,
+        feedback_texts: Sequence[str],
+        connected_banner_text: str,
+        timeout_ms: int = 120_000,
+    ) -> RepositoryAccessActivationObservation:
+        self.wait_for_repository_access_focus("Connect token", timeout_ms=5_000)
+        body_text_before = self.body_text()
+        self._session.press_key(key, timeout_ms=30_000)
+        try:
+            wait_match = self._session.wait_for_any_text(
+                feedback_texts,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            raise AssertionError(
+                "The focused Connect token button did not surface visible connection "
+                "feedback after keyboard activation.\n"
+                f"Observed body text:\n{self.body_text()}",
+            ) from None
+        return RepositoryAccessActivationObservation(
+            key=key,
+            matched_text=wait_match.matched_text,
+            response_kind=(
+                "success"
+                if wait_match.matched_text == connected_banner_text
+                else "error"
+                if wait_match.matched_text == "GitHub connection failed:"
+                else "feedback"
+            ),
+            response_text=self._extract_repository_access_feedback_text(
+                wait_match.body_text,
+                wait_match.matched_text,
+            ),
+            body_text_before=body_text_before,
+            body_text_after=wait_match.body_text,
+        )
+
     def observe_repository_access_section(
         self,
         *,
@@ -1286,6 +1655,19 @@ class LiveProjectSettingsPage:
             ) from error
         return self.body_text()
 
+    @staticmethod
+    def _extract_repository_access_feedback_text(
+        body_text: str,
+        matched_text: str,
+    ) -> str:
+        if matched_text != "GitHub connection failed:":
+            return matched_text
+        for line in body_text.splitlines():
+            normalized = " ".join(line.split())
+            if normalized.startswith(matched_text):
+                return normalized
+        return matched_text
+
     def _scroll_into_view(self, selector: str) -> None:
         self._session.evaluate(
             """
@@ -1298,6 +1680,56 @@ class LiveProjectSettingsPage:
             """,
             arg=selector,
         )
+
+    def _wait_for_visible_semantics_text(self, text: str, *, timeout_ms: int) -> str:
+        payload = self._session.wait_for_function(
+            r"""
+            (expectedText) => {
+              const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .find((candidate) => {
+                  if (!isVisible(candidate)) {
+                    return false;
+                  }
+                  const rendered = normalize(
+                    candidate.getAttribute('aria-label')
+                    ?? candidate.innerText
+                    ?? candidate.textContent
+                    ?? '',
+                  );
+                  return rendered.includes(expectedText);
+                });
+              if (!match) {
+                return null;
+              }
+              return normalize(
+                match.getAttribute('aria-label')
+                ?? match.innerText
+                ?? match.textContent
+                ?? '',
+              );
+            }
+            """,
+            arg=text,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, str) or not payload.strip():
+            raise AssertionError(
+                f'The Settings surface never exposed visible semantics containing "{text}".\n'
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return str(payload).strip()
 
     def _tab_selector_for(self, label: str) -> str:
         return f'{self._tab_selector}[aria-label="{self._escape(label)}"]'

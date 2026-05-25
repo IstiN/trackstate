@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 import platform
 import sys
+import tempfile
 import traceback
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -15,6 +20,7 @@ from testing.components.pages.live_tracker_header_page import (  # noqa: E402
     DesktopHeaderObservation,
     HeaderControlObservation,
     LiveTrackerHeaderPage,
+    RepositoryAccessStateObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -31,6 +37,7 @@ HEIGHT_TOLERANCE = 1.0
 CENTER_TOLERANCE = 1.0
 ACTION_GAP = 8.0
 GAP_TOLERANCE = 1.5
+BACKGROUND_DISTANCE_THRESHOLD = 8.0
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -40,6 +47,30 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts615_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts615_failure.png"
+
+
+@dataclass(frozen=True)
+class RenderedControlObservation:
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @property
+    def right(self) -> float:
+        return self.x + self.width
+
+    @property
+    def center_y(self) -> float:
+        return self.y + (self.height / 2)
+
+
+@dataclass(frozen=True)
+class RenderedHeaderObservation:
+    search_field: RenderedControlObservation
+    create_issue: RenderedControlObservation
+    repository_access: RenderedControlObservation
+    theme_toggle: RenderedControlObservation
 
 
 def main() -> None:
@@ -67,7 +98,7 @@ def main() -> None:
     try:
         with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
             header_page = LiveTrackerHeaderPage(tracker_page)
-            tracker_page.session.set_viewport_size(width=1440, height=900)
+            tracker_page.session.set_viewport_size(width=1440, height=960)
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
@@ -99,106 +130,114 @@ def main() -> None:
                 )
 
                 observation = header_page.observe_desktop_header()
+                state_observation = header_page.observe_repository_access_state_surface()
+                rendered_observation = _observe_rendered_header(header_page, observation)
                 result["header_observation"] = asdict(observation)
-                step_errors: list[str] = []
-
-                try:
-                    _assert_repository_access_button(observation)
-                except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="failed",
-                        action="Locate the repository access state button in the desktop header.",
-                        observed=str(error),
-                    )
-                    step_errors.append(str(error))
-                else:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action="Locate the repository access state button in the desktop header.",
-                        observed=(
-                            f"workspace_switcher_label={observation.repository_access.accessible_label}; "
-                            f"visible_text={observation.repository_access.visible_text!r}; "
-                            f"x={observation.repository_access.x:.1f}; "
-                            f"y={observation.repository_access.y:.1f}; "
-                            f"width={observation.repository_access.width:.1f}; "
-                            f"height={observation.repository_access.height:.1f}"
-                        ),
-                    )
-
-                try:
-                    _assert_visual_parity(observation)
-                except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=3,
-                        status="failed",
-                        action=(
-                            "Compare the repository access button height and baseline "
-                            "alignment against the adjacent JQL search field and "
-                            "'Create issue' button."
-                        ),
-                        observed=str(error),
-                    )
-                    step_errors.append(str(error))
-                else:
-                    _record_step(
-                        result,
-                        step=3,
-                        status="passed",
-                        action=(
-                            "Compare the repository access button height and baseline "
-                            "alignment against the adjacent JQL search field and "
-                            "'Create issue' button."
-                        ),
-                        observed=_parity_summary(observation),
-                    )
-
-                try:
-                    _assert_shared_spacing_token(observation)
-                except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action="Verify that the shared spacing token is applied to the pill.",
-                        observed=str(error),
-                    )
-                    step_errors.append(str(error))
-                else:
-                    _record_step(
-                        result,
-                        step=4,
-                        status="passed",
-                        action="Verify that the shared spacing token is applied to the pill.",
-                        observed=_spacing_summary(observation),
-                    )
-
+                result["repository_access_state_observation"] = asdict(state_observation)
+                result["rendered_header_observation"] = asdict(rendered_observation)
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified as a desktop user that the top-right header cluster showed "
-                        "the workspace switcher/repository access control between "
-                        "`Create issue` and the JQL search field."
+                        "Verified as a desktop user that the visible top bar showed "
+                        "`Create issue`, `Attachments limited`, and the theme toggle in "
+                        "the expected top-right control cluster."
                     ),
                     observed=_header_cluster_summary(observation),
                 )
+
+                step_errors: list[str] = []
+                try:
+                    _assert_repository_access_button(observation, state_observation)
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action="Locate the repository access state button in the desktop header.",
+                        observed=str(error),
+                    )
+                    step_errors.append(str(error))
+                else:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action="Locate the repository access state button in the desktop header.",
+                        observed=_repository_access_visibility_summary(
+                            observation,
+                            state_observation,
+                        ),
+                    )
+                try:
+                    _assert_visual_parity(observation, rendered_observation)
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=(
+                            "Compare the repository access button height and baseline "
+                            "alignment against the adjacent JQL search field and "
+                            "'Create issue' button."
+                        ),
+                        observed=str(error),
+                    )
+                    step_errors.append(str(error))
+                else:
+                    _record_step(
+                        result,
+                        step=3,
+                        status="passed",
+                        action=(
+                            "Compare the repository access button height and baseline "
+                            "alignment against the adjacent JQL search field and "
+                            "'Create issue' button."
+                        ),
+                        observed=_parity_summary(observation, rendered_observation),
+                    )
+
+                try:
+                    _assert_shared_spacing_token(rendered_observation)
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action="Verify that the shared spacing token is applied to the pill.",
+                        observed=str(error),
+                    )
+                    step_errors.append(str(error))
+                else:
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action="Verify that the shared spacing token is applied to the pill.",
+                        observed=_spacing_summary(rendered_observation),
+                    )
+
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified whether the `Attachments limited` state was actually "
-                        "legible on the visible workspace-switcher trigger rather than only "
-                        "available through accessibility metadata."
+                        "Verified the rendered `Attachments limited` state itself was visible "
+                        "inside the workspace-switcher trigger rather than inferred only from "
+                        "accessibility metadata."
                     ),
-                    observed=_visibility_summary(observation.repository_access),
+                    observed=_repository_access_visibility_summary(
+                        observation,
+                        state_observation,
+                    ),
                 )
-
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the repository access label was legible and visually sat "
+                        "on the same centered baseline as the neighboring desktop controls."
+                    ),
+                    observed=_parity_summary(observation, rendered_observation),
+                )
                 if step_errors:
                     raise AssertionError("\n\n".join(step_errors))
-
                 header_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
@@ -219,31 +258,41 @@ def main() -> None:
     _write_pass_outputs(result)
 
 
-def _assert_repository_access_button(observation: DesktopHeaderObservation) -> None:
-    accessible_label = observation.repository_access.accessible_label or ""
-    if "Attachments limited" not in accessible_label:
+def _assert_repository_access_button(
+    observation: DesktopHeaderObservation,
+    state_observation: RepositoryAccessStateObservation,
+) -> None:
+    expected_state = "Attachments limited"
+    if not state_observation.state_found:
         raise AssertionError(
-            "Step 2 failed: the desktop header did not expose a repository access control "
-            "whose accessible label included `Attachments limited`.\n"
-            f"Observed header metrics: {_semantic_summary(observation)}",
+            "Step 2 failed: the visible workspace-switcher trigger did not expose a "
+            "rendered `Attachments limited` state surface in the desktop header.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    if (
+        state_observation.state_label != expected_state
+        and state_observation.state_visible_text != expected_state
+    ):
+        raise AssertionError(
+            "Step 2 failed: the rendered repository access state surface did not show "
+            "the expected `Attachments limited` text clearly.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    if not state_observation.state_fully_within_trigger:
+        raise AssertionError(
+            "Step 2 failed: the rendered `Attachments limited` state surface overflowed "
+            "the workspace-switcher trigger instead of fitting clearly within it.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
         )
 
-    if observation.repository_access.text_is_clipped:
-        raise AssertionError(
-            "Step 2 failed: the visible workspace-switcher trigger did not display the "
-            "`Attachments limited` state clearly in the desktop header.\n"
-            "The state is only recoverable from the accessibility label because the trigger "
-            "text is clipped within the 240px control width "
-            f"(client_width={observation.repository_access.client_width:.1f}px; "
-            f"scroll_width={observation.repository_access.scroll_width:.1f}px; "
-            f"accessible_label={accessible_label!r})."
-        )
 
-
-def _assert_visual_parity(observation: DesktopHeaderObservation) -> None:
-    repository_access = observation.repository_access
-    create_issue = observation.create_issue
-    search_field = observation.search_field
+def _assert_visual_parity(
+    semantic_observation: DesktopHeaderObservation,
+    rendered_observation: RenderedHeaderObservation,
+) -> None:
+    search_field = rendered_observation.search_field
+    repository_access = rendered_observation.repository_access
+    create_issue = rendered_observation.create_issue
     errors: list[str] = []
 
     if not _within(search_field.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
@@ -290,26 +339,22 @@ def _assert_visual_parity(observation: DesktopHeaderObservation) -> None:
             "Step 3 failed: the desktop header controls did not keep the documented "
             "32px visual parity for the `Attachments limited` repository access state.\n"
             f"{'; '.join(errors)}.\n"
-            f"Observed metrics: {_parity_summary(observation)}",
+            f"Observed metrics: {_parity_summary(semantic_observation, rendered_observation)}",
         )
 
 
-def _assert_shared_spacing_token(observation: DesktopHeaderObservation) -> None:
-    left_gap = observation.repository_access.x - (
-        observation.create_issue.x + observation.create_issue.width
-    )
-    right_gap = observation.search_field.x - (
-        observation.repository_access.x + observation.repository_access.width
-    )
+def _assert_shared_spacing_token(observation: RenderedHeaderObservation) -> None:
+    left_gap = observation.repository_access.x - observation.create_issue.right
+    right_gap = observation.search_field.x - observation.repository_access.right
     errors: list[str] = []
     if not _within(left_gap, ACTION_GAP, GAP_TOLERANCE):
         errors.append(
-            "the gap between `Create issue` and the workspace switcher measured "
+            "the gap between `Create issue` and `Attachments limited` measured "
             f"{left_gap:.1f}px instead of {ACTION_GAP:.1f}px"
         )
     if not _within(right_gap, ACTION_GAP, GAP_TOLERANCE):
         errors.append(
-            "the gap between the workspace switcher and the visible Search issues field measured "
+            "the gap between `Attachments limited` and the visible Search issues field measured "
             f"{right_gap:.1f}px instead of {ACTION_GAP:.1f}px"
         )
     if errors:
@@ -402,13 +447,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         "* Opened the deployed hosted TrackState web app in a desktop Chromium session.",
-        "* Reached a real hosted session whose workspace switcher accessibility label included the `Attachments limited` repository access state.",
-        "* Located the visible `Create issue` button, workspace-switcher repository access control, Search issues field, and theme toggle from the rendered desktop header.",
-        "* Compared the current repository access control against the adjacent desktop header controls and verified the shared 8px spacing token around the pill.",
+        "* Connected the real hosted GitHub flow until the live top bar exposed the `Attachments limited` repository access state.",
+        "* Located the visible search field, `Create issue`, `Attachments limited`, sync pill, and theme toggle controls from the rendered desktop header.",
+        "* Compared the rendered repository access control bounds against the adjacent search field and `Create issue` button, then verified the shared 8px action-cluster spacing token around the pill.",
         "",
         "*Observed result*",
         (
-            "* Matched the expected result: the repository access control stayed visually aligned, kept the shared spacing token, and displayed the limited state clearly."
+            "* Matched the expected result: the `Attachments limited` header control matched the neighboring desktop controls and kept the shared 8px action-cluster spacing."
             if passed
             else "* Did not match the expected result."
         ),
@@ -446,13 +491,13 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         "- Opened the deployed hosted TrackState web app in a desktop Chromium session.",
-        "- Reached a real hosted session whose workspace switcher accessibility label included the `Attachments limited` repository access state.",
-        "- Located the visible `Create issue` button, workspace-switcher repository access control, Search issues field, and theme toggle from the rendered desktop header.",
-        "- Compared the current repository access control against the adjacent desktop header controls and verified the shared 8px spacing token around the pill.",
+        "- Connected the real hosted GitHub flow until the live top bar exposed the `Attachments limited` repository access state.",
+        "- Located the visible search field, `Create issue`, `Attachments limited`, sync pill, and theme toggle controls from the rendered desktop header.",
+        "- Compared the rendered repository access control bounds against the adjacent search field and `Create issue` button, then verified the shared 8px action-cluster spacing token around the pill.",
         "",
         "### Observed result",
         (
-            "- Matched the expected result: the repository access control stayed visually aligned, kept the shared spacing token, and displayed the limited state clearly."
+            "- Matched the expected result: the `Attachments limited` header control matched the neighboring desktop controls and kept the shared 8px action-cluster spacing."
             if passed
             else "- Did not match the expected result."
         ),
@@ -511,10 +556,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
-    observation = result.get("header_observation", {})
+    rendered_observation = result.get("rendered_header_observation", {})
+    state_observation = result.get("repository_access_state_observation", {})
     return "\n".join(
         [
-            "# TS-615 - Desktop header repository access control does not clearly display the `Attachments limited` state",
+            "# TS-615 - Desktop header `Attachments limited` control does not clearly display the state or match adjacent rendered header geometry",
             "",
             "## Steps to reproduce",
             "1. Launch the web application and trigger the `Attachments limited` state.",
@@ -533,10 +579,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             (
-                "- Expected: the desktop header repository access control remains 32px tall, "
-                "stays centered with the visible Search issues field and `Create issue` button, "
-                "keeps the shared 8px spacing token, and clearly shows the `Attachments limited` "
-                "state on the visible trigger."
+                "- Expected: the desktop header keeps `Attachments limited` at the "
+                "documented 32px control height, vertically centered with the visible "
+                "Search issues input and `Create issue` button, while keeping the shared "
+                "8px action-cluster spacing."
             ),
             (
                 "- Actual: "
@@ -555,7 +601,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-            f"- Header observation: `{observation}`",
+            f"- Repository access state observation: `{state_observation}`",
+            f"- Rendered header observation: `{rendered_observation}`",
             f"- Runtime state: `{result.get('runtime_state', '')}`",
             f"- Connected body text: `{result.get('connected_body_text', '')}`",
         ],
@@ -615,12 +662,12 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
 
 def _header_cluster_summary(observation: DesktopHeaderObservation) -> str:
     return (
-        f"create_issue=({observation.create_issue.x:.1f},{observation.create_issue.y:.1f},"
-        f"{observation.create_issue.width:.1f}x{observation.create_issue.height:.1f}); "
-        f"workspace_switcher=({observation.repository_access.x:.1f},{observation.repository_access.y:.1f},"
-        f"{observation.repository_access.width:.1f}x{observation.repository_access.height:.1f}); "
         f"search_field=({observation.search_field.x:.1f},{observation.search_field.y:.1f},"
         f"{observation.search_field.width:.1f}x{observation.search_field.height:.1f}); "
+        f"create_issue=({observation.create_issue.x:.1f},{observation.create_issue.y:.1f},"
+        f"{observation.create_issue.width:.1f}x{observation.create_issue.height:.1f}); "
+        f"repository_access=({observation.repository_access.x:.1f},{observation.repository_access.y:.1f},"
+        f"{observation.repository_access.width:.1f}x{observation.repository_access.height:.1f}); "
         f"theme_toggle=({observation.theme_toggle.x:.1f},{observation.theme_toggle.y:.1f},"
         f"{observation.theme_toggle.width:.1f}x{observation.theme_toggle.height:.1f})"
     )
@@ -632,46 +679,129 @@ def _semantic_summary(observation: DesktopHeaderObservation) -> str:
         f"{observation.search_field.width:.1f}x{observation.search_field.height:.1f}); "
         f"create_issue=({observation.create_issue.x:.1f},{observation.create_issue.y:.1f},"
         f"{observation.create_issue.width:.1f}x{observation.create_issue.height:.1f}); "
-        f"repository_access_label={observation.repository_access.accessible_label!r}; "
         f"repository_access=({observation.repository_access.x:.1f},{observation.repository_access.y:.1f},"
         f"{observation.repository_access.width:.1f}x{observation.repository_access.height:.1f})"
     )
 
 
-def _parity_summary(observation: DesktopHeaderObservation) -> str:
+def _repository_access_visibility_summary(
+    observation: DesktopHeaderObservation,
+    state_observation: RepositoryAccessStateObservation,
+) -> str:
+    return (
+        f"workspace_switcher_label={observation.repository_access.accessible_label!r}; "
+        f"workspace_switcher_visible_text={observation.repository_access.visible_text!r}; "
+        f"state_found={state_observation.state_found}; "
+        f"state_label={state_observation.state_label!r}; "
+        f"state_visible_text={state_observation.state_visible_text!r}; "
+        f"state_bounds=({state_observation.state_x:.1f},{state_observation.state_y:.1f},"
+        f"{state_observation.state_width:.1f}x{state_observation.state_height:.1f}); "
+        f"state_within_trigger={state_observation.state_fully_within_trigger}; "
+        f"center_hit_within_trigger={state_observation.center_hit_within_trigger}; "
+        f"center_hit_tag={state_observation.center_hit_tag_name!r}; "
+        f"center_hit_text={state_observation.center_hit_text!r}"
+    )
+
+
+def _parity_summary(
+    semantic_observation: DesktopHeaderObservation,
+    rendered_observation: RenderedHeaderObservation,
+) -> str:
     return (
         f"expected_control_height={EXPECTED_CONTROL_HEIGHT:.1f}px; "
-        f"search_field_height={observation.search_field.height:.1f}px; "
-        f"create_issue_height={observation.create_issue.height:.1f}px; "
-        f"repository_access_height={observation.repository_access.height:.1f}px; "
-        f"search_field_center_y={observation.search_field.center_y:.1f}px; "
-        f"create_issue_center_y={observation.create_issue.center_y:.1f}px; "
-        f"repository_access_center_y={observation.repository_access.center_y:.1f}px"
+        f"search_field_height={rendered_observation.search_field.height:.1f}px; "
+        f"create_issue_height={rendered_observation.create_issue.height:.1f}px; "
+        f"repository_access_height={rendered_observation.repository_access.height:.1f}px; "
+        f"search_field_center_y={rendered_observation.search_field.center_y:.1f}px; "
+        f"create_issue_center_y={rendered_observation.create_issue.center_y:.1f}px; "
+        f"repository_access_center_y={rendered_observation.repository_access.center_y:.1f}px"
     )
 
 
-def _spacing_summary(observation: DesktopHeaderObservation) -> str:
+def _spacing_summary(observation: RenderedHeaderObservation) -> str:
     return (
-        f"create_to_repository_gap="
-        f"{observation.repository_access.x - (observation.create_issue.x + observation.create_issue.width):.1f}px; "
-        f"repository_to_search_gap="
-        f"{observation.search_field.x - (observation.repository_access.x + observation.repository_access.width):.1f}px; "
+        f"create_to_repository_gap={observation.repository_access.x - observation.create_issue.right:.1f}px; "
+        f"repository_to_search_gap={observation.search_field.x - observation.repository_access.right:.1f}px; "
         f"expected_gap={ACTION_GAP:.1f}px"
-    )
-
-
-def _visibility_summary(control: HeaderControlObservation) -> str:
-    return (
-        f"accessible_label={control.accessible_label!r}; "
-        f"visible_text={control.visible_text!r}; "
-        f"client_width={control.client_width:.1f}px; "
-        f"scroll_width={control.scroll_width:.1f}px; "
-        f"text_clipped={control.text_is_clipped}"
     )
 
 
 def _within(value: float, expected: float, tolerance: float) -> bool:
     return abs(value - expected) <= tolerance
+
+
+def _observe_rendered_header(
+    header_page: LiveTrackerHeaderPage,
+    observation: DesktopHeaderObservation,
+) -> RenderedHeaderObservation:
+    temp_screenshot = _temporary_screenshot_path()
+    try:
+        header_page.screenshot(str(temp_screenshot))
+        with Image.open(temp_screenshot) as image_handle:
+            image = image_handle.convert("RGB")
+            try:
+                return RenderedHeaderObservation(
+                    search_field=_extract_rendered_control(image, observation.search_field),
+                    create_issue=_extract_rendered_control(image, observation.create_issue),
+                    repository_access=_extract_rendered_control(image, observation.repository_access),
+                    theme_toggle=_extract_rendered_control(image, observation.theme_toggle),
+                )
+            finally:
+                image.close()
+    finally:
+        temp_screenshot.unlink(missing_ok=True)
+
+
+def _extract_rendered_control(
+    image: Image.Image,
+    control: HeaderControlObservation,
+    *,
+    padding: int = 6,
+) -> RenderedControlObservation:
+    left = max(int(math.floor(control.x)) - padding, 0)
+    top = max(int(math.floor(control.y)) - padding, 0)
+    right = min(int(math.ceil(control.x + control.width)) + padding, image.width)
+    bottom = min(int(math.ceil(control.y + control.height)) + padding, image.height)
+    crop = image.crop((left, top, right, bottom))
+    try:
+        background = crop.getpixel((0, 0))
+        diff_pixels: list[tuple[int, int]] = []
+        for y in range(crop.height):
+            for x in range(crop.width):
+                if _color_distance(crop.getpixel((x, y)), background) > BACKGROUND_DISTANCE_THRESHOLD:
+                    diff_pixels.append((x, y))
+        if not diff_pixels:
+            raise AssertionError(
+                f"Could not determine the rendered bounds for the `{control.label}` header control.",
+            )
+        xs = [point[0] for point in diff_pixels]
+        ys = [point[1] for point in diff_pixels]
+        rendered_left = left + min(xs)
+        rendered_top = top + min(ys)
+        rendered_right = left + max(xs) + 1
+        rendered_bottom = top + max(ys) + 1
+        return RenderedControlObservation(
+            x=float(rendered_left),
+            y=float(rendered_top),
+            width=float(rendered_right - rendered_left),
+            height=float(rendered_bottom - rendered_top),
+        )
+    finally:
+        crop.close()
+
+
+def _color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
+    return math.sqrt(
+        (left[0] - right[0]) ** 2
+        + (left[1] - right[1]) ** 2
+        + (left[2] - right[2]) ** 2
+    )
+
+
+def _temporary_screenshot_path() -> Path:
+    fd, path = tempfile.mkstemp(prefix="ts615-rendered-header-", suffix=".png")
+    os.close(fd)
+    return Path(path)
 
 
 if __name__ == "__main__":
