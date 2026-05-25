@@ -30,6 +30,7 @@ class GitHubTrackStateProvider
     caseSensitive: false,
     multiLine: true,
   );
+  static final RegExp _fullGitShaPattern = RegExp(r'^[0-9a-fA-F]{40}$');
   static const _releaseAssetDeletionVisibilityMaxAttempts = 8;
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
@@ -269,8 +270,19 @@ class GitHubTrackStateProvider
   }
 
   @override
-  Future<String> resolveWriteBranch() async =>
-      _connection?.branch.isNotEmpty == true ? _connection!.branch : sourceRef;
+  Future<String> resolveWriteBranch() async {
+    final configuredBranch = _connection?.branch.trim() ?? '';
+    if (configuredBranch.isEmpty || _fullGitShaPattern.hasMatch(configuredBranch)) {
+      return sourceRef;
+    }
+    if (configuredBranch.startsWith('refs/heads/')) {
+      final branchName = configuredBranch.substring('refs/heads/'.length).trim();
+      if (branchName.isNotEmpty) {
+        return branchName;
+      }
+    }
+    return configuredBranch;
+  }
 
   @override
   Future<RepositoryBranch> getBranch(String name) async {
