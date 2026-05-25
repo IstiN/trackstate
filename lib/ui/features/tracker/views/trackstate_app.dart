@@ -13513,6 +13513,9 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    if (_isSubtaskType && _selectedParentKey == null) {
+      return;
+    }
     final customFields = <String, String>{};
     for (final field in _createIssueFieldDefinitions(
       widget.viewModel.project,
