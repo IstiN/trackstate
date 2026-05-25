@@ -706,6 +706,11 @@ class LocalGitTrackStateProvider
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 
