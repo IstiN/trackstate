@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import FocusedElementObservation
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,7 @@ class ScreenRect:
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+    _connect_token_button_selector = 'flt-semantics[aria-label="Connect token"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _selected_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
@@ -36,9 +40,13 @@ class LiveIssueDetailCollaborationPage:
             user_login=user_login,
             repository=repository,
         )
-        if self._is_connected(connected_banner):
+        connected_banner_prefix = f"Connected as {user_login} to {repository}."
+        if self._is_connected(
+            connected_banner=connected_banner,
+            connected_banner_prefix=connected_banner_prefix,
+        ):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        if self._connect_button_count() == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
@@ -46,23 +54,19 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        self._click_connect_button(timeout_ms=30_000)
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-        self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-        self._session.click(
-            self._button_selector,
-            has_text="Connect token",
-            timeout_ms=30_000,
-        )
+        self._click_connect_token_button(timeout_ms=30_000)
         wait_match = self._session.wait_for_any_text(
             [
                 connected_banner,
+                connected_banner_prefix,
                 "GitHub connection failed:",
             ],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in {connected_banner, connected_banner_prefix}:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
                 "connected state required for TS-311.\n"
@@ -78,10 +82,12 @@ class LiveIssueDetailCollaborationPage:
 
     def open_issue(self, *, issue_key: str, issue_summary: str) -> None:
         self.open_jql_search()
-        self._session.click(
-            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=30_000,
-        )
+        if self.issue_detail_count(issue_key) == 0:
+            self._click_issue_result(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+                timeout_ms=30_000,
+            )
         self._session.wait_for_selector(
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
@@ -287,10 +293,90 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
-    def _is_connected(self, connected_banner: str) -> bool:
+    def _is_connected(
+        self,
+        *,
+        connected_banner: str,
+        connected_banner_prefix: str,
+    ) -> bool:
         return (
             self._session.count(self._connected_button_selector) > 0
             or connected_banner in self.current_body_text()
+            or connected_banner_prefix in self.current_body_text()
+        )
+
+    def _connect_button_count(self) -> int:
+        exact_count = self._session.count(self._connect_button_selector)
+        if exact_count > 0:
+            return exact_count
+        return self._session.count(self._button_selector, has_text="Connect GitHub")
+
+    def _click_connect_button(self, *, timeout_ms: int) -> None:
+        if self._session.count(self._connect_button_selector) > 0:
+            self._session.click(self._connect_button_selector, timeout_ms=timeout_ms)
+            return
+        self._click_first_visible_button_with_text(
+            "Connect GitHub",
+            timeout_ms=timeout_ms,
+        )
+
+    def _click_connect_token_button(self, *, timeout_ms: int) -> None:
+        if self._session.count(self._connect_token_button_selector) > 0:
+            self._session.click(
+                self._connect_token_button_selector,
+                timeout_ms=timeout_ms,
+            )
+            return
+        self._click_first_visible_button_with_text(
+            "Connect token",
+            timeout_ms=timeout_ms,
+        )
+
+    def _click_first_visible_button_with_text(
+        self,
+        label: str,
+        *,
+        timeout_ms: int,
+    ) -> None:
+        button_count = self._session.count(self._button_selector, has_text=label)
+        last_error: WebAppTimeoutError | None = None
+        for index in range(button_count):
+            try:
+                self._session.click(
+                    self._button_selector,
+                    has_text=label,
+                    index=index,
+                    timeout_ms=timeout_ms,
+                )
+                return
+            except WebAppTimeoutError as error:
+                last_error = error
+        if last_error is not None:
+            raise last_error
+        self._session.click(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=timeout_ms,
+        )
+
+    def _click_issue_result(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        timeout_ms: int,
+    ) -> None:
+        for selector in self._candidate_open_issue_selectors(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        ):
+            if self._session.count(selector) == 0:
+                continue
+            self._session.click(selector, timeout_ms=timeout_ms)
+            return
+        self._session.click(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            timeout_ms=timeout_ms,
         )
 
     @staticmethod
@@ -301,6 +387,33 @@ class LiveIssueDetailCollaborationPage:
             'flt-semantics[role="button"]'
             f'[aria-label*="Open {escaped_key} {escaped_summary}"]'
         )
+
+    @staticmethod
+    def _candidate_open_issue_selectors(
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> tuple[str, ...]:
+        normalized_summary = issue_summary.strip().strip('"')
+        selectors = [
+            LiveIssueDetailCollaborationPage._open_issue_selector(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            ),
+            (
+                'flt-semantics[role="button"]'
+                f'[aria-label*="Open {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+            ),
+        ]
+        if normalized_summary and normalized_summary != issue_summary:
+            selectors.insert(
+                1,
+                LiveIssueDetailCollaborationPage._open_issue_selector(
+                    issue_key=issue_key,
+                    issue_summary=normalized_summary,
+                ),
+            )
+        return tuple(dict.fromkeys(selectors))
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:

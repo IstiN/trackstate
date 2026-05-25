@@ -26,7 +26,10 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts311_failure.png"
 SEEDED_COMMENT_FRAGMENT = "This comment demonstrates markdown-backed collaboration history."
 READ_ONLY_ATTACHMENT_MESSAGE = "download-only for Git LFS attachments"
 DOWNLOAD_BUTTON_LABEL_FRAGMENT = "Download"
-UPLOAD_BUTTON_LABEL_FRAGMENT = "Upload attachment to"
+UPLOAD_BUTTON_LABEL_FRAGMENTS = (
+    "Upload attachment to",
+    "Upload attachment",
+)
 
 
 class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
@@ -234,33 +237,40 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 download_button_count = live_issue_page.button_label_fragment_count(
                     DOWNLOAD_BUTTON_LABEL_FRAGMENT,
                 )
-                upload_button_count = live_issue_page.button_label_fragment_count(
-                    UPLOAD_BUTTON_LABEL_FRAGMENT,
-                )
+                upload_label_counts = {
+                    fragment: live_issue_page.button_label_fragment_count(fragment)
+                    for fragment in UPLOAD_BUTTON_LABEL_FRAGMENTS
+                }
+                visible_upload_fragments = [
+                    fragment
+                    for fragment, count in upload_label_counts.items()
+                    if count > 0
+                ]
 
-                self.assertEqual(
-                    upload_button_count,
-                    0,
-                    "Step 3 failed: the hosted Attachments tab still exposed an upload "
-                    "action even though Git LFS uploads are unsupported in the hosted "
-                    "session.\n"
-                    f"Observed body text:\n{live_issue_page.current_body_text()}",
-                )
-                self.assertGreater(
-                    read_only_message_count,
-                    0,
-                    "Step 3 failed: the hosted Attachments tab did not explain that this "
-                    "session is read-only/download-only for Git LFS attachments.\n"
-                    f"Observed body text:\n{live_issue_page.current_body_text()}",
-                )
-                self.assertGreater(
-                    download_button_count,
-                    0,
-                    "Step 3 failed: the hosted Attachments tab did not expose any "
-                    "download action for the seeded LFS attachment.\n"
-                    f"Seeded attachment: {seeded_attachment_name}\n"
-                    f"Observed body text:\n{live_issue_page.current_body_text()}",
-                )
+                attachment_failures: list[str] = []
+                if visible_upload_fragments:
+                    attachment_failures.append(
+                        "Step 3 failed: the hosted Attachments tab still exposed an upload "
+                        "action even though Git LFS uploads are unsupported in the hosted "
+                        "session.\n"
+                        f"Visible upload labels: {visible_upload_fragments}\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    )
+                if read_only_message_count <= 0:
+                    attachment_failures.append(
+                        "Step 3 failed: the hosted Attachments tab did not explain that this "
+                        "session is read-only/download-only for Git LFS attachments.\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    )
+                if download_button_count <= 0:
+                    attachment_failures.append(
+                        "Step 3 failed: the hosted Attachments tab did not expose any "
+                        "download action for the seeded LFS attachment.\n"
+                        f"Seeded attachment: {seeded_attachment_name}\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    )
+                if attachment_failures:
+                    raise AssertionError("\n\n".join(attachment_failures))
             except Exception:
                 live_issue_page.screenshot(str(SCREENSHOT_PATH))
                 raise
