@@ -317,6 +317,97 @@ void main() {
   );
 
   testWidgets(
+    'fields editor keeps Summary immutable and saves a Bug-only Environment select field',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      Finder fieldInput(String label) => find.descendant(
+        of: find.widgetWithText(TextFormField, label),
+        matching: find.byType(EditableText),
+      );
+      Finder rowAction(String title, String actionLabel) => find.descendant(
+        of: find.ancestor(
+          of: find.text(title),
+          matching: find.byType(ListTile),
+        ),
+        matching: find.widgetWithText(TextButton, actionLabel),
+      );
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Fields'));
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel('Delete field Summary'), findsNothing);
+
+        await tester.tap(rowAction('Summary', 'Edit'));
+        await tester.pumpAndSettle();
+
+        final summaryIdField = tester.widget<TextFormField>(
+          find.widgetWithText(TextFormField, 'ID'),
+        );
+        expect(summaryIdField.controller?.text, 'summary');
+        expect(summaryIdField.enabled, isFalse);
+
+        final summaryTypeButton = tester.widget<TextButton>(
+          find.widgetWithText(TextButton, 'Type string'),
+        );
+        expect(summaryTypeButton.onPressed, isNull);
+
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Add field'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(fieldInput('ID'), 'environment');
+        await tester.enterText(fieldInput('Name'), 'Environment');
+        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('option').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          fieldInput('Options'),
+          'Production, Staging, Development',
+        );
+        await tester.tap(find.widgetWithText(FilterChip, 'Bug'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Environment'), findsOneWidget);
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        final environmentField = repository.savedSettings?.fieldDefinitions
+            .where((field) => field.id == 'environment')
+            .single;
+        expect(environmentField, isNotNull);
+        expect(environmentField!.name, 'Environment');
+        expect(environmentField.type, 'option');
+        expect(environmentField.options.map((option) => option.name).toList(), [
+          'Production',
+          'Staging',
+          'Development',
+        ]);
+        expect(environmentField.applicableIssueTypeIds, ['bug']);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'simple catalog editor preloads selected component after adding a priority',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
@@ -346,7 +437,9 @@ void main() {
 
         await tester.tap(_settingsTab('Components'));
         await tester.pumpAndSettle();
-        final editAutomation = find.bySemanticsLabel('Edit component Automation');
+        final editAutomation = find.bySemanticsLabel(
+          'Edit component Automation',
+        );
         await tester.ensureVisible(editAutomation);
         await tester.tap(editAutomation, warnIfMissed: false);
         await tester.pumpAndSettle();
