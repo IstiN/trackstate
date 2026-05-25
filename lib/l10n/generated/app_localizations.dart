@@ -1896,8 +1896,21 @@ abstract class AppLocalizations {
   /// No description provided for @hierarchyChangeConfirmationMessage.
   ///
   /// In en, this message translates to:
-  /// **'Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
-  String hierarchyChangeConfirmationMessage(int descendantCount);
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
+  String hierarchyChangeConfirmationMessage(
+    String issueLabel,
+    int descendantCount,
+  );
+
+  /// No description provided for @hierarchyChangeConfirmationDestinationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.'**
+  String hierarchyChangeConfirmationDestinationMessage(
+    String issueLabel,
+    int descendantCount,
+    String destinationLabel,
+  );
 
   /// No description provided for @confirmMove.
   ///

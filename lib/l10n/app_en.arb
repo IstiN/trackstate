@@ -610,11 +610,28 @@
   "noTransitionsAvailable": "No workflow transitions available.",
   "resolutionRequired": "Resolution is required for this transition.",
   "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
-  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
   "@hierarchyChangeConfirmationMessage": {
     "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
       "descendantCount": {
         "type": "int"
+      }
+    }
+  },
+  "hierarchyChangeConfirmationDestinationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.",
+  "@hierarchyChangeConfirmationDestinationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      },
+      "destinationLabel": {
+        "type": "String"
       }
     }
   },
