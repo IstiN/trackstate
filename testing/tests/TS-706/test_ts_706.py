@@ -213,8 +213,9 @@ def main() -> None:
         _record_failed_step_from_error(result, str(error))
         result["precondition_failure"] = True
         result["product_failure"] = False
+        _collect_precondition_run_evidence(result, config)
         _write_failure_outputs(result)
-        print("TS-706 precondition not met")
+        print("TS-706 failed" if result.get("product_failure") else "TS-706 precondition not met")
         return
     except Exception as error:
         _merge_probe_error_context(result, error)
@@ -337,6 +338,155 @@ def _open_actions_page(
         )
 
 
+def _collect_precondition_run_evidence(
+    result: dict[str, object],
+    config: GitHubActionsPreflightGateConfig,
+) -> None:
+    run = result.get("run")
+    preflight_job = result.get("preflight_job")
+    downstream_job = result.get("downstream_job")
+    if not isinstance(run, dict):
+        return
+
+    run_url = _read_nested_string(run, "html_url")
+    run_id = run.get("id")
+    tag_name = str(result.get("tag_name", "")).strip()
+    head_sha = str(result.get("head_sha", "")).strip()
+
+    if run_url and not _step_exists(result, 2):
+        _record_step(
+            result,
+            step=2,
+            status="passed",
+            action=REQUEST_STEPS[1],
+            observed=(
+                f"Created disposable tag `{tag_name or '<missing>'}` on "
+                f"`{result.get('repository', '')}@{head_sha or '<missing>'}` and observed "
+                f"Apple Release Builds run `{run_id}` ({run_url})."
+            ),
+        )
+
+    if run_url and not _step_exists(result, 3):
+        preflight_name = _read_nested_string(preflight_job, "name")
+        downstream_name = _read_nested_string(downstream_job, "name")
+        try:
+            run_page = _open_actions_page(
+                url=run_url,
+                screenshot_path=RUN_SCREENSHOT_PATH,
+                expected_texts=(
+                    str(result.get("workflow_name", "")),
+                    preflight_name,
+                    downstream_name,
+                ),
+                timeout_seconds=config.ui_timeout_seconds,
+            )
+            job_url = _read_nested_string(preflight_job, "html_url") or run_url
+            job_page = _open_actions_page(
+                url=job_url,
+                screenshot_path=JOB_SCREENSHOT_PATH,
+                expected_texts=(
+                    preflight_name,
+                    downstream_name,
+                    "success",
+                    "queued",
+                    "in progress",
+                    "Failure",
+                    "failed",
+                ),
+                timeout_seconds=config.ui_timeout_seconds,
+            )
+            result["run_page"] = asdict(run_page)
+            result["job_page"] = asdict(job_page)
+            _record_step(
+                result,
+                step=3,
+                status="passed",
+                action=REQUEST_STEPS[2],
+                observed=(
+                    f"Opened the live GitHub Actions run page `{run_page.url}` and the "
+                    f"preflight job page `{job_page.url}`. Screenshots: "
+                    f"`{run_page.screenshot_path}`, `{job_page.screenshot_path}`."
+                ),
+            )
+            _record_human_verification(
+                result,
+                check=(
+                    "Viewed the live GitHub Actions run page as a maintainer would and checked "
+                    "the visible job list for the precondition-not-met run."
+                ),
+                observed=(
+                    f"Run page body text included `{preflight_name or '<missing>'}` and "
+                    f"`{downstream_name or '<missing>'}`. Run screenshot: "
+                    f"`{run_page.screenshot_path}`."
+                ),
+            )
+            _record_human_verification(
+                result,
+                check=(
+                    "Viewed the preflight job page and checked the user-visible outcome for "
+                    "the precondition-not-met run."
+                ),
+                observed=(
+                    f"Job page body excerpt: {_snippet(job_page.body_text, limit=600)}. "
+                    f"Job screenshot: `{job_page.screenshot_path}`."
+                ),
+            )
+        except AssertionError as page_error:
+            _record_step(
+                result,
+                step=3,
+                status="failed",
+                action=REQUEST_STEPS[2],
+                observed=str(page_error),
+            )
+
+    if not _step_exists(result, 4):
+        preflight_conclusion = _read_nested_string(preflight_job, "conclusion") or "<missing>"
+        preflight_url = _read_nested_string(preflight_job, "html_url") or run_url
+        downstream_status = _read_nested_string(downstream_job, "status") or "<missing>"
+        downstream_conclusion = (
+            _read_nested_string(downstream_job, "conclusion") or "<missing>"
+        )
+        downstream_url = _read_nested_string(downstream_job, "html_url")
+        visible_warning = _runner_permission_warning(result)
+        if visible_warning:
+            result["precondition_failure"] = False
+            result["product_failure"] = True
+            result["error"] = (
+                "AssertionError: Step 4 failed: the Ubuntu preflight gate succeeded with a "
+                "visible warning that the token could not read repository runners, and the "
+                "downstream macOS job queued instead of failing fast."
+            )
+            _record_step(
+                result,
+                step=4,
+                status="failed",
+                action=REQUEST_STEPS[3],
+                observed=(
+                    "The live run did not match the expected result: the run page showed "
+                    f"`{visible_warning}`, the preflight job page showed "
+                    f"`Verify macOS runner availability` succeeded, and the downstream macOS "
+                    f"job entered `{downstream_status}` instead of the workflow failing fast. "
+                    f"Preflight job URL: {preflight_url}. Downstream job URL: "
+                    f"{downstream_url or '<missing>'}."
+                ),
+            )
+            return
+        _record_step(
+            result,
+            step=4,
+            status="blocked",
+            action=REQUEST_STEPS[3],
+            observed=(
+                "Observed a precondition-not-met run instead of the ticket's expected failure "
+                f"path: preflight job conclusion was `{preflight_conclusion}`, downstream job "
+                f"status/conclusion was `{downstream_status}` / `{downstream_conclusion}`, "
+                f"and the workflow did not fail fast on runner unavailability. Preflight job "
+                f"URL: {preflight_url}. Downstream job URL: {downstream_url or '<missing>'}."
+            ),
+        )
+
+
 def _merge_probe_error_context(result: dict[str, object], error: Exception) -> None:
     if not isinstance(error, GitHubActionsPreflightGateProbeError):
         return
@@ -344,6 +494,32 @@ def _merge_probe_error_context(result: dict[str, object], error: Exception) -> N
     if not isinstance(partial_result, dict):
         return
     result.update(partial_result)
+
+
+def _read_nested_string(payload: object, key: str) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    value = payload.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _runner_permission_warning(result: dict[str, object]) -> str:
+    pattern = re.compile(
+        r"Skipping macOS runner availability preflight because the token cannot read "
+        r"repository runners\.[^\n]*",
+        flags=re.IGNORECASE,
+    )
+    for key in ("run_page", "job_page"):
+        payload = result.get(key)
+        if not isinstance(payload, dict):
+            continue
+        body_text = payload.get("body_text")
+        if not isinstance(body_text, str):
+            continue
+        match = pattern.search(body_text)
+        if match:
+            return match.group(0).strip()
+    return ""
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -573,9 +749,29 @@ def _outcome_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    visible_warning = _runner_permission_warning(result)
+    actual_result = (
+        "the run page showed the warning "
+        f"`{visible_warning}`, the preflight job page showed `Verify macOS runner "
+        "availability` succeeded, and the downstream macOS job entered "
+        f"`{_nested_value(result, 'downstream_job', 'status') or '<missing>'}` instead of "
+        "the workflow failing fast with a clear runner-availability error."
+        if visible_warning
+        else (
+            "the preflight job failed with a GitHub permission error "
+            "(`Resource not accessible by integration`) instead of a clear runner-"
+            "availability message such as `No runner registered for ...` or "
+            "`none are online`. The downstream macOS job was skipped, but the failure "
+            "was not actionable for the infrastructure condition the ticket covers."
+        )
+    )
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Ubuntu preflight readiness gate failed with the wrong error",
+            (
+                f"# {TICKET_KEY} - Ubuntu preflight readiness gate did not fail fast"
+                if visible_warning
+                else f"# {TICKET_KEY} - Ubuntu preflight readiness gate failed with the wrong error"
+            ),
             "",
             "## Steps to reproduce",
             "1. Ensure all macOS runners registered with the label set `[self-hosted, macOS, trackstate-release, ARM64]` are offline.",
@@ -597,13 +793,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",
-            (
-                "- Actual: the preflight job failed with a GitHub permission error "
-                "(`Resource not accessible by integration`) instead of a clear runner-"
-                "availability message such as `No runner registered for ...` or "
-                "`none are online`. The downstream macOS job was skipped, but the failure "
-                "was not actionable for the infrastructure condition the ticket covers."
-            ),
+            f"- Actual: {actual_result}",
             "",
             "## Environment",
             f"- Repository: `{result.get('repository', '')}`",
@@ -829,7 +1019,13 @@ def _failed_step_summary(result: dict[str, object]) -> str:
         if not isinstance(entry, dict):
             continue
         status = str(entry.get("status", "")).lower()
-        if status in {"failed", "blocked"}:
+        if status == "failed":
+            return f"Step {entry.get('step')} failed: {entry.get('observed')}"
+    for entry in steps:
+        if not isinstance(entry, dict):
+            continue
+        status = str(entry.get("status", "")).lower()
+        if status == "blocked":
             return f"Step {entry.get('step')} {status}: {entry.get('observed')}"
     return str(result.get("error", "Unknown failure"))
 
