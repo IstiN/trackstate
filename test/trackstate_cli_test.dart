@@ -46,6 +46,23 @@ void main() {
       );
     });
 
+    test('documents shared target selection options in root help', () async {
+      final cli = TrackStateCli();
+
+      final result = await cli.run(const <String>['--help']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('--target'));
+      expect(result.stdout, contains('Target type: local or hosted.'));
+      expect(result.stdout, contains('--provider'));
+      expect(
+        result.stdout,
+        contains('Provider name. Supported values: local-git, github.'),
+      );
+      expect(result.stdout, contains('--repository'));
+      expect(result.stdout, contains('Hosted repository in owner/name form.'));
+    });
+
     test(
       'prints attachment upload help for the jiraattachfiletoticket alias',
       () async {
@@ -129,6 +146,103 @@ void main() {
       expect(data['authSource'], 'none');
       expect(data['projectConfig'], isA<Map<String, Object?>>());
     });
+
+    test('accepts root target flags as a session shorthand for local targets', () async {
+      final cli = TrackStateCli(
+        environment: TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+          resolvePath: (path) => path,
+        ),
+        providerFactory: _FakeTrackStateCliProviderFactory(
+          localProvider: _FakeLocalGitTrackStateProvider(
+            repositoryPath: '/workspace/repo',
+            branch: 'feature/local',
+            user: const RepositoryUser(
+              login: 'local@example.com',
+              displayName: 'Local User',
+            ),
+            permission: const RepositoryPermission(
+              canRead: true,
+              canWrite: true,
+              isAdmin: false,
+              canCreateBranch: true,
+              canManageAttachments: true,
+              canCheckCollaborators: false,
+            ),
+          ),
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+        ),
+      );
+
+      final result = await cli.run(const <String>['--target', 'local']);
+      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+      final data = json['data']! as Map<String, Object?>;
+
+      expect(result.exitCode, 0);
+      expect(json['provider'], 'local-git');
+      expect(json['target'], <String, Object?>{
+        'type': 'local',
+        'value': '/workspace/repo',
+      });
+      expect(data['branch'], 'feature/local');
+      expect(data['authSource'], 'none');
+    });
+
+    test(
+      'accepts root target flags as a session shorthand for hosted targets',
+      () async {
+        final hostedProvider = _FakeHostedTrackStateProvider(
+          user: const RepositoryUser(login: 'octocat', displayName: 'Octo Cat'),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: false,
+            isAdmin: false,
+            canCreateBranch: true,
+            canManageAttachments: false,
+            canCheckCollaborators: false,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--branch',
+          'main',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['provider'], 'github');
+        expect(json['target'], <String, Object?>{
+          'type': 'hosted',
+          'value': 'owner/repo',
+        });
+        expect(data['branch'], 'main');
+        expect(data['authSource'], 'env');
+        expect(hostedProvider.connection?.repository, 'owner/repo');
+        expect(hostedProvider.connection?.branch, 'main');
+      },
+    );
 
     test(
       'includes projectConfig statuses and workflows in session output',

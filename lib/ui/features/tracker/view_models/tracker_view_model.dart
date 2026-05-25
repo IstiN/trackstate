@@ -944,7 +944,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final saved = await _repository.updateIssueStatus(issue, status);
       _applyTargetedIssueRefresh(saved);
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       _message = usesLocalPersistence
           ? TrackerMessage.localGitMoveCommitted(
               issueKey: issue.key,
@@ -1038,7 +1038,7 @@ class TrackerViewModel extends ChangeNotifier {
       _snapshot = await _repository.loadSnapshot();
       _updateWorkspaceSyncBaseline();
       _selectIssueFromSnapshot(created);
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       _section = TrackerSection.search;
       _issueDetailReturnSection =
           returnSection == null || returnSection == TrackerSection.search
@@ -1295,9 +1295,7 @@ class TrackerViewModel extends ChangeNotifier {
         _applyTargetedIssueRefresh(saved);
       }
       _selectIssueFromSnapshot(saved);
-      await _refreshSearchResultsAfterMutation(
-        preferLoadedSnapshot: usedInMemoryLocalFallback,
-      );
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
@@ -1665,7 +1663,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final saved = await _repository.addIssueComment(issue, normalizedBody);
       _applyTargetedIssueRefresh(saved);
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       _issueHistoryByKey.remove(issue.key);
       return true;
     } on Object catch (error) {
@@ -1820,7 +1818,7 @@ class TrackerViewModel extends ChangeNotifier {
         bytes: bytes,
       );
       _applyTargetedIssueRefresh(saved);
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       _issueHistoryByKey.remove(issue.key);
       return true;
     } on Object catch (error) {
@@ -2111,6 +2109,22 @@ class TrackerViewModel extends ChangeNotifier {
       _applyTargetedIssueRefresh(hydrated);
       _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          issue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       _setIssueDeferredError(
         issue.key,
@@ -2490,6 +2504,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _applyTargetedIssueRefresh(hydrated);
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       for (final scope in scopes) {
         _setIssueDeferredError(
@@ -2664,6 +2694,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _applyTargetedIssueRefresh(hydrated);
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       for (final scope in scopes) {
         _setIssueDeferredError(
