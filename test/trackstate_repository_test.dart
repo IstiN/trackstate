@@ -973,6 +973,142 @@ Updated comment body from sync.
   );
 
   test(
+    'provider-backed deleteIssue preserves legacy deleted.json while writing tombstones',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Delete me',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-25T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/deleted.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'project': 'DEMO',
+              'formerPath': 'DEMO/DEMO-99/main.md',
+              'deletedAt': '2026-05-01T00:00:00Z',
+              'summary': 'Legacy deleted issue',
+              'issueType': 'story',
+              'parent': null,
+              'epic': null,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Delete me
+updated: 2026-05-25T00:00:00Z
+---
+
+# Description
+
+Issue targeted by the delete workflow.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+      final snapshot = await repository.loadSnapshot();
+      final legacyDeletedIndexBefore =
+          provider.files['DEMO/.trackstate/index/deleted.json'];
+
+      final tombstone = await repository.deleteIssue(snapshot.issues.single);
+
+      expect(tombstone.key, 'DEMO-1');
+      expect(
+        provider.lastFileChangeRequest,
+        isNotNull,
+        reason:
+            'deleteIssue should persist its changes through applyFileChanges.',
+      );
+      final deletePaths = provider.lastFileChangeRequest!.changes
+          .whereType<RepositoryDeleteFileChange>()
+          .map((change) => change.path)
+          .toList(growable: false);
+      final rewrittenPaths = provider.lastFileChangeRequest!.changes
+          .whereType<RepositoryTextFileChange>()
+          .map((change) => change.path)
+          .toList(growable: false);
+      expect(
+        deletePaths,
+        isNot(contains('DEMO/.trackstate/index/deleted.json')),
+      );
+      expect(
+        rewrittenPaths,
+        containsAll(<String>[
+          'DEMO/.trackstate/index/issues.json',
+          'DEMO/.trackstate/index/tombstones.json',
+          'DEMO/.trackstate/tombstones/DEMO-1.json',
+        ]),
+      );
+      expect(
+        rewrittenPaths,
+        isNot(contains('DEMO/.trackstate/index/deleted.json')),
+      );
+      expect(
+        provider.files['DEMO/.trackstate/index/deleted.json'],
+        legacyDeletedIndexBefore,
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/index/issues.json']!)
+            as List<Object?>,
+        isEmpty,
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/index/tombstones.json']!)
+            as List<Object?>,
+        [
+          {'key': 'DEMO-1', 'path': 'DEMO/.trackstate/tombstones/DEMO-1.json'},
+        ],
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/tombstones/DEMO-1.json']!)
+            as Map<String, Object?>,
+        containsPair('formerPath', 'DEMO/DEMO-1/main.md'),
+      );
+    },
+  );
+
+  test(
     'checked-in setup template supports TS-315 text-search terms across description and acceptance criteria only',
     () async {
       final repository = _mockSetupRepository(
@@ -3981,7 +4117,10 @@ http.Response _binaryContentResponse(Uint8List content, {String? downloadUrl}) {
 }
 
 class _FakeReleaseAttachmentProvider
-    implements TrackStateProviderAdapter, RepositoryReleaseAttachmentStore {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryReleaseAttachmentStore,
+        RepositoryFileMutator {
   _FakeReleaseAttachmentProvider({
     required this.permission,
     required Map<String, String> files,
@@ -3993,6 +4132,7 @@ class _FakeReleaseAttachmentProvider
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
+  RepositoryFileChangeRequest? lastFileChangeRequest;
   RepositoryConnection? _connection;
 
   @override
@@ -4056,6 +4196,36 @@ class _FakeReleaseAttachmentProvider
       path: request.path,
       branch: request.branch,
       revision: 'metadata-sha',
+    );
+  }
+
+  @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    lastFileChangeRequest = request;
+    for (final change in request.changes) {
+      if (change is RepositoryTextFileChange) {
+        if (enforceExistingRevisionOnWrite &&
+            files.containsKey(change.path) &&
+            (change.expectedRevision?.isNotEmpty != true)) {
+          throw TrackStateProviderException(
+            'Cannot save ${change.path} because it changed in the current '
+            'branch. Expected revision for existing file was not provided.',
+          );
+        }
+        files[change.path] = change.content;
+      } else if (change is RepositoryDeleteFileChange) {
+        files.remove(change.path);
+        binaryFiles.remove(change.path);
+      } else if (change is RepositoryBinaryFileChange) {
+        binaryFiles[change.path] = Uint8List.fromList(change.bytes);
+      }
+    }
+    return RepositoryCommitResult(
+      branch: request.branch,
+      message: request.message,
+      revision: 'commit-sha',
     );
   }
 
