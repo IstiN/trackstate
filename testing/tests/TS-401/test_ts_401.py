@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -28,10 +29,22 @@ TICKET_KEY = "TS-401"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_success.png"
-TARGET_ISSUE_KEY = "DEMO-3"
+TARGET_ISSUE_KEY = "DEMO-5"
 TARGET_STATUS_LABEL = "Done"
 TARGET_PRIORITY_LABEL = "Highest"
 EXPECTED_BOARD_COLUMN = "Done"
+SETUP_STATUS_LABEL = "In Progress"
+KNOWN_STATUS_LABELS = (
+    TARGET_STATUS_LABEL,
+    SETUP_STATUS_LABEL,
+    "In Review",
+    "To Do",
+)
+KNOWN_PRIORITY_LABELS = (
+    TARGET_PRIORITY_LABEL,
+    "Medium",
+    "Low",
+)
 
 
 def main() -> None:
@@ -90,6 +103,7 @@ def main() -> None:
                     repository=service.repository,
                     user_login=user.login,
                 )
+                page.dismiss_connection_banner()
                 _record_step(
                     result,
                     step=2,
@@ -120,14 +134,74 @@ def main() -> None:
                     result,
                     step=3,
                     status="passed",
-                    action="Open the Edit issue surface for DEMO-3 from JQL Search.",
+                    action="Open the Edit issue surface for DEMO-5 from Board.",
                     observed=dialog_text,
                 )
+
+                initial_status = _extract_label(
+                    dialog_text,
+                    labels=KNOWN_STATUS_LABELS,
+                    field_name="current status",
+                )
+                initial_priority = _extract_label(
+                    initial_priority_control.text,
+                    labels=KNOWN_PRIORITY_LABELS,
+                    field_name="priority",
+                )
+                result["initial_status"] = initial_status
+                result["initial_priority"] = initial_priority
+                current_status = initial_status
+                current_priority = initial_priority
+
+                available_status_transitions = page.available_status_transitions()
+                result["available_status_transitions_before_edit"] = list(
+                    available_status_transitions,
+                )
+                if (
+                    TARGET_STATUS_LABEL not in available_status_transitions
+                    and current_status == "To Do"
+                    and SETUP_STATUS_LABEL in available_status_transitions
+                ):
+                    setup_status_control = page.change_status_transition(
+                        SETUP_STATUS_LABEL,
+                    )
+                    result["setup_status_control_after_edit"] = _control_payload(
+                        setup_status_control,
+                    )
+                    setup_detail_text = page.save_issue_edits(
+                        issue_key=issue_fixture.key,
+                        expected_status=SETUP_STATUS_LABEL,
+                    )
+                    result["setup_post_save_detail_text"] = setup_detail_text
+                    setup_projection_text = page.wait_for_issue_detail_state(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=SETUP_STATUS_LABEL,
+                        expected_priority=current_priority,
+                        step_number=3,
+                    )
+                    result["setup_detail_projection_text"] = setup_projection_text
+                    current_status = SETUP_STATUS_LABEL
+                    result["setup_transition"] = (
+                        f"Moved {issue_fixture.key} from {initial_status} to "
+                        f"{SETUP_STATUS_LABEL} so the live workflow exposed the required "
+                        f"{TARGET_STATUS_LABEL} transition before the ticketed edit."
+                    )
+                    dialog_text = page.open_edit_dialog_for_issue(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    result["edit_dialog_text_after_setup"] = dialog_text
+                    available_status_transitions = page.available_status_transitions()
+                    result["available_status_transitions_after_setup"] = list(
+                        available_status_transitions,
+                    )
 
                 updated_priority_control = page.change_priority(TARGET_PRIORITY_LABEL)
                 result["priority_control_after_edit"] = _control_payload(
                     updated_priority_control,
                 )
+                current_priority = TARGET_PRIORITY_LABEL
                 _record_step(
                     result,
                     step=4,
@@ -142,6 +216,7 @@ def main() -> None:
                 result["status_control_after_edit"] = _control_payload(
                     updated_status_control,
                 )
+                current_status = TARGET_STATUS_LABEL
                 _record_step(
                     result,
                     step=5,
@@ -220,12 +295,15 @@ def main() -> None:
                 }
                 if (
                     search_observation.count_summary != "1 issue"
-                    or f"Open {issue_fixture.key} {issue_fixture.summary}"
+                    or (
+                        f"Open {issue_fixture.key} "
+                        f"{_normalized_issue_summary(issue_fixture.summary)}"
+                    )
                     not in search_observation.issue_labels
                 ):
                     raise AssertionError(
                         "Step 10 failed: JQL Search did not visibly refresh down to the "
-                        "edited DEMO-3 issue after saving.\n"
+                        f"edited {issue_fixture.key} issue after saving.\n"
                         f"Observed count summary: {search_observation.count_summary}\n"
                         f"Observed result labels: {list(search_observation.issue_labels)}\n"
                         f"Observed JQL Search text:\n{search_observation.body_text}",
@@ -292,6 +370,13 @@ def _find_issue_fixture(
     return service.fetch_issue_fixture(issue_path)
 
 
+def _normalized_issue_summary(issue_summary: str) -> str:
+    stripped = issue_summary.strip()
+    if re.fullmatch(r'"[^"]+"', stripped):
+        return stripped[1:-1]
+    return stripped
+
+
 def _record_step(
     result: dict[str, object],
     *,
@@ -347,6 +432,21 @@ def _assert_issue_starts_outside_target_state(
         f"Observed initial status text: {initial_status_control.text}\n"
         f"Observed initial priority label: {initial_priority_control.label}\n"
         f"Observed initial priority text: {initial_priority_control.text}",
+    )
+
+
+def _extract_label(
+    text: str,
+    *,
+    labels: tuple[str, ...],
+    field_name: str,
+) -> str:
+    for label in labels:
+        if label in text:
+            return label
+    raise AssertionError(
+        f"Human-style verification failed: the visible {field_name} could not be "
+        f"identified from the live text.\nObserved text:\n{text}",
     )
 
 

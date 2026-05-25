@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
@@ -45,12 +46,11 @@ class LiveMultiViewRefreshPage:
             user_login=user_login,
         )
 
+    def dismiss_connection_banner(self) -> None:
+        self._issue_page.dismiss_connection_banner()
+
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
-        self.navigate_to_section("JQL Search")
-        self._session.wait_for_selector(
-            self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=60_000,
-        )
+        self.navigate_to_section("Board")
         self.open_issue_from_current_section(
             issue_key=issue_key,
             issue_summary=issue_summary,
@@ -68,7 +68,7 @@ class LiveMultiViewRefreshPage:
         dialog_text = self._session.wait_for_text("Edit issue", timeout_ms=30_000)
         if issue_key not in dialog_text:
             raise AssertionError(
-                "Step 3 failed: opening the requested issue from JQL Search did not "
+                "Step 3 failed: opening the requested issue from Board did not "
                 f"lead to the edit surface for {issue_key}.\n"
                 f"Expected issue key in edit dialog: {issue_key}\n"
                 f"Observed dialog text:\n{dialog_text}",
@@ -81,9 +81,19 @@ class LiveMultiViewRefreshPage:
         issue_key: str,
         issue_summary: str,
     ) -> str:
-        selector = self._issue_selector(issue_key=issue_key, issue_summary=issue_summary)
-        self._session.wait_for_selector(selector, timeout_ms=60_000)
-        self._session.click(selector, timeout_ms=30_000)
+        issue_button_text = self._issue_button_text(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
+        button_bounds = self._session.bounding_box(
+            self._button_selector,
+            has_text=issue_button_text,
+            timeout_ms=60_000,
+        )
+        self._session.mouse_click(
+            button_bounds.x + (button_bounds.width / 2),
+            button_bounds.y + (button_bounds.height / 2),
+        )
         self._session.wait_for_selector(
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
@@ -237,6 +247,23 @@ class LiveMultiViewRefreshPage:
                 f"Observed dialog text:\n{self.current_body_text()}",
             )
         return updated
+
+    def available_status_transitions(self) -> tuple[str, ...]:
+        options = self._open_focusable_dropdown(
+            selector='flt-semantics[role="button"][aria-label*="Status"]',
+            has_text=None,
+            control_name="Status",
+        )
+        self._session.press_key("Escape")
+        self._session.wait_for_function(
+            """
+            () =>
+              document.querySelectorAll('flt-semantics[role="menuitem"]').length === 0
+              && (document.body?.innerText ?? '').includes('Edit issue')
+            """,
+            timeout_ms=30_000,
+        )
+        return options
 
     def save_issue_edits(
         self,
@@ -836,6 +863,18 @@ class LiveMultiViewRefreshPage:
             'flt-semantics[role="button"]'
             f'[aria-label="Open {issue_key} {escaped_summary}"]'
         )
+
+    @classmethod
+    def _issue_button_text(cls, *, issue_key: str, issue_summary: str) -> str:
+        normalized_summary = cls._normalized_issue_summary(issue_summary)
+        return f"Open {issue_key} {normalized_summary}"
+
+    @staticmethod
+    def _normalized_issue_summary(issue_summary: str) -> str:
+        stripped = issue_summary.strip()
+        if re.fullmatch(r'"[^"]+"', stripped):
+            return stripped[1:-1]
+        return stripped
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
