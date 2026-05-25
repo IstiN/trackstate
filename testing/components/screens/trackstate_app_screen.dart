@@ -678,8 +678,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         'but it was not visible after opening the menu.',
       );
     }
-    await tester.ensureVisible(option.last);
-    await tester.tap(option.last, warnIfMissed: false);
+    final hitTestableOption = option.hitTestable();
+    final tappableOption = hitTestableOption.evaluate().isNotEmpty
+        ? hitTestableOption.last
+        : option.last;
+    await tester.ensureVisible(tappableOption);
+    await tester.tap(tappableOption, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -693,8 +697,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final dropdown = tester.widget<DropdownButtonFormField<String>>(
       field.first,
     );
+    final state = tester.state<FormFieldState<String>>(field.first);
+    final selectedValue = state.value;
     final helperText = dropdown.decoration.helperText?.trim();
     final hintText = dropdown.decoration.hintText?.trim();
+    final errorText = dropdown.decoration.errorText?.trim();
     for (final widget in tester.widgetList<Text>(
       find.descendant(of: field.first, matching: find.byType(Text)),
     )) {
@@ -703,12 +710,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           value.isEmpty ||
           value == label ||
           value == helperText ||
-          value == hintText) {
+          value == hintText ||
+          value == errorText) {
         continue;
       }
       return value;
     }
-    return null;
+    return selectedValue;
   }
 
   @override
@@ -815,6 +823,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   List<String> visibleTextsSnapshot() {
     return _textSnapshotWithin(find.byType(Scaffold));
   }
+
 
   @override
   List<String> topBarVisibleTextsSnapshot() {

@@ -146,50 +146,6 @@ void main() {
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
 
-        await screen.enterLabeledTextField(
-          'Summary',
-          text: 'TS-303 hierarchy validation draft',
-        );
-        await screen.submitCreateIssue(createIssueSection: 'Dashboard');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
-        final parentValidationVisible = await screen.isTextVisible(
-          'Sub-tasks require a parent issue.',
-        );
-        final createFormStillVisible = await screen.isTextFieldVisible(
-          'Summary',
-        );
-        if (!parentValidationVisible) {
-          final repositoryIssues =
-              await tester.runAsync(fixture.describeIssues) ?? const <String>[];
-          fail(
-            'Step 5 failed: saving a Sub-task without Parent should surface the '
-            'visible parent-required validation message. Visible texts: '
-            '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}. '
-            'Create form still visible: $createFormStillVisible. Repository '
-            'issues: ${repositoryIssues.join(' | ')}.',
-          );
-        }
-        expect(
-          createFormStillVisible,
-          isTrue,
-          reason:
-              'Step 5 failed: after showing the parent-required validation '
-              'message, the Create issue form should remain open so the user can '
-              'select Parent and continue. Visible texts: '
-              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-        );
-        expect(
-          await screen.countDropdownFields('Parent'),
-          1,
-          reason:
-              'Step 5 failed: after the parent-required validation appears, the '
-              'visible Parent dropdown should remain available for correction. '
-              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-        );
-
         await screen.selectDropdownOption(
           'Parent',
           optionText: Ts303IssueHierarchyFixture.parentOptionLabel,
@@ -215,6 +171,15 @@ void main() {
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
         expect(
+          await screen.isTextVisible('Sub-tasks require a parent issue.'),
+          isFalse,
+          reason:
+              'Step 6 failed: selecting a valid Parent should not show the '
+              'parent-required validation message. Visible texts: '
+              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
           await screen.countDropdownFields('Epic'),
           0,
           reason:
@@ -222,6 +187,79 @@ void main() {
               'non-editable after selecting Parent. Visible texts: '
               '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+
+        await screen.closeDialog('Cancel');
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+
+        final reopenedCreateFlow = await screen.tapTopBarControl('Create issue');
+        if (!reopenedCreateFlow) {
+          fail(
+            'Step 1 failed: the visible top-bar "Create issue" control was not '
+            'reachable when reopening the flow for parent validation. Top bar '
+            'texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
+            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+            'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+          );
+        }
+
+        await screen.expectCreateIssueFormVisible(
+          createIssueSection: 'Dashboard',
+        );
+        await screen.selectDropdownOption('Issue Type', optionText: 'Sub-task');
+        await screen.enterLabeledTextField(
+          'Summary',
+          text: 'TS-303 hierarchy validation draft',
+        );
+        await screen.submitCreateIssue(createIssueSection: 'Dashboard');
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+
+        final parentValidationVisible = await screen.isTextVisible(
+          'Sub-tasks require a parent issue.',
+        );
+        final createFormStillVisible = await screen.isTextFieldVisible(
+          'Summary',
+        );
+        final repositoryIssues =
+            await tester.runAsync(fixture.describeIssues) ?? const <String>[];
+        if (!parentValidationVisible) {
+          fail(
+            'Step 5 failed: saving a Sub-task without Parent should surface the '
+            'visible parent-required validation message. Visible texts: '
+            '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}. '
+            'Create form still visible: $createFormStillVisible. Repository '
+            'issues: ${repositoryIssues.join(' | ')}.',
+          );
+        }
+        expect(
+          createFormStillVisible,
+          isTrue,
+          reason:
+              'Step 5 failed: after showing the parent-required validation '
+              'message, the Create issue form should remain open so the user can '
+              'select Parent and continue. Visible texts: '
+              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          await screen.isSemanticsLabelVisible('Parent'),
+          isTrue,
+          reason:
+              'Step 5 failed: after the parent-required validation appears, the '
+              'visible Parent field should remain available for correction. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          repositoryIssues.where(
+            (issue) => issue.contains('TS-303 hierarchy validation draft'),
+          ),
+          isEmpty,
+          reason:
+              'Step 5 failed: submitting a Sub-task without Parent must not '
+              'create a new issue in the repository. Repository issues: '
+              '${repositoryIssues.join(' | ')}.',
         );
       } finally {
         await tester.runAsync(() async {
