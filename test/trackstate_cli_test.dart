@@ -1215,6 +1215,51 @@ void main() {
       ]);
     });
 
+    test('supports the issue-link-types read alias', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshot(),
+            page: const TrackStateIssueSearchPage.empty(),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>['read', 'issue-link-types']);
+      final json = jsonDecode(result.stdout) as List<Object?>;
+
+      expect(result.exitCode, 0);
+      expect(json, <Object?>[
+        {
+          'id': 'blocks',
+          'name': 'Blocks',
+          'outward': 'blocks',
+          'inward': 'is blocked by',
+        },
+        {
+          'id': 'relates-to',
+          'name': 'Relates',
+          'outward': 'relates to',
+          'inward': 'relates to',
+        },
+        {
+          'id': 'duplicates',
+          'name': 'Duplicates',
+          'outward': 'duplicates',
+          'inward': 'is duplicated by',
+        },
+        {
+          'id': 'clones',
+          'name': 'Clones',
+          'outward': 'clones',
+          'inward': 'is cloned by',
+        },
+      ]);
+    });
+
     test(
       'reads the current profile and supports hosted user lookup by login',
       () async {
