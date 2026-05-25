@@ -94,13 +94,14 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
-            repository=repository,
-        )
-        if self._is_connected(connected_banner):
+        if self._is_connected(user_login=user_login, repository=repository):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        connect_via_aria = self._session.count(self._connect_button_selector) > 0
+        connect_via_text = self._session.count(
+            self._button_selector,
+            has_text="Connect GitHub",
+        ) > 0
+        if not connect_via_aria and not connect_via_text:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
@@ -108,7 +109,14 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        if connect_via_aria:
+            self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        else:
+            self._session.click(
+                self._button_selector,
+                has_text="Connect GitHub",
+                timeout_ms=30_000,
+            )
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
@@ -118,7 +126,10 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=30_000,
         )
         connected_markers = [
-            connected_banner,
+            *TrackStateTrackerPage.connected_banners(
+                user_login=user_login,
+                repository=repository,
+            ),
             "GitHub connection failed:",
             "Manage GitHub access",
             user_login,
@@ -1538,10 +1549,14 @@ class LiveIssueDetailCollaborationPage:
         )
         return int(payload)
 
-    def _is_connected(self, connected_banner: str) -> bool:
+    def _is_connected(self, *, user_login: str, repository: str) -> bool:
         return (
             self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
+            or TrackStateTrackerPage.body_has_connected_banner(
+                self.current_body_text(),
+                user_login=user_login,
+                repository=repository,
+            )
         )
 
     @staticmethod

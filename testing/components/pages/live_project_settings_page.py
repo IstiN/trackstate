@@ -131,12 +131,12 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        current_body = self.body_text()
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
             user_login=user_login,
             repository=repository,
-        )
-        current_body = self.body_text()
-        if connected_banner in current_body:
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
@@ -170,7 +170,10 @@ class LiveProjectSettingsPage:
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        connected_banner,
+                        *TrackStateTrackerPage.connected_banners(
+                            user_login=user_login,
+                            repository=repository,
+                        ),
                         "Attachments limited",
                         "Manage GitHub access",
                         "GitHub connection failed:",
@@ -182,7 +185,10 @@ class LiveProjectSettingsPage:
                 if any(
                     marker in current_body
                     for marker in (
-                        connected_banner,
+                        *TrackStateTrackerPage.connected_banners(
+                            user_login=user_login,
+                            repository=repository,
+                        ),
                         "Attachments limited",
                         "Manage GitHub access",
                     )
@@ -216,12 +222,12 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        current_body = self.body_text()
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
             user_login=user_login,
             repository=repository,
-        )
-        current_body = self.body_text()
-        if connected_banner in current_body:
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
@@ -265,10 +271,22 @@ class LiveProjectSettingsPage:
                 )
 
             try:
-                self._session.wait_for_text(
-                    connected_banner,
+                wait_match = self._session.wait_for_any_text(
+                    [
+                        *TrackStateTrackerPage.connected_banners(
+                            user_login=user_login,
+                            repository=repository,
+                        ),
+                        "GitHub connection failed:",
+                    ],
                     timeout_ms=timeout_seconds * 1_000,
                 )
+                if wait_match.matched_text == "GitHub connection failed:":
+                    raise AssertionError(
+                        "Step 2 failed: submitting the fine-grained token did not "
+                        "reach a write-capable hosted session.\n"
+                        f"Observed body text:\n{wait_match.body_text}",
+                    )
                 return self.body_text()
             except WebAppTimeoutError:
                 current_body = self.body_text()
