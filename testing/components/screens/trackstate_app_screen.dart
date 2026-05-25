@@ -438,13 +438,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text) async {
     await expectMessageBannerContains(text);
-    final visibleTexts = visibleTextsSnapshot();
-    final visibleSemantics = visibleSemanticsLabelsSnapshot();
     final liveRegionAlert = find.semantics.byPredicate((node) {
       final data = node.getSemanticsData();
       return data.label.trim() == text &&
           data.hasFlag(SemanticsFlag.isLiveRegion);
     }, describeMatch: (_) => 'live-region semantics node for "$text"');
+
+    final end = DateTime.now().add(const Duration(seconds: 2));
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (liveRegionAlert.evaluate().isNotEmpty) {
+        await _pumpFrames();
+        return;
+      }
+    }
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
 
     expect(
       liveRegionAlert.evaluate(),
