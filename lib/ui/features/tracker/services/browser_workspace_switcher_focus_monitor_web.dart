@@ -9,6 +9,10 @@ import 'browser_workspace_switcher_focus_matcher.dart';
 import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
 
+const Duration _workspaceSwitcherPointerInteractionGrace = Duration(
+  milliseconds: 150,
+);
+
 class BrowserViewportScrollSnapshot {
   const BrowserViewportScrollSnapshot(this._targets);
 
@@ -109,15 +113,24 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserFocusOutside,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
+  final pointerdownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
+  final mousedownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
-    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
+      _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
       final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
       );
       if (tabMoveResult != _BrowserWorkspaceSwitcherTabMoveResult.none) {
         keyboardEvent.preventDefault();
+        // Stop propagation so Flutter's semantics layer cannot also act on the
+        // same Tab event and asynchronously reassign focus.
+        keyboardEvent.stopImmediatePropagation();
       }
       if (tabMoveResult ==
           _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
@@ -127,6 +140,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       return;
     }
 
+    final ancestors = _activeBrowserFocusAncestors();
     if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
       key: keyboardEvent.key,
       ancestors: ancestors,
@@ -148,18 +162,34 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     onBrowserFocusOutside();
   }).toJS;
 
+  web.window.addEventListener('pointerdown', pointerdownListener, true.toJS);
+  web.window.addEventListener('mousedown', mousedownListener, true.toJS);
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   web.window.addEventListener('focusin', focusinListener, true.toJS);
   return BrowserWorkspaceSwitcherFocusMonitorSubscription(() {
+    web.window.removeEventListener(
+      'pointerdown',
+      pointerdownListener,
+      true.toJS,
+    );
+    web.window.removeEventListener('mousedown', mousedownListener, true.toJS);
     web.window.removeEventListener('keydown', keydownListener, true.toJS);
     web.window.removeEventListener('focusin', focusinListener, true.toJS);
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
   });
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
-  return browserFocusWithinWorkspaceSwitcher(
+  if (browserFocusWithinWorkspaceSwitcher(
     ancestors: _activeBrowserFocusAncestors(),
-  );
+  )) {
+    return true;
+  }
+  final ancestors = _recentBrowserWorkspaceSwitcherPointerAncestors;
+  if (ancestors == null) {
+    return false;
+  }
+  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
 }
 
 BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
@@ -381,6 +411,26 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     targets: focusTargets,
     activeElement: activeElement,
   );
+  final selectedRowIndex = focusTargets.indexWhere(
+    (target) => target.isSelectedWorkspaceRow,
+  );
+  if (!backwards &&
+      selectedRowIndex != -1 &&
+      (_isBrowserWorkspaceSwitcherTriggerFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ) ||
+          _isBrowserWorkspaceSwitcherFallbackFocus(
+            activeElement: activeElement,
+            focusTargets: focusTargets,
+            currentIndex: currentIndex,
+          ))) {
+    if (_focusElement(focusTargets[selectedRowIndex].element)) {
+      return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
+    }
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  }
   if (currentIndex == null) {
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
@@ -388,13 +438,18 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
     focusStops: [
       for (final target in focusTargets)
-        BrowserWorkspaceSwitcherTabStopSnapshot(
-          isFocusable: true,
-          isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
-          isWithinWorkspaceRow: target.isWithinWorkspaceRow,
-          isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
-          isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
-        ),
+        () {
+          final rect = target.element.getBoundingClientRect();
+          return BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+            visualTop: rect.top,
+            visualLeft: rect.left,
+          );
+        }(),
     ],
     currentIndex: currentIndex,
     backwards: backwards,
@@ -403,12 +458,87 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
-  if (!_focusElement(focusTargets[targetIndex].element)) {
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
-  }
+  final targetElement = focusTargets[targetIndex].element;
+  // Attempt focus immediately; the result tells us whether the browser already
+  // accepted the focus change. For BrowserFocusableControl PlatformView
+  // buttons the attempt may not succeed synchronously (the flt-platform-view
+  // container may need a frame to accept focus), so we always install the
+  // guard timer and always report the result based on WHERE we are trying to
+  // move focus — not on whether the first attempt succeeded. The guard will
+  // retry for ~96 ms and correct any async reassignment by Flutter's semantics
+  // layer.
+  _focusElement(targetElement);
+  _guardTabHandoffFocus(targetElement);
   return focusTargets[targetIndex].isWithinWorkspaceSwitcher
       ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
       : _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher;
+}
+
+/// Keeps [target] focused for up to [_tabHandoffGuardFrames] animation frames
+/// (~96 ms) in case Flutter's semantics bridge asynchronously moves focus
+/// away from the element we just focused during Tab navigation.
+void _guardTabHandoffFocus(web.Element target) {
+  // 12 attempts × 16 ms ≈ 192 ms. PlatformView (HtmlElementView) buttons may
+  // need multiple frames before the flt-platform-view container accepts focus.
+  const maxAttempts = 12;
+  var attempts = 0;
+  Timer? timer;
+  timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+    attempts++;
+    final active = web.document.activeElement;
+    if (active == null || active == target || target.contains(active)) {
+      timer?.cancel();
+      return;
+    }
+    (target as web.HTMLElement).focus(
+      web.FocusOptions(preventScroll: true),
+    );
+    if (attempts >= maxAttempts) {
+      timer?.cancel();
+    }
+  });
+}
+
+bool _isBrowserWorkspaceSwitcherTriggerFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (_workspaceSwitcherTriggerElementFor(activeElement) == null) {
+    return false;
+  }
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _isBrowserWorkspaceSwitcherFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+
+  final tagName = activeElement.tagName.toLowerCase();
+  if (tagName == 'flt-glass-pane' ||
+      tagName == 'flt-scene-host' ||
+      tagName == 'flt-semantics-host') {
+    return true;
+  }
+
+  return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
+      'flutter-view';
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
@@ -524,22 +654,61 @@ bool _focusBrowserFocusableControl(String focusTargetId) {
 
 List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>
 _activeBrowserFocusAncestors() {
+  final activeElement = web.document.activeElement;
+  if (activeElement is! web.Element) {
+    return const <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
+  }
+  return _browserFocusAncestorsFor(activeElement);
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot> _browserFocusAncestorsFor(
+  web.Element element,
+) {
   final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
-  web.Element? element = web.document.activeElement;
-  while (element != null) {
+  web.Element? current = element;
+  while (current != null) {
     ancestors.add(
       BrowserWorkspaceSwitcherFocusAncestorSnapshot(
         semanticsIdentifier:
-            element.getAttribute(_browserFocusIdAttribute) ??
-            element.getAttribute(_browserFocusPanelIdAttribute) ??
-            element.getAttribute(_browserFocusRowIdAttribute) ??
-            element.getAttribute('flt-semantics-identifier'),
-        textContent: element.textContent,
+            current.getAttribute(_browserFocusIdAttribute) ??
+            current.getAttribute(_browserFocusPanelIdAttribute) ??
+            current.getAttribute(_browserFocusRowIdAttribute) ??
+            current.getAttribute('flt-semantics-identifier'),
+        textContent: current.textContent,
       ),
     );
-    element = element.parentElement;
+    current = current.parentElement;
   }
   return ancestors;
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>?
+_recentBrowserWorkspaceSwitcherPointerAncestors;
+Timer? _recentBrowserWorkspaceSwitcherPointerResetTimer;
+
+void _recordBrowserWorkspaceSwitcherPointerInteraction(web.Event event) {
+  final target = event.target as web.Element?;
+  if (target == null) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  final ancestors = _browserFocusAncestorsFor(target);
+  if (!browserFocusWithinWorkspaceSwitcher(ancestors: ancestors)) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  _recentBrowserWorkspaceSwitcherPointerAncestors = ancestors;
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = Timer(
+    _workspaceSwitcherPointerInteractionGrace,
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction,
+  );
+}
+
+void _clearRecentBrowserWorkspaceSwitcherPointerInteraction() {
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = null;
+  _recentBrowserWorkspaceSwitcherPointerAncestors = null;
 }
 
 void syncBrowserWorkspaceSwitcherRowTabIndices({
@@ -615,7 +784,16 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     if (seen.contains(element)) {
       continue;
     }
-    if (!_isVisible(element) ||
+    // Explicitly-registered controls (BrowserFocusableControl widgets that set
+    // our custom data attributes) may have zero visual rect because their
+    // visual representation is rendered on Flutter's canvas while the DOM
+    // element is just a focus/semantic receptor. Skip the rect-based visibility
+    // check for those, but still require them to be focusable and meaningful.
+    final hasExplicitRegistration =
+        element.getAttribute(_browserFocusIdAttribute) != null ||
+        element.getAttribute(_browserFocusPanelIdAttribute) != null ||
+        element.getAttribute(_browserFocusRowIdAttribute) != null;
+    if ((!hasExplicitRegistration && !_isVisible(element)) ||
         !_isFocusable(element) ||
         !_isMeaningfullyInteractiveFocusTarget(element)) {
       continue;
@@ -649,7 +827,8 @@ bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
   if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
     return true;
   }
-  if (element.getAttribute(_browserFocusPanelIdAttribute) case final String _?) {
+  if (element.getAttribute(_browserFocusPanelIdAttribute)
+      case final String _?) {
     return true;
   }
   if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {

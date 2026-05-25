@@ -24,6 +24,7 @@ jobs:
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          token: ${{ github.token }}
           filters: |
             flutter:
               - 'lib/**'
@@ -108,6 +109,7 @@ jobs:
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          token: ${{ github.token }}
           filters: |
             accessibility:
               - 'lib/**'
@@ -189,6 +191,22 @@ jobs:
         run: |
           log_path="$RUNNER_TEMP/accessibility-check.log"
           node testing/accessibility/log_validation.js "$log_path"
+
+      - name: Build web app for browser regressions
+        if: steps.changes.outputs.accessibility == 'true'
+        run: |
+          flutter build web --release \
+            --base-href / \
+            --pwa-strategy=none \
+            --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
+            --dart-define TRACKSTATE_SOURCE_REF=main \
+            --dart-define TRACKSTATE_DATA_REF=main \
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+
+      - name: Run browser regression checks
+        if: steps.changes.outputs.accessibility == 'true'
+        run: npx playwright test --config playwright.browser-regressions.config.js
 
   deploy-preview:
     name: Deploy preview
