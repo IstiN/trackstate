@@ -1273,6 +1273,9 @@ class IssueMutationService {
     required Object error,
   }) {
     if (error is IssueMutationResult<T>) return error;
+    final providerDetails = error is TrackStateProviderException
+        ? error.details
+        : const <String, Object?>{};
     final normalized = error is TrackStateProviderException
         ? error.message
         : '$error';
@@ -1302,6 +1305,7 @@ class IssueMutationService {
       issueKey: issueKey,
       category: category,
       message: normalized,
+      details: providerDetails,
     );
   }
 }
