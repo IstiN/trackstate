@@ -672,7 +672,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final searchPage = await _repository.searchIssuePage(
         query,
-        maxResults: _searchPageSize,
+        maxResults: _maxResultsForQuery(query),
       );
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
@@ -1571,9 +1571,12 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final searchPage = await _repository.searchIssuePage(
         _jql,
-        maxResults: _searchResults.isEmpty
-            ? _searchPageSize
-            : _searchResults.length,
+        maxResults: _maxResultsForQuery(
+          _jql,
+          fallbackMaxResults: _searchResults.isEmpty
+              ? _searchPageSize
+              : _searchResults.length,
+        ),
       );
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
@@ -1606,14 +1609,39 @@ class TrackerViewModel extends ChangeNotifier {
       issues: snapshot.issues,
       project: snapshot.project,
       jql: _jql,
-      maxResults: _searchResults.isEmpty
-          ? _searchPageSize
-          : _searchResults.length,
+      maxResults: _maxResultsForQuery(
+        _jql,
+        snapshot: snapshot,
+        fallbackMaxResults: _searchResults.isEmpty
+            ? _searchPageSize
+            : _searchResults.length,
+      ),
     );
     _applySearchPage(
       searchPage,
       retainSelectionWhenMissing: retainSelectionWhenMissing,
     );
+  }
+
+  int _maxResultsForQuery(
+    String query, {
+    TrackerSnapshot? snapshot,
+    int fallbackMaxResults = _searchPageSize,
+  }) {
+    if (query.trim().isNotEmpty) {
+      return fallbackMaxResults;
+    }
+    final resolvedSnapshot = snapshot ?? _snapshot;
+    if (resolvedSnapshot != null) {
+      return resolvedSnapshot.issues.length;
+    }
+    if (_searchPage.total > 0) {
+      return _searchPage.total;
+    }
+    if (_searchResults.isNotEmpty) {
+      return _searchResults.length;
+    }
+    return fallbackMaxResults;
   }
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
