@@ -293,6 +293,30 @@ class TrackStateCliRootLinksJsonExclusivityTest(unittest.TestCase):
             f"Executed command: {observation.executed_command_text}\n"
             f"Compiled binary path: {observation.compiled_binary_path}",
         )
+        self.assertIsNotNone(
+            observation.execution_working_directory,
+            f"{precondition_message}\n"
+            "TS-1136 must record the process working directory so the harness proves "
+            "`--path` selected the disposable repository explicitly."
+        )
+        self.assertEqual(
+            observation.execution_working_directory,
+            str(self.repository_root),
+            f"{precondition_message}\n"
+            "TS-1136 must run the compiled CLI from the checkout root instead of the "
+            "target repository.\n"
+            f"Expected working directory: {self.repository_root}\n"
+            f"Observed working directory: {observation.execution_working_directory}",
+        )
+        self.assertNotEqual(
+            observation.execution_working_directory,
+            observation.repository_path,
+            f"{precondition_message}\n"
+            "TS-1136 still coupled the CLI working directory to the seeded target "
+            "repository, so `--path` was not isolated as the repository selector.\n"
+            f"Repository path: {observation.repository_path}\n"
+            f"Observed working directory: {observation.execution_working_directory}",
+        )
 
     def _assert_successful_envelope(
         self,

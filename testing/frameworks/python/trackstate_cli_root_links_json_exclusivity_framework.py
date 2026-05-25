@@ -49,24 +49,29 @@ class PythonTrackStateCliRootLinksJsonExclusivityFramework(
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
                     f"checkout so {config.test_id} exercises the live local CLI against "
-                    "a seeded disposable repository."
+                    "a seeded disposable repository while `--path` remains the explicit "
+                    "repository selector."
                 )
+                execution_working_directory = self._repository_root
                 issue_a_create_observation = self._observe_command(
                     requested_command=config.issue_a_create_command(str(repository_path)),
                     repository_path=repository_path,
                     executable_path=executable_path,
+                    execution_working_directory=execution_working_directory,
                     fallback_reason=fallback_reason,
                 )
                 issue_b_create_observation = self._observe_command(
                     requested_command=config.issue_b_create_command(str(repository_path)),
                     repository_path=repository_path,
                     executable_path=executable_path,
+                    execution_working_directory=execution_working_directory,
                     fallback_reason=fallback_reason,
                 )
                 link_observation = self._observe_command(
                     requested_command=config.link_command(str(repository_path)),
                     repository_path=repository_path,
                     executable_path=executable_path,
+                    execution_working_directory=execution_working_directory,
                     fallback_reason=fallback_reason,
                 )
 
@@ -126,6 +131,7 @@ class PythonTrackStateCliRootLinksJsonExclusivityFramework(
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
+        execution_working_directory: Path,
         fallback_reason: str,
     ) -> TrackStateCliCommandObservation:
         executed_command = (str(executable_path), *requested_command[1:])
@@ -135,7 +141,8 @@ class PythonTrackStateCliRootLinksJsonExclusivityFramework(
             fallback_reason=fallback_reason,
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
-            result=self._run(executed_command, cwd=repository_path),
+            execution_working_directory=str(execution_working_directory),
+            result=self._run(executed_command, cwd=execution_working_directory),
         )
 
     def _seed_local_repository(
