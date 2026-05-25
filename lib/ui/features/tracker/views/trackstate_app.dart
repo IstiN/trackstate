@@ -11871,6 +11871,8 @@ class _LoadingPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final backgroundColor = colors.loadingFeedbackBackground;
+    final foregroundColor = colors.loadingFeedbackForeground;
     return Semantics(
       container: true,
       label: semanticLabel,
@@ -11878,7 +11880,7 @@ class _LoadingPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: colors.surfaceAlt,
+            color: backgroundColor,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: colors.border),
           ),
@@ -11886,7 +11888,7 @@ class _LoadingPill extends StatelessWidget {
             label,
             style: Theme.of(
               context,
-            ).textTheme.labelSmall?.copyWith(color: colors.muted),
+            ).textTheme.labelSmall?.copyWith(color: foregroundColor),
           ),
         ),
       ),
@@ -11906,6 +11908,8 @@ class _SectionLoadingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final backgroundColor = colors.loadingFeedbackBackground;
+    final foregroundColor = colors.loadingFeedbackForeground;
     return Semantics(
       container: true,
       label: semanticLabel,
@@ -11914,7 +11918,7 @@ class _SectionLoadingBanner extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: colors.surfaceAlt,
+            color: backgroundColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: colors.border),
           ),
@@ -11935,7 +11939,7 @@ class _SectionLoadingBanner extends StatelessWidget {
                   label,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
+                  ).textTheme.labelMedium?.copyWith(color: foregroundColor),
                 ),
               ),
             ],
