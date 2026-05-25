@@ -13559,6 +13559,12 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    if (_summaryController.text.trim().isEmpty) {
+      return;
+    }
+    if (_isSubtaskType && _selectedParentKey == null) {
+      return;
+    }
     final customFields = <String, String>{};
     for (final field in _createIssueFieldDefinitions(
       widget.viewModel.project,
@@ -13652,15 +13658,16 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 980;
-        final horizontalInset = isCompact ? 16.0 : 24.0;
-        final verticalInset = isCompact ? 16.0 : 24.0;
+        final insetPadding = isCompact
+            ? EdgeInsets.zero
+            : const EdgeInsets.only(left: 24, top: 24, right: 0, bottom: 24);
         final availableWidth = math.max(
           0.0,
-          constraints.maxWidth - (horizontalInset * 2),
+          constraints.maxWidth - insetPadding.horizontal,
         );
         final availableHeight = math.max(
           0.0,
-          constraints.maxHeight - (verticalInset * 2),
+          constraints.maxHeight - insetPadding.vertical,
         );
         final surfaceWidth = isCompact
             ? availableWidth
@@ -13668,10 +13675,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
 
         return Dialog(
           alignment: isCompact ? Alignment.topCenter : Alignment.centerRight,
-          insetPadding: EdgeInsets.symmetric(
-            horizontal: horizontalInset,
-            vertical: verticalInset,
-          ),
+          insetPadding: insetPadding,
           child: SizedBox(
             width: surfaceWidth,
             height: availableHeight,
@@ -13749,6 +13753,13 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                   enabled: canEditFields,
                                   decoration: InputDecoration(
                                     labelText: summaryLabel,
+                                    errorText:
+                                        _didAttemptSubmit &&
+                                            _summaryController.text
+                                                .trim()
+                                                .isEmpty
+                                        ? l10n.summaryRequired
+                                        : null,
                                   ),
                                 ),
                               ),
