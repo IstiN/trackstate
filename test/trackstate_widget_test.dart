@@ -108,6 +108,60 @@ void main() {
     }
   });
 
+  testWidgets(
+    'board issue cards expose an Edit action that opens the shared editor with preloaded data',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      const targetKey = 'TRACK-12';
+      const targetSummary = 'Implement Git sync service';
+      try {
+        final snapshot = await const _EditIssueFieldsLocalRuntimeRepository()
+            .loadSnapshot();
+        final issue = snapshot.issues.firstWhere(
+          (candidate) => candidate.key == targetKey,
+        );
+
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+        await screen.openSection('Board');
+        await screen.expectTextVisible(targetSummary);
+
+        final editButton = find.byKey(const ValueKey('board-edit-$targetKey'));
+
+        expect(
+          editButton,
+          findsOneWidget,
+          reason:
+              'Expected the Board card for $targetKey to expose a visible Edit '
+              'affordance without first navigating through issue detail.',
+        );
+
+        await tester.ensureVisible(editButton);
+        await tester.tap(editButton, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Edit issue'), findsOneWidget);
+        expect(
+          await screen.readLabeledTextFieldValue('Summary'),
+          issue.summary,
+        );
+        expect(
+          await screen.readLabeledTextFieldValue('Description'),
+          issue.description,
+        );
+        expect(
+          await screen.readDropdownFieldValue('Priority'),
+          issue.priority.label,
+        );
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('dragging a board card moves it to another status', (
     tester,
   ) async {
