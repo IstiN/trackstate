@@ -1271,91 +1271,51 @@ void main() {
       },
     );
 
-    test('resolves the active local account by email', () async {
-      final cli = TrackStateCli(
-        environment: const TrackStateCliEnvironment(
-          workingDirectory: '/workspace/repo',
-        ),
-        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-          localRepository: _FakeSearchRepository(
-            snapshot: _sampleSnapshot(),
-            page: const TrackStateIssueSearchPage.empty(),
-            connectedUser: const RepositoryUser(
-              login: 'user@example.com',
-              displayName: 'Local User',
-              accountId: 'local-user',
-              emailAddress: 'user@example.com',
-              active: true,
-            ),
+    test(
+      'reports account-by-email as unsupported for the exact ticket command',
+      () async {
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory();
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
           ),
-        ),
-      );
+          repositoryFactory: repositoryFactory,
+        );
 
-      final result = await cli.run(const <String>[
-        'read',
-        'account-by-email',
-        '--email',
-        'user@example.com',
-      ]);
-      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final result = await cli.run(const <String>[
+          'read',
+          'account-by-email',
+          'user@example.com',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
 
-      expect(result.exitCode, 0);
-      expect(json, <String, Object?>{
-        'accountId': 'local-user',
-        'displayName': 'Local User',
-        'active': true,
-        'emailAddress': 'user@example.com',
-      });
-    });
+        expect(result.exitCode, 5);
+        expect(json['ok'], false);
+        expect(error['code'], 'UNSUPPORTED_ACCOUNT_BY_EMAIL');
+        expect(error['category'], 'unsupported');
+        expect(error['exitCode'], 5);
+        expect(
+          error['message'],
+          'Reading accounts by email is currently unsupported.',
+        );
+        expect(repositoryFactory.lastRepositoryPath, isNull);
+        expect(repositoryFactory.lastDataRef, isNull);
+      },
+    );
 
     test(
-      'supports hosted account-by-email lookup when the provider exposes it',
+      'reports account-by-email as unsupported for hosted targets too',
       () async {
-        final repository = _FakeSearchRepository(
-          snapshot: _sampleSnapshot(),
-          page: const TrackStateIssueSearchPage.empty(),
-          connectedUser: const RepositoryUser(
-            login: 'octocat',
-            displayName: 'Octo Cat',
-            accountId: '42',
-            emailAddress: 'octo@example.com',
-            active: true,
-          ),
-        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory();
         final cli = TrackStateCli(
           environment: const TrackStateCliEnvironment(
             environment: <String, String>{
               trackStateCliTokenEnvironmentVariable: 'env-token',
             },
           ),
-          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-            hostedRepository: repository,
-          ),
-          providerFactory: _FakeTrackStateCliProviderFactory(
-            hostedProvider: _FakeHostedTrackStateProvider(
-              user: const RepositoryUser(
-                login: 'octocat',
-                displayName: 'Octo Cat',
-                accountId: '42',
-                emailAddress: 'octo@example.com',
-                active: true,
-              ),
-              permission: const RepositoryPermission(
-                canRead: true,
-                canWrite: false,
-                isAdmin: false,
-              ),
-              usersByEmail: const {
-                'hubot@example.com': RepositoryUser(
-                  login: 'hubot',
-                  displayName: 'Hubot',
-                  accountId: '99',
-                  emailAddress: 'hubot@example.com',
-                  active: true,
-                ),
-              },
-            ),
-          ),
+          repositoryFactory: repositoryFactory,
+          providerFactory: const _FakeTrackStateCliProviderFactory(),
         );
 
         final result = await cli.run(const <String>[
@@ -1371,14 +1331,18 @@ void main() {
           'hubot@example.com',
         ]);
         final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
 
-        expect(result.exitCode, 0);
-        expect(json, <String, Object?>{
-          'accountId': '99',
-          'displayName': 'Hubot',
-          'active': true,
-          'emailAddress': 'hubot@example.com',
-        });
+        expect(result.exitCode, 5);
+        expect(json['ok'], false);
+        expect(error['code'], 'UNSUPPORTED_ACCOUNT_BY_EMAIL');
+        expect(error['category'], 'unsupported');
+        expect(error['exitCode'], 5);
+        expect(
+          error['message'],
+          'Reading accounts by email is currently unsupported.',
+        );
+        expect(repositoryFactory.lastHostedRepository, isNull);
       },
     );
 
@@ -3059,13 +3023,11 @@ class _FakeHostedTrackStateProvider
     required this.user,
     required this.permission,
     this.usersByLogin = const {},
-    this.usersByEmail = const {},
   });
 
   final RepositoryUser user;
   final RepositoryPermission permission;
   final Map<String, RepositoryUser> usersByLogin;
-  final Map<String, RepositoryUser> usersByEmail;
   RepositoryConnection? connection;
 
   @override
@@ -3093,13 +3055,8 @@ class _FakeHostedTrackStateProvider
   }
 
   @override
-  Future<RepositoryUser> lookupUserByEmail(String email) async {
-    final resolved = usersByEmail[email];
-    if (resolved == null) {
+  Future<RepositoryUser> lookupUserByEmail(String email) async =>
       throw const TrackStateProviderException('User was not found.');
-    }
-    return resolved;
-  }
 
   @override
   Future<RepositoryPermission> getPermission() async => permission;
