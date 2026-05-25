@@ -1515,6 +1515,67 @@ void main() {
     );
 
     test(
+      'local attachment upload preserves a custom display name and source media type',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/sample.pdf');
+        final uploadBytes = '%PDF-1.4\nlocal cli attachment\n'.codeUnits;
+        await uploadFile.writeAsBytes(uploadBytes);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'Spec Document',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final attachment = data['attachment']! as Map<String, Object?>;
+        final attachmentsDir = Directory('${repo.path}/DEMO/DEMO-1/attachments');
+        final storedFiles = await attachmentsDir
+            .list()
+            .where((entity) => entity is File)
+            .cast<File>()
+            .toList();
+        final storedRelativePath = storedFiles.single.path
+            .substring(repo.path.length + 1)
+            .replaceAll('\\', '/');
+        final metadata =
+            jsonDecode(
+                  File(
+                    '${repo.path}/DEMO/DEMO-1/attachments.json',
+                  ).readAsStringSync(),
+                )
+                as List<Object?>;
+        final metadataEntry = metadata.single as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(data['issue'], 'DEMO-1');
+        expect(attachment['name'], 'Spec Document');
+        expect(attachment['mediaType'], 'application/pdf');
+        expect(attachment['id'], storedRelativePath);
+        expect(metadataEntry['name'], 'Spec Document');
+        expect(metadataEntry['mediaType'], 'application/pdf');
+        expect(await storedFiles.single.readAsBytes(), uploadBytes);
+      },
+    );
+
+    test(
       'local release-backed attachment uploads forward optional GitHub credentials',
       () async {
         final uploadFile = File(
@@ -2579,6 +2640,62 @@ void main() {
         expect(error['category'], 'unsupported');
       },
     );
+
+    test(
+      'rejects unsupported admin paths for jira_execute_request before local repo access',
+      () async {
+        final localProvider = _FailingLocalGitTrackStateProvider(
+          repositoryPath: '/tmp/isolated-target',
+          user: const RepositoryUser(
+            login: 'local@example.com',
+            displayName: 'Local User',
+          ),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: localProvider,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--path',
+          '/tmp/isolated-target',
+          '--method',
+          'POST',
+          '--request-path',
+          '/rest/api/2/user/permission',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final target = json['target']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(error['code'], 'UNSUPPORTED_REQUEST');
+        expect(error['category'], 'unsupported');
+        expect(
+          error['message'],
+          contains(
+            'jira_execute_request does not support "/rest/api/2/user/permission"',
+          ),
+        );
+        expect(target, <String, Object?>{
+          'type': 'local',
+          'value': '/tmp/isolated-target',
+        });
+        expect(localProvider.resolveWriteBranchCalled, isFalse);
+      },
+    );
   });
 }
 
@@ -3026,6 +3143,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     final uploadException = this.uploadException;
     if (uploadException != null) {
@@ -3128,6 +3246,23 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
       permission: permission,
     ),
   );
+}
+
+class _FailingLocalGitTrackStateProvider
+    extends _FakeLocalGitTrackStateProvider {
+  _FailingLocalGitTrackStateProvider({
+    required super.repositoryPath,
+    required super.user,
+    required super.permission,
+  }) : super(branch: 'main');
+
+  bool resolveWriteBranchCalled = false;
+
+  @override
+  Future<String> resolveWriteBranch() async {
+    resolveWriteBranchCalled = true;
+    throw StateError('resolveWriteBranch should not be called');
+  }
 }
 
 class _FakeHostedTrackStateProvider

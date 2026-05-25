@@ -681,11 +681,12 @@ class TrackStateCli {
       );
     }
     final bytes = await sourceFile.readAsBytes();
+    final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
         results['name']?.toString().trim().ifEmpty(
-          _fileNameFromPath(resolvedFilePath),
+          sourceName,
         ) ??
-        _fileNameFromPath(resolvedFilePath);
+        sourceName;
 
     try {
       return await switch (target.type) {
@@ -694,6 +695,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
         TrackStateCliTargetType.hosted => _runHostedAttachmentUpload(
@@ -701,6 +703,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
       };
@@ -891,18 +894,14 @@ class TrackStateCli {
           const <String>[],
     );
     final body = _parseJsonBody(results['body']?.toString());
-    final normalizedRequestPath = requestPath.trim().toLowerCase();
-    if (normalizedRequestPath.contains('/attachment/')) {
-      throw _mapCompatibilityError(
-        const JiraCompatibilityRequestException(
-          code: 'UNSUPPORTED_REQUEST',
-          message:
-              'Attachment and binary Jira paths are not supported through jira_execute_request. Use the dedicated attachment commands instead.',
-        ),
-      );
-    }
 
     try {
+      _jiraCompatibilityService.validate(
+        method: method,
+        path: requestPath,
+        query: query,
+        body: body,
+      );
       return await switch (target.type) {
         TrackStateCliTargetType.local => _runLocalExecuteRequest(
           target,
@@ -919,6 +918,14 @@ class TrackStateCli {
           body: body,
         ),
       };
+    } on JiraCompatibilityRequestException catch (error) {
+      return _error(
+        _mapCompatibilityError(error),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: TrackStateCliOutput.json,
+      );
     } on _TrackStateCliException catch (error) {
       return _error(
         error,
@@ -3386,6 +3393,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final branch = await _resolveLocalBranch(target);
@@ -3422,6 +3430,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3450,6 +3459,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final credential = await _resolveHostedCredential(target);
@@ -3484,6 +3494,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
