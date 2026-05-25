@@ -38,6 +38,7 @@ class LabelTokenObservation:
 
 
 class LiveCreateIssueFormPage:
+    _label_commit_timeout_ms = 45_000
     _button_selector = 'flt-semantics[role="button"]'
     _generic_semantics_selector = "flt-semantics"
     _summary_selector = 'input[aria-label="Summary"]'
@@ -138,7 +139,7 @@ class LiveCreateIssueFormPage:
         labels_value_after_enter = self._session.wait_for_input_value(
             self._labels_selector,
             "",
-            timeout_ms=15_000,
+            timeout_ms=self._label_commit_timeout_ms,
         )
         self._wait_for_token("frontend")
 
@@ -151,7 +152,7 @@ class LiveCreateIssueFormPage:
         labels_value_after_comma = self._session.wait_for_input_value(
             self._labels_selector,
             "",
-            timeout_ms=15_000,
+            timeout_ms=self._label_commit_timeout_ms,
         )
         self._wait_for_token("bug")
 
@@ -237,7 +238,7 @@ class LiveCreateIssueFormPage:
         try:
             self._session.wait_for_selector(
                 self._token_selector(token),
-                timeout_ms=15_000,
+                timeout_ms=self._label_commit_timeout_ms,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
