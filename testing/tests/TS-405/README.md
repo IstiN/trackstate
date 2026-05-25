@@ -35,7 +35,7 @@ flutter test testing/tests/TS-405/test_ts_405.dart --reporter expanded
 ## Expected result
 
 ```text
-Current expected outcome: FAIL
+Current expected outcome: PASS
 
 The duplicate-ID save attempt should render:
 Save failed: Status ID "in-progress" is defined more than once.
@@ -45,4 +45,7 @@ Save failed: Statuses must include both an ID and a name.
 
 The repository HEAD, worktree cleanliness, and DEMO/config/statuses.json must
 remain unchanged for both blocked save attempts.
+
+If this automation fails, the current implementation has regressed from the
+ticket's shipped validation behavior.
 ```
