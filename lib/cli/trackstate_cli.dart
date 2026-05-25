@@ -195,7 +195,10 @@ class TrackStateCli {
       'versions list' => 'versions',
       'profile get' => 'profile',
       'user get' => 'user',
-      'link-types list' || 'link-type list' => 'link-types',
+      'link-types list' ||
+      'link-type list' ||
+      'issue-link-types list' ||
+      'issue-link-type list' => 'link-types',
       'account-by-email get' => 'account-by-email',
       _ => null,
     };
@@ -2477,7 +2480,10 @@ class TrackStateCli {
     'versions' => 'versions',
     'profile' => 'profile',
     'user' => 'user',
-    'link-types' || 'link-type' => 'link-types',
+    'link-types' ||
+    'link-type' ||
+    'issue-link-types' ||
+    'issue-link-type' => 'link-types',
     'account-by-email' => 'account-by-email',
     _ => null,
   };
@@ -6411,6 +6417,7 @@ class TrackStateCli {
         '  trackstate profile get',
         '  trackstate user get --login octocat',
         '  trackstate link-types list',
+        '  trackstate issue-link-types list',
       ].join('\n');
     }
 
@@ -6427,7 +6434,9 @@ class TrackStateCli {
         '  trackstate read components [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'versions' =>
         '  trackstate read versions [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
-      'link-types' => '  trackstate read link-types [--output json|text]',
+      'link-types' =>
+        '  trackstate read link-types [--output json|text]\n'
+            '  trackstate read issue-link-types [--output json|text]',
       'profile' =>
         '  trackstate read profile [--path /repo|--target hosted --provider github --repository owner/name] [--output json|text]',
       'user' =>
