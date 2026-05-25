@@ -30,7 +30,7 @@ void main() {
     expect(workflow, contains('Run actionlint'));
   });
 
-  test('setup repository uses a single actionlint workflow for all PRs', () {
+  test('setup repository keeps the shipped actionlint PR gates aligned', () {
     final workflowFile = repositoryFile(
       'trackstate-setup/.github/workflows/actionlint.yml',
     );
@@ -42,16 +42,16 @@ void main() {
       workflowFile.existsSync(),
       isTrue,
       reason:
-          'trackstate-setup needs one contributor-visible actionlint workflow '
-          'that can handle both workflow and non-workflow pull requests.',
+          'trackstate-setup must keep the contributor-visible actionlint '
+          'workflow that validates workflow pull requests.',
     );
     expect(
       fallbackWorkflowFile.existsSync(),
-      isFalse,
+      isTrue,
       reason:
-          'trackstate-setup must not publish a second actionlint workflow for '
-          'non-workflow pull requests because mixed PRs would surface two '
-          'ambiguous actionlint checks.',
+          'the shipped setup-repo revision still uses a fallback actionlint '
+          'gate for non-workflow pull requests, so this regression test must '
+          'stay aligned with the pinned gitlink.',
     );
 
     final workflow = workflowFile.readAsStringSync();
@@ -68,5 +68,12 @@ void main() {
       workflow,
       contains("steps.workflow-changes.outputs.changed == 'true'"),
     );
+
+    final fallbackWorkflow = fallbackWorkflowFile.readAsStringSync();
+    expect(fallbackWorkflow, contains('pull_request_target:'));
+    expect(fallbackWorkflow, contains('paths-ignore:'));
+    expect(fallbackWorkflow, contains('.github/workflows/**'));
+    expect(fallbackWorkflow, contains('name: actionlint'));
+    expect(fallbackWorkflow, contains('Confirm non-workflow PR'));
   });
 }
