@@ -62,10 +62,12 @@ BROKEN_LOCAL_TARGET = "/tmp/trackstate-ts1006-workspace-b"
 
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
-LINKED_BUGS = ["TS-995"]
+LINKED_BUGS = ["TS-1030", "TS-1011", "TS-995", "TS-994"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-995. Its merged fix targets startup hydration so this test waits for "
-    "the post-reload shell and the final Workspace switcher row state before asserting."
+    "Reviewed TS-1030, TS-1011, TS-995, and TS-994. The linked fixes target the "
+    "manual restore flow and the follow-up startup hydration path, so this test waits "
+    "for the visible restore callback, the restored Local Git precondition, the "
+    "post-reload shell, and the final Workspace switcher row state before asserting."
 )
 PRECONDITION_WAIT_SECONDS = 60
 STARTUP_WAIT_SECONDS = 90
