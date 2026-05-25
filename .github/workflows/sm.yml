@@ -36,8 +36,14 @@ jobs:
           fi
           # Count in-progress AI Teammate runs (exclude the one that just completed)
           ACTIVE=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status in_progress --json databaseId --jq 'length')
-          QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId --jq 'length')
-          echo "Active AI Teammate runs: $ACTIVE, Queued: $QUEUED"
+          # Count only recent queued runs (ignore zombie runs older than 60 minutes)
+          STALE_CUTOFF=$(date -u -d '60 minutes ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-60M '+%Y-%m-%dT%H:%M:%SZ')
+          QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$STALE_CUTOFF\")] | length")
+          STALE_QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt <= \"$STALE_CUTOFF\")] | length")
+          echo "Active AI Teammate runs: $ACTIVE, Queued (recent): $QUEUED, Queued (stale >60min): $STALE_QUEUED"
+          if [ "$STALE_QUEUED" -gt 0 ]; then
+            echo "⚠️ Ignoring $STALE_QUEUED stale queued run(s) older than 60 minutes"
+          fi
           if [ "$ACTIVE" -gt 0 ] || [ "$QUEUED" -gt 0 ]; then
             echo "Skipping SM — other AI Teammate runs still active, SM will trigger when they finish"
             echo "should_run=false" >> "$GITHUB_OUTPUT"
