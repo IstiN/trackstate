@@ -83,7 +83,7 @@ def main() -> None:
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_failure_outputs(result)
+        _write_failure_outputs(result, product_defect=_is_product_defect(result))
         _write_review_replies(result, status="failed")
         raise
 
@@ -96,17 +96,41 @@ def _build_failures(
 ) -> list[str]:
     failures: list[str] = []
     if not execution.succeeded:
-        return [
+        failures = [
             "Step 1 failed: the TS-684 CLI probe did not analyze cleanly.\n"
             f"{execution.analyze_output}"
         ]
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=(
+                "Mock the GitHub release-creation conflict path and execute the local "
+                "CLI attachment upload flow."
+            ),
+            observed=execution.analyze_output,
+        )
+        result["failures"] = failures
+        return failures
 
     if payload.get("status") != "passed":
         details = [str(payload.get("error") or "The TS-684 CLI probe failed.")]
         stack_trace = payload.get("stackTrace")
         if stack_trace:
             details.append(str(stack_trace))
-        return ["\n".join(details)]
+        failures = ["\n".join(details)]
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=(
+                "Mock the GitHub release-creation conflict path and execute the local "
+                "CLI attachment upload flow."
+            ),
+            observed="\n".join(details),
+        )
+        result["failures"] = failures
+        return failures
 
     requested_command_text = _as_text(payload.get("requestedCommandText"))
     cli_payload = _as_dict(payload.get("cliPayload"))
@@ -125,6 +149,16 @@ def _build_failures(
 
     result.update(
         {
+            "repository": _as_text(payload.get("repository")),
+            "branch": _as_text(payload.get("branch")),
+            "issueKey": _as_text(payload.get("issueKey")),
+            "issuePath": _as_text(payload.get("issuePath")),
+            "manifestPath": _as_text(payload.get("manifestPath")),
+            "attachmentName": _as_text(payload.get("attachmentName")),
+            "releaseTag": _as_text(payload.get("releaseTag")),
+            "releaseTitle": _as_text(payload.get("releaseTitle")),
+            "repository_path": _as_text(payload.get("repositoryPath")),
+            "attachmentPath": _as_text(payload.get("attachmentPath")),
             "requested_command_text": requested_command_text,
             "cli_payload": cli_payload,
             "cli_error": cli_error,
@@ -142,8 +176,12 @@ def _build_failures(
         }
     )
 
+    step1_issues: list[str] = []
+    step2_issues: list[str] = []
+    step3_issues: list[str] = []
+
     if requested_command_text != REQUESTED_COMMAND_TEXT:
-        failures.append(
+        step1_issues.append(
             "Precondition failed: TS-684 did not exercise the exact ticket command "
             "through the CLI execution layer.\n"
             f"Expected command: {REQUESTED_COMMAND_TEXT}\n"
@@ -151,69 +189,32 @@ def _build_failures(
         )
 
     if cli_exit_code == 0:
-        failures.append(
+        step1_issues.append(
             "Step 1 failed: the local CLI attachment upload unexpectedly succeeded even "
             "though GitHub release creation returned HTTP 409 Conflict.\n"
             f"{_observed_command_output(stdout=cli_stdout, stderr=cli_stderr)}"
         )
-        return failures
-
     if not cli_payload:
-        failures.append(
+        step1_issues.append(
             "Step 1 failed: the local CLI did not return a machine-readable JSON "
             "error envelope.\n"
             f"{_observed_command_output(stdout=cli_stdout, stderr=cli_stderr)}"
         )
-        return failures
 
     if cli_payload.get("ok") is not False:
-        failures.append(
+        step1_issues.append(
             "Expected result failed: the CLI output did not stay in a failure state.\n"
             f"Observed payload: {json.dumps(cli_payload, indent=2, sort_keys=True)}"
         )
 
     if not cli_error:
-        failures.append(
+        step1_issues.append(
             "Step 1 failed: the CLI JSON envelope did not include an `error` object.\n"
             f"Observed payload: {json.dumps(cli_payload, indent=2, sort_keys=True)}"
         )
-        return failures
-
-    missing_expected = [
-        fragment for fragment in EXPECTED_CONFLICT_FRAGMENTS if fragment not in visible_error
-    ]
-    present_prohibited = [
-        fragment for fragment in PROHIBITED_CONFLICT_FRAGMENTS if fragment in visible_error
-    ]
-    present_wrapper = [
-        fragment for fragment in PROHIBITED_CLI_WRAPPERS if fragment in visible_error
-    ]
-
-    if missing_expected:
-        failures.append(
-            "Step 2 failed: the caller-visible CLI output did not surface the expected "
-            "409 conflict details.\n"
-            f"Missing fragments: {missing_expected}\n"
-            f"Observed output: {visible_error}"
-        )
-    if present_prohibited:
-        failures.append(
-            "Expected result failed: the CLI output misidentified the release-creation "
-            "conflict as a validation failure.\n"
-            f"Unexpected fragments: {present_prohibited}\n"
-            f"Observed output: {visible_error}"
-        )
-    if present_wrapper:
-        failures.append(
-            "Expected result failed: the local CLI still hides the release-creation "
-            "conflict behind the generic repository wrapper instead of surfacing a "
-            "conflict-specific error.\n"
-            f"Unexpected wrapper fragments: {present_wrapper}\n"
-            f"Observed output: {visible_error}"
-        )
 
     if not _contains_ordered_sequence(request_sequence, EXPECTED_SEQUENCE):
-        failures.append(
+        step1_issues.append(
             "Step 1 failed: the mocked GitHub API traffic did not reach the expected "
             "release-creation conflict path.\n"
             f"Observed request sequence: {request_sequence}"
@@ -221,100 +222,153 @@ def _build_failures(
 
     release_lookup_status = release_lookup.get("responseStatusCode")
     if release_lookup_status != 404:
-        failures.append(
+        step1_issues.append(
             "Expected result failed: release lookup did not return the mocked 404.\n"
             f"Observed lookup: {json.dumps(release_lookup, indent=2, sort_keys=True)}"
         )
 
     release_create_json = _as_dict(release_create.get("jsonBody"))
     if release_create.get("responseStatusCode") != 409:
-        failures.append(
+        step1_issues.append(
             "Expected result failed: release creation did not return the mocked 409.\n"
             f"Observed release create exchange: {json.dumps(release_create, indent=2, sort_keys=True)}"
         )
     if release_create_json.get("tag_name") != "ts684-TS-101":
-        failures.append(
+        step1_issues.append(
             "Expected result failed: the release-creation request targeted the wrong tag.\n"
             f"Observed request body: {json.dumps(release_create_json, indent=2, sort_keys=True)}"
         )
     if release_create_json.get("target_commitish") != "main":
-        failures.append(
+        step1_issues.append(
             "Expected result failed: the release-creation request targeted the wrong branch.\n"
             f"Observed request body: {json.dumps(release_create_json, indent=2, sort_keys=True)}"
         )
     if release_create_json.get("name") != "Attachments for TS-101":
-        failures.append(
+        step1_issues.append(
             "Expected result failed: the release-creation request used the wrong title.\n"
             f"Observed request body: {json.dumps(release_create_json, indent=2, sort_keys=True)}"
         )
 
+    if cli_exit_code != 0 and cli_payload and cli_error:
+        missing_expected = [
+            fragment
+            for fragment in EXPECTED_CONFLICT_FRAGMENTS
+            if fragment not in visible_error
+        ]
+        present_prohibited = [
+            fragment
+            for fragment in PROHIBITED_CONFLICT_FRAGMENTS
+            if fragment in visible_error
+        ]
+        present_wrapper = [
+            fragment for fragment in PROHIBITED_CLI_WRAPPERS if fragment in visible_error
+        ]
+
+        if missing_expected:
+            step2_issues.append(
+                "Step 2 failed: the caller-visible CLI output did not surface the "
+                "expected 409 conflict details.\n"
+                f"Missing fragments: {missing_expected}\n"
+                f"Observed output: {visible_error}"
+            )
+        if present_prohibited:
+            step2_issues.append(
+                "Expected result failed: the CLI output misidentified the release-"
+                "creation conflict as a validation failure.\n"
+                f"Unexpected fragments: {present_prohibited}\n"
+                f"Observed output: {visible_error}"
+            )
+        if present_wrapper:
+            step2_issues.append(
+                "Expected result failed: the local CLI still hides the release-"
+                "creation conflict behind the generic repository wrapper instead of "
+                "surfacing a conflict-specific error.\n"
+                f"Unexpected wrapper fragments: {present_wrapper}\n"
+                f"Observed output: {visible_error}"
+            )
+    else:
+        step2_issues.append(
+            "Step 2 failed: the caller-visible CLI error could not be validated because "
+            "the command did not produce the expected machine-readable failure envelope.\n"
+            f"{_observed_command_output(stdout=cli_stdout, stderr=cli_stderr)}"
+        )
+
     if release_asset_upload:
-        failures.append(
+        step3_issues.append(
             "Expected result failed: asset upload was attempted after release creation "
             "already failed with HTTP 409 Conflict.\n"
             f"Observed asset upload: {json.dumps(release_asset_upload, indent=2, sort_keys=True)}"
         )
     if metadata_write:
-        failures.append(
+        step3_issues.append(
             "Expected result failed: attachments.json was written even though release "
             "creation failed first.\n"
             f"Observed metadata write: {json.dumps(metadata_write, indent=2, sort_keys=True)}"
         )
     if cached_attachment_count != 0 or cached_attachment_names:
-        failures.append(
+        step3_issues.append(
             "Expected result failed: the cached issue state changed after the failed "
             "release-creation conflict.\n"
             f"Observed cached_attachment_count={cached_attachment_count}; "
             f"cached_attachment_names={cached_attachment_names}"
         )
 
-    if not failures:
-        _record_step(
-            result,
-            step=1,
-            status="passed",
-            action=(
-                "Execute `trackstate attachment upload --target local --issue TS-101 "
-                "--file test.pdf` through the CLI execution layer with a mocked "
-                "release-creation 409 conflict."
-            ),
-            observed=visible_error,
-        )
-        _record_step(
-            result,
-            step=2,
-            status="passed",
-            action=(
-                "Inspect the caller-visible CLI JSON envelope/text and confirm the "
-                "409 conflict is surfaced instead of a generic repository wrapper."
-            ),
-            observed=visible_error,
-        )
-        _record_step(
-            result,
-            step=3,
-            status="passed",
-            action=(
-                "Inspect the mocked GitHub API traffic and post-failure repository "
-                "state for the failed release creation."
-            ),
-            observed=(
-                f"request_sequence={' | '.join(request_sequence)}; "
-                f"release_asset_upload_present={bool(release_asset_upload)}; "
-                f"metadata_write_present={bool(metadata_write)}; "
-                f"cached_attachment_count={cached_attachment_count}"
-            ),
-        )
-        _record_human_verification(
-            result,
-            check=(
-                "Observed the exact local CLI failure a caller receives and confirmed "
-                "it reported the 409/tag-already-exists conflict without mutating "
-                "attachment state."
-            ),
-            observed=visible_error,
-        )
+    failures.extend(step1_issues)
+    failures.extend(step2_issues)
+    failures.extend(step3_issues)
 
+    _record_step(
+        result,
+        step=1,
+        status="passed" if not step1_issues else "failed",
+        action=(
+            "Mock the GitHub API to return a release lookup 404 and release creation "
+            "409, then execute `trackstate attachment upload --issue TS-101 --file "
+            "test.pdf --target local`."
+        ),
+        observed=(
+            f"command={requested_command_text or '<missing>'}; "
+            f"cli_exit_code={cli_exit_code}; "
+            f"release_lookup_status={release_lookup_status}; "
+            f"release_create_status={release_create.get('responseStatusCode')}; "
+            f"request_sequence={' | '.join(request_sequence) or '<missing>'}"
+        ),
+    )
+    _record_step(
+        result,
+        step=2,
+        status="passed" if not step2_issues else "failed",
+        action="Inspect the caller-visible CLI error output.",
+        observed=visible_error or _observed_command_output(stdout=cli_stdout, stderr=cli_stderr),
+    )
+    _record_step(
+        result,
+        step=3,
+        status="passed" if not step3_issues else "failed",
+        action=(
+            "Inspect the post-failure user-visible side effects and repository state."
+        ),
+        observed=(
+            f"release_asset_upload_present={bool(release_asset_upload)}; "
+            f"metadata_write_present={bool(metadata_write)}; "
+            f"cached_attachment_count={cached_attachment_count}; "
+            f"cached_attachment_names={cached_attachment_names}"
+        ),
+    )
+    _record_human_verification(
+        result,
+        check=(
+            "Observe the exact terminal/JSON error a local CLI user receives and verify "
+            "whether attachment state remains unchanged after the failed upload."
+        ),
+        observed=(
+            f"visible_error={visible_error or '<missing>'}; "
+            f"release_asset_upload_present={bool(release_asset_upload)}; "
+            f"metadata_write_present={bool(metadata_write)}; "
+            f"cached_attachment_count={cached_attachment_count}"
+        ),
+    )
+    result["failures"] = failures
     return failures
 
 
@@ -339,18 +393,25 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     release_create_json = _as_dict(_as_dict(result.get("release_create")).get("jsonBody"))
 
     jira_lines = [
-        "h3. Test Automation Rework Result",
+        "h3. Test Automation Result",
         "",
         "*Status:* ✅ PASSED",
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
-        "h4. What changed",
-        "* Updated TS-684 to execute the TrackState CLI attachment-upload path instead of calling the repository upload method directly.",
-        "* Kept the mocked GitHub release lookup/create flow (`404` then `409 Conflict`) and revalidated the post-failure state.",
+        "h4. What was automated",
+        "* Step 1: Mocked the GitHub release lookup/create flow so `GET /releases/tags/ts684-TS-101` returned `404` and `POST /releases` returned `409 Conflict` with `tag already exists`.",
+        "* Step 2: Executed `trackstate attachment upload --issue TS-101 --file test.pdf --target local` through the local CLI execution path.",
+        "* Step 3: Inspected the caller-visible CLI output and the post-failure attachment state.",
         "",
-        "h4. New result",
-        f"* The local CLI output stayed conflict-specific: {{code}}{visible_error}{{code}}",
-        "* No release asset upload was attempted and no {{attachments.json}} write occurred after the release-creation failure.",
+        "h4. Human-style verification",
+        f"* Observed the exact CLI error text the local user would receive: {{code}}{visible_error}{{code}}",
+        "* Confirmed no attachment appeared for the issue, no release asset upload was attempted, and no `attachments.json` write occurred after the failure.",
+        "",
+        "h4. Result",
+        "* ✅ Step 1 passed: the CLI exercised the expected mocked release-creation conflict path.",
+        "* ✅ Step 2 passed: the visible error stayed conflict-specific and included `409`, `Conflict`, and `tag already exists` without `422`, `Validation Failed`, or `REPOSITORY_OPEN_FAILED`.",
+        "* ✅ Step 3 passed: no user-visible attachment state changed after the failed upload.",
+        "* ✅ Human-style verification passed: the exact terminal/JSON error and the unchanged post-failure state matched the expected result.",
         "",
         "h4. Observed request sequence",
         "{code}",
@@ -369,20 +430,40 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     ]
 
     markdown_lines = [
-        "## TS-684 rework",
+        "## Test Automation Result",
         "",
-        "- Updated the test to execute the local `TrackStateCli` attachment-upload path instead of calling the repository upload method directly.",
-        "- Re-ran the mocked GitHub release lookup/create conflict flow (`404` then `409 Conflict`) and revalidated the post-failure state.",
-        f"- Result: **passed**. The local CLI failure stayed conflict-specific: `{visible_error}`.",
-        "- No release asset upload or `attachments.json` write occurred after the failed release creation.",
+        "**Status:** ✅ PASSED",
+        f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## What was automated",
+        "- Mocked the GitHub release lookup/create flow so release tag lookup returned `404` and release creation returned `409 Conflict` with `tag already exists`.",
+        "- Executed `trackstate attachment upload --issue TS-101 --file test.pdf --target local` through the local CLI execution path.",
+        "- Inspected the caller-visible CLI output and the post-failure attachment state.",
+        "",
+        "## Human-style verification",
+        f"- Observed the exact CLI error text the local user would receive: `{visible_error}`.",
+        "- Confirmed no attachment appeared for the issue, no release asset upload was attempted, and no `attachments.json` write occurred after the failure.",
+        "",
+        "## Result",
+        "- Step 1 passed: the CLI exercised the expected mocked release-creation conflict path.",
+        "- Step 2 passed: the visible error stayed conflict-specific and included `409`, `Conflict`, and `tag already exists` without `422`, `Validation Failed`, or `REPOSITORY_OPEN_FAILED`.",
+        "- Step 3 passed: no user-visible attachment state changed after the failed upload.",
+        "- Human-style verification passed: the exact terminal/JSON error and the unchanged post-failure state matched the expected result.",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
     ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
 
 
-def _write_failure_outputs(result: dict[str, object]) -> None:
+def _write_failure_outputs(
+    result: dict[str, object], *, product_defect: bool
+) -> None:
     error_message = _as_text(result.get("error"))
     RESULT_PATH.write_text(
         json.dumps(
@@ -405,21 +486,60 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     request_sequence = _as_list_of_strings(result.get("request_sequence"))
     release_create_json = _as_dict(_as_dict(result.get("release_create")).get("jsonBody"))
     traceback_text = _as_text(result.get("traceback"))
+    failures = _as_list_of_strings(result.get("failures"))
+    release_lookup = _as_dict(result.get("release_lookup"))
+    release_create = _as_dict(result.get("release_create"))
+    release_asset_upload = _as_dict(result.get("release_asset_upload"))
+    metadata_write = _as_dict(result.get("metadata_write"))
+    cached_attachment_count = int(result.get("cached_attachment_count") or 0)
+    cached_attachment_names = _as_list_of_strings(result.get("cached_attachment_names"))
+    repository_path = _as_text(result.get("repository_path"))
+    step1_summary = (
+        f"command={_as_text(result.get('requested_command_text')) or '<missing>'}; "
+        f"release_lookup_status={release_lookup.get('responseStatusCode')}; "
+        f"release_create_status={release_create.get('responseStatusCode')}; "
+        f"request_sequence={' | '.join(request_sequence) or '<missing>'}"
+    )
+    step2_summary = visible_error or _observed_command_output(
+        stdout=cli_stdout, stderr=cli_stderr
+    )
+    step3_summary = (
+        f"release_asset_upload_present={bool(release_asset_upload)}; "
+        f"metadata_write_present={bool(metadata_write)}; "
+        f"cached_attachment_count={cached_attachment_count}; "
+        f"cached_attachment_names={cached_attachment_names}"
+    )
+    actual_vs_expected = (
+        "Actual: the local CLI returned the generic "
+        "`REPOSITORY_OPEN_FAILED` repository envelope with top-level message "
+        f"`Attachment upload failed for \"{repository_path}\".` while only placing the "
+        "409 release conflict details in the nested reason text. Expected: the "
+        "caller-visible error itself should be conflict-specific, clearly indicating "
+        "`409`, `Conflict`, and `tag already exists`, and should not be wrapped in "
+        "`REPOSITORY_OPEN_FAILED`."
+    )
 
     jira_lines = [
-        "h3. Test Automation Rework Result",
+        "h3. Test Automation Result",
         "",
         "*Status:* ❌ FAILED",
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
-        "h4. What changed",
-        "* Updated TS-684 to execute the TrackState CLI attachment-upload path instead of calling the repository upload method directly.",
-        "* Kept the mocked GitHub release lookup/create flow (`404` then `409 Conflict`) and revalidated the post-failure state.",
+        "h4. What was automated",
+        "* Step 1: Mocked the GitHub release lookup/create flow so `GET /releases/tags/ts684-TS-101` returned `404` and `POST /releases` returned `409 Conflict` with `tag already exists`.",
+        "* Step 2: Executed `trackstate attachment upload --issue TS-101 --file test.pdf --target local` through the local CLI execution path.",
+        "* Step 3: Inspected the caller-visible CLI output and the post-failure attachment state.",
         "",
-        "h4. New result",
-        "* The review issue is fixed: the test now exercises the CLI surface.",
-        "* The rerun exposed a product bug: the local CLI still wraps the 409 conflict in the generic {{REPOSITORY_OPEN_FAILED}} envelope instead of surfacing a conflict-specific local CLI error.",
-        f"* Observed CLI output: {{code}}{visible_error or cli_stdout or cli_stderr}{{code}}",
+        "h4. Human-style verification",
+        f"* Observed the exact CLI error text the local user would receive: {{code}}{visible_error or cli_stdout or cli_stderr}{{code}}",
+        "* Observed no attachment was added for the issue after the failed upload: no release asset upload occurred, no `attachments.json` write occurred, and the cached attachment list stayed empty.",
+        "",
+        "h4. Result",
+        f"* {'✅' if not any(message.startswith('Step 1 failed') or message.startswith('Precondition failed') or 'release lookup' in message or 'release creation' in message for message in failures) else '❌'} Step 1 {'passed' if not any(message.startswith('Step 1 failed') or message.startswith('Precondition failed') or 'release lookup' in message or 'release creation' in message for message in failures) else 'failed'}: {step1_summary}",
+        f"* ❌ Step 2 failed: the caller-visible CLI error was {{code}}{visible_error}{{code}}.",
+        f"* Actual vs Expected: {actual_vs_expected}",
+        f"* {'✅' if not any('asset upload was attempted' in message or 'attachments.json was written' in message or 'cached issue state changed' in message for message in failures) else '❌'} Step 3 {'passed' if not any('asset upload was attempted' in message or 'attachments.json was written' in message or 'cached issue state changed' in message for message in failures) else 'failed'}: {step3_summary}",
+        f"* {'❌' if product_defect else '⚠️'} Human-style verification {'failed' if product_defect else 'was blocked'}: the exact terminal/JSON error seen by the user still exposed the generic `REPOSITORY_OPEN_FAILED` wrapper instead of a conflict-specific CLI error.",
         "",
         "h4. Observed request sequence",
         "{code}",
@@ -431,6 +551,11 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         json.dumps(release_create_json, indent=2, sort_keys=True),
         "{code}",
         "",
+        "h4. Exact assertion failure / stack trace",
+        "{code}",
+        traceback_text or error_message,
+        "{code}",
+        "",
         "h4. Run command",
         "{code:bash}",
         RUN_COMMAND,
@@ -438,18 +563,45 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     ]
 
     markdown_lines = [
-        "## TS-684 rework",
+        "## Test Automation Result",
         "",
-        "- Updated the test to execute the local `TrackStateCli` attachment-upload path instead of calling the repository upload method directly.",
-        "- Re-ran the mocked GitHub release lookup/create conflict flow (`404` then `409 Conflict`) and revalidated the post-failure state.",
-        "- Result: **failed**. The review issue is fixed, but the rerun exposed a product bug: the local CLI still returns the generic `REPOSITORY_OPEN_FAILED` wrapper instead of surfacing a conflict-specific 409/tag-already-exists error.",
-        f"- Observed CLI output: `{visible_error or cli_stdout or cli_stderr}`.",
+        "**Status:** ❌ FAILED",
+        f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## What was automated",
+        "- Mocked the GitHub release lookup/create flow so release tag lookup returned `404` and release creation returned `409 Conflict` with `tag already exists`.",
+        "- Executed `trackstate attachment upload --issue TS-101 --file test.pdf --target local` through the local CLI execution path.",
+        "- Inspected the caller-visible CLI output and the post-failure attachment state.",
+        "",
+        "## Human-style verification",
+        f"- Observed the exact CLI error text the local user would receive: `{visible_error or cli_stdout or cli_stderr}`.",
+        "- Observed no attachment was added for the issue after the failed upload: no release asset upload occurred, no `attachments.json` write occurred, and the cached attachment list stayed empty.",
+        "",
+        "## Result",
+        f"- Step 1 {'passed' if not any(message.startswith('Step 1 failed') or message.startswith('Precondition failed') or 'release lookup' in message or 'release creation' in message for message in failures) else 'failed'}: {step1_summary}",
+        f"- ❌ Step 2 failed: the caller-visible CLI error was `{visible_error}`.",
+        f"- Actual vs Expected: {actual_vs_expected}",
+        f"- Step 3 {'passed' if not any('asset upload was attempted' in message or 'attachments.json was written' in message or 'cached issue state changed' in message for message in failures) else 'failed'}: {step3_summary}",
+        f"- Human-style verification {'failed' if product_defect else 'was blocked'}: the exact terminal/JSON error seen by the user still exposed the generic `REPOSITORY_OPEN_FAILED` wrapper instead of a conflict-specific CLI error.",
+        "",
+        "## Exact assertion failure / stack trace",
+        "```text",
+        traceback_text or error_message,
+        "```",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
     ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    if product_defect:
+        BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _build_bug_description(result: dict[str, object]) -> str:
@@ -460,45 +612,65 @@ def _build_bug_description(result: dict[str, object]) -> str:
     release_create_json = _as_dict(_as_dict(result.get("release_create")).get("jsonBody"))
     cli_payload = _as_dict(result.get("cli_payload"))
     traceback_text = _as_text(result.get("traceback"))
+    repository_path = _as_text(result.get("repository_path"))
+    request_sequence_text = "\n".join(request_sequence) or "<no requests captured>"
+    observed_output = _observed_command_output(stdout=cli_stdout, stderr=cli_stderr)
 
     lines = [
-        f"# {TICKET_KEY} - Local CLI still hides GitHub release creation 409 conflicts behind REPOSITORY_OPEN_FAILED",
+        f"# {TICKET_KEY} bug reproduction",
+        "",
+        "## Environment",
+        f"- Repository: `{_as_text(result.get('repository'))}`",
+        f"- Repository path: `{repository_path}`",
+        f"- Branch: `{_as_text(result.get('branch'))}`",
+        f"- Issue: `{_as_text(result.get('issueKey'))}`",
+        f"- Attachment file: `{_as_text(result.get('attachmentPath'))}`",
+        f"- Command: `{REQUESTED_COMMAND_TEXT}`",
+        f"- OS: `{platform.system()}`",
         "",
         "## Steps to reproduce",
-        "1. Configure a project with `attachmentStorage.mode = github-releases` and issue `TS-101`.",
-        "2. Mock `GET /repos/IstiN/trackstate/releases/tags/ts684-TS-101` to return `404` and `POST /repos/IstiN/trackstate/releases` to return `409 Conflict` with `tag already exists`.",
-        f"3. Execute `{REQUESTED_COMMAND_TEXT}`.",
-        "4. Inspect the local CLI JSON error envelope / visible output.",
+        "1. ✅ Configure the project with `attachmentStorage.mode = github-releases`. Observed: the disposable CLI fixture repository was created with issue `TS-101` and release-backed attachment storage enabled.",
+        "2. ✅ Mock the GitHub API so `GET /repos/IstiN/trackstate/releases/tags/ts684-TS-101` returns `404` and `POST /repos/IstiN/trackstate/releases` returns `409 Conflict` with `tag already exists`. Observed request sequence reached both mocked endpoints in that order.",
+        f"3. ✅ Execute `{REQUESTED_COMMAND_TEXT}`. Observed: the command failed with exit code `{_as_text(result.get('cli_exit_code'))}` and returned a JSON error payload to the caller.",
+        (
+            "4. ❌ Inspect the CLI error output. Observed: the caller-visible output was "
+            f"`{visible_error or cli_stdout or cli_stderr}`. The 409 conflict details were "
+            "present only inside the nested reason text, while the top-level user-visible "
+            "error still used the generic `REPOSITORY_OPEN_FAILED` / `Attachment upload "
+            f"failed for \"{repository_path}\".` wrapper."
+        ),
+        (
+            "5. ✅ Inspect post-failure side effects. Observed: no release asset upload "
+            "occurred, no `attachments.json` write occurred, and the cached attachment "
+            f"list stayed empty for issue `{_as_text(result.get('issueKey'))}`."
+        ),
         "",
         "## Expected result",
-        (
-            "The local CLI should surface a conflict-specific failure for the 409 release "
-            "creation response, including `409`, `Conflict`, and `tag already exists`, "
-            "without hiding it behind the generic `REPOSITORY_OPEN_FAILED` wrapper."
-        ),
+        "- The local CLI should surface a conflict-specific failure for the 409 release creation response.",
+        "- The caller-visible output should clearly include `409`, `Conflict`, and `tag already exists`.",
+        "- The failure should not be hidden behind the generic `REPOSITORY_OPEN_FAILED` wrapper.",
+        "- No attachment metadata or release asset side effects should be created.",
         "",
         "## Actual result",
-        visible_error or cli_stdout or cli_stderr or "<no CLI output captured>",
-        "",
-        "## Missing or broken production capability",
+        f"- Caller-visible output: `{visible_error or cli_stdout or cli_stderr or '<no CLI output captured>'}`",
         (
-            "The local attachment-upload CLI path does not expose a conflict-specific "
-            "machine-readable/local-CLI error for GitHub release creation conflicts. "
-            "It still maps the provider failure to the generic `REPOSITORY_OPEN_FAILED` "
-            "envelope with `Attachment upload failed for \"<path>\".` at the top level, "
-            "leaving the 409 conflict details only in `error.details.reason`."
+            f"- Actual vs Expected: Actual: the local CLI returned `REPOSITORY_OPEN_FAILED` "
+            f"with top-level message `Attachment upload failed for \"{repository_path}\".` "
+            "and only exposed the 409 conflict inside `error.details.reason`. Expected: "
+            "the caller-visible error itself should be conflict-specific and should not "
+            "use the generic repository wrapper."
         ),
         "",
-        "## Failing command",
-        "```bash",
-        RUN_COMMAND,
-        "```",
-        "",
-        "## Failing CLI payload/output",
+        "## Captured CLI payload/output",
         "```json",
         json.dumps(cli_payload, indent=2, sort_keys=True)
         if cli_payload
         else json.dumps({"stdout": cli_stdout, "stderr": cli_stderr}, indent=2, sort_keys=True),
+        "```",
+        "",
+        "## Captured terminal output",
+        "```text",
+        observed_output or "<no stdout/stderr captured>",
         "```",
         "",
         "## Mocked release creation request body",
@@ -508,7 +680,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "",
         "## Observed request sequence",
         "```text",
-        "\n".join(request_sequence),
+        request_sequence_text,
         "```",
         "",
         "## Exact assertion failure / stack trace",
@@ -517,6 +689,20 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "```",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _is_product_defect(result: dict[str, object]) -> bool:
+    payload = _as_dict(result.get("probe_payload"))
+    if payload.get("status") != "passed":
+        return False
+    visible_error = _as_text(result.get("visible_error_text"))
+    request_sequence = _as_list_of_strings(result.get("request_sequence"))
+    release_create = _as_dict(result.get("release_create"))
+    return bool(
+        visible_error
+        or request_sequence
+        or release_create.get("responseStatusCode") == 409
+    )
 
 
 def _write_review_replies(result: dict[str, object], *, status: str) -> None:
