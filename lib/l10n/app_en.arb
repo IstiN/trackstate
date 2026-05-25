@@ -599,6 +599,7 @@
   "close": "Close",
   "connectGitHub": "Connect GitHub",
   "retry": "Retry",
+  "retryStartup": "Retry startup",
   "editIssue": "Edit issue",
   "optional": "Optional",
   "unassigned": "Unassigned",
