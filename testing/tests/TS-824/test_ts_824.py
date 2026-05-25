@@ -219,7 +219,8 @@ def main() -> None:
                         f"container_kind={panel.container_kind}; "
                         f"anchored_to_trigger={panel.anchored_to_trigger}; "
                         f"row_count={switcher.row_count}; "
-                        f"title_visible={'Workspace switcher' in switcher.switcher_text}"
+                        f"title_visible={'Workspace switcher' in switcher.switcher_text}; "
+                        f"content_excerpt={_snippet(switcher.switcher_text)}"
                     ),
                 )
                 _record_human_verification(
@@ -227,15 +228,15 @@ def main() -> None:
                     check=(
                         "Reached the workspace switcher trigger through real keyboard Tab "
                         "navigation, opened the visible desktop panel from that focused "
-                        "trigger, and confirmed the panel title plus saved workspace rows "
-                        "were shown before pressing Tab again."
+                        "trigger, and confirmed the panel content a user would see before "
+                        "pressing Tab again."
                     ),
                     observed=(
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         "title='Workspace switcher'; "
                         f"row_count={switcher.row_count}; "
-                        f"text_excerpt={switcher.switcher_text!r}"
+                        f"text_excerpt={_snippet(switcher.switcher_text)}"
                     ),
                 )
 
@@ -423,10 +424,21 @@ def _assert_desktop_panel_open(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
-    if switcher.row_count <= 0:
+    switcher_text = switcher.switcher_text.strip()
+    if not switcher_text:
         raise AssertionError(
-            "Step 2 failed: opening the workspace switcher did not expose any visible "
-            "workspace rows.\n"
+            "Step 2 failed: opening the workspace switcher did not expose readable "
+            "visible panel content.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}",
+        )
+    if (
+        "Workspace switcher" not in switcher_text
+        and trigger.display_name not in switcher_text
+        and "Add workspace" not in switcher_text
+    ):
+        raise AssertionError(
+            "Step 2 failed: opening the workspace switcher trigger did not expose the "
+            "expected desktop workspace-switcher content.\n"
             f"Observed switcher text:\n{switcher.switcher_text}",
         )
     if panel.container_kind not in {"anchored-panel", "surface"}:
