@@ -29,4 +29,26 @@ void main() {
     expect(workflow, contains('name: actionlint'));
     expect(workflow, contains('Run actionlint'));
   });
+
+  test('setup repository exposes an actionlint pass gate for non-workflow PRs', () {
+    final workflowFile = repositoryFile(
+      'trackstate-setup/.github/workflows/actionlint-non-workflow-pr.yml',
+    );
+
+    expect(
+      workflowFile.existsSync(),
+      isTrue,
+      reason:
+          'trackstate-setup needs a contributor-visible actionlint check for '
+          'non-workflow pull requests because actionlint remains required on '
+          'the protected main branch.',
+    );
+
+    final workflow = workflowFile.readAsStringSync();
+    expect(workflow, contains('pull_request_target:'));
+    expect(workflow, contains('paths-ignore:'));
+    expect(workflow, contains('.github/workflows/**'));
+    expect(workflow, contains('jobs:'));
+    expect(workflow, contains('name: actionlint'));
+  });
 }
