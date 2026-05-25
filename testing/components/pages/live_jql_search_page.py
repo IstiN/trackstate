@@ -110,11 +110,10 @@ class LiveJqlSearchPage:
             field_index=field_index,
             expected_count_summaries=expected_count_summaries,
         )
-        self._session.fill(
+        self._replace_query_text(
             field_selector,
             query,
             index=field_index,
-            timeout_ms=30_000,
         )
         self._session.press(
             field_selector,
@@ -138,22 +137,10 @@ class LiveJqlSearchPage:
     def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
         field_selector, field_index = self._wait_for_search_field()
-        self._session.focus(
-            field_selector,
-            index=field_index,
-            timeout_ms=30_000,
-        )
-        self._session.fill(
+        self._replace_query_text(
             field_selector,
             query,
             index=field_index,
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_input_value(
-            field_selector,
-            query,
-            index=field_index,
-            timeout_ms=30_000,
         )
         self._session.press(
             field_selector,
@@ -316,11 +303,10 @@ class LiveJqlSearchPage:
             return
 
         sync_query = self._synchronization_query(expected_count_summaries)
-        self._session.fill(
+        self._replace_query_text(
             field_selector,
             sync_query,
             index=field_index,
-            timeout_ms=30_000,
         )
         self._session.press(
             field_selector,
@@ -369,6 +355,49 @@ class LiveJqlSearchPage:
         if "No issues" in expected_count_summaries:
             return ""
         return "__ts327_sync_no_match__"
+
+    def _replace_query_text(
+        self,
+        field_selector: str,
+        query: str,
+        *,
+        index: int,
+    ) -> None:
+        self._session.click(
+            field_selector,
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.press(
+            field_selector,
+            "Control+A",
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.press(
+            field_selector,
+            "Backspace",
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            field_selector,
+            "",
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.fill(
+            field_selector,
+            query,
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            field_selector,
+            query,
+            index=index,
+            timeout_ms=30_000,
+        )
 
     @staticmethod
     def _count_summary(body_text: str) -> str | None:
