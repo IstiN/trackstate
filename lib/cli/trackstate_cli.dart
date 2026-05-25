@@ -510,6 +510,24 @@ class TrackStateCli {
       results,
       defaultTargetType: TrackStateCliTargetType.local,
     );
+    if (resource == 'account-by-email') {
+      return _error(
+        _TrackStateCliException(
+          code: 'UNSUPPORTED_ACCOUNT_BY_EMAIL',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: 'Reading accounts by email is currently unsupported.',
+          exitCode: 5,
+          details: <String, Object?>{
+            'resource': resource,
+            if (results.rest.isNotEmpty) 'arguments': results.rest,
+          },
+        ),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
 
     try {
       return await switch (target.type) {
@@ -667,10 +685,7 @@ class TrackStateCli {
     final bytes = await sourceFile.readAsBytes();
     final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
-        results['name']?.toString().trim().ifEmpty(
-          sourceName,
-        ) ??
-        sourceName;
+        results['name']?.toString().trim().ifEmpty(sourceName) ?? sourceName;
 
     try {
       return await switch (target.type) {
@@ -6384,7 +6399,7 @@ class TrackStateCli {
         '  link-types        List canonical issue link types.',
         '  profile           Read the current provider identity.',
         '  user              Read a provider user by login when supported.',
-        '  account-by-email  Read an account by email when the active provider can resolve it.',
+        '  account-by-email  Reserved for Jira compatibility; currently returns an unsupported error.',
         '',
         'Canonical examples:',
         '  trackstate read ticket --key TRACK-1',
@@ -6427,14 +6442,14 @@ class TrackStateCli {
       'user' =>
         '  trackstate read user --login octocat [--target hosted --provider github --repository owner/name] [--output json|text]',
       'account-by-email' =>
-        '  trackstate read account-by-email --email user@example.com',
+        '  trackstate read account-by-email user@example.com',
       _ => '  trackstate read $resource',
     };
     final notes = switch (resource) {
       'user' =>
         '  Local runtime only supports returning the current Git identity when the login matches.',
       'account-by-email' =>
-        '  Local runtime resolves the active Git identity by email; hosted GitHub mode also searches provider-native email matches.',
+        '  This command currently returns an explicit unsupported-operation error instead of querying provider or repository state.',
       _ =>
         '  JSON success output matches the equivalent Jira response family and omits TrackState-only wrappers.',
     };
