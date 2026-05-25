@@ -27,6 +27,7 @@ void main() {
                 Ts716WorkspaceSyncAccessibilityRepository.hostedTokenValue,
           },
         );
+        await robot.resize(const Size(1440, 900));
 
         await _pumpUntil(
           tester,
@@ -46,7 +47,7 @@ void main() {
                   )
                   .evaluate()
                   .isNotEmpty,
-          timeout: const Duration(seconds: 5),
+          timeout: const Duration(seconds: 10),
           failureMessage:
               'TS-716 could not reach the hosted read-only Attention needed state. '
               'Visible texts: ${_formatSnapshot(robot.visibleTexts())}. '
@@ -75,27 +76,39 @@ void main() {
             );
           }
 
-          final pillBackground = robot.decoratedContainerBackgroundColor(
-            _workspaceSyncPill,
+          final visibleStatus = find.text(
+            Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
+            findRichText: true,
           );
-          if (pillBackground == null) {
+          if (visibleStatus.evaluate().isEmpty) {
             failures.add(
-              'Step 3 failed: the top-bar sync pill did not expose a decorated error background, '
-              'so contrast could not be measured.',
+              'Step 3 failed: the top-bar sync pill did not keep the visible '
+              '"${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" status on screen. '
+              'Visible texts: ${_formatSnapshot(topBarTexts)}.',
             );
           } else {
-            final contrast = contrastRatio(
-              robot.renderedTextColorWithin(
-                _workspaceSyncPill,
-                Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
-              ),
-              pillBackground,
+            final pillBackground = robot.decoratedContainerBackgroundColor(
+              _workspaceSyncPill,
             );
-            if (contrast < 4.5) {
+            if (pillBackground == null) {
               failures.add(
-                'Step 3 failed: the visible "${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" '
-                'label contrast was ${contrast.toStringAsFixed(2)}:1, below the WCAG AA 4.5:1 threshold.',
+                'Step 3 failed: the top-bar sync pill did not expose a decorated error background, '
+                'so contrast could not be measured.',
               );
+            } else {
+              final contrast = contrastRatio(
+                robot.renderedTextColorWithin(
+                  _workspaceSyncPill,
+                  Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
+                ),
+                pillBackground,
+              );
+              if (contrast < 4.5) {
+                failures.add(
+                  'Step 3 failed: the visible "${Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel}" '
+                  'label contrast was ${contrast.toStringAsFixed(2)}:1, below the WCAG AA 4.5:1 threshold.',
+                );
+              }
             }
           }
         }

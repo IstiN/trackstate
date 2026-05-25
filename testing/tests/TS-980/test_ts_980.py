@@ -75,10 +75,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Updated TS-980 to accept the current simplified workspace-switcher layout "
-    "while establishing the manual-restore precondition, then continue through "
-    "the hard reload and assert the live post-reload user-visible state instead "
-    "of failing early on the precondition parser."
+    "Resolved the TS-980 merge with main while preserving the approved "
+    "repo-backed manual-restore flow and the post-reload product-gap "
+    "assertions for the restored local workspace."
 )
 
 

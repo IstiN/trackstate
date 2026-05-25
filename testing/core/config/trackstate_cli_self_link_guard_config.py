@@ -37,7 +37,7 @@ class TrackStateCliSelfLinkGuardConfig:
     def from_defaults(cls) -> "TrackStateCliSelfLinkGuardConfig":
         return cls(
             test_id="TS-659",
-            compiled_source_ref="origin/main",
+            compiled_source_ref="current checkout",
             project_key="TS",
             project_name="TS-659 Self Link Guard Project",
             seed_issue_key="TS-0",

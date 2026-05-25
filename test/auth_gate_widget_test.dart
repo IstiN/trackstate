@@ -7,7 +7,12 @@ import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../testing/components/screens/settings_screen_robot.dart';
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+
+const String _readOnlyTitle = 'This repository session is read-only';
+const String _readOnlyMessage =
+    'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
 
 void main() {
   setUp(() {
@@ -33,6 +38,67 @@ void main() {
 
         expect(find.text('Summary'), findsAtLeastNWidgets(1));
         expect(find.text('Description'), findsAtLeastNWidgets(1));
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'read-only hosted create flow Open settings routes to Project Settings with repository access visible',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+      });
+      const readOnlyPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
+      final settingsRobot = SettingsScreenRobot(tester);
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: readOnlyPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('^Create issue\$')).first);
+        await tester.pumpAndSettle();
+
+        final callout = find.ancestor(
+          of: find.text(_readOnlyTitle, findRichText: true).last,
+          matching: find.byWidgetPredicate((widget) {
+            if (widget is! Semantics) {
+              return false;
+            }
+            final label = widget.properties.label ?? '';
+            return label.contains(_readOnlyTitle) &&
+                label.contains(_readOnlyMessage);
+          }, description: 'read-only create gate callout'),
+        );
+        final openSettings = find.descendant(
+          of: callout,
+          matching: find.widgetWithText(OutlinedButton, 'Open settings'),
+        );
+        expect(openSettings, findsOneWidget);
+        expect(openSettings.hitTestable(), findsOneWidget);
+
+        await tester.tap(openSettings.hitTestable().first);
+        await tester.pumpAndSettle();
+
+        expect(settingsRobot.projectSettingsHeading, findsOneWidget);
+        expect(settingsRobot.repositoryAccessSection, findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -312,7 +378,7 @@ void main() {
   );
 
   testWidgets(
-    'release-backed hosted flow keeps upload controls available and shows a runtime failure when hosted release writes are unavailable',
+    'release-backed hosted flow keeps upload controls available and queues inbox uploads when direct release writes are unavailable',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -335,12 +401,13 @@ void main() {
       );
 
       try {
+        final repository = ReactiveIssueDetailTrackStateRepository(
+          permission: releaseRestrictedPermission,
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        );
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(
-              permission: releaseRestrictedPermission,
-              textFixtures: _githubReleasesProjectTextFixtures(),
-            ),
+            repository: repository,
             attachmentPicker: pickAttachment,
           ),
         );
@@ -398,18 +465,12 @@ void main() {
         await tester.tap(uploadAttachmentAction);
         await tester.pumpAndSettle();
 
+        expect(find.textContaining('Save failed:'), findsNothing);
         expect(
-          find.textContaining(
-            'Save failed: GitHub Releases attachment storage requires GitHub authentication/configuration that supports release uploads.',
-          ),
+          find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
         );
-        expect(
-          find.textContaining(
-            'This repository session cannot upload release-backed attachments.',
-          ),
-          findsOneWidget,
-        );
+        expect(find.text('release notes.pdf'), findsNothing);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
