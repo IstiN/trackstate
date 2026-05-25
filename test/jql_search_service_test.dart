@@ -171,10 +171,7 @@ void main() {
       );
 
       expect(page.issues.map((issue) => issue.key), ['TRACK-10']);
-      expect(
-        service.requiresIssueDetails('project = TRACK TRACK-10'),
-        isFalse,
-      );
+      expect(service.requiresIssueDetails('project = TRACK TRACK-10'), isFalse);
     },
   );
 
