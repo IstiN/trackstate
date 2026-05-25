@@ -273,22 +273,30 @@ class LiveTrackerHeaderPage:
                   ),
               ) ?? null;
               const createIssueButton = smallest(
-                Array.from(
-                  document.querySelectorAll('flt-semantics[role="button"][aria-label="Create issue"]'),
-                ).filter(isVisible),
+                Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
+                  (element) => isVisible(element) && labelFor(element).label === 'Create issue',
+                ),
               );
               const repositoryAccessButton = smallest(
-                Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
+                Array.from(document.querySelectorAll('flt-semantics')).filter(
                   (element) => {
                     if (!isVisible(element)) {
                       return false;
                     }
-                    return matchesAnyLabel(element, [
-                      'Attachments limited',
-                      'Repository access',
-                      'Manage GitHub access',
-                      'Connected',
-                    ]);
+                    const rect = element.getBoundingClientRect();
+                    if (rect.y >= 110 || rect.height > 60) {
+                      return false;
+                    }
+                    const labels = labelFor(element);
+                    return (
+                      labels.accessibleLabel.startsWith('Workspace switcher:')
+                      || matchesAnyLabel(element, [
+                        'Attachments limited',
+                        'Repository access',
+                        'Manage GitHub access',
+                        'Connected',
+                      ])
+                    );
                   },
                 ),
               );
@@ -302,11 +310,13 @@ class LiveTrackerHeaderPage:
                   if (!isVisible(element)) {
                     return false;
                   }
+                  const label = labelFor(element).label.toLowerCase();
                   const rect = element.getBoundingClientRect();
                   return (
                     rect.height >= 32
                     && rect.width < 220
-                    && labelFor(element).label.includes('Synced with Git')
+                    && rect.y < 110
+                    && label.includes('sync')
                   );
                 }),
               );

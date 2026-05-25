@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from testing.components.pages.live_dashboard_page import LiveDashboardPage  # noqa: E402
 from testing.components.pages.live_tracker_header_page import (  # noqa: E402
     HeaderContainerObservation,
     HeaderControlObservation,
@@ -68,6 +69,7 @@ def main() -> None:
     try:
         with create_live_tracker_app(config) as tracker_page:
             page = LiveTrackerHeaderPage(tracker_page)
+            dashboard_page = LiveDashboardPage(tracker_page)
             runtime = tracker_page.open()
             result["runtime_state"] = runtime.kind
             result["runtime_body_text"] = runtime.body_text
@@ -84,7 +86,9 @@ def main() -> None:
                 user_login=user.login,
             )
             page.dismiss_connection_banner()
+            dashboard = dashboard_page.open()
             result["connected_text"] = connected_text
+            result["dashboard_text"] = dashboard.body_text
             _record_step(
                 result,
                 step=1,
@@ -113,8 +117,8 @@ def main() -> None:
                 result,
                 check=(
                     "Verified the live desktop header visibly showed the sync status pill, "
-                    "search field, Create issue button, repository access button, theme "
-                    "toggle, and profile identity in the same top row."
+                    "search field, Create issue button, workspace switcher/repository "
+                    "access control, theme toggle, and profile identity in the same top row."
                 ),
                 observed=(
                     f"sync={_label(header.sync_status_pill)!r}; "
@@ -144,7 +148,8 @@ def main() -> None:
                 ),
                 observed=(
                     f"heights_px={_height_summary(header)}; "
-                    f"vertical_center_spread_px={center_spread:.2f}"
+                    f"vertical_center_spread_px={center_spread:.2f}; "
+                    f"dashboard_visible={dashboard.active_dashboard_visible}"
                 ),
             )
 

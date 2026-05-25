@@ -93,13 +93,12 @@ class ProjectSettingsNavigationState:
 
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _tappable_button_selector = 'flt-semantics[role="button"][flt-tappable]'
     _tab_selector = 'flt-semantics[role="tab"]'
-    _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _remember_on_this_browser_selector = (
         'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
     )
-    _connect_token_selector = 'flt-semantics[role="button"][aria-label*="Connect token"]'
     _repository_access_selector = 'flt-semantics[aria-label*="Repository access"]'
     _settings_nav_selector = 'flt-semantics[role="button"]'
     _settings_heading = "Project Settings"
@@ -130,7 +129,7 @@ class LiveProjectSettingsPage:
         if connected_banner in current_body:
             return current_body
 
-        if self._session.count(self._connect_selector) == 0:
+        if self._session.count(self._button_selector, has_text="Connect GitHub") == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
                 "action needed to enter the writable Settings flow.\n"
@@ -139,12 +138,16 @@ class LiveProjectSettingsPage:
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
-                self._session.click(self._connect_selector, timeout_ms=30_000)
+                self._session.click(
+                    self._tappable_button_selector,
+                    has_text="Connect GitHub",
+                    timeout_ms=30_000,
+                )
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
             self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
             self._session.click(
-                self._button_selector,
+                self._tappable_button_selector,
                 has_text="Connect token",
                 timeout_ms=30_000,
             )
@@ -191,9 +194,9 @@ class LiveProjectSettingsPage:
         )
 
     def dismiss_connection_banner(self) -> None:
-        if self._session.count(self._close_selector) == 0:
+        if self._session.count(self._button_selector, has_text="Close") == 0:
             return
-        self._session.click(self._close_selector, timeout_ms=30_000)
+        self._session.click(self._button_selector, has_text="Close", timeout_ms=30_000)
 
     def open_settings(self) -> str:
         self._session.click(
