@@ -5375,15 +5375,16 @@ Future<void> _showRepositoryAccessDialog(
   final dialogTitle = accessMode == HostedRepositoryAccessMode.disconnected
       ? l10n.connectGitHub
       : l10n.manageGitHubAccess;
-  final connectionRequest = await showDialog<_HostedRepositoryAccessDialogResult>(
-    context: context,
-    builder: (context) {
-      return _HostedRepositoryAccessDialog(
-        title: dialogTitle,
-        viewModel: viewModel,
+  final connectionRequest =
+      await showDialog<_HostedRepositoryAccessDialogResult>(
+        context: context,
+        builder: (context) {
+          return _HostedRepositoryAccessDialog(
+            title: dialogTitle,
+            viewModel: viewModel,
+          );
+        },
       );
-    },
-  );
   if (connectionRequest == null) {
     return;
   }
@@ -5509,10 +5510,7 @@ class _HostedRepositoryAccessDialogState
           onPressed: () => Navigator.of(context).pop(),
           child: Text(l10n.cancel),
         ),
-        FilledButton(
-          onPressed: _submitToken,
-          child: Text(l10n.connectToken),
-        ),
+        FilledButton(onPressed: _submitToken, child: Text(l10n.connectToken)),
       ],
     );
   }
@@ -11000,6 +10998,11 @@ class _IssueDetail extends StatefulWidget {
 
 class _IssueDetailState extends State<_IssueDetail> {
   late final TextEditingController _commentController;
+  late final List<FocusNode> _collaborationTabFocusNodes =
+      List<FocusNode>.generate(
+        4,
+        (index) => FocusNode(debugLabel: 'issue-detail-tab-$index'),
+      );
   int _selectedCollaborationTab = 0;
   PickedAttachment? _selectedAttachment;
   String? _attachmentUploadNotice;
@@ -11074,6 +11077,9 @@ class _IssueDetailState extends State<_IssueDetail> {
   @override
   void dispose() {
     _commentController.dispose();
+    for (final focusNode in _collaborationTabFocusNodes) {
+      focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -11277,168 +11283,196 @@ class _IssueDetailState extends State<_IssueDetail> {
     ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: FocusScope(
+        debugLabel: 'issue-detail-${issue.key}',
+        autofocus: true,
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _IssueTypeGlyph(issue.issueType),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  issue.key,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    color: colors.muted,
-                    fontWeight: FontWeight.w600,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _IssueTypeGlyph(issue.issueType),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      issue.key,
+                      style: TextStyle(
+                        fontFamily: 'JetBrains Mono',
+                        color: colors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                ),
+                  Flexible(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.end,
+                      children: actions,
+                    ),
+                  ),
+                ],
               ),
-              Flexible(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.end,
-                  children: actions,
-                ),
+              const SizedBox(height: 12),
+              Text(
+                issue.summary,
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            issue.summary,
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 12),
-          if (hasBlockedWriteAccess) ...[
-            _AccessCallout(
-              semanticLabel: l10n.issueDetail,
-              title: _repositoryAccessTitle(l10n, widget.viewModel),
-              message: _repositoryAccessMessage(l10n, widget.viewModel),
-              primaryActionLabel: l10n.openSettings,
-              onPrimaryAction: () =>
-                  widget.viewModel.selectSection(TrackerSection.settings),
-            ),
-            const SizedBox(height: 12),
-          ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _StatusBadge(
-                status: issue.status,
-                label: _resolvedIssueStatusLabel(
+              const SizedBox(height: 12),
+              if (hasBlockedWriteAccess) ...[
+                _AccessCallout(
+                  semanticLabel: l10n.issueDetail,
+                  title: _repositoryAccessTitle(l10n, widget.viewModel),
+                  message: _repositoryAccessMessage(l10n, widget.viewModel),
+                  primaryActionLabel: l10n.openSettings,
+                  onPrimaryAction: () =>
+                      widget.viewModel.selectSection(TrackerSection.settings),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _StatusBadge(
+                    status: issue.status,
+                    label: _resolvedIssueStatusLabel(
+                      context,
+                      widget.viewModel.project,
+                      issue,
+                    ),
+                  ),
+                  _PriorityBadge(priority: issue.priority),
+                  for (final label in issue.labels) _Chip(label: label),
+                ],
+              ),
+              const SizedBox(height: 18),
+              _IssueDetailTabs(
+                selectedIndex: _selectedCollaborationTab,
+                tabs: [
+                  l10n.detail,
+                  l10n.comments,
+                  l10n.attachments,
+                  l10n.history,
+                ],
+                focusNodes: _collaborationTabFocusNodes,
+                failedTabIndexes: {
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.detail,
+                  ))
+                    0,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.comments,
+                  ))
+                    1,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.attachments,
+                  ))
+                    2,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.history,
+                  ))
+                    3,
+                },
+                onSelected: (index) {
+                  setState(() {
+                    _selectedCollaborationTab = index;
+                  });
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) {
+                      return;
+                    }
+                    _collaborationTabFocusNodes[index].requestFocus();
+                  });
+                  switch (index) {
+                    case 0:
+                      widget.viewModel.ensureIssueDetailLoaded(issue);
+                    case 1:
+                      widget.viewModel.ensureIssueCommentsLoaded(issue);
+                    case 2:
+                      widget.viewModel.ensureIssueAttachmentsLoaded(issue);
+                    case 3:
+                      widget.viewModel.ensureIssueHistoryLoaded(issue);
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              if (_selectedCollaborationTab == 0)
+                _detailTabContent(
                   context,
-                  widget.viewModel.project,
-                  issue,
+                  issue: issue,
+                  l10n: l10n,
+                  colors: colors,
+                )
+              else if (_selectedCollaborationTab == 1)
+                _CommentsTab(
+                  issue: issue,
+                  viewModel: widget.viewModel,
+                  controller: _commentController,
+                  isSaving: widget.viewModel.isSaving,
+                  isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.comments,
+                  ),
+                  writeBlocked: hasBlockedWriteAccess,
+                  onSave: canUseWriteActions ? _saveComment : null,
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueCommentsLoaded(issue),
+                )
+              else if (_selectedCollaborationTab == 2)
+                _AttachmentsTab(
+                  issue: issue,
+                  viewModel: widget.viewModel,
+                  onDownload: widget.viewModel.downloadIssueAttachment,
+                  selectedAttachment: _selectedAttachment,
+                  uploadNotice: _attachmentUploadNotice,
+                  isSaving: widget.viewModel.isSaving,
+                  isLoading: widget.viewModel.isIssueAttachmentsLoading(
+                    issue.key,
+                  ),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.attachments,
+                  ),
+                  onChooseAttachment: _chooseAttachment,
+                  onClearSelection: () {
+                    setState(() {
+                      _selectedAttachment = null;
+                      _attachmentUploadNotice = null;
+                    });
+                  },
+                  onUpload: _uploadAttachment,
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueAttachmentsLoaded(issue),
+                )
+              else
+                _HistoryTab(
+                  entries: widget.viewModel.issueHistoryFor(issue.key),
+                  isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.history,
+                  ),
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueHistoryLoaded(issue),
                 ),
-              ),
-              _PriorityBadge(priority: issue.priority),
-              for (final label in issue.labels) _Chip(label: label),
             ],
           ),
-          const SizedBox(height: 18),
-          _IssueDetailTabs(
-            selectedIndex: _selectedCollaborationTab,
-            tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
-            failedTabIndexes: {
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.detail,
-              ))
-                0,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.comments,
-              ))
-                1,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.attachments,
-              ))
-                2,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.history,
-              ))
-                3,
-            },
-            onSelected: (index) {
-              setState(() {
-                _selectedCollaborationTab = index;
-              });
-              switch (index) {
-                case 0:
-                  widget.viewModel.ensureIssueDetailLoaded(issue);
-                case 1:
-                  widget.viewModel.ensureIssueCommentsLoaded(issue);
-                case 2:
-                  widget.viewModel.ensureIssueAttachmentsLoaded(issue);
-                case 3:
-                  widget.viewModel.ensureIssueHistoryLoaded(issue);
-              }
-            },
-          ),
-          const SizedBox(height: 16),
-          if (_selectedCollaborationTab == 0)
-            _detailTabContent(context, issue: issue, l10n: l10n, colors: colors)
-          else if (_selectedCollaborationTab == 1)
-            _CommentsTab(
-              issue: issue,
-              viewModel: widget.viewModel,
-              controller: _commentController,
-              isSaving: widget.viewModel.isSaving,
-              isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.comments,
-              ),
-              writeBlocked: hasBlockedWriteAccess,
-              onSave: canUseWriteActions ? _saveComment : null,
-              onRetry: () => widget.viewModel.ensureIssueCommentsLoaded(issue),
-            )
-          else if (_selectedCollaborationTab == 2)
-            _AttachmentsTab(
-              issue: issue,
-              viewModel: widget.viewModel,
-              onDownload: widget.viewModel.downloadIssueAttachment,
-              selectedAttachment: _selectedAttachment,
-              uploadNotice: _attachmentUploadNotice,
-              isSaving: widget.viewModel.isSaving,
-              isLoading: widget.viewModel.isIssueAttachmentsLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.attachments,
-              ),
-              onChooseAttachment: _chooseAttachment,
-              onClearSelection: () {
-                setState(() {
-                  _selectedAttachment = null;
-                  _attachmentUploadNotice = null;
-                });
-              },
-              onUpload: _uploadAttachment,
-              onRetry: () =>
-                  widget.viewModel.ensureIssueAttachmentsLoaded(issue),
-            )
-          else
-            _HistoryTab(
-              entries: widget.viewModel.issueHistoryFor(issue.key),
-              isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.history,
-              ),
-              onRetry: () => widget.viewModel.ensureIssueHistoryLoaded(issue),
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _IssueDetailActionButton extends StatelessWidget {
+class _IssueDetailActionButton extends StatefulWidget {
   const _IssueDetailActionButton({
     required this.label,
     required this.onPressed,
@@ -11454,13 +11488,29 @@ class _IssueDetailActionButton extends StatelessWidget {
   final FocusNode? focusNode;
 
   @override
+  State<_IssueDetailActionButton> createState() =>
+      _IssueDetailActionButtonState();
+}
+
+class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
+  late final FocusNode _focusNode = FocusNode(debugLabel: widget.label);
+
+  FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode;
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final child = ExcludeSemantics(child: Text(label));
-    final button = emphasized
+    final child = ExcludeSemantics(child: Text(widget.label));
+    final button = widget.emphasized
         ? FilledButton(
-            focusNode: focusNode,
-            onPressed: onPressed,
+            focusNode: _effectiveFocusNode,
+            onPressed: widget.onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
               foregroundColor: colors.page,
@@ -11472,8 +11522,8 @@ class _IssueDetailActionButton extends StatelessWidget {
             child: child,
           )
         : OutlinedButton(
-            focusNode: focusNode,
-            onPressed: onPressed,
+            focusNode: _effectiveFocusNode,
+            onPressed: widget.onPressed,
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.text,
               side: BorderSide(color: colors.border),
@@ -11484,17 +11534,25 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    final semanticButton = Semantics(
-      button: true,
-      label: label,
-      sortKey: _semanticsSortKey(sortOrder),
+    final semanticButton = AnimatedBuilder(
+      animation: _effectiveFocusNode,
       child: button,
+      builder: (context, child) => Semantics(
+        button: true,
+        enabled: widget.onPressed != null,
+        focusable: widget.onPressed != null,
+        focused: _effectiveFocusNode.hasFocus,
+        label: widget.label,
+        sortKey: _semanticsSortKey(widget.sortOrder),
+        onTap: widget.onPressed,
+        child: ExcludeSemantics(child: child!),
+      ),
     );
-    if (sortOrder == null) {
+    if (widget.sortOrder == null) {
       return semanticButton;
     }
     return FocusTraversalOrder(
-      order: NumericFocusOrder(sortOrder!),
+      order: NumericFocusOrder(widget.sortOrder!),
       child: semanticButton,
     );
   }
@@ -15387,12 +15445,14 @@ class _IssueDetailTabs extends StatelessWidget {
   const _IssueDetailTabs({
     required this.selectedIndex,
     required this.tabs,
+    required this.focusNodes,
     this.failedTabIndexes = const <int>{},
     required this.onSelected,
   });
 
   final int selectedIndex;
   final List<String> tabs;
+  final List<FocusNode> focusNodes;
   final Set<int> failedTabIndexes;
   final ValueChanged<int> onSelected;
 
@@ -15412,6 +15472,7 @@ class _IssueDetailTabs extends StatelessWidget {
             for (var index = 0; index < tabs.length; index++)
               _IssueDetailTabChip(
                 label: tabs[index],
+                focusNode: focusNodes[index],
                 selected: index == selectedIndex,
                 showFailureIndicator: failedTabIndexes.contains(index),
                 sortOrder: index + 1,
@@ -15427,6 +15488,7 @@ class _IssueDetailTabs extends StatelessWidget {
 class _IssueDetailTabChip extends StatelessWidget {
   const _IssueDetailTabChip({
     required this.label,
+    required this.focusNode,
     required this.selected,
     required this.showFailureIndicator,
     required this.sortOrder,
@@ -15434,6 +15496,7 @@ class _IssueDetailTabChip extends StatelessWidget {
   });
 
   final String label;
+  final FocusNode focusNode;
   final bool selected;
   final bool showFailureIndicator;
   final int sortOrder;
@@ -15450,6 +15513,8 @@ class _IssueDetailTabChip extends StatelessWidget {
         label: label,
         sortKey: OrdinalSortKey(sortOrder.toDouble()),
         child: InkWell(
+          autofocus: selected,
+          focusNode: focusNode,
           borderRadius: BorderRadius.circular(999),
           onTap: onPressed,
           child: ExcludeSemantics(
@@ -15526,73 +15591,78 @@ class _CommentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (writeBlocked) ...[
-          _AccessCallout(
-            semanticLabel: l10n.comments,
-            title: _repositoryAccessTitle(l10n, viewModel),
-            message: _repositoryAccessMessage(l10n, viewModel),
-            primaryActionLabel: l10n.openSettings,
-            onPrimaryAction: () =>
-                viewModel.selectSection(TrackerSection.settings),
-          ),
-          const SizedBox(height: 12),
-        ],
-        Semantics(
-          label: l10n.comments,
-          textField: true,
-          enabled: !isSaving && !isLoading && !writeBlocked,
-          value: controller.text,
-          child: TextField(
-            controller: controller,
-            minLines: 3,
-            maxLines: null,
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (writeBlocked) ...[
+            _AccessCallout(
+              semanticLabel: l10n.comments,
+              title: _repositoryAccessTitle(l10n, viewModel),
+              message: _repositoryAccessMessage(l10n, viewModel),
+              primaryActionLabel: l10n.openSettings,
+              onPrimaryAction: () =>
+                  viewModel.selectSection(TrackerSection.settings),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Semantics(
+            label: l10n.comments,
+            textField: true,
             enabled: !isSaving && !isLoading && !writeBlocked,
-            decoration: InputDecoration(
-              labelText: l10n.comments,
-              hintText: l10n.commentPlaceholder,
-              hintStyle: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
-              alignLabelWithHint: true,
-              floatingLabelBehavior: FloatingLabelBehavior.always,
+            value: controller.text,
+            child: TextField(
+              controller: controller,
+              minLines: 3,
+              maxLines: null,
+              enabled: !isSaving && !isLoading && !writeBlocked,
+              decoration: InputDecoration(
+                labelText: l10n.comments,
+                hintText: l10n.commentPlaceholder,
+                hintStyle: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+                alignLabelWithHint: true,
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: _IssueDetailActionButton(
-            label: l10n.postComment,
-            emphasized: true,
-            onPressed: writeBlocked || isLoading ? null : onSave,
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _IssueDetailActionButton(
+              label: l10n.postComment,
+              emphasized: true,
+              sortOrder: 1,
+              onPressed: writeBlocked || isLoading ? null : onSave,
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (errorText != null)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.comments} error',
-            title: l10n.comments,
-            message: errorText!,
-            tone: _DeferredSectionTone.error,
-            actionLabel: l10n.retry,
-            onAction: onRetry,
-          )
-        else if (isLoading || !issue.hasCommentsLoaded)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.comments} loading',
-            title: l10n.comments,
-            message: l10n.loading,
-            tone: _DeferredSectionTone.loading,
-          )
-        else if (issue.comments.isEmpty)
-          Text(l10n.noResults, style: TextStyle(color: colors.muted))
-        else
-          for (final comment in issue.comments)
-            _CommentBubble(comment: comment),
-      ],
+          const SizedBox(height: 16),
+          if (errorText != null)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.comments} error',
+              title: l10n.comments,
+              message: errorText!,
+              tone: _DeferredSectionTone.error,
+              actionLabel: l10n.retry,
+              actionSortOrder: 2,
+              onAction: onRetry,
+            )
+          else if (isLoading || !issue.hasCommentsLoaded)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.comments} loading',
+              title: l10n.comments,
+              message: l10n.loading,
+              tone: _DeferredSectionTone.loading,
+            )
+          else if (issue.comments.isEmpty)
+            Text(l10n.noResults, style: TextStyle(color: colors.muted))
+          else
+            for (final comment in issue.comments)
+              _CommentBubble(comment: comment),
+        ],
+      ),
     );
   }
 }
@@ -15646,132 +15716,138 @@ class _AttachmentsTab extends StatelessWidget {
         viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (accessMessage.isNotEmpty) ...[
-          _AccessCallout(
-            semanticLabel: l10n.attachments,
-            title: accessTitle,
-            message: accessMessage,
-            primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
-            onPrimaryAction: showSettingsAction
-                ? () => viewModel.openProjectSettings(
-                    tab: ProjectSettingsTab.attachments,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 12),
-        ],
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.attachments,
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 8),
-              if (selectedAttachment == null)
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (accessMessage.isNotEmpty) ...[
+            _AccessCallout(
+              semanticLabel: l10n.attachments,
+              title: accessTitle,
+              message: accessMessage,
+              primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
+              onPrimaryAction: showSettingsAction
+                  ? () => viewModel.openProjectSettings(
+                      tab: ProjectSettingsTab.attachments,
+                    )
+                  : null,
+            ),
+            const SizedBox(height: 12),
+          ],
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  l10n.noAttachmentSelected,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                )
-              else
-                Semantics(
-                  container: true,
-                  label: l10n.selectedAttachmentSummary(
-                    selectedAttachment!.name,
-                    _formatAttachmentFileSize(selectedAttachment!.sizeBytes),
-                  ),
-                  child: ExcludeSemantics(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          selectedAttachment!.name,
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        Text(
-                          _formatAttachmentFileSize(
-                            selectedAttachment!.sizeBytes,
+                  l10n.attachments,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                if (selectedAttachment == null)
+                  Text(
+                    l10n.noAttachmentSelected,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                  )
+                else
+                  Semantics(
+                    container: true,
+                    label: l10n.selectedAttachmentSummary(
+                      selectedAttachment!.name,
+                      _formatAttachmentFileSize(selectedAttachment!.sizeBytes),
+                    ),
+                    child: ExcludeSemantics(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            selectedAttachment!.name,
+                            style: Theme.of(context).textTheme.labelLarge,
                           ),
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                        ),
-                      ],
+                          Text(
+                            _formatAttachmentFileSize(
+                              selectedAttachment!.sizeBytes,
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.muted),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              if ((uploadNotice ?? '').isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _AccessCallout(
-                  semanticLabel: l10n.attachments,
-                  title: l10n.attachments,
-                  message: uploadNotice!,
-                ),
-              ],
-              if (!attachmentDownloadOnly) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _IssueDetailActionButton(
-                      label: l10n.chooseAttachment,
-                      onPressed: canChooseAttachment
-                          ? onChooseAttachment
-                          : null,
-                    ),
-                    _IssueDetailActionButton(
-                      label: l10n.uploadAttachment,
-                      emphasized: true,
-                      onPressed: canUploadAttachment ? onUpload : null,
-                    ),
-                    if (selectedAttachment != null)
+                if ((uploadNotice ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _AccessCallout(
+                    semanticLabel: l10n.attachments,
+                    title: l10n.attachments,
+                    message: uploadNotice!,
+                  ),
+                ],
+                if (!attachmentDownloadOnly) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
                       _IssueDetailActionButton(
-                        label: l10n.clearSelectedAttachment,
-                        onPressed: isSaving ? null : onClearSelection,
+                        label: l10n.chooseAttachment,
+                        sortOrder: 1,
+                        onPressed: canChooseAttachment
+                            ? onChooseAttachment
+                            : null,
                       ),
-                  ],
-                ),
+                      _IssueDetailActionButton(
+                        label: l10n.uploadAttachment,
+                        emphasized: true,
+                        sortOrder: 2,
+                        onPressed: canUploadAttachment ? onUpload : null,
+                      ),
+                      if (selectedAttachment != null)
+                        _IssueDetailActionButton(
+                          label: l10n.clearSelectedAttachment,
+                          sortOrder: 3,
+                          onPressed: isSaving ? null : onClearSelection,
+                        ),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (errorText != null)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.attachments} error',
-            title: l10n.attachments,
-            message: errorText!,
-            tone: _DeferredSectionTone.error,
-            actionLabel: l10n.retry,
-            onAction: onRetry,
-          )
-        else if (isLoading || !issue.hasAttachmentsLoaded)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.attachments} loading',
-            title: l10n.attachments,
-            message: l10n.loading,
-            tone: _DeferredSectionTone.loading,
-          )
-        else if (issue.attachments.isEmpty)
-          Text(l10n.noResults, style: TextStyle(color: colors.muted))
-        else
-          for (final attachment in issue.attachments)
-            _AttachmentRow(attachment: attachment, onDownload: onDownload),
-      ],
+          const SizedBox(height: 16),
+          if (errorText != null)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.attachments} error',
+              title: l10n.attachments,
+              message: errorText!,
+              tone: _DeferredSectionTone.error,
+              actionLabel: l10n.retry,
+              actionSortOrder: 4,
+              onAction: onRetry,
+            )
+          else if (isLoading || !issue.hasAttachmentsLoaded)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.attachments} loading',
+              title: l10n.attachments,
+              message: l10n.loading,
+              tone: _DeferredSectionTone.loading,
+            )
+          else if (issue.attachments.isEmpty)
+            Text(l10n.noResults, style: TextStyle(color: colors.muted))
+          else
+            for (final attachment in issue.attachments)
+              _AttachmentRow(attachment: attachment, onDownload: onDownload),
+        ],
+      ),
     );
   }
 }
@@ -15921,6 +15997,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     required this.message,
     required this.tone,
     this.actionLabel,
+    this.actionSortOrder,
     this.onAction,
   });
 
@@ -15929,6 +16006,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
   final String message;
   final _DeferredSectionTone tone;
   final String? actionLabel;
+  final double? actionSortOrder;
   final VoidCallback? onAction;
 
   @override
@@ -15940,6 +16018,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     };
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       label: semanticLabel,
       child: Container(
         width: double.infinity,
@@ -15956,19 +16035,41 @@ class _DeferredSectionStateCard extends StatelessWidget {
               const LinearProgressIndicator(minHeight: 2),
               const SizedBox(height: 12),
             ],
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: accentColor),
+            Row(
+              children: [
+                if (tone == _DeferredSectionTone.error) ...[
+                  TrackStateIcon(
+                    TrackStateIconGlyph.issue,
+                    color: accentColor,
+                    semanticLabel: semanticLabel,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: accentColor),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            Text(message),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: tone == _DeferredSectionTone.error
+                    ? colors.muted
+                    : colors.text,
+              ),
+            ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 12),
               _IssueDetailActionButton(
                 label: actionLabel!,
                 onPressed: onAction,
+                sortOrder: actionSortOrder,
               ),
             ],
           ],

@@ -205,6 +205,26 @@ Deferred attachment loading should surface an accessible error treatment.
       );
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: _revision,
+      sessionRevision: _revision,
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        canCheckCollaborators: false,
+      ),
+    ),
+  );
+
+  @override
   Future<bool> isLfsTracked(String path) async => false;
 
   @override
