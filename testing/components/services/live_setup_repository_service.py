@@ -189,8 +189,16 @@ class LiveSetupRepositoryService:
                 continue
             prefix = f"{key}:"
             if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
+                return LiveSetupRepositoryService._normalize_front_matter_scalar(
+                    line.removeprefix(prefix).strip(),
+                )
         return None
+
+    @staticmethod
+    def _normalize_front_matter_scalar(value: str) -> str:
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            return value[1:-1]
+        return value
 
     @staticmethod
     def _markdown_section(markdown: str, *, heading: str) -> str:
