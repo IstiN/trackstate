@@ -911,6 +911,43 @@ void main() {
     );
 
     test(
+      'supports the ticket get shorthand with a positional issue key',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final aliasResult = await cli.run(const <String>[
+          'ticket',
+          'get',
+          'TRACK-2',
+        ]);
+        final canonicalResult = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final aliasJson =
+            jsonDecode(aliasResult.stdout) as Map<String, Object?>;
+        final canonicalJson =
+            jsonDecode(canonicalResult.stdout) as Map<String, Object?>;
+
+        expect(aliasResult.exitCode, 0);
+        expect(aliasJson, canonicalJson);
+        expect(aliasResult.stdout, canonicalResult.stdout);
+      },
+    );
+
+    test(
       'supports compatibility aliases and returns Jira field metadata',
       () async {
         final cli = TrackStateCli(
