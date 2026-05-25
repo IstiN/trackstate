@@ -13362,26 +13362,26 @@ class _LabelTokenField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textField = TextField(
+      controller: controller,
+      focusNode: focusNode,
+      enabled: enabled,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(labelText: label, helperText: helperText),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Semantics(
-          label: label,
-          textField: true,
-          enabled: enabled,
-          value: controller.text,
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            enabled: enabled,
-            onChanged: onChanged,
-            onSubmitted: onSubmitted,
-            decoration: InputDecoration(
-              labelText: label,
-              helperText: helperText,
-            ),
-          ),
-        ),
+        kIsWeb
+            ? textField
+            : Semantics(
+                label: label,
+                textField: true,
+                enabled: enabled,
+                value: controller.text,
+                child: textField,
+              ),
         if (labels.isNotEmpty) ...[
           const SizedBox(height: 8),
           Wrap(
@@ -13399,6 +13399,42 @@ class _LabelTokenField extends StatelessWidget {
       ],
     );
   }
+}
+
+Widget _buildWebCompatibleTextField({
+  Key? key,
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  String? helperText,
+  String? errorText,
+  int? minLines,
+  int? maxLines = 1,
+  bool alignLabelWithHint = false,
+}) {
+  final textField = TextField(
+    key: key,
+    controller: controller,
+    minLines: minLines,
+    maxLines: maxLines,
+    enabled: enabled,
+    decoration: InputDecoration(
+      labelText: label,
+      helperText: helperText,
+      errorText: errorText,
+      alignLabelWithHint: alignLabelWithHint,
+    ),
+  );
+  if (kIsWeb) {
+    return textField;
+  }
+  return Semantics(
+    label: label,
+    textField: true,
+    enabled: enabled,
+    value: controller.text,
+    child: textField,
+  );
 }
 
 class _CreateIssueDialog extends StatefulWidget {
@@ -13764,42 +13800,24 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 onChanged: _applyIssueType,
                               ),
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildWebCompatibleTextField(
+                                controller: _summaryController,
                                 label: summaryLabel,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
-                                    errorText:
-                                        _didAttemptSubmit &&
-                                            _summaryController.text
-                                                .trim()
-                                                .isEmpty
-                                        ? l10n.summaryRequired
-                                        : null,
-                                  ),
-                                ),
+                                errorText:
+                                    _didAttemptSubmit &&
+                                        _summaryController.text.trim().isEmpty
+                                    ? l10n.summaryRequired
+                                    : null,
                               ),
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildWebCompatibleTextField(
+                                controller: _descriptionController,
                                 label: l10n.description,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 3,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
-                                  ),
-                                ),
+                                minLines: 3,
+                                maxLines: null,
+                                alignLabelWithHint: true,
                               ),
                               const SizedBox(height: 12),
                               _DropdownCreateField(
@@ -13907,18 +13925,10 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 ),
                               ],
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildWebCompatibleTextField(
+                                controller: _assigneeController,
                                 label: assigneeLabel,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                  ),
-                                ),
                               ),
                               const SizedBox(height: 12),
                               _LabelTokenField(
@@ -13938,32 +13948,19 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               ),
                               for (final field in createFields) ...[
                                 const SizedBox(height: 12),
-                                Semantics(
+                                _buildWebCompatibleTextField(
+                                  key: ValueKey('create-field-${field.id}'),
+                                  controller:
+                                      _customFieldControllers[field.id]!,
                                   label: _createIssueFieldLabel(
                                     project,
                                     field,
                                     metadataLocale,
                                   ),
-                                  textField: true,
-                                  child: TextField(
-                                    key: ValueKey('create-field-${field.id}'),
-                                    controller:
-                                        _customFieldControllers[field.id],
-                                    minLines: field.type == 'markdown' ? 3 : 1,
-                                    maxLines: field.type == 'markdown'
-                                        ? null
-                                        : 1,
-                                    enabled: canEditFields,
-                                    decoration: InputDecoration(
-                                      labelText: _createIssueFieldLabel(
-                                        project,
-                                        field,
-                                        metadataLocale,
-                                      ),
-                                      alignLabelWithHint:
-                                          field.type == 'markdown',
-                                    ),
-                                  ),
+                                  enabled: canEditFields,
+                                  minLines: field.type == 'markdown' ? 3 : 1,
+                                  maxLines: field.type == 'markdown' ? null : 1,
+                                  alignLabelWithHint: field.type == 'markdown',
                                 ),
                               ],
                             ],
