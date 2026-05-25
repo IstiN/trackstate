@@ -6,23 +6,24 @@ when the target key uses different casing from the source key.
 The automation:
 1. creates `TS-1` in a disposable Local Git-backed TrackState repository
 2. runs `trackstate ticket link --key TS-1 --target-key ts-1 --type "relates to"`
-   through a repository-local compiled CLI binary
+   through a repository-local compiled CLI binary built from `origin/main`
 3. captures the terminal-visible JSON response for the mixed-case self-link
    attempt
 4. verifies the command fails with validation exit code `2`
 5. verifies no `TS/TS-1/links.json` metadata is persisted after the rejection
+6. writes the required result artifacts to `outputs/`
 
 ## Run this test
 
 ```bash
-python3 -m unittest discover -s testing/tests/TS-663 -p 'test_*.py' -v
+python3 testing/tests/TS-663/test_ts_663.py
 ```
 
 ## Required configuration
 
 This test creates its own temporary local Git repository fixture and compiles a
-temporary CLI binary from the current checkout, so no external service
-credentials are required.
+temporary CLI binary from `origin/main`, so no external service credentials are
+required.
 
 ## Expected result
 

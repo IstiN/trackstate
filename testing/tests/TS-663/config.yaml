@@ -5,7 +5,44 @@ platform: python
 dependencies:
   - Flutter SDK available on PATH
   - git CLI available on PATH
+runtime_inputs:
+  test_id: TS-663
+  compiled_source_ref: origin/main
+  project_key: TS
+  project_name: TS-663 Mixed Case Self Link Guard Project
+  seed_issue_key: TS-0
+  expected_author_email: ts663@example.com
+  issue_a_summary: Issue A
+  issue_a_create_command_prefix:
+    - trackstate
+    - ticket
+    - create
+    - --target
+    - local
+    - --summary
+    - Issue A
+    - --issue-type
+    - Story
+  self_link_command_prefix:
+    - trackstate
+    - ticket
+    - link
+    - --target
+    - local
+    - --key
+    - TS-1
+    - --target-key
+    - ts-1
+    - --type
+    - relates to
+  expected_error_code: INVALID_MUTATION
+  expected_error_category: validation
+  expected_error_exit_code: 2
+  expected_error_message_fragments:
+    - ts-1
+    - itself
 notes:
   - Reuses the disposable Local Git CLI mutation harness used by TS-659.
+  - Compiles the CLI from `origin/main` because the linked bug fix is already merged there and this branch only carries the historical automation work.
   - Creates Issue A, then runs `trackstate ticket link --key TS-1 --target-key ts-1 --type "relates to"` against the live CLI implementation.
   - Verifies mixed-case self-link validation remains case-insensitive, returns exit code 2, and persists no `links.json` metadata.
