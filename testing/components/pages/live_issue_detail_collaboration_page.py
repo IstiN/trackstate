@@ -19,7 +19,6 @@ class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _selected_button_selector = _active_tab_button_selector
@@ -41,7 +40,11 @@ class LiveIssueDetailCollaborationPage:
         )
         if self._is_connected(connected_banner):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        token_input_visible = self._session.count(self._token_input_selector) > 0
+        connect_button_visible = (
+            self._session.count(self._button_selector, has_text="Connect GitHub") > 0
+        )
+        if not connect_button_visible and not token_input_visible:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
@@ -49,8 +52,13 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
-        self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+        if not token_input_visible:
+            self._session.click(
+                self._button_selector,
+                has_text="Connect GitHub",
+                timeout_ms=30_000,
+            )
+            self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
         self._session.click(
