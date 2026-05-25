@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/cli/trackstate_cli.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
@@ -778,7 +779,10 @@ void main() {
         File('${repo.path}/$activeAcceptancePath').readAsStringSync(),
         contains('Can be loaded from local Git'),
       );
-      expect(afterArchive.repositoryIndex.pathForKey('DEMO-1'), activeIssuePath);
+      expect(
+        afterArchive.repositoryIndex.pathForKey('DEMO-1'),
+        activeIssuePath,
+      );
       expect(afterArchive.issues.single.storagePath, activeIssuePath);
       expect(afterArchive.issues.single.isArchived, isTrue);
     },
@@ -1027,6 +1031,188 @@ void main() {
         File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
         contains('"default"'),
       );
+    },
+  );
+
+  test(
+    'local repository saves settings when reserved priority field omits embedded options',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","configPath":"config"}\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"in-progress","name":"In Progress","category":"indeterminate"},'
+            '{"id":"in-review","name":"In Review","category":"indeterminate"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story","workflow":"delivery-workflow"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"priority","name":"Priority","type":"option","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/priorities.json',
+        '[{"id":"highest","name":"Highest"},'
+            '{"id":"high","name":"High"},'
+            '{"id":"medium","name":"Medium"},'
+            '{"id":"low","name":"Low"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","in-progress","in-review","done"],'
+            '"transitions":[{"id":"start","name":"Start work","from":"todo","to":"in-progress"},'
+            '{"id":"review","name":"Request review","from":"in-progress","to":"in-review"},'
+            '{"id":"complete","name":"Complete","from":"in-review","to":"done"},'
+            '{"id":"reopen","name":"Reopen","from":"done","to":"todo"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed setup-style settings fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      final originalFields = File(
+        '${repo.path}/DEMO/config/fields.json',
+      ).readAsStringSync();
+      final beforeHead = (await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ])).stdout.toString().trim();
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          statusDefinitions: [
+            ...snapshot.project.statusDefinitions,
+            const TrackStateConfigEntry(
+              id: 'blocked',
+              name: 'Blocked',
+              category: 'indeterminate',
+            ),
+          ],
+          workflowDefinitions: [
+            for (final workflow in snapshot.project.workflowDefinitions)
+              if (workflow.id == 'delivery-workflow')
+                workflow.copyWith(
+                  transitions: [
+                    for (final transition in workflow.transitions)
+                      if (transition.id == 'reopen')
+                        transition.copyWith(name: 'Reopen issue')
+                      else
+                        transition,
+                  ],
+                )
+              else
+                workflow,
+          ],
+        ),
+      );
+
+      final afterHead = (await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ])).stdout.toString().trim();
+
+      expect(afterHead, isNot(beforeHead));
+      expect(
+        updatedSnapshot.project.statusDefinitions.map((status) => status.id),
+        contains('blocked'),
+      );
+      expect(
+        updatedSnapshot.project.workflowDefinitions
+            .singleWhere((workflow) => workflow.id == 'delivery-workflow')
+            .transitions
+            .singleWhere((transition) => transition.id == 'reopen')
+            .name,
+        'Reopen issue',
+      );
+      expect(
+        File('${repo.path}/DEMO/config/statuses.json').readAsStringSync(),
+        contains('"blocked"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+        contains('"Reopen issue"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/fields.json').readAsStringSync(),
+        originalFields,
+      );
+
+      final cli = TrackStateCli(
+        environment: TrackStateCliEnvironment(
+          workingDirectory: repo.path,
+          resolvePath: (path) => path,
+        ),
+      );
+      final sessionResult = await cli.run(const <String>[
+        'session',
+        '--target',
+        'local',
+      ]);
+      final sessionJson =
+          jsonDecode(sessionResult.stdout) as Map<String, Object?>;
+      final sessionData = sessionJson['data']! as Map<String, Object?>;
+      final projectConfig =
+          sessionData['projectConfig']! as Map<String, Object?>;
+      final statuses = projectConfig['statuses']! as List<Object?>;
+      final workflows = projectConfig['workflows']! as List<Object?>;
+      final deliveryWorkflow =
+          workflows.singleWhere(
+                (workflow) =>
+                    (workflow as Map<String, Object?>)['id'] ==
+                    'delivery-workflow',
+              )
+              as Map<String, Object?>;
+      final transitions = deliveryWorkflow['transitions']! as List<Object?>;
+      final reopenTransition =
+          transitions.singleWhere(
+                (transition) =>
+                    (transition as Map<String, Object?>)['id'] == 'reopen',
+              )
+              as Map<String, Object?>;
+
+      expect(sessionResult.exitCode, 0);
+      expect(
+        statuses.any(
+          (status) =>
+              (status as Map<String, Object?>)['id'] == 'blocked' &&
+              status['name'] == 'Blocked' &&
+              status['category'] == 'indeterminate',
+        ),
+        isTrue,
+      );
+      expect(reopenTransition['name'], 'Reopen issue');
+      expect(reopenTransition['from'], <String, Object?>{
+        'id': 'done',
+        'name': 'Done',
+      });
+      expect(reopenTransition['to'], <String, Object?>{
+        'id': 'todo',
+        'name': 'To Do',
+      });
     },
   );
 

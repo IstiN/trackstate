@@ -4028,14 +4028,18 @@ class TrackStateCli {
       final branch = target.branch.isEmpty
           ? await provider.resolveWriteBranch()
           : target.branch;
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: branch,
-          token: credential?.token ?? '',
-        ),
+      final connection = RepositoryConnection(
+        repository: target.value,
+        branch: branch,
+        token: credential?.token ?? '',
       );
+      final user = await provider.authenticate(connection);
       final permission = await provider.getPermission();
+      final repository = _repositoryFactory.createLocal(
+        repositoryPath: target.value,
+        dataRef: branch,
+        client: _httpClient,
+      );
       final data = <String, Object?>{
         'command': 'session',
         'provider': target.provider,
@@ -4046,6 +4050,10 @@ class TrackStateCli {
           'displayName': user.displayName,
         },
         'permissions': _permissionJson(permission),
+        'projectConfig': await _loadSessionProjectConfig(
+          repository: repository,
+          connection: connection,
+        ),
       };
       return _success(
         targetType: target.type,
@@ -4100,16 +4108,23 @@ class TrackStateCli {
     );
 
     try {
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: target.branch.ifEmpty(
-            GitHubTrackStateProvider.defaultSourceRef,
-          ),
-          token: credential.token,
+      final connection = RepositoryConnection(
+        repository: target.value,
+        branch: target.branch.ifEmpty(
+          GitHubTrackStateProvider.defaultSourceRef,
         ),
+        token: credential.token,
       );
+      final user = await provider.authenticate(connection);
       final permission = await provider.getPermission();
+      final repository = _repositoryFactory.createHosted(
+        provider: target.provider,
+        repository: target.value,
+        branch: target.branch.ifEmpty(
+          GitHubTrackStateProvider.defaultSourceRef,
+        ),
+        client: _httpClient,
+      );
       final data = <String, Object?>{
         'command': 'session',
         'provider': target.provider,
@@ -4122,6 +4137,10 @@ class TrackStateCli {
           'displayName': user.displayName,
         },
         'permissions': _permissionJson(permission),
+        'projectConfig': await _loadSessionProjectConfig(
+          repository: repository,
+          connection: connection,
+        ),
       };
       return _success(
         targetType: target.type,
@@ -5883,6 +5902,71 @@ class TrackStateCli {
         'attachmentUploadMode': permission.attachmentUploadMode.name,
         'canCheckCollaborators': permission.canCheckCollaborators,
       };
+
+  Future<Map<String, Object?>> _loadSessionProjectConfig({
+    required TrackStateRepository repository,
+    required RepositoryConnection connection,
+  }) async {
+    await repository.connect(connection);
+    final snapshot = await repository.loadSnapshot();
+    return _sessionProjectConfigJson(snapshot.project);
+  }
+
+  Map<String, Object?> _sessionProjectConfigJson(ProjectConfig project) =>
+      <String, Object?>{
+        'key': project.key,
+        'name': project.name,
+        'defaultLocale': project.defaultLocale,
+        'supportedLocales': project.effectiveSupportedLocales,
+        'statuses': [
+          for (final status in project.statusDefinitions)
+            _sessionConfigEntryJson(status),
+        ],
+        'workflows': [
+          for (final workflow in project.workflowDefinitions)
+            _sessionWorkflowJson(workflow, project),
+        ],
+      };
+
+  Map<String, Object?> _sessionConfigEntryJson(
+    TrackStateConfigEntry entry,
+  ) => <String, Object?>{
+    'id': entry.id,
+    'name': entry.name,
+    if (entry.category != null) 'category': entry.category,
+    if (entry.hierarchyLevel != null) 'hierarchyLevel': entry.hierarchyLevel,
+    if (entry.icon != null) 'icon': entry.icon,
+    if (entry.workflowId != null) 'workflowId': entry.workflowId,
+  };
+
+  Map<String, Object?> _sessionWorkflowJson(
+    TrackStateWorkflowDefinition workflow,
+    ProjectConfig project,
+  ) => <String, Object?>{
+    'id': workflow.id,
+    'name': workflow.name,
+    'statuses': [
+      for (final statusId in workflow.statusIds)
+        _sessionStatusReferenceJson(project, statusId),
+    ],
+    'transitions': [
+      for (final transition in workflow.transitions)
+        <String, Object?>{
+          'id': transition.id,
+          'name': transition.name,
+          'from': _sessionStatusReferenceJson(project, transition.fromStatusId),
+          'to': _sessionStatusReferenceJson(project, transition.toStatusId),
+        },
+    ],
+  };
+
+  Map<String, Object?> _sessionStatusReferenceJson(
+    ProjectConfig project,
+    String statusId,
+  ) {
+    final status = _findConfigEntry(project.statusDefinitions, statusId);
+    return <String, Object?>{'id': status.id, 'name': status.name};
+  }
 
   String _textSuccess({
     required TrackStateCliTargetType targetType,

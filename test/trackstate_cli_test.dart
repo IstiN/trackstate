@@ -62,6 +62,9 @@ void main() {
             ),
           ),
         ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+        ),
       );
 
       final result = await cli.run(const <String>[
@@ -80,7 +83,128 @@ void main() {
       });
       expect(data['branch'], 'feature/local');
       expect(data['authSource'], 'none');
+      expect(data['projectConfig'], isA<Map<String, Object?>>());
     });
+
+    test(
+      'includes projectConfig statuses and workflows in session output',
+      () async {
+        final snapshot = TrackerSnapshot(
+          project: const ProjectConfig(
+            key: 'DEMO',
+            name: 'Demo',
+            repository: 'owner/demo',
+            branch: 'main',
+            defaultLocale: 'en',
+            issueTypeDefinitions: <TrackStateConfigEntry>[
+              TrackStateConfigEntry(
+                id: 'story',
+                name: 'Story',
+                workflowId: 'delivery',
+              ),
+            ],
+            statusDefinitions: <TrackStateConfigEntry>[
+              TrackStateConfigEntry(id: 'todo', name: 'To Do', category: 'new'),
+              TrackStateConfigEntry(
+                id: 'in-review',
+                name: 'In Review',
+                category: 'indeterminate',
+              ),
+              TrackStateConfigEntry(id: 'done', name: 'Done', category: 'done'),
+            ],
+            fieldDefinitions: <TrackStateFieldDefinition>[
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+            ],
+            workflowDefinitions: <TrackStateWorkflowDefinition>[
+              TrackStateWorkflowDefinition(
+                id: 'delivery',
+                name: 'Delivery',
+                statusIds: <String>['todo', 'in-review', 'done'],
+                transitions: <TrackStateWorkflowTransition>[
+                  TrackStateWorkflowTransition(
+                    id: 'review',
+                    name: 'Request review',
+                    fromStatusId: 'todo',
+                    toStatusId: 'in-review',
+                  ),
+                  TrackStateWorkflowTransition(
+                    id: 'complete',
+                    name: 'Complete',
+                    fromStatusId: 'in-review',
+                    toStatusId: 'done',
+                  ),
+                ],
+              ),
+            ],
+          ),
+          issues: const <TrackStateIssue>[],
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(snapshot: snapshot),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'session',
+          '--target',
+          'local',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final projectConfig = data['projectConfig']! as Map<String, Object?>;
+        final statuses = projectConfig['statuses']! as List<Object?>;
+        final workflows = projectConfig['workflows']! as List<Object?>;
+        final delivery = workflows.single as Map<String, Object?>;
+        final transitions = delivery['transitions']! as List<Object?>;
+        final reviewTransition = transitions.first as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(
+          statuses.any(
+            (status) =>
+                (status as Map<String, Object?>)['id'] == 'in-review' &&
+                status['name'] == 'In Review' &&
+                status['category'] == 'indeterminate',
+          ),
+          isTrue,
+        );
+        expect(delivery['id'], 'delivery');
+        expect(delivery['statuses'], <Map<String, Object?>>[
+          <String, Object?>{'id': 'todo', 'name': 'To Do'},
+          <String, Object?>{'id': 'in-review', 'name': 'In Review'},
+          <String, Object?>{'id': 'done', 'name': 'Done'},
+        ]);
+        expect(reviewTransition['name'], 'Request review');
+        expect(reviewTransition['to'], <String, Object?>{
+          'id': 'in-review',
+          'name': 'In Review',
+        });
+      },
+    );
 
     test('rejects hosted targets without credentials', () async {
       final cli = TrackStateCli(
@@ -163,6 +287,11 @@ void main() {
             providerFactory: _FakeTrackStateCliProviderFactory(
               hostedProvider: hostedProvider,
             ),
+            repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+              hostedRepository: _FakeSearchRepository(
+                snapshot: _sampleSnapshot(),
+              ),
+            ),
           );
 
           final result = await cli.run(<String>[
@@ -205,6 +334,11 @@ void main() {
           ),
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -249,6 +383,11 @@ void main() {
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: envProvider,
           ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
+          ),
         );
 
         final envResult = await envCli.run(const <String>[
@@ -282,6 +421,11 @@ void main() {
           ),
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: ghProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -358,6 +502,9 @@ void main() {
               isAdmin: false,
             ),
           ),
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
         ),
       );
 
