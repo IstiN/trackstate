@@ -121,6 +121,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   }
 
   @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    state = state.copyWith(activeWorkspaceId: null);
+    return state;
+  }
+
+  @override
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
   ) async => null;

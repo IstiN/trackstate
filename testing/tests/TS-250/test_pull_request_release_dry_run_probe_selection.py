@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -54,6 +55,28 @@ def _build_probe(
 
 
 class PullRequestReleaseDryRunProbeSelectionTest(unittest.TestCase):
+    def test_local_release_workflow_declares_pull_request_dry_run_path(self) -> None:
+        probe, _ = _build_probe()
+        repository_root = Path(__file__).resolve().parents[3]
+        workflow_text = (
+            repository_root / "trackstate-setup/.github/workflows/release-on-main.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertTrue(
+            probe._workflow_declares_pull_request(workflow_text),
+            "The setup release workflow must run on pull requests so contributors can "
+            "see the dry-run check before merge.",
+        )
+        self.assertTrue(
+            probe._workflow_declares_dry_run_step(workflow_text),
+            "The setup release workflow must declare a visible dry-run step name.",
+        )
+        self.assertTrue(
+            probe._workflow_declares_dry_run_command(workflow_text),
+            "The setup release workflow must include an explicit dry-run command "
+            "marker so the probe can verify the intended release preview path.",
+        )
+
     def test_workflow_declares_pull_request_for_scalar_inline_and_target_triggers(
         self,
     ) -> None:
