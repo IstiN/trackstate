@@ -1,14 +1,24 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class Ts453BootstrapLoadingRepository implements TrackStateRepository {
-  const Ts453BootstrapLoadingRepository();
+abstract interface class CancellableLoadingStateRepository
+    implements TrackStateRepository {
+  void cancelPendingLoadingWork();
+}
+
+class Ts453BootstrapLoadingRepository
+    implements CancellableLoadingStateRepository {
+  Ts453BootstrapLoadingRepository();
 
   static const DemoTrackStateRepository _delegate = DemoTrackStateRepository();
   static const JqlSearchService _searchService = JqlSearchService();
+
+  Timer? _pendingSearchTimer;
+  Completer<void>? _pendingSearchDelay;
 
   @override
   bool get usesLocalPersistence => false;
@@ -55,7 +65,26 @@ class Ts453BootstrapLoadingRepository implements TrackStateRepository {
     String? continuationToken,
   }) async {
     final snapshot = await loadSnapshot();
-    await Future<void>.delayed(const Duration(seconds: 8));
+    _pendingSearchTimer?.cancel();
+    if (_pendingSearchDelay case final delay?) {
+      if (!delay.isCompleted) {
+        delay.complete();
+      }
+      _pendingSearchDelay = null;
+    }
+
+    final searchDelay = Completer<void>();
+    _pendingSearchDelay = searchDelay;
+    _pendingSearchTimer = Timer(const Duration(seconds: 8), () {
+      _pendingSearchTimer = null;
+      if (!searchDelay.isCompleted) {
+        searchDelay.complete();
+      }
+      if (identical(_pendingSearchDelay, searchDelay)) {
+        _pendingSearchDelay = null;
+      }
+    });
+    await searchDelay.future;
     return _searchService.search(
       issues: snapshot.issues,
       project: snapshot.project,
@@ -119,4 +148,16 @@ class Ts453BootstrapLoadingRepository implements TrackStateRepository {
   @override
   Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) =>
       _delegate.loadIssueHistory(issue);
+
+  @override
+  void cancelPendingLoadingWork() {
+    _pendingSearchTimer?.cancel();
+    _pendingSearchTimer = null;
+    if (_pendingSearchDelay case final delay?) {
+      if (!delay.isCompleted) {
+        delay.complete();
+      }
+      _pendingSearchDelay = null;
+    }
+  }
 }
