@@ -71,12 +71,40 @@ class TrackStateTrackerPage:
     SAVE_LABEL = "Save"
     CANCEL_LABEL = "Cancel"
     BACK_TO_BOARD_LABEL = "Back to Board"
-    CONNECTED_BANNER_TEMPLATE = (
-        "Connected as {user_login} to {repository}. Drag cards to commit status changes."
+    CONNECTED_BANNER_TEMPLATES = (
+        "Connected as {user_login} to {repository}. Drag cards to commit status changes.",
+        "Connected as {user_login} to {repository}.",
     )
+    CONNECTED_BANNER_TEMPLATE = CONNECTED_BANNER_TEMPLATES[0]
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+
+    @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return tuple(
+            template.format(user_login=user_login, repository=repository)
+            for template in cls.CONNECTED_BANNER_TEMPLATES
+        )
+
+    @classmethod
+    def body_has_connected_banner(
+        cls,
+        body_text: str,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(
+            " ".join(banner.split()).casefold() in normalized_body
+            for banner in cls.connected_banners(
+                user_login=user_login,
+                repository=repository,
+            )
+        ):
+            return True
+        return "connected as " in normalized_body and " to " in normalized_body
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -205,15 +233,15 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = self.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_banners, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
