@@ -15389,18 +15389,28 @@ class _IssueDetailTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (var index = 0; index < tabs.length; index++)
-          _IssueDetailTabChip(
-            label: tabs[index],
-            selected: index == selectedIndex,
-            showFailureIndicator: failedTabIndexes.contains(index),
-            onPressed: () => onSelected(index),
-          ),
-      ],
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.arrowRight): NextFocusIntent(),
+          SingleActivator(LogicalKeyboardKey.arrowLeft): PreviousFocusIntent(),
+        },
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var index = 0; index < tabs.length; index++)
+              _IssueDetailTabChip(
+                label: tabs[index],
+                selected: index == selectedIndex,
+                showFailureIndicator: failedTabIndexes.contains(index),
+                sortOrder: index + 1,
+                onPressed: () => onSelected(index),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -15410,58 +15420,67 @@ class _IssueDetailTabChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.showFailureIndicator,
+    required this.sortOrder,
     required this.onPressed,
   });
 
   final String label;
   final bool selected;
   final bool showFailureIndicator;
+  final int sortOrder;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onPressed,
-        child: ExcludeSemantics(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected ? colors.primary : colors.surfaceAlt,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: selected ? colors.primary : colors.border,
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(sortOrder.toDouble()),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        sortKey: OrdinalSortKey(sortOrder.toDouble()),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onPressed,
+          child: ExcludeSemantics(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: selected ? colors.primary : colors.surfaceAlt,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: selected ? colors.primary : colors.border,
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: selected ? colors.page : colors.text,
-                    ),
-                  ),
-                  if (showFailureIndicator) ...[
-                    const SizedBox(width: 8),
-                    ExcludeSemantics(
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: selected ? colors.page : colors.error,
-                          shape: BoxShape.circle,
-                        ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: selected ? colors.page : colors.text,
                       ),
                     ),
+                    if (showFailureIndicator) ...[
+                      const SizedBox(width: 8),
+                      ExcludeSemantics(
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: selected ? colors.page : colors.error,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -15960,54 +15979,51 @@ class _HistoryRow extends StatelessWidget {
     final colors = context.ts;
     return Semantics(
       container: true,
-      label: '${entry.summary} ${entry.author} ${entry.timestamp}',
-      child: ExcludeSemantics(
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TrackStateIcon(
-                TrackStateIconGlyph.sync,
-                color: colors.text,
-                semanticLabel: entry.summary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.summary,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    Text(
-                      '${entry.author} · ${entry.timestamp}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
-                    ),
-                    if ((entry.before ?? '').isNotEmpty ||
-                        (entry.after ?? '').isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          '${entry.before ?? ''} -> ${entry.after ?? ''}'
-                              .trim(),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+      explicitChildNodes: true,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TrackStateIcon(
+              TrackStateIconGlyph.sync,
+              color: colors.text,
+              semanticLabel: entry.summary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.summary,
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  Text(
+                    '${entry.author} · ${entry.timestamp}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: colors.text),
+                  ),
+                  if ((entry.before ?? '').isNotEmpty ||
+                      (entry.after ?? '').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
