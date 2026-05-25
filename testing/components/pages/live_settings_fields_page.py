@@ -255,14 +255,7 @@ class LiveSettingsFieldsPage:
         )
 
     def save_settings(self) -> None:
-        self._click_button_by_aria_label("Save settings")
-        self._session.wait_for_function(
-            """
-            (selector) => document.querySelector(selector) !== null
-            """,
-            arg=self._button_by_aria_label("Save settings"),
-            timeout_ms=30_000,
-        )
+        self._session.click(self._button_selector, has_text="Save settings", timeout_ms=30_000)
 
     def read_editor_observation(self) -> FieldEditorObservation:
         payload = self._session.evaluate(
@@ -338,11 +331,15 @@ class LiveSettingsFieldsPage:
         self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
         self._session.wait_for_function(
             """
-            (title) => !(document.body?.innerText ?? '').includes(title)
+            () => document.querySelector('input[aria-label="ID"]') === null
             """,
-            arg=self._editor_title,
             timeout_ms=30_000,
         )
+
+    def close_editor_if_open(self) -> None:
+        if self._session.count(self._editor_input_selector("ID")) == 0:
+            return
+        self.cancel_editor()
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()

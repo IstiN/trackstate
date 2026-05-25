@@ -41,6 +41,12 @@ class LiveIssueDetailCollaborationPage:
         )
         if self._is_connected(connected_banners):
             return
+        if self._session.count(self._token_input_selector) > 0:
+            self._submit_connection(
+                token=token,
+                connected_banners=connected_banners,
+            )
+            return
         if self._session.count(self._button_selector, has_text=self._connect_button_label) == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
@@ -49,19 +55,22 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(
-            self._button_selector,
-            has_text=self._connect_button_label,
-            timeout_ms=30_000,
-        )
+        self._click_visible_button(text=self._connect_button_label)
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+        self._submit_connection(
+            token=token,
+            connected_banners=connected_banners,
+        )
+
+    def _submit_connection(
+        self,
+        *,
+        token: str,
+        connected_banners: tuple[str, ...],
+    ) -> None:
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-        self._session.click(
-            self._button_selector,
-            has_text="Connect token",
-            timeout_ms=30_000,
-        )
+        self._click_visible_button(aria_label="Connect token")
         wait_match = self._session.wait_for_any_text(
             [
                 *connected_banners,
@@ -354,6 +363,56 @@ class LiveIssueDetailCollaborationPage:
         return (
             self._session.count(self._connected_button_selector) > 0
             or any(banner in body_text for banner in connected_banners)
+        )
+
+    def _click_visible_button(
+        self,
+        *,
+        text: str | None = None,
+        aria_label: str | None = None,
+    ) -> None:
+        clicked = self._session.evaluate(
+            """
+            ({ text, ariaLabel }) => {
+              const matches = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .filter((element) => {
+                  const rect = element.getBoundingClientRect();
+                  if (rect.width <= 0 || rect.height <= 0) {
+                    return false;
+                  }
+                  const innerText = (element.innerText ?? '').trim();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  if (ariaLabel) {
+                    return label === ariaLabel;
+                  }
+                  if (!text) {
+                    return false;
+                  }
+                  return innerText === text || label === text || innerText.includes(text);
+                });
+              if (matches.length === 0) {
+                return false;
+              }
+              matches[matches.length - 1].click();
+              return true;
+            }
+            """,
+            arg={"text": text, "ariaLabel": aria_label},
+        )
+        if clicked is True:
+            return
+        if aria_label is not None:
+            self._session.click(
+                f'{self._button_selector}[aria-label="{self._escape(aria_label)}"]',
+                timeout_ms=30_000,
+            )
+            return
+        if text is None:
+            raise AssertionError("No button text or aria-label was provided.")
+        self._session.click(
+            self._button_selector,
+            has_text=text,
+            timeout_ms=30_000,
         )
 
     @staticmethod

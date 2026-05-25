@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 import traceback
 from pathlib import Path
@@ -63,7 +64,10 @@ def main() -> None:
         "expected_reserved_field_id": EXPECTED_RESERVED_FIELD_ID,
         "expected_reserved_field_type": EXPECTED_RESERVED_FIELD_TYPE,
         "steps": [],
+        "human_verification": [],
     }
+    scenario_failures: list[str] = []
+    writes_product_bug_report = False
 
     try:
         with create_live_tracker_app_with_stored_token(
@@ -108,48 +112,139 @@ def main() -> None:
                     observed=fields_text,
                 )
 
-                summary_row = settings_page.field_row_observation("Summary")
-                result["summary_row"] = _row_payload(summary_row)
-                _assert_summary_row(summary_row)
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=(
-                        "Locate the Summary field row and verify the visible reserved "
-                        "field metadata."
-                    ),
-                    observed=summary_row.aria_label,
-                )
+                summary_row: SettingsFieldRowObservation | None = None
+                try:
+                    summary_row = settings_page.field_row_observation("Summary")
+                    result["summary_row"] = _row_payload(summary_row)
+                    _assert_summary_row(summary_row)
+                except AssertionError as error:
+                    writes_product_bug_report = True
+                    failure = str(error)
+                    scenario_failures.append(failure)
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=(
+                            "Locate the Summary field row and verify the visible reserved "
+                            "field metadata."
+                        ),
+                        observed=failure,
+                    )
+                else:
+                    _record_step(
+                        result,
+                        step=3,
+                        status="passed",
+                        action=(
+                            "Locate the Summary field row and verify the visible reserved "
+                            "field metadata."
+                        ),
+                        observed=summary_row.aria_label,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the live Summary field row in Settings > Fields and "
+                            "confirmed the user-visible reserved metadata was shown in the "
+                            "catalog itself."
+                        ),
+                        observed=summary_row.aria_label,
+                    )
 
-                if summary_row.delete_action_visible:
-                    raise AssertionError(
+                if summary_row is None:
+                    writes_product_bug_report = True
+                    failure = (
+                        "Step 4 failed: the Summary field row could not be inspected for the "
+                        "reserved delete-action check because the live row was missing."
+                    )
+                    scenario_failures.append(failure)
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action="Attempt to delete the Summary field.",
+                        observed=failure,
+                    )
+                elif summary_row.delete_action_visible:
+                    writes_product_bug_report = True
+                    failure = (
                         "Step 4 failed: the reserved Summary field still exposed a delete "
                         "action in Settings > Fields.\n"
-                        f"Observed Summary row: {summary_row.aria_label}",
+                        f"Observed Summary row: {summary_row.aria_label}"
                     )
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action="Attempt to delete the Summary field.",
-                    observed=(
+                    scenario_failures.append(failure)
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action="Attempt to delete the Summary field.",
+                        observed=failure,
+                    )
+                else:
+                    observed = (
                         "No Delete field Summary action was exposed; only the edit action "
                         "was visible on the reserved field row."
-                    ),
-                )
+                    )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action="Attempt to delete the Summary field.",
+                        observed=observed,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the live Summary row actions and confirmed the delete "
+                            "control was not shown to the user."
+                        ),
+                        observed=observed,
+                    )
 
-                settings_page.open_field_editor("Summary")
-                editor = settings_page.read_editor_observation()
-                result["summary_editor"] = _editor_payload(editor)
-                _assert_reserved_field_editor(editor)
-                _record_step(
-                    result,
-                    step=5,
-                    status="passed",
-                    action="Attempt to change the Summary field ID or Type.",
-                    observed=editor.body_text,
-                )
+                try:
+                    settings_page.open_field_editor("Summary")
+                    editor = settings_page.read_editor_observation()
+                    result["summary_editor"] = _editor_payload(editor)
+                    _assert_reserved_field_editor(editor)
+                except AssertionError as error:
+                    writes_product_bug_report = True
+                    failure = str(error)
+                    scenario_failures.append(failure)
+                    _record_step(
+                        result,
+                        step=5,
+                        status="failed",
+                        action="Attempt to change the Summary field ID or Type.",
+                        observed=failure,
+                    )
+                    if "summary_editor" in result:
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Opened the live Summary field editor and observed the exact "
+                                "controls a user would see before trying the custom-field flow."
+                            ),
+                            observed=str(result["summary_editor"]),
+                        )
+                else:
+                    _record_step(
+                        result,
+                        step=5,
+                        status="passed",
+                        action="Attempt to change the Summary field ID or Type.",
+                        observed=editor.body_text,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the live Summary field editor and confirmed the visible "
+                            "ID and Type controls remained immutable."
+                        ),
+                        observed=editor.body_text,
+                    )
+                finally:
+                    settings_page.close_editor_if_open()
 
                 had_existing_environment = settings_page.field_exists(CUSTOM_FIELD_NAME)
                 result["environment_field_preexisting"] = had_existing_environment
@@ -175,9 +270,9 @@ def main() -> None:
                         )
 
                 settings_page.open_add_field_editor()
+                settings_page.select_field_type(CUSTOM_FIELD_TYPE)
                 settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
                 settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
-                settings_page.select_field_type(CUSTOM_FIELD_TYPE)
                 settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
                 settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
                 environment_editor_draft = settings_page.read_editor_observation()
@@ -222,6 +317,15 @@ def main() -> None:
                     ),
                     observed=environment_row.aria_label,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the saved Environment field in the live catalog and "
+                        "confirmed it appeared as a normal custom field with edit/delete "
+                        "actions after save."
+                    ),
+                    observed=environment_row.aria_label,
+                )
 
                 settings_page.open_field_editor(CUSTOM_FIELD_NAME)
                 environment_editor = settings_page.read_editor_observation()
@@ -244,6 +348,17 @@ def main() -> None:
                     ),
                     observed=environment_editor.body_text,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Re-opened the saved Environment field editor and confirmed the "
+                        "visible option values and Bug-only applicability were retained."
+                    ),
+                    observed=environment_editor.body_text,
+                )
+
+                if scenario_failures:
+                    raise AssertionError("\n\n".join(scenario_failures))
 
                 settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -254,12 +369,14 @@ def main() -> None:
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
+        _write_output_artifacts(result, writes_product_bug_report=writes_product_bug_report)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
+        _write_output_artifacts(result, writes_product_bug_report=False)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
         raise
@@ -270,6 +387,7 @@ def main() -> None:
             "field immutable and can create a Bug-only Environment select field with "
             "three option values."
         )
+        _write_output_artifacts(result, writes_product_bug_report=False)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
 
@@ -529,6 +647,22 @@ def _record_step(
     )
 
 
+def _record_human_verification(
+    result: dict[str, object],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    checks = result.setdefault("human_verification", [])
+    assert isinstance(checks, list)
+    checks.append(
+        {
+            "check": check,
+            "observed": observed,
+        },
+    )
+
+
 def _reopen_fields_tab(
     *,
     tracker_page,
@@ -553,6 +687,175 @@ def _reopen_fields_tab(
     collaboration_page.dismiss_connection_banner()
     settings_page.open_settings_admin()
     return settings_page.open_fields_tab()
+
+
+def _write_output_artifacts(
+    payload: dict[str, object],
+    *,
+    writes_product_bug_report: bool,
+) -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    _write_test_automation_result(payload)
+    (OUTPUTS_DIR / "jira_comment.md").write_text(_jira_comment(payload), encoding="utf-8")
+    (OUTPUTS_DIR / "pr_body.md").write_text(_pr_body(payload), encoding="utf-8")
+    (OUTPUTS_DIR / "response.md").write_text(_response_markdown(payload), encoding="utf-8")
+    bug_path = OUTPUTS_DIR / "bug_description.md"
+    if payload.get("status") == "failed" and writes_product_bug_report:
+        bug_path.write_text(_bug_description(payload), encoding="utf-8")
+    elif bug_path.exists():
+        bug_path.unlink()
+
+
+def _write_test_automation_result(payload: dict[str, object]) -> None:
+    status = str(payload.get("status", "failed"))
+    result = {
+        "status": status,
+        "passed": 1 if status == "passed" else 0,
+        "failed": 0 if status == "passed" else 1,
+        "skipped": 0,
+        "summary": "1 passed, 0 failed" if status == "passed" else "0 passed, 1 failed",
+    }
+    if status != "passed" and payload.get("error"):
+        result["error"] = str(payload["error"])
+    (OUTPUTS_DIR / "test_automation_result.json").write_text(
+        json.dumps(result, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _response_markdown(payload: dict[str, object]) -> str:
+    status = str(payload.get("status", "failed")).upper()
+    summary = payload.get("summary") or payload.get("error") or "TS-408 completed."
+    return f"# TS-408 — {status}\n\n{summary}\n"
+
+
+def _pr_body(payload: dict[str, object]) -> str:
+    return _markdown_report(payload)
+
+
+def _jira_comment(payload: dict[str, object]) -> str:
+    status = str(payload.get("status", "failed")).upper()
+    lines = [f"h3. TS-408 — {status}", ""]
+    lines.extend(_wiki_section("Automation checked", _step_lines(payload)))
+    lines.extend(_wiki_section("Human-style verification", _human_lines(payload)))
+    lines.extend(_wiki_section("Observed result", _observed_lines(payload)))
+    lines.extend(_wiki_section("Environment", _environment_lines(payload)))
+    if payload.get("error"):
+        lines.extend(_wiki_section("Exact assertion failure", ["{code}", str(payload["error"]), "", str(payload.get("traceback", "")), "{code}"]))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _bug_description(payload: dict[str, object]) -> str:
+    lines = [
+        "# Bug report",
+        "",
+        "## Steps to reproduce",
+    ]
+    lines.extend(_markdown_step_lines(payload))
+    lines.extend(
+        [
+            "",
+            "## Actual vs Expected",
+            "",
+            f"- **Expected:** For `summary`, the ID and Type fields stay immutable, delete is disabled, and the `Environment` custom field can be created as a Select field with three option values that apply only to `Bug`.",
+            f"- **Actual:** {payload.get('error', 'See failing step details below.')}",
+            "",
+            "## Exact error message or assertion failure",
+            "",
+            "```text",
+            str(payload.get("error", "")),
+            "",
+            str(payload.get("traceback", "")),
+            "```",
+            "",
+            "## Environment details",
+        ],
+    )
+    for line in _environment_lines(payload):
+        lines.append(f"- {line}")
+    if payload.get("screenshot"):
+        lines.extend(["", "## Screenshots or logs", "", f"- Screenshot: `{payload['screenshot']}`"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _markdown_report(payload: dict[str, object]) -> str:
+    status = str(payload.get("status", "failed")).upper()
+    lines = [f"# TS-408 — {status}", ""]
+    lines.extend(_markdown_section("Automation checked", _step_lines(payload)))
+    lines.extend(_markdown_section("Human-style verification", _human_lines(payload)))
+    lines.extend(_markdown_section("Observed result", _observed_lines(payload)))
+    lines.extend(_markdown_section("Environment", _environment_lines(payload)))
+    if payload.get("error"):
+        lines.extend(
+            [
+                "## Exact assertion failure",
+                "",
+                "```text",
+                str(payload["error"]),
+                "",
+                str(payload.get("traceback", "")),
+                "```",
+            ],
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _step_lines(payload: dict[str, object]) -> list[str]:
+    lines = []
+    for step in payload.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        status = "PASS" if step.get("status") == "passed" else "FAIL"
+        lines.append(
+            f'Step {step.get("step")} [{status}] {step.get("action")} Observed: {step.get("observed")}',
+        )
+    return lines or ["No automation steps were recorded."]
+
+
+def _markdown_step_lines(payload: dict[str, object]) -> list[str]:
+    lines = []
+    for step in payload.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        marker = "✅" if step.get("status") == "passed" else "❌"
+        lines.append(
+            f"1. {marker} Step {step.get('step')}: {step.get('action')}\n   - Observed: {step.get('observed')}",
+        )
+    return lines or ["1. ❌ No step results were recorded."]
+
+
+def _human_lines(payload: dict[str, object]) -> list[str]:
+    lines = []
+    for item in payload.get("human_verification", []):
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"{item.get('check')} Observed: {item.get('observed')}")
+    return lines or ["No additional human-style verification was recorded."]
+
+
+def _observed_lines(payload: dict[str, object]) -> list[str]:
+    status = str(payload.get("status", "failed"))
+    if status == "passed":
+        return [str(payload.get("summary", "The live hosted behavior matched the expected result."))]
+    return [str(payload.get("error", "The live hosted behavior did not match the expected result."))]
+
+
+def _environment_lines(payload: dict[str, object]) -> list[str]:
+    return [
+        f"URL: {payload.get('app_url')}",
+        f"Repository: {payload.get('repository')}@{payload.get('repository_ref')}",
+        "Browser: Playwright Chromium (headless)",
+        f"OS: {platform.system()}",
+        f"Screenshot: {payload.get('screenshot', '<none>')}",
+    ]
+
+
+def _markdown_section(title: str, lines: list[str]) -> list[str]:
+    return [f"## {title}", "", *[f"- {line}" for line in lines], ""]
+
+
+def _wiki_section(title: str, lines: list[str]) -> list[str]:
+    return [f"*{title}*", *[f"* {line}" for line in lines], ""]
 
 
 def _write_result_if_requested(payload: dict[str, object]) -> None:
