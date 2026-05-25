@@ -1383,6 +1383,76 @@ void main() {
       },
     );
 
+    test('preserves invalid target validation for account-by-email', () async {
+      final repositoryFactory = _FakeTrackStateCliRepositoryFactory();
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: repositoryFactory,
+      );
+
+      final result = await cli.run(const <String>[
+        'read',
+        'account-by-email',
+        '--target',
+        'nope',
+        'user@example.com',
+      ]);
+      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+      final error = json['error']! as Map<String, Object?>;
+
+      expect(result.exitCode, 2);
+      expect(json['ok'], false);
+      expect(error['code'], 'INVALID_TARGET');
+      expect(error['category'], 'validation');
+      expect(
+        error['message'],
+        'Unsupported target "nope". Use "local" or "hosted".',
+      );
+      expect(repositoryFactory.lastRepositoryPath, isNull);
+      expect(repositoryFactory.lastDataRef, isNull);
+    });
+
+    test(
+      'preserves hosted repository validation for account-by-email',
+      () async {
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory();
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          repositoryFactory: repositoryFactory,
+          providerFactory: const _FakeTrackStateCliProviderFactory(),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'account-by-email',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--email',
+          'hubot@example.com',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+
+        expect(result.exitCode, 2);
+        expect(json['ok'], false);
+        expect(error['code'], 'INVALID_TARGET');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          'Hosted targets require "--repository owner/name".',
+        );
+        expect(repositoryFactory.lastHostedRepository, isNull);
+      },
+    );
+
     test(
       'uploads attachments through the Jira alias and returns attachment metadata in the envelope',
       () async {
@@ -1546,7 +1616,9 @@ void main() {
         final json = jsonDecode(result.stdout) as Map<String, Object?>;
         final data = json['data']! as Map<String, Object?>;
         final attachment = data['attachment']! as Map<String, Object?>;
-        final attachmentsDir = Directory('${repo.path}/DEMO/DEMO-1/attachments');
+        final attachmentsDir = Directory(
+          '${repo.path}/DEMO/DEMO-1/attachments',
+        );
         final storedFiles = await attachmentsDir
             .list()
             .where((entity) => entity is File)
@@ -1737,7 +1809,10 @@ void main() {
         expect(error['message'], contains('not implemented'));
         expect(details['repository'], 'owner/repo');
         expect(details['issue'], 'TRACK-1');
-        expect(details['attachmentPath'], 'TRACK/TRACK-1/attachments/design.zip');
+        expect(
+          details['attachmentPath'],
+          'TRACK/TRACK-1/attachments/design.zip',
+        );
         expect(repository.lastUploadIssue, isNull);
         expect(repository.lastUploadName, isNull);
       },
@@ -3370,7 +3445,8 @@ class _FakeHostedTrackStateProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => lfsTrackedPaths.contains(path);
+  Future<bool> isLfsTracked(String path) async =>
+      lfsTrackedPaths.contains(path);
 }
 
 class _ThrowingHostedTrackStateProvider extends _FakeHostedTrackStateProvider {

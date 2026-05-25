@@ -503,31 +503,30 @@ class TrackStateCli {
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
-    late final _ResolvedTarget target;
+    final target = await _resolveTarget(
+      results,
+      defaultTargetType: TrackStateCliTargetType.local,
+    );
+    if (resource == 'account-by-email') {
+      return _error(
+        _TrackStateCliException(
+          code: 'UNSUPPORTED_ACCOUNT_BY_EMAIL',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: 'Reading accounts by email is currently unsupported.',
+          exitCode: 5,
+          details: <String, Object?>{
+            'resource': resource,
+            if (results.rest.isNotEmpty) 'arguments': results.rest,
+          },
+        ),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
 
     try {
-      target = await _resolveTarget(
-        results,
-        defaultTargetType: TrackStateCliTargetType.local,
-      );
-      if (resource == 'account-by-email') {
-        return _error(
-          _TrackStateCliException(
-            code: 'UNSUPPORTED_ACCOUNT_BY_EMAIL',
-            category: TrackStateCliErrorCategory.unsupported,
-            message: 'Reading accounts by email is currently unsupported.',
-            exitCode: 5,
-            details: <String, Object?>{
-              'resource': resource,
-              if (results.rest.isNotEmpty) 'arguments': results.rest,
-            },
-          ),
-          targetType: target.type,
-          targetValue: target.value,
-          provider: target.provider,
-          output: output,
-        );
-      }
       return await switch (target.type) {
         TrackStateCliTargetType.local => _runLocalRead(
           target,
@@ -683,10 +682,7 @@ class TrackStateCli {
     final bytes = await sourceFile.readAsBytes();
     final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
-        results['name']?.toString().trim().ifEmpty(
-          sourceName,
-        ) ??
-        sourceName;
+        results['name']?.toString().trim().ifEmpty(sourceName) ?? sourceName;
 
     try {
       return await switch (target.type) {
