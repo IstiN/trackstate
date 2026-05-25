@@ -25,6 +25,27 @@ void main() {
       expect(result.stdout, contains('trackstate read ticket --key TRACK-1'));
     });
 
+    test('prints attachment upload and download examples in root help', () async {
+      final cli = TrackStateCli();
+
+      final result = await cli.run(const <String>['--help']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('Upload or download one attachment.'));
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+        ),
+      );
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
+        ),
+      );
+    });
+
     test('reports validation errors in the JSON envelope', () async {
       final cli = TrackStateCli();
 

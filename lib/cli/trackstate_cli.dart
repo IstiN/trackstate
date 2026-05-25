@@ -6617,6 +6617,7 @@ class TrackStateCli {
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
     '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+    '  trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',
     'Use "trackstate <command> --help" for command-specific options.',
