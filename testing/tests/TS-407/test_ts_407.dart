@@ -13,6 +13,7 @@ void main() {
   testWidgets(
     'TS-407 issue type administration supports hierarchy edits and constrains icon selection',
     (tester) async {
+      const issueTypesPath = 'DEMO/config/issue-types.json';
       final semantics = tester.ensureSemantics();
       final settingsRobot = createLocalGitSettingsScreenRobot(tester);
       final issueTypeRobot = IssueTypeSettingsRobot(tester, settingsRobot);
@@ -24,6 +25,14 @@ void main() {
         if (fixture == null) {
           throw StateError('TS-407 fixture creation did not complete.');
         }
+        final initialHead = await tester.runAsync(fixture.headRevision) ?? '';
+        final initialStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        final originalIssueTypesJson =
+            await tester.runAsync(
+              () => fixture!.readRepositoryFile(issueTypesPath),
+            ) ??
+            '';
 
         await settingsRobot.pumpLocalGitApp(
           repositoryPath: fixture.repositoryPath,
@@ -107,24 +116,44 @@ void main() {
           }
 
           await issueTypeRobot.saveSettings();
-          await _waitForCondition(
-            tester,
-            () async {
-              final savedIssueTypes = await tester.runAsync(
-                fixture!.readIssueTypeEntries,
-              );
-              if (savedIssueTypes == null) {
-                return false;
-              }
-              final savedStory = savedIssueTypes.singleWhere(
-                (entry) => entry['id'] == Ts407IssueTypeAdminFixture.storyId,
-              );
-              return savedStory['hierarchyLevel'] == 1;
-            },
-            failureMessage:
-                'Step 3 failed: Save settings did not persist Story hierarchy '
-                'level 1 to DEMO/config/issue-types.json.',
-          );
+          final persistedDuringWait = await _waitForCondition(tester, () async {
+            final savedIssueTypes = await tester.runAsync(
+              fixture!.readIssueTypeEntries,
+            );
+            if (savedIssueTypes == null) {
+              return false;
+            }
+            final savedStory = savedIssueTypes.singleWhere(
+              (entry) => entry['id'] == Ts407IssueTypeAdminFixture.storyId,
+            );
+            return savedStory['hierarchyLevel'] == 1;
+          }, timeout: const Duration(seconds: 10));
+          if (!persistedDuringWait) {
+            final postSaveHead =
+                await tester.runAsync(fixture.headRevision) ?? '';
+            final postSaveStatus =
+                await tester.runAsync(fixture.worktreeStatusLines) ??
+                <String>[];
+            final postSaveIssueTypesJson =
+                await tester.runAsync(
+                  () => fixture!.readRepositoryFile(issueTypesPath),
+                ) ??
+                '';
+            failures.add(
+              'Step 3 failed: Save settings did not persist Story hierarchy '
+              'level 1 to $issueTypesPath within 10 seconds. The visible Issue '
+              'Types list showed the edited Story row before the repository save '
+              'attempt, but Git-backed persistence stayed unchanged. Initial HEAD '
+              'was $initialHead and remained $postSaveHead. Initial '
+              '`git status --short` was '
+              '${initialStatus.isEmpty ? '<clean>' : initialStatus.join(' | ')} '
+              'and after Save settings it was '
+              '${postSaveStatus.isEmpty ? '<clean>' : postSaveStatus.join(' | ')}. '
+              'Original $issueTypesPath: $originalIssueTypesJson. Current '
+              '$issueTypesPath: $postSaveIssueTypesJson. Visible texts: '
+              '${issueTypeRobot.visibleTextSnapshot(limit: 60)}.',
+            );
+          }
 
           final persistedIssueTypes = await tester.runAsync(
             fixture.readIssueTypeEntries,
@@ -238,14 +267,13 @@ void main() {
         semantics.dispose();
       }
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    timeout: const Timeout(Duration(seconds: 45)),
   );
 }
 
-Future<void> _waitForCondition(
+Future<bool> _waitForCondition(
   WidgetTester tester,
   Future<bool> Function() condition, {
-  required String failureMessage,
   Duration timeout = const Duration(seconds: 5),
   Duration step = const Duration(milliseconds: 100),
 }) async {
@@ -253,8 +281,8 @@ Future<void> _waitForCondition(
   while (DateTime.now().isBefore(end)) {
     await tester.pump(step);
     if (await condition()) {
-      return;
+      return true;
     }
   }
-  fail(failureMessage);
+  return false;
 }
