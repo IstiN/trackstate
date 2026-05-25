@@ -1827,6 +1827,12 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get retry;
 
+  /// No description provided for @retryStartup.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry startup'**
+  String get retryStartup;
+
   /// No description provided for @editIssue.
   ///
   /// In en, this message translates to:
