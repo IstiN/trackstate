@@ -207,25 +207,24 @@ class LiveCreateIssueFormPage:
             except WebAppTimeoutError as error:
                 selection_errors.append(str(error))
 
-        if self._candidate_count(self._listbox_selector, has_text=None) > 0:
-            try:
-                self._session.press(
-                    self._assignee_selector,
-                    "ArrowDown",
-                    timeout_ms=15_000,
-                )
-                self._session.press(
-                    self._assignee_selector,
-                    "Enter",
-                    timeout_ms=15_000,
-                )
-                return self._session.wait_for_input_value(
-                    self._assignee_selector,
-                    expected_suggestion,
-                    timeout_ms=15_000,
-                )
-            except WebAppTimeoutError as error:
-                selection_errors.append(str(error))
+        try:
+            self._session.press(
+                self._assignee_selector,
+                "ArrowDown",
+                timeout_ms=15_000,
+            )
+            self._session.press(
+                self._assignee_selector,
+                "Enter",
+                timeout_ms=15_000,
+            )
+            return self._session.wait_for_input_value(
+                self._assignee_selector,
+                expected_suggestion,
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            selection_errors.append(str(error))
 
         raise AssertionError(
             "Step 3 failed: the assignee picker appeared but the test could not select "
@@ -237,8 +236,7 @@ class LiveCreateIssueFormPage:
     def _wait_for_token(self, token: str) -> None:
         try:
             self._session.wait_for_selector(
-                self._generic_semantics_selector,
-                has_text=token,
+                self._token_selector(token),
                 timeout_ms=15_000,
             )
         except WebAppTimeoutError as error:
@@ -248,7 +246,11 @@ class LiveCreateIssueFormPage:
             ) from error
 
     def _token_count(self, token: str) -> int:
-        return self._session.count(self._generic_semantics_selector, has_text=token)
+        return self._session.count(self._token_selector(token))
 
     def _candidate_count(self, selector: str, *, has_text: str | None) -> int:
         return self._session.count(selector, has_text=has_text)
+
+    @staticmethod
+    def _token_selector(token: str) -> str:
+        return f'flt-semantics[role="button"][aria-label="{token}"]'
