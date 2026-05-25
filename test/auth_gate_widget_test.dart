@@ -312,7 +312,7 @@ void main() {
   );
 
   testWidgets(
-    'release-backed hosted flow keeps upload controls available and shows a runtime failure when hosted release writes are unavailable',
+    'release-backed hosted flow keeps upload controls available and queues inbox uploads when direct release writes are unavailable',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -335,12 +335,13 @@ void main() {
       );
 
       try {
+        final repository = ReactiveIssueDetailTrackStateRepository(
+          permission: releaseRestrictedPermission,
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        );
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(
-              permission: releaseRestrictedPermission,
-              textFixtures: _githubReleasesProjectTextFixtures(),
-            ),
+            repository: repository,
             attachmentPicker: pickAttachment,
           ),
         );
@@ -398,18 +399,12 @@ void main() {
         await tester.tap(uploadAttachmentAction);
         await tester.pumpAndSettle();
 
+        expect(find.textContaining('Save failed:'), findsNothing);
         expect(
-          find.textContaining(
-            'Save failed: GitHub Releases attachment storage requires GitHub authentication/configuration that supports release uploads.',
-          ),
+          find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
         );
-        expect(
-          find.textContaining(
-            'This repository session cannot upload release-backed attachments.',
-          ),
-          findsOneWidget,
-        );
+        expect(find.text('release notes.pdf'), findsNothing);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
