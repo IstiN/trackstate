@@ -123,6 +123,7 @@
       }
     }
   },
+  "commentPlaceholder": "Add a comment...",
   "postComment": "Post comment",
   "editedAt": "Edited {timestamp}",
   "@editedAt": {

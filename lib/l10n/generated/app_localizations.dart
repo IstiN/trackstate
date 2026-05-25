@@ -484,6 +484,12 @@ abstract class AppLocalizations {
   /// **'Download {fileName}'**
   String downloadAttachment(String fileName);
 
+  /// No description provided for @commentPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a comment...'**
+  String get commentPlaceholder;
+
   /// No description provided for @postComment.
   ///
   /// In en, this message translates to:
