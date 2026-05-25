@@ -1,10 +1,15 @@
-import 'dart:collection';
+@TestOn('browser')
+library;
+
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -17,7 +22,7 @@ void main() {
   });
 
   testWidgets(
-    'startup exposes the shell before delayed auth completes in web-style restore flow',
+    'startup exposes the shell with restricted access after the timeout fallback while delayed auth remains in progress in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -49,6 +54,7 @@ void main() {
       final delayedRepository = _DelayedConnectRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
       );
+      var browserLocalRepositoryChecks = 0;
 
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
@@ -57,23 +63,29 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
+      final previousDiagnostics = startupAuthProbeDiagnostics;
+      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
+        logger: (_) {},
+      );
+      addTearDown(() {
+        startupAuthProbeDiagnostics = previousDiagnostics;
+      });
+
       await tester.pumpWidget(
         TrackStateApp(
           repositoryFactory: () => delayedRepository,
           workspaceProfileService: service,
           authStore: authStore,
-          openLocalRepository:
+          openBrowserLocalRepository:
               ({
                 required String repositoryPath,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => _QueuedLoadTrackStateRepository(
-                loadResults: [
-                  UnsupportedError(
-                    'Unsupported operation: Process.run is not supported on the web.',
-                  ),
-                ],
-              ),
+              }) async {
+                browserLocalRepositoryChecks += 1;
+                expect(repositoryPath, '/tmp/trackstate-demo');
+                return null;
+              },
           openHostedRepository:
               ({
                 required String repository,
@@ -87,18 +99,63 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
       expect(
-        find.bySemanticsLabel(
-          'Workspace switcher: Active local workspace, Local, Local Git',
-        ),
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
         findsOneWidget,
       );
       expect(find.text('Dashboard'), findsWidgets);
-      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
+      expect(find.text('Add workspace'), findsNothing);
+      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
+      expect(delayedRepository.connectCalled, isTrue);
+      expect(delayedRepository.connectCompleted, isFalse);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+      expect(find.text('Connect GitHub'), findsOneWidget);
+      final savedStateBeforeConnect = await service.loadState();
+      expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateBeforeConnect.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
 
       delayedRepository.completeConnect();
       await tester.pump();
       await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Add workspace'), findsNothing);
+      final savedState = await service.loadState();
+      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(delayedRepository.session?.canWrite, isTrue);
+      expect(delayedRepository.session?.canCreateBranch, isTrue);
+      expect(
+        savedState.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
     },
   );
 }
@@ -131,41 +188,148 @@ Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
   );
 }
 
-class _DelayedConnectRepository extends DemoTrackStateRepository {
-  _DelayedConnectRepository({required super.snapshot});
+class _DelayedConnectRepository extends ProviderBackedTrackStateRepository {
+  _DelayedConnectRepository({required TrackerSnapshot snapshot})
+    : this._(snapshot: snapshot, provider: _DelayedConnectProvider());
 
-  final Completer<RepositoryUser> _connectCompleter =
-      Completer<RepositoryUser>();
+  _DelayedConnectRepository._({
+    required TrackerSnapshot snapshot,
+    required _DelayedConnectProvider provider,
+  }) : _snapshotOverride = snapshot,
+       _provider = provider,
+       super(provider: provider);
+
+  final TrackerSnapshot _snapshotOverride;
+  final _DelayedConnectProvider _provider;
+
+  bool get connectCalled => _provider.connectCalled;
+
+  bool get connectCompleted => _provider.connectCompleted;
+
+  void completeConnect() {
+    _provider.completeConnect();
+  }
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) =>
-      _connectCompleter.future;
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
+  }
+}
+
+class _DelayedConnectProvider implements TrackStateProviderAdapter {
+  final Completer<void> _connectCompleter = Completer<void>();
+  bool connectCalled = false;
+  bool _connected = false;
+
+  bool get connectCompleted => _connectCompleter.isCompleted;
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => 'stable/repo';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    connectCalled = true;
+    await _connectCompleter.future;
+    _connected = true;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'mock-revision',
+  );
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _connected,
+    isAdmin: false,
+    canCreateBranch: _connected,
+    canManageAttachments: _connected,
+    attachmentUploadMode: _connected
+        ? AttachmentUploadMode.full
+        : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'mock-revision',
+      sessionRevision: _connected ? 'connected' : 'disconnected',
+      connectionState: _connected
+          ? ProviderConnectionState.connected
+          : ProviderConnectionState.disconnected,
+      permission: await getPermission(),
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => RepositoryAttachment(path: path, bytes: Uint8List(0));
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => RepositoryTextFile(path: path, content: '');
+
+  @override
+  Future<String> resolveWriteBranch() async => 'main';
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => RepositoryAttachmentWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'mock-revision',
+  );
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => RepositoryWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'mock-revision',
+  );
 
   void completeConnect() {
     if (_connectCompleter.isCompleted) {
       return;
     }
-    _connectCompleter.complete(
-      const RepositoryUser(login: 'demo-user', displayName: 'Demo User'),
-    );
-  }
-}
-
-class _QueuedLoadTrackStateRepository extends DemoTrackStateRepository {
-  _QueuedLoadTrackStateRepository({required List<Object> loadResults})
-    : _loadResults = Queue<Object>.from(loadResults);
-
-  final Queue<Object> _loadResults;
-
-  @override
-  Future<TrackerSnapshot> loadSnapshot() async {
-    if (_loadResults.isEmpty) {
-      return super.loadSnapshot();
-    }
-    final next = _loadResults.removeFirst();
-    if (next is TrackerSnapshot) {
-      return next;
-    }
-    throw next;
+    _connectCompleter.complete();
   }
 }

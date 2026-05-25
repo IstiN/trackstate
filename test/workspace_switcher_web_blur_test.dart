@@ -110,7 +110,7 @@ void main() {
   );
 
   testWidgets(
-    'desktop web workspace row activation keeps focus on the browser-owned control',
+    'desktop web workspace open action keeps focus on the browser-owned control',
     (tester) async {
       if (!kIsWeb) {
         return;
@@ -170,7 +170,7 @@ void main() {
         );
 
         await tester.tap(
-          find.byKey(const ValueKey('workspace-hosted:beta/repo@main')),
+          find.byKey(const ValueKey('workspace-open-hosted:beta/repo@main')),
           warnIfMissed: false,
         );
         await tester.pump();
@@ -209,6 +209,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   @override
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId) {
     throw UnimplementedError();
+  }
+
+  @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    state = state.copyWith(activeWorkspaceId: null);
+    return state;
   }
 
   @override

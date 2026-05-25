@@ -25,6 +25,50 @@ void main() {
       expect(result.stdout, contains('trackstate read ticket --key TRACK-1'));
     });
 
+    test('prints attachment upload and download examples in root help', () async {
+      final cli = TrackStateCli();
+
+      final result = await cli.run(const <String>['--help']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('Upload or download one attachment.'));
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+        ),
+      );
+      expect(
+        result.stdout,
+        contains(
+          'trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
+        ),
+      );
+    });
+
+    test(
+      'prints attachment upload help for the jiraattachfiletoticket alias',
+      () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>[
+          'jiraattachfiletoticket',
+          '--help',
+        ]);
+
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('trackstate attachment upload'));
+        expect(result.stdout, contains('--issue'));
+        expect(result.stdout, contains('--file'));
+        expect(
+          result.stdout,
+          contains(
+            'jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
+          ),
+        );
+      },
+    );
+
     test('reports validation errors in the JSON envelope', () async {
       final cli = TrackStateCli();
 
@@ -62,6 +106,9 @@ void main() {
             ),
           ),
         ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+        ),
       );
 
       final result = await cli.run(const <String>[
@@ -80,7 +127,128 @@ void main() {
       });
       expect(data['branch'], 'feature/local');
       expect(data['authSource'], 'none');
+      expect(data['projectConfig'], isA<Map<String, Object?>>());
     });
+
+    test(
+      'includes projectConfig statuses and workflows in session output',
+      () async {
+        final snapshot = TrackerSnapshot(
+          project: const ProjectConfig(
+            key: 'DEMO',
+            name: 'Demo',
+            repository: 'owner/demo',
+            branch: 'main',
+            defaultLocale: 'en',
+            issueTypeDefinitions: <TrackStateConfigEntry>[
+              TrackStateConfigEntry(
+                id: 'story',
+                name: 'Story',
+                workflowId: 'delivery',
+              ),
+            ],
+            statusDefinitions: <TrackStateConfigEntry>[
+              TrackStateConfigEntry(id: 'todo', name: 'To Do', category: 'new'),
+              TrackStateConfigEntry(
+                id: 'in-review',
+                name: 'In Review',
+                category: 'indeterminate',
+              ),
+              TrackStateConfigEntry(id: 'done', name: 'Done', category: 'done'),
+            ],
+            fieldDefinitions: <TrackStateFieldDefinition>[
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+            ],
+            workflowDefinitions: <TrackStateWorkflowDefinition>[
+              TrackStateWorkflowDefinition(
+                id: 'delivery',
+                name: 'Delivery',
+                statusIds: <String>['todo', 'in-review', 'done'],
+                transitions: <TrackStateWorkflowTransition>[
+                  TrackStateWorkflowTransition(
+                    id: 'review',
+                    name: 'Request review',
+                    fromStatusId: 'todo',
+                    toStatusId: 'in-review',
+                  ),
+                  TrackStateWorkflowTransition(
+                    id: 'complete',
+                    name: 'Complete',
+                    fromStatusId: 'in-review',
+                    toStatusId: 'done',
+                  ),
+                ],
+              ),
+            ],
+          ),
+          issues: const <TrackStateIssue>[],
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(snapshot: snapshot),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'session',
+          '--target',
+          'local',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final projectConfig = data['projectConfig']! as Map<String, Object?>;
+        final statuses = projectConfig['statuses']! as List<Object?>;
+        final workflows = projectConfig['workflows']! as List<Object?>;
+        final delivery = workflows.single as Map<String, Object?>;
+        final transitions = delivery['transitions']! as List<Object?>;
+        final reviewTransition = transitions.first as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(
+          statuses.any(
+            (status) =>
+                (status as Map<String, Object?>)['id'] == 'in-review' &&
+                status['name'] == 'In Review' &&
+                status['category'] == 'indeterminate',
+          ),
+          isTrue,
+        );
+        expect(delivery['id'], 'delivery');
+        expect(delivery['statuses'], <Map<String, Object?>>[
+          <String, Object?>{'id': 'todo', 'name': 'To Do'},
+          <String, Object?>{'id': 'in-review', 'name': 'In Review'},
+          <String, Object?>{'id': 'done', 'name': 'Done'},
+        ]);
+        expect(reviewTransition['name'], 'Request review');
+        expect(reviewTransition['to'], <String, Object?>{
+          'id': 'in-review',
+          'name': 'In Review',
+        });
+      },
+    );
 
     test('rejects hosted targets without credentials', () async {
       final cli = TrackStateCli(
@@ -163,6 +331,11 @@ void main() {
             providerFactory: _FakeTrackStateCliProviderFactory(
               hostedProvider: hostedProvider,
             ),
+            repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+              hostedRepository: _FakeSearchRepository(
+                snapshot: _sampleSnapshot(),
+              ),
+            ),
           );
 
           final result = await cli.run(<String>[
@@ -205,6 +378,11 @@ void main() {
           ),
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -249,6 +427,11 @@ void main() {
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: envProvider,
           ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
+          ),
         );
 
         final envResult = await envCli.run(const <String>[
@@ -282,6 +465,11 @@ void main() {
           ),
           providerFactory: _FakeTrackStateCliProviderFactory(
             hostedProvider: ghProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -358,6 +546,9 @@ void main() {
               isAdmin: false,
             ),
           ),
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
         ),
       );
 
@@ -716,6 +907,43 @@ void main() {
             'inwardIssue': <String, Object?>{'id': '1', 'key': 'TRACK-1'},
           },
         ]);
+      },
+    );
+
+    test(
+      'supports the ticket get shorthand with a positional issue key',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final aliasResult = await cli.run(const <String>[
+          'ticket',
+          'get',
+          'TRACK-2',
+        ]);
+        final canonicalResult = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final aliasJson =
+            jsonDecode(aliasResult.stdout) as Map<String, Object?>;
+        final canonicalJson =
+            jsonDecode(canonicalResult.stdout) as Map<String, Object?>;
+
+        expect(aliasResult.exitCode, 0);
+        expect(aliasJson, canonicalJson);
+        expect(aliasResult.stdout, canonicalResult.stdout);
       },
     );
 
@@ -1257,6 +1485,133 @@ void main() {
     );
 
     test(
+      'attachment upload rejects duplicate file flags before mutating the repository',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-upload-duplicate-file',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final firstFile = File('${tempDir.path}/file1.png');
+        final secondFile = File('${tempDir.path}/file2.png');
+        await firstFile.writeAsBytes(const <int>[1]);
+        await secondFile.writeAsBytes(const <int>[2]);
+        final repository = _FakeSearchRepository(snapshot: _sampleSnapshot());
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          firstFile.path,
+          '--file',
+          secondFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 2);
+        expect(json['ok'], false);
+        expect(json['error'], isA<Map<String, Object?>>());
+        final error = json['error']! as Map<String, Object?>;
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          allOf(contains('file'), contains('Only one file')),
+        );
+        expect(repository.lastUploadIssue, isNull);
+        expect(repository.lastUploadName, isNull);
+      },
+    );
+
+    test(
+      'local attachment upload preserves a custom display name and source media type',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/sample.pdf');
+        final uploadBytes = '%PDF-1.4\nlocal cli attachment\n'.codeUnits;
+        await uploadFile.writeAsBytes(uploadBytes);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'Spec Document',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final attachment = data['attachment']! as Map<String, Object?>;
+        final attachmentsDir = Directory('${repo.path}/DEMO/DEMO-1/attachments');
+        final storedFiles = await attachmentsDir
+            .list()
+            .where((entity) => entity is File)
+            .cast<File>()
+            .toList();
+        final storedRelativePath = storedFiles.single.path
+            .substring(repo.path.length + 1)
+            .replaceAll('\\', '/');
+        final metadata =
+            jsonDecode(
+                  File(
+                    '${repo.path}/DEMO/DEMO-1/attachments.json',
+                  ).readAsStringSync(),
+                )
+                as List<Object?>;
+        final metadataEntry = metadata.single as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(data['issue'], 'DEMO-1');
+        expect(attachment['name'], 'Spec Document');
+        expect(attachment['mediaType'], 'application/pdf');
+        expect(attachment['id'], storedRelativePath);
+        expect(metadataEntry['name'], 'Spec Document');
+        expect(metadataEntry['mediaType'], 'application/pdf');
+        expect(await storedFiles.single.readAsBytes(), uploadBytes);
+      },
+    );
+
+    test(
       'local release-backed attachment uploads forward optional GitHub credentials',
       () async {
         final uploadFile = File(
@@ -1349,6 +1704,290 @@ void main() {
     );
 
     test(
+      'hosted attachment upload returns an explicit unsupported error for LFS-tracked files',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-hosted-lfs-upload.zip',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsBytes(const <int>[1, 2, 3, 4]);
+        final repository = _FakeSearchRepository(snapshot: _sampleSnapshot());
+        final hostedProvider = _FakeHostedTrackStateProvider(
+          user: const RepositoryUser(login: 'octocat', displayName: 'Octo Cat'),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+            canManageAttachments: true,
+            attachmentUploadMode: AttachmentUploadMode.noLfs,
+          ),
+          lfsTrackedPaths: const <String>{
+            'TRACK/TRACK-1/attachments/design.zip',
+          },
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+            environment: const <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'design.zip',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(json['ok'], isFalse);
+        expect(error['code'], 'UNSUPPORTED_OPERATION');
+        expect(error['category'], 'unsupported');
+        expect(error['message'], contains('Git LFS'));
+        expect(error['message'], contains('not implemented'));
+        expect(details['repository'], 'owner/repo');
+        expect(details['issue'], 'TRACK-1');
+        expect(details['attachmentPath'], 'TRACK/TRACK-1/attachments/design.zip');
+        expect(repository.lastUploadIssue, isNull);
+        expect(repository.lastUploadName, isNull);
+      },
+    );
+
+    test(
+      'local release-backed upload surfaces explicit GitHub release validation failures',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-local-release-validation.txt',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsString('release payload');
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          uploadException: const TrackStateProviderException(
+            'Could not create GitHub release trackstate-attachments-TRACK-1 '
+            'for issue TRACK-1 (422): '
+            '{"message":"Validation Failed","errors":[{"resource":"Release","field":"target_commitish","code":"invalid","message":"target_commitish is invalid"}]}',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          '/workspace/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'API_VALIDATION_FAILED');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          contains(
+            'Could not create GitHub release trackstate-attachments-TRACK-1',
+          ),
+        );
+        expect(error['message'], contains('(422)'));
+        expect(error['message'], contains('Validation Failed'));
+        expect(error['message'], contains('target_commitish'));
+        expect(details['reason'], error['message']);
+      },
+    );
+
+    test(
+      'local release-backed upload surfaces explicit GitHub release conflicts',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-local-release-conflict.txt',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsString('release payload');
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          uploadException: const TrackStateProviderException(
+            'Could not create GitHub release trackstate-attachments-TRACK-1 '
+            'for issue TRACK-1 (409): '
+            '{"message":"Conflict","errors":[{"resource":"Release","field":"tag_name","code":"already_exists","message":"tag already exists"}]}',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          '/workspace/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'RESOURCE_CONFLICT');
+        expect(error['category'], 'repository');
+        expect(
+          error['message'],
+          contains(
+            'Could not create GitHub release trackstate-attachments-TRACK-1',
+          ),
+        );
+        expect(error['message'], contains('(409)'));
+        expect(error['message'], contains('Conflict'));
+        expect(error['message'], contains('tag already exists'));
+        expect(details['reason'], error['message']);
+      },
+    );
+
+    test(
       'local release-backed upload without a git remote reports an explicit repository identity error',
       () async {
         final repo = await _createCliLocalRepository();
@@ -1395,6 +2034,71 @@ void main() {
           details['reason'],
           contains(
             'GitHub repository identity cannot be resolved from the local Git configuration because no remote is configured.',
+          ),
+        );
+      },
+    );
+
+    test(
+      'local release-backed upload with a non-GitHub remote returns a repository identity validation error',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/release-plan.txt');
+        await uploadFile.writeAsString('roadmap');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+        );
+        await _gitCliTest(repo.path, [
+          'remote',
+          'add',
+          'origin',
+          'https://gitlab.com/user/project.git',
+        ]);
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure release-backed attachment storage',
+        ]);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'INVALID_REQUEST');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no GitHub remote is configured.',
+          ),
+        );
+        expect(
+          details['reason'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no GitHub remote is configured.',
           ),
         );
       },
@@ -1972,6 +2676,62 @@ void main() {
         expect(error['category'], 'unsupported');
       },
     );
+
+    test(
+      'rejects unsupported admin paths for jira_execute_request before local repo access',
+      () async {
+        final localProvider = _FailingLocalGitTrackStateProvider(
+          repositoryPath: '/tmp/isolated-target',
+          user: const RepositoryUser(
+            login: 'local@example.com',
+            displayName: 'Local User',
+          ),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: localProvider,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--path',
+          '/tmp/isolated-target',
+          '--method',
+          'POST',
+          '--request-path',
+          '/rest/api/2/user/permission',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final target = json['target']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(error['code'], 'UNSUPPORTED_REQUEST');
+        expect(error['category'], 'unsupported');
+        expect(
+          error['message'],
+          contains(
+            'jira_execute_request does not support "/rest/api/2/user/permission"',
+          ),
+        );
+        expect(target, <String, Object?>{
+          'type': 'local',
+          'value': '/tmp/isolated-target',
+        });
+        expect(localProvider.resolveWriteBranchCalled, isFalse);
+      },
+    );
   });
 }
 
@@ -2316,6 +3076,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     RepositoryUser? connectedUser,
     this.downloadBytes = const <String, List<int>>{},
     this.downloadException,
+    this.uploadException,
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
     this.requiredUploadToken,
@@ -2334,6 +3095,7 @@ class _FakeSearchRepository implements TrackStateRepository {
   final RepositoryUser connectedUser;
   final Map<String, List<int>> downloadBytes;
   final TrackStateProviderException? downloadException;
+  final Object? uploadException;
   final String Function(String name)? uploadedAttachmentNameBuilder;
   final bool sortUploadedAttachmentsByName;
   final String? requiredUploadToken;
@@ -2417,7 +3179,12 @@ class _FakeSearchRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
+    final uploadException = this.uploadException;
+    if (uploadException != null) {
+      throw uploadException;
+    }
     final requiredUploadToken = this.requiredUploadToken;
     if (requiredUploadToken != null &&
         connection?.token != requiredUploadToken) {
@@ -2517,6 +3284,23 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
   );
 }
 
+class _FailingLocalGitTrackStateProvider
+    extends _FakeLocalGitTrackStateProvider {
+  _FailingLocalGitTrackStateProvider({
+    required super.repositoryPath,
+    required super.user,
+    required super.permission,
+  }) : super(branch: 'main');
+
+  bool resolveWriteBranchCalled = false;
+
+  @override
+  Future<String> resolveWriteBranch() async {
+    resolveWriteBranchCalled = true;
+    throw StateError('resolveWriteBranch should not be called');
+  }
+}
+
 class _FakeHostedTrackStateProvider
     implements TrackStateProviderAdapter, RepositoryUserLookup {
   _FakeHostedTrackStateProvider({
@@ -2524,12 +3308,14 @@ class _FakeHostedTrackStateProvider
     required this.permission,
     this.usersByLogin = const {},
     this.usersByEmail = const {},
+    this.lfsTrackedPaths = const <String>{},
   });
 
   final RepositoryUser user;
   final RepositoryPermission permission;
   final Map<String, RepositoryUser> usersByLogin;
   final Map<String, RepositoryUser> usersByEmail;
+  final Set<String> lfsTrackedPaths;
   RepositoryConnection? connection;
 
   @override
@@ -2627,7 +3413,7 @@ class _FakeHostedTrackStateProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async => lfsTrackedPaths.contains(path);
 }
 
 class _ThrowingHostedTrackStateProvider extends _FakeHostedTrackStateProvider {

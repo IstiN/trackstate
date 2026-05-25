@@ -1027,6 +1027,18 @@ class IssueMutationService {
       }
       final snapshot = resolution.snapshot!;
       final issue = resolution.issue!;
+      final normalizedIssueKey = _normalizedIssueKey(issue.key);
+      final normalizedTargetKey = _normalizedIssueKey(targetKey);
+      if (normalizedIssueKey == normalizedTargetKey) {
+        return _failure(
+          operation: operation,
+          issueKey: issueKey,
+          category: IssueMutationErrorCategory.validation,
+          message:
+              'Issue $issueKey cannot be linked to itself using target key $targetKey.',
+          details: <String, Object?>{'targetKey': targetKey},
+        );
+      }
       final target = snapshot.issues.where(
         (candidate) => candidate.key == targetKey,
       );
@@ -1046,15 +1058,6 @@ class IssueMutationService {
           issueKey: issueKey,
           category: IssueMutationErrorCategory.validation,
           message: 'Unsupported link type $type.',
-        );
-      }
-      if (issue.key == targetKey) {
-        return _failure(
-          operation: operation,
-          issueKey: issueKey,
-          category: IssueMutationErrorCategory.validation,
-          message: 'Issue $issueKey cannot be linked to itself.',
-          details: <String, Object?>{'targetKey': targetKey},
         );
       }
 
@@ -1099,14 +1102,25 @@ class IssueMutationService {
           ),
         );
       }
-      final writeResult = await provider.writeTextFile(
-        RepositoryWriteRequest(
-          path: linksPath,
-          content: '${jsonEncode(_linksJson(existingLinks))}\n',
-          message: 'Link $issueKey to $targetKey',
-          branch: writeBranch,
-          expectedRevision: existingRevision,
-        ),
+      final message = 'Link $issueKey to $targetKey';
+      final commitResult = await _applyChanges(
+        provider: provider,
+        branch: writeBranch,
+        message: message,
+        changes: [
+          RepositoryTextFileChange(
+            path: linksPath,
+            content: '${jsonEncode(_linksJson(existingLinks))}\n',
+            expectedRevision: existingRevision,
+          ),
+          await _repositoryRootLinksJsonChange(
+            provider: provider,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+            updatedLinksPath: linksPath,
+            updatedLinks: existingLinks,
+          ),
+        ],
       );
       final refreshed = await providerRepository.loadSnapshot();
       return IssueMutationResult.success(
@@ -1115,7 +1129,7 @@ class IssueMutationService {
         value: refreshed.issues.firstWhere(
           (candidate) => candidate.key == issueKey,
         ),
-        revision: writeResult.revision,
+        revision: commitResult.revision,
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
@@ -2153,6 +2167,57 @@ List<Map<String, Object?>> _linksJson(List<IssueLink> links) => [
     {'type': link.type, 'target': link.targetKey, 'direction': link.direction},
 ];
 
+Future<RepositoryTextFileChange> _repositoryRootLinksJsonChange({
+  required TrackStateProviderAdapter provider,
+  required String ref,
+  required Set<String> blobPaths,
+  required String updatedLinksPath,
+  required List<IssueLink> updatedLinks,
+}) async {
+  final aggregateLinks = await _aggregateRepositoryRootLinks(
+    provider: provider,
+    ref: ref,
+    blobPaths: blobPaths,
+    updatedLinksPath: updatedLinksPath,
+    updatedLinks: updatedLinks,
+  );
+  return RepositoryTextFileChange(
+    path: 'links.json',
+    content: '${jsonEncode(_linksJson(aggregateLinks))}\n',
+    expectedRevision: await _existingTextRevision(
+      provider,
+      path: 'links.json',
+      ref: ref,
+      blobPaths: blobPaths,
+    ),
+  );
+}
+
+Future<List<IssueLink>> _aggregateRepositoryRootLinks({
+  required TrackStateProviderAdapter provider,
+  required String ref,
+  required Set<String> blobPaths,
+  required String updatedLinksPath,
+  required List<IssueLink> updatedLinks,
+}) async {
+  final aggregateLinks = <IssueLink>[];
+  final linksPaths = <String>{
+    ...blobPaths.where((path) => path.endsWith('/links.json')),
+    updatedLinksPath,
+  }.toList()..sort();
+
+  for (final path in linksPaths) {
+    if (path == updatedLinksPath) {
+      aggregateLinks.addAll(updatedLinks);
+      continue;
+    }
+    aggregateLinks.addAll(
+      _parseLinksJson((await provider.readTextFile(path, ref: ref)).content),
+    );
+  }
+  return aggregateLinks;
+}
+
 Map<String, Object?> _parseFrontmatter(List<String> lines) {
   final result = <String, Object?>{};
   String? pendingRootKey;
@@ -2440,6 +2505,8 @@ String _upsertSection(String markdown, String title, String content) {
 
 String _issueRoot(String storagePath) =>
     storagePath.substring(0, storagePath.lastIndexOf('/'));
+
+String _normalizedIssueKey(String key) => key.trim().toUpperCase();
 
 bool? _boolValue(Object? value) {
   if (value is bool) {

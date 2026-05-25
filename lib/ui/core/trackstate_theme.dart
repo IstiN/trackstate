@@ -39,6 +39,10 @@ class TrackStateColors extends ThemeExtension<TrackStateColors> {
   final Color info;
   final Color shadow;
 
+  Color get loadingFeedbackBackground => surfaceAlt;
+
+  Color get loadingFeedbackForeground => text;
+
   static const light = TrackStateColors(
     primary: Color(0xFFB24328),
     primarySoft: Color(0xFFF2D2C4),

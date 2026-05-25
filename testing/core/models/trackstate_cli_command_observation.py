@@ -13,6 +13,7 @@ class TrackStateCliCommandObservation:
     repository_path: str
     compiled_binary_path: str | None
     result: CliCommandResult
+    execution_working_directory: str | None = None
 
     @property
     def requested_command_text(self) -> str:
