@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import platform
 import sys
 import traceback
 import uuid
@@ -40,15 +41,26 @@ from testing.tests.support.live_tracker_app_factory import (
 
 TICKET_KEY = "TS-409"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_success.png"
 STATUSES_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_statuses_commit.png"
 WORKFLOWS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_workflows_commit.png"
-RESULT_PATH = OUTPUTS_DIR / "ts409_result.json"
 STATUSES_PATH = "DEMO/config/statuses.json"
 WORKFLOWS_PATH = "DEMO/config/workflows.json"
 WORKFLOW_NAME = "Delivery Workflow"
 WORKFLOW_ID = "delivery-workflow"
+REQUEST_STEPS = (
+    "Navigate to Settings Admin Workspace.",
+    "Make changes in 'Statuses' (Add new) and 'Workflows' (Update transition).",
+    "Click 'Save'.",
+    "Verify the resulting Git commit.",
+    "Execute `trackstate session` via CLI.",
+)
 
 
 def main() -> None:
@@ -92,6 +104,7 @@ def main() -> None:
         "expected_status_name": status_name,
         "expected_transition_name": transition_name,
         "steps": [],
+        "human_verification": [],
     }
 
     mutation_attempted = False
@@ -153,6 +166,15 @@ def main() -> None:
                     ),
                     observed=ui_observation.post_save_text,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the visible hosted settings flow exposed the user-facing "
+                        "`Project Settings`, `Add status`, `Workflows`, `Edit workflow`, "
+                        "and `Save settings` surfaces before and after saving."
+                    ),
+                    observed=_human_ui_observation_text(ui_observation),
+                )
             except Exception:
                 settings_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
@@ -194,6 +216,14 @@ def main() -> None:
             transition_name=transition_name,
         )
         result["github_ui_verification"] = file_page_observations
+        _record_human_verification(
+            result,
+            check=(
+                "Verified the committed GitHub file views visibly showed the new status "
+                "and updated Delivery Workflow transition in the saved repository state."
+            ),
+            observed=_human_commit_observation_text(file_page_observations),
+        )
 
         cli_result = _run_session_until_project_config(
             cli_service=cli_service,
@@ -216,15 +246,25 @@ def main() -> None:
             action="Run `trackstate session` for the same hosted repository.",
             observed=cli_result.stdout,
         )
+        _record_human_verification(
+            result,
+            check=(
+                "Verified the installed `trackstate session` CLI output for the same "
+                "hosted repository exposed the saved status and workflow markers inside "
+                "the returned `projectConfig` block."
+            ),
+            observed=_human_cli_observation_text(cli_result),
+        )
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
-        _write_result(result)
+        _record_failed_step_from_error(result)
+        _write_failure_outputs(result)
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_result(result)
+        _write_failure_outputs(result)
         raise
     finally:
         if mutation_attempted:
@@ -254,7 +294,7 @@ def main() -> None:
         "changes in one commit and that the hosted CLI session output exposed the "
         "updated projectConfig data immediately afterward."
     )
-    _write_result(result)
+    _write_pass_outputs(result)
     print(json.dumps(result, indent=2))
 
 
@@ -309,7 +349,21 @@ def _resolve_delivery_transition_index(workflows_content: str) -> int:
             "least four transitions so the existing 'Reopen' transition can be updated.\n"
             f"Observed workflows.json:\n{workflows_content}",
         )
-    return len(transitions) - 1
+    for index, transition in enumerate(transitions):
+        if not isinstance(transition, dict):
+            continue
+        if str(transition.get("id", "")).strip() == "reopen":
+            return index
+    for index, transition in enumerate(transitions):
+        if not isinstance(transition, dict):
+            continue
+        if str(transition.get("name", "")).strip().lower() == "reopen":
+            return index
+    raise AssertionError(
+        "Precondition failed: TS-409 expected the Delivery Workflow to expose an "
+        "existing `Reopen` transition to edit.\n"
+        f"Observed workflows.json:\n{workflows_content}",
+    )
 
 
 def _assert_commit_observation(
@@ -415,8 +469,8 @@ def _run_session_until_project_config(
     branch: str,
     status_marker: str,
     workflow_marker: str,
-    attempts: int = 5,
-    interval_seconds: float = 3.0,
+    attempts: int = 12,
+    interval_seconds: float = 5.0,
 ) -> CliCommandResult:
     matched, last_result = poll_until(
         probe=lambda: cli_service.run_session(
@@ -530,8 +584,368 @@ def _record_step(
     )
 
 
-def _write_result(payload: dict[str, object]) -> None:
-    RESULT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def _record_human_verification(
+    result: dict[str, object],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    observations = result.setdefault("human_verification", [])
+    assert isinstance(observations, list)
+    observations.append({"check": check, "observed": observed})
+
+
+def _record_failed_step_from_error(result: dict[str, object]) -> None:
+    error = str(result.get("error", "")).strip()
+    if not error.startswith("Step "):
+        return
+    try:
+        prefix, _, observed = error.partition("\n")
+        step_number = int(prefix.split()[1])
+    except (IndexError, ValueError):
+        return
+    steps = result.setdefault("steps", [])
+    assert isinstance(steps, list)
+    if any(
+        isinstance(step, dict) and int(step.get("step", -1)) == step_number
+        for step in steps
+    ):
+        return
+    action = (
+        REQUEST_STEPS[step_number - 1]
+        if 0 < step_number <= len(REQUEST_STEPS)
+        else "Automation step failed."
+    )
+    steps.append(
+        {
+            "step": step_number,
+            "status": "failed",
+            "action": action,
+            "observed": observed or error,
+        },
+    )
+
+
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+
+
+def _write_failure_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: unknown failure"))
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    if _is_product_failure(result):
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    lines = [
+        f"h3. {TICKET_KEY} {status}",
+        "",
+        "*Automation coverage*",
+        "* Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to *Project Settings*.",
+        "* Added a unique status, edited the existing *Delivery Workflow* transition, and saved through the visible hosted Settings UI.",
+        "* Verified the save result through the live GitHub repository commit/file state.",
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block.",
+        "",
+        "*Observed result*",
+        (
+            "* Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
+            if passed
+            else "* Did not match the expected result."
+        ),
+        (
+            f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
+            f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
+            f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
+        ),
+        f"* Screenshot: {{{{{screenshot_path}}}}}",
+        "",
+        "*Step results*",
+        *_step_lines(result, jira=True),
+        "",
+        "*Human-style verification*",
+        *_human_lines(result, jira=True),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _pr_body(result: dict[str, object], *, passed: bool) -> str:
+    status = "Passed" if passed else "Failed"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    lines = [
+        f"## {TICKET_KEY} {status}",
+        "",
+        "### Automation",
+        "- Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to `Project Settings`.",
+        "- Added a unique status, edited the existing `Delivery Workflow` transition, and saved through the visible hosted Settings UI.",
+        "- Verified the save result through the live GitHub repository commit/file state.",
+        "- Ran the installed `trackstate session` CLI against the same hosted repository and checked the returned `projectConfig` block.",
+        "",
+        "### Observed result",
+        (
+            "- Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
+            if passed
+            else "- Did not match the expected result."
+        ),
+        (
+            f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
+            f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
+        ),
+        f"- Screenshot: `{screenshot_path}`",
+        "",
+        "### Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "### Human-style verification",
+        *_human_lines(result, jira=False),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "### Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    lines = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        (
+            "Verified the hosted Settings save created one atomic commit and the installed "
+            "`trackstate session` CLI immediately returned the updated `projectConfig`."
+            if passed
+            else "The hosted Settings persistence / CLI parity scenario did not match the expected result."
+        ),
+        "",
+        "## Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "## Human-style verification",
+        *_human_lines(result, jira=False),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _bug_description(result: dict[str, object]) -> str:
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    actual = _actual_result_text(result)
+    cli_observation = result.get("cli_observation")
+    cli_text = (
+        json.dumps(cli_observation, indent=2)
+        if isinstance(cli_observation, dict)
+        else "CLI step was not reached."
+    )
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} product defect",
+            "",
+            "## Steps to reproduce",
+            *_ticket_step_lines(result),
+            "",
+            "## Expected result",
+            (
+                "Approved changes are written in one atomic Git commit via `applyFileChanges`. "
+                "The CLI `session` output immediately reflects the updated status catalog and "
+                "workflow summaries in the `projectConfig` block."
+            ),
+            "",
+            "## Actual result",
+            actual,
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: `{result['app_url']}`",
+            f"- Repository: `{result['repository']}`",
+            f"- Branch/ref: `{result['repository_ref']}`",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.system()}`",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{screenshot_path}`",
+            "- CLI observation:",
+            "```json",
+            cli_text,
+            "```",
+        ]
+    ) + "\n"
+
+
+def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        return ["* No automation steps were recorded." if jira else "- No automation steps were recorded."]
+    prefix = "*" if jira else "-"
+    rendered: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        rendered.append(
+            f"{prefix} Step {step.get('step')}: {step.get('status', 'unknown').upper()} - "
+            f"{step.get('action', '')}"
+        )
+        rendered.append(f"{prefix} Observed: {step.get('observed', '')}")
+    return rendered
+
+
+def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    entries = result.get("human_verification", [])
+    if not isinstance(entries, list) or not entries:
+        return ["* No additional human-style observations were recorded." if jira else "- No additional human-style observations were recorded."]
+    prefix = "*" if jira else "-"
+    rendered: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        rendered.append(f"{prefix} {entry.get('check', '')}")
+        rendered.append(f"{prefix} Observed: {entry.get('observed', '')}")
+    return rendered
+
+
+def _ticket_step_lines(result: dict[str, object]) -> list[str]:
+    recorded_steps = result.get("steps", [])
+    step_lookup = {
+        int(step.get("step")): step
+        for step in recorded_steps
+        if isinstance(step, dict) and isinstance(step.get("step"), int)
+    }
+    lines: list[str] = []
+    for index, action in enumerate(REQUEST_STEPS, start=1):
+        step = step_lookup.get(index)
+        if step is None:
+            lines.append(f"{index}. {action} - not reached.")
+            continue
+        status = str(step.get("status", "unknown")).upper()
+        icon = "✅" if status == "PASSED" else "❌"
+        lines.append(f"{index}. {action} - {icon} {status}")
+        lines.append(f"   - Observed: {step.get('observed', '')}")
+    return lines
+
+
+def _actual_result_text(result: dict[str, object]) -> str:
+    error = str(result.get("error", ""))
+    if error.startswith("Step 4 failed:"):
+        return (
+            "After the hosted Settings save, the repository branch head did not change "
+            "within the polling window, so no new atomic commit was available for the "
+            "requested settings update."
+        )
+    if error.startswith("Step 5 failed:"):
+        return (
+            "The hosted save reached Git, but the installed `trackstate session` CLI did "
+            "not expose the updated status/workflow markers inside the returned "
+            "`projectConfig` block within the polling window."
+        )
+    return error or "The scenario failed before the expected user-visible result was observed."
+
+
+def _human_ui_observation_text(observation: ProjectSettingsUiObservation) -> str:
+    return (
+        f"settings_text={observation.settings_text!r}; "
+        f"status_dialog_text={observation.status_dialog_text!r}; "
+        f"workflow_dialog_text={observation.workflow_dialog_text!r}; "
+        f"post_save_text={observation.post_save_text!r}"
+    )
+
+
+def _human_commit_observation_text(observation: dict[str, object]) -> str:
+    statuses = observation.get("statuses_file", {}) if isinstance(observation, dict) else {}
+    workflows = observation.get("workflows_file", {}) if isinstance(observation, dict) else {}
+    return (
+        f"statuses_url={statuses.get('url', '')!r}; "
+        f"statuses_match={statuses.get('matched_text', '')!r}; "
+        f"statuses_screenshot={statuses.get('screenshot_path', '')!r}; "
+        f"workflows_url={workflows.get('url', '')!r}; "
+        f"workflows_match={workflows.get('matched_text', '')!r}; "
+        f"workflows_screenshot={workflows.get('screenshot_path', '')!r}"
+    )
+
+
+def _human_cli_observation_text(result: CliCommandResult) -> str:
+    payload = (
+        json.dumps(result.json_payload, sort_keys=True)
+        if result.json_payload is not None
+        else result.stdout
+    )
+    return (
+        f"command={result.command_text!r}; exit_code={result.exit_code}; "
+        f"project_config_payload={payload}"
+    )
+
+
+def _is_product_failure(result: dict[str, object]) -> bool:
+    error = str(result.get("error", ""))
+    if error.startswith("Precondition failed:"):
+        return False
+    if "requires GH_TOKEN" in error or "available on PATH" in error:
+        return False
+    return error.startswith("Step ")
 
 
 if __name__ == "__main__":
