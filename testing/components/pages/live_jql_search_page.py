@@ -96,12 +96,18 @@ class LiveJqlSearchPage:
             field_selector=field_selector,
             expected_count_summaries=expected_count_summaries,
         )
+        pre_submit_observation = self._observe(
+            query=query,
+            field_selector=field_selector,
+        )
+        self._focus_search_field(field_selector=field_selector)
         self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._session.press_key("Enter", timeout_ms=30_000)
         return self._wait_for_submitted_result(
             query=query,
             field_selector=field_selector,
-            expected_count_summaries=expected_count_summaries,
+            pre_submit_count_summary=pre_submit_observation.count_summary,
+            pre_submit_issue_labels=pre_submit_observation.issue_labels,
         )
 
     def screenshot(self, path: str) -> None:
@@ -113,10 +119,7 @@ class LiveJqlSearchPage:
     def _submit_query(self, query: str) -> str:
         self.open()
         field_selector = self._wait_for_search_field()
-        self._session.click(
-            self._panel_search_field_container_selector,
-            timeout_ms=30_000,
-        )
+        self._focus_search_field(field_selector=field_selector)
         self._session.fill(field_selector, query, timeout_ms=30_000)
         self._session.press_key("Enter", timeout_ms=30_000)
         return field_selector
@@ -128,13 +131,14 @@ class LiveJqlSearchPage:
         field_selector: str,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
+        issue_result_labels = self._issue_result_labels()
         return LiveJqlSearchObservation(
             query=query,
             visible_query=self._session.read_value(field_selector, timeout_ms=30_000),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
-            issue_result_count=self._session.count(self._issue_button_selector),
-            issue_result_labels=self._issue_result_labels(),
+            issue_result_count=len(issue_result_labels),
+            issue_result_labels=issue_result_labels,
         )
 
     def _wait_for_search_field(self) -> str:
@@ -185,7 +189,8 @@ class LiveJqlSearchPage:
         *,
         query: str,
         field_selector: str,
-        expected_count_summaries: tuple[str, ...] | None = None,
+        pre_submit_count_summary: str | None,
+        pre_submit_issue_labels: tuple[str, ...],
     ) -> LiveJqlSearchObservation:
         try:
             self._session.wait_for_function(
@@ -194,7 +199,8 @@ class LiveJqlSearchPage:
                     fieldSelector,
                     issueSelector,
                     submittedQuery,
-                    expectedCountSummaries,
+                    preSubmitCountSummary,
+                    preSubmitIssueLabels,
                 }) => {
                     const field = document.querySelector(fieldSelector);
                     if (!field || !("value" in field)) {
@@ -206,13 +212,17 @@ class LiveJqlSearchPage:
                     const bodyText = document.body?.innerText ?? "";
                     const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
                     const countSummary = countMatch ? countMatch[0] : null;
+                    if (countSummary === null) {
+                        return null;
+                    }
                     const issueLabels = Array.from(document.querySelectorAll(issueSelector))
                         .map((element) => (element.getAttribute("aria-label") ?? "").trim())
                         .filter((label) => label.length > 0);
-                    const countMatches =
-                        expectedCountSummaries === null
-                        || expectedCountSummaries.includes(countSummary);
-                    if (!countMatches) {
+                    const labelsChanged =
+                        issueLabels.length !== preSubmitIssueLabels.length
+                        || issueLabels.some((label, index) => label !== preSubmitIssueLabels[index]);
+                    const countChanged = countSummary !== preSubmitCountSummary;
+                    if (!labelsChanged && !countChanged) {
                         return null;
                     }
                     return {
@@ -227,9 +237,8 @@ class LiveJqlSearchPage:
                     "fieldSelector": field_selector,
                     "issueSelector": self._issue_button_selector,
                     "submittedQuery": query,
-                    "expectedCountSummaries": list(expected_count_summaries)
-                    if expected_count_summaries is not None
-                    else None,
+                    "preSubmitCountSummary": pre_submit_count_summary,
+                    "preSubmitIssueLabels": list(pre_submit_issue_labels),
                 },
                 timeout_ms=60_000,
             )
@@ -239,7 +248,6 @@ class LiveJqlSearchPage:
                 "Step 4 failed: the live JQL Search panel never reached a post-submit "
                 "state for the submitted query.\n"
                 f"Submitted query: {query}\n"
-                f"Expected summaries after submit: {expected_count_summaries}\n"
                 f"Latest visible query: {latest_observation.visible_query}\n"
                 f"Latest count summary: {latest_observation.count_summary}\n"
                 f"Latest visible issue labels: {list(latest_observation.issue_labels)}\n"
@@ -260,8 +268,9 @@ class LiveJqlSearchPage:
             return
 
         sync_query = self._synchronization_query(expected_count_summaries)
+        self._focus_search_field(field_selector=field_selector)
         self._session.fill(field_selector, sync_query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._session.press_key("Enter", timeout_ms=30_000)
         self._wait_for_non_matching_count_summary(
             excluded_count_summaries=expected_count_summaries,
         )
@@ -303,6 +312,29 @@ class LiveJqlSearchPage:
         if "No issues" in expected_count_summaries:
             return ""
         return "__ts327_sync_no_match__"
+
+    def _focus_search_field(self, *, field_selector: str) -> None:
+        self._session.click(
+            self._panel_search_field_container_selector,
+            timeout_ms=30_000,
+        )
+        try:
+            self._session.wait_for_function(
+                """
+                (fieldSelector) => {
+                    const field = document.querySelector(fieldSelector);
+                    return !!field && document.activeElement === field;
+                }
+                """,
+                arg=field_selector,
+                timeout_ms=10_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 3 failed: the live app did not focus the JQL Search field before "
+                "the query was entered.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     @staticmethod
     def _count_summary(body_text: str) -> str | None:
