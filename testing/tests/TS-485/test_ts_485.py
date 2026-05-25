@@ -5,6 +5,7 @@ import platform
 import traceback
 from pathlib import Path
 import sys
+import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -900,6 +901,13 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         lines.append(f"{prefix} {check.get('check')}")
         lines.append(f"{prefix} Observed: {check.get('observed')}")
     return lines
+
+
+class TrackStateCliMixedAttachmentResolutionTest(unittest.TestCase):
+    maxDiff = None
+
+    def test_mixed_attachment_backend_resolution(self) -> None:
+        main()
 
 
 def main() -> None:
