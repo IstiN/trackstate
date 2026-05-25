@@ -394,6 +394,12 @@ abstract class AppLocalizations {
   /// **'Detail'**
   String get detail;
 
+  /// No description provided for @comment.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment'**
+  String get comment;
+
   /// No description provided for @comments.
   ///
   /// In en, this message translates to:
@@ -409,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
+  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
