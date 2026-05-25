@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import platform
 import re
@@ -31,9 +30,7 @@ from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
     Ts980RestorePersistenceRuntime,
-    install_restorable_directory_picker,
     read_manual_reauth_probe as _support_read_manual_reauth_probe,
-    read_restorable_directory_picker_state as _support_read_restorable_directory_picker_state,
 )
 
 TICKET_KEY = "TS-912"
@@ -88,9 +85,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Resolved the merge conflict and replaced the same-named OPFS substitute "
-    "workspace with a picker handle seeded from the recreated saved workspace "
-    "contents, so step 4 stays bound to the actual restore target."
+    "Removed the synthetic directory-picker override so TS-912 stays bound to "
+    "the actual saved workspace action and reports the real manual re-auth gap "
+    "instead of replaying fixture data through a substitute handle."
 )
 
 
@@ -294,20 +291,7 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
-                workspace_directory_snapshot = _workspace_directory_snapshot(
-                    Path(restored_local_workspace["path"]),
-                )
-                install_restorable_directory_picker(
-                    tracker_page=tracker_page,
-                    directory_snapshot=workspace_directory_snapshot,
-                )
-                result["manual_directory_picker_fixture"] = (
-                    _workspace_directory_snapshot_summary(workspace_directory_snapshot)
-                )
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
-                    tracker_page,
-                )
-                result["manual_directory_picker_state_before_action"] = _read_directory_picker_state(
                     tracker_page,
                 )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
@@ -370,9 +354,6 @@ def main() -> None:
                 result["manual_reauth_probe_after_action"] = restore_attempt_observation[
                     "probe"
                 ]
-                result["manual_directory_picker_state_after_action"] = _read_directory_picker_state(
-                    tracker_page,
-                )
                 if not callback_observed:
                     _record_human_verification(
                         result,
@@ -383,8 +364,7 @@ def main() -> None:
                         observed=(
                             f"trigger_after_click={json.dumps(restore_attempt_observation['trigger'], ensure_ascii=True)}; "
                             f"body_text={restore_attempt_observation['body_text']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"directory_picker={json.dumps(restore_attempt_observation['directory_picker_state'], ensure_ascii=True)}"
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
                         ),
                     )
                     _record_step(
@@ -396,8 +376,7 @@ def main() -> None:
                             "The manual unavailable-workspace action never triggered a "
                             "directory-access callback and never restored the workspace.\n"
                             f"action_label={exact_action_label!r}\n"
-                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                            f"directory_picker_state={json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
@@ -405,8 +384,6 @@ def main() -> None:
                         "a directory-access callback and never restored the workspace.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        "Observed directory picker state:\n"
-                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
                 if restore_attempt_observation["failure_message"] is not None:
@@ -418,8 +395,7 @@ def main() -> None:
                         ),
                         observed=(
                             f"failure_message={restore_attempt_observation['failure_message']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"directory_picker={json.dumps(restore_attempt_observation['directory_picker_state'], ensure_ascii=True)}"
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
                         ),
                     )
                     _record_step(
@@ -432,7 +408,7 @@ def main() -> None:
                             "a directory-access prompt and instead failed in the deployed app.\n"
                             f"action_label={exact_action_label!r}\n"
                             f"failure_message={restore_attempt_observation['failure_message']!r}\n"
-                            f"directory_picker_state={json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
@@ -443,12 +419,8 @@ def main() -> None:
                         f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
                         "Missing production capability: the Workspace switcher does not expose "
                         "a working manual re-authentication / access-grant flow for the saved "
-                        "unavailable local workspace in the deployed web build, even when the "
-                        "test replays the recreated saved workspace through the browser picker "
-                        "boundary.\n"
+                        "unavailable local workspace in the deployed web build.\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        "Observed directory picker state:\n"
-                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
 
@@ -470,18 +442,24 @@ def main() -> None:
                         status="failed",
                         action=REQUEST_STEPS[3],
                         observed=(
-                            "A directory-access callback was observed, but the workspace never "
-                            "completed the Local Git restore flow.\n"
+                            "The visible Retry action reached the real browser directory-access "
+                            "boundary, but the deployed app never completed the Local Git "
+                            "restore flow afterward.\n"
                             f"restore_observation={json.dumps(restored_observation, indent=2)}\n"
-                            f"directory_picker_state={json.dumps(result['manual_directory_picker_state_after_action'], indent=2)}"
+                            f"probe_state={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
-                        "Step 4 failed: the directory-access callback was observed, but the "
-                        "workspace never completed the Local Git restore flow.\n"
+                        "Step 4 failed: the visible Retry action reached the real browser "
+                        "directory-access boundary, but the workspace never completed the "
+                        "Local Git restore flow afterward.\n"
+                        "Missing production capability: the deployed web build only exposes the "
+                        "native browser directory prompt for this saved workspace and keeps "
+                        "remembered directory handles in an in-memory map, so the actual saved "
+                        "directory cannot be re-bound from the existing TS-912 preload/runtime "
+                        "surface without substituting the handle.\n"
                         f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}\n"
-                        "Observed directory picker state:\n"
-                        f"{json.dumps(result['manual_directory_picker_state_after_action'], indent=2)}"
+                        f"Observed probe state:\n{json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                     )
 
                 trigger_after_restore = restored_observation["trigger"]
@@ -527,11 +505,10 @@ def main() -> None:
                     observed=(
                         "After the manual restore action, the workspace was visible as the "
                         "active `Local Git` workspace and the interactive shell remained loaded "
-                        "after the test supplied the recreated saved-workspace contents through "
-                        "the browser picker boundary.\n"
+                        "without substituting the saved directory handle from the test.\n"
                         f"selected_row={json.dumps(_row_payload(selected_row_after), indent=2)}\n"
                         f"shell_after_restore={json.dumps(shell_after_restore, indent=2)}\n"
-                        f"directory_picker={json.dumps(result['manual_directory_picker_state_after_action'], indent=2)}"
+                        f"probe={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                     ),
                 )
 
@@ -1235,54 +1212,8 @@ def _restorable_workspace_fixture_files() -> dict[str, str]:
     }
 
 
-def _workspace_directory_snapshot(local_path: Path) -> dict[str, object]:
-    relative_paths = [
-        ".git/HEAD",
-        ".git/config",
-        ".trackstate-ts912-precondition.txt",
-        *sorted(_restorable_workspace_fixture_files()),
-    ]
-    files: list[dict[str, str]] = []
-    for relative_path in relative_paths:
-        absolute_path = local_path / relative_path
-        if not absolute_path.is_file():
-            continue
-        files.append(
-            {
-                "path": relative_path,
-                "base64": base64.b64encode(absolute_path.read_bytes()).decode("ascii"),
-            },
-        )
-    return {
-        "rootName": local_path.name,
-        "rootPath": str(local_path),
-        "files": files,
-    }
-
-
-def _workspace_directory_snapshot_summary(
-    snapshot: dict[str, object],
-) -> dict[str, object]:
-    files = snapshot.get("files", [])
-    return {
-        "rootName": snapshot.get("rootName"),
-        "rootPath": snapshot.get("rootPath"),
-        "fileCount": len(files) if isinstance(files, list) else 0,
-        "paths": [
-            entry.get("path")
-            for entry in files
-            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
-        ],
-    }
-
-
 def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
     return _support_read_manual_reauth_probe(tracker_page)
-
-
-def _read_directory_picker_state(tracker_page) -> dict[str, object]:
-    return _support_read_restorable_directory_picker_state(tracker_page)
-
 
 def _observe_manual_restore_attempt(
     *,
@@ -1291,19 +1222,14 @@ def _observe_manual_restore_attempt(
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
     probe = _read_manual_reauth_probe(tracker_page)
-    directory_picker_state = _read_directory_picker_state(tracker_page)
     trigger = _safe_trigger_payload(page)
     return {
         "probe": probe,
-        "directory_picker_state": directory_picker_state,
         "body_text": body_text,
         "trigger": trigger,
         "failure_message": _extract_workspace_open_failure_message(body_text),
         "directory_access_callback_observed": bool(
-            probe["showDirectoryPickerCalls"]
-            or probe["requestPermissionCalls"]
-            or directory_picker_state["calls"]
-            or directory_picker_state.get("selectedDirectoryName")
+            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
         ),
     }
 
@@ -1587,9 +1513,9 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         return (
             f"{TICKET_KEY} passed.\n\n"
             f"{REWORK_SUMMARY}\n\n"
-            "The saved unavailable local workspace was restored manually from a "
-            "directory picker handle seeded from the recreated saved workspace and became the active Local Git "
-            "workspace while the shell stayed interactive.\n"
+            "The saved unavailable local workspace was restored through the real "
+            "manual re-auth flow, without substituting the saved directory handle, "
+            "and became the active Local Git workspace while the shell stayed interactive.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
@@ -1638,7 +1564,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
-    directory_picker_state_after_action = result.get("manual_directory_picker_state_after_action")
     manual_action_label = result.get("manual_restore_action_label")
     startup_observation = result.get("startup_observation")
     boundary_reached = bool(result.get("ticket_boundary_reached"))
@@ -1647,12 +1572,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
         and (
             probe_after_action.get("showDirectoryPickerCalls")
             or probe_after_action.get("requestPermissionCalls")
-        ),
-    ) or bool(
-        isinstance(directory_picker_state_after_action, dict)
-        and (
-            directory_picker_state_after_action.get("calls")
-            or directory_picker_state_after_action.get("selectedDirectoryName")
         ),
     )
     missing_capability = (
@@ -1664,10 +1583,12 @@ def _build_bug_description(result: dict[str, object]) -> str:
         if not boundary_reached
         else (
             (
-                "The deployed web build reaches the browser directory-access boundary for the "
-                "saved unavailable local workspace, but it does not complete the restore to "
-                "`Local Git` or switch the active workspace after the callback returns a "
-                "handle seeded from the recreated saved workspace."
+                "The deployed web build reaches the native browser directory-access boundary "
+                "for the saved unavailable local workspace, but it does not provide any "
+                "production-backed way to re-bind the actual saved directory from the current "
+                "TS-912 preload/runtime surface. Remembered directory handles live only in the "
+                "browser's in-memory map, so the restore cannot complete without substituting "
+                "the handle from the test."
                 if callback_observed
                 else (
                     "The deployed web build does not expose a working manual re-authentication / "
@@ -1718,7 +1639,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
         f"- Manual action label: `{manual_action_label}`",
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
-        f"- Manual directory picker state after action: `{json.dumps(directory_picker_state_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
@@ -1759,11 +1679,12 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     return (
-        "Fixed: TS-912 no longer returns a scaffolded same-named OPFS workspace. "
-        "The test now seeds the recreated saved workspace on disk, replays that "
-        "saved-directory content through the picker boundary, records the "
-        "browser-boundary state explicitly, and generates `review_replies.json` "
-        "from the unresolved threads in "
+        "Fixed: TS-912 no longer overrides `showDirectoryPicker()` or returns a "
+        "test-authored substitute handle. The test now stays on the real visible "
+        "Retry flow, records only the actual browser callback probe, reports the "
+        "missing remembered-handle path when the live app cannot re-bind the "
+        "saved directory from the existing runtime surface, and generates "
+        "`review_replies.json` from the unresolved threads in "
         f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
         f"{rerun_summary}"
     )
