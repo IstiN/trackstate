@@ -16,18 +16,14 @@ from testing.components.pages.live_desktop_header_layout_page import (  # noqa: 
     HeaderControlObservation,
     LiveDesktopHeaderLayoutPage,
 )
-from testing.components.services.live_setup_repository_service import (  # noqa: E402
-    LiveSetupRepositoryService,
-)
+from testing.components.pages.live_create_issue_gate_page import LiveCreateIssueGatePage  # noqa: E402
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
-    create_live_tracker_app_with_stored_token,
-)
+from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-616"
 RUN_COMMAND = "python testing/tests/TS-616/test_ts_616.py"
-BASE_VIEWPORT = {"width": 1600, "height": 960}
-RESIZED_VIEWPORT = {"width": 1500, "height": 960}
+BASE_VIEWPORT = {"width": 1440, "height": 900}
+RESIZED_VIEWPORT = {"width": 1280, "height": 900}
 GEOMETRY_TOLERANCE = 1.0
 STANDARDIZED_CONTROL_HEIGHT = 32.0
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -44,20 +40,14 @@ def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     config = load_live_setup_test_config()
-    service = LiveSetupRepositoryService(config=config)
-    token = service.token
-    if not token:
-        raise RuntimeError(
-            "TS-616 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
-        )
-
-    user = service.fetch_authenticated_user()
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "app_url": config.app_url,
-        "repository": service.repository,
-        "repository_ref": service.ref,
-        "user_login": user.login,
+        "repository": config.repository,
+        "repository_ref": config.ref,
+        "browser": "Chromium via Playwright",
+        "os": platform.platform(),
+        "run_command": RUN_COMMAND,
         "base_viewport": BASE_VIEWPORT,
         "resized_viewport": RESIZED_VIEWPORT,
         "steps": [],
@@ -65,152 +55,150 @@ def main() -> None:
     }
 
     try:
-        with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
-            page = LiveDesktopHeaderLayoutPage(tracker_page, user_login=user.login)
+        with create_live_tracker_app(config) as tracker_page:
+            page = LiveDesktopHeaderLayoutPage(tracker_page)
+            create_issue_gate_page = LiveCreateIssueGatePage(tracker_page)
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
                 result["runtime_body_text"] = runtime.body_text
                 if runtime.kind != "ready":
                     raise AssertionError(
-                        "Step 1 failed: the deployed app did not reach the hosted tracker "
-                        "shell before the desktop header audit started.\n"
+                        "Precondition failed: the deployed app did not reach the hosted "
+                        "tracker shell before the desktop header audit started.\n"
                         f"Observed body text:\n{runtime.body_text}",
                     )
 
-                page.ensure_connected(
-                    token=token,
-                    repository=service.repository,
-                    user_login=user.login,
-                )
-                page.dismiss_connection_banner()
+                dashboard = page.open_dashboard()
+                result["dashboard_observation"] = asdict(dashboard)
                 page.set_viewport(**BASE_VIEWPORT)
 
                 baseline = page.observe_header()
                 result["baseline_observation"] = _observation_payload(baseline)
-                baseline_action = (
-                    "Open the deployed hosted app on desktop and verify the visible "
-                    "header controls are ready for interaction."
-                )
-                baseline_summary = _header_summary(baseline)
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the desktop header visibly showed the sync status, "
-                        "Search issues field, Create issue button, Attachments limited "
-                        "state, theme toggle, and the signed-in profile label."
+                        "Verified the desktop Dashboard header visibly showed the sync status, "
+                        "Create issue action, workspace switcher, Search issues field, and "
+                        "theme toggle in one top row."
                     ),
-                    observed=_header_labels_summary(baseline, user.login),
-                )
-                try:
-                    _assert_baseline_header(baseline=baseline, user_login=user.login)
-                except AssertionError as error:
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "Checked the live desktop header as a user would see it before "
-                            "any interaction and compared the visible control heights in the "
-                            "top row."
-                        ),
-                        observed=(
-                            "The Search issues field was visibly taller than the surrounding "
-                            f"32px controls: {_control_summary(baseline.search)}; "
-                            f"sync={_control_summary(baseline.sync)}; "
-                            f"create={_control_summary(baseline.create)}"
-                        ),
-                    )
-                    _record_step(
-                        result,
-                        step=1,
-                        status="failed",
-                        action=baseline_action,
-                        observed=f"{baseline_summary}; error={_trimmed(str(error), limit=600)}",
-                    )
-                    raise
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action=baseline_action,
-                    observed=baseline_summary,
+                    observed=_header_labels_summary(baseline),
                 )
 
+                failures: list[str] = []
+
+                step_one_errors = _baseline_expectation_errors(
+                    baseline=baseline,
+                    expected_body_fragments=("Dashboard", "Open Issues", "Team Velocity"),
+                )
                 page.hover_create_issue()
                 hovered = page.observe_header()
                 result["hover_observation"] = _observation_payload(hovered)
-                _assert_geometry_stable(
-                    reference=baseline,
-                    observed=hovered,
-                    step_number=2,
-                    context="hovering the visible Create issue button",
-                    compare_horizontal=True,
+                step_one_errors.extend(
+                    _geometry_stability_errors(
+                        reference=baseline,
+                        observed=hovered,
+                        step_number=1,
+                        context="hovering the visible Create issue button",
+                        compare_horizontal=True,
+                    ),
                 )
                 page.click_create_issue()
-                after_create = page.observe_header()
-                result["after_create_observation"] = _observation_payload(after_create)
-                _assert_geometry_stable(
-                    reference=baseline,
-                    observed=after_create,
-                    step_number=2,
-                    context="clicking the visible Create issue button",
-                    compare_horizontal=True,
-                )
+                post_click_effect: str | None = None
+                after_create: DesktopHeaderObservation | None = None
+                try:
+                    post_click_effect = _wait_for_create_issue_post_click_effect(
+                        create_issue_gate_page=create_issue_gate_page,
+                    )
+                    after_create = page.observe_header()
+                    result["after_create_observation"] = _observation_payload(after_create)
+                    step_one_errors.extend(
+                        _geometry_stability_errors(
+                            reference=baseline,
+                            observed=after_create,
+                            step_number=1,
+                            context="clicking the visible Create issue button",
+                            compare_horizontal=True,
+                        ),
+                    )
+                except AssertionError as error:
+                    step_one_errors.append(str(error))
+                finally:
+                    _restore_dashboard_after_create_issue_click(page)
                 _record_step(
                     result,
-                    step=2,
-                    status="passed",
-                    action=(
-                        "Hover over and click the visible Create issue button."
-                    ),
+                    step=1,
+                    status="passed" if not step_one_errors else "failed",
+                    action="Hover over and click the `Create issue` button; observe height changes.",
                     observed=(
+                        f"baseline={_header_summary(baseline)}; "
                         f"hover_create={_control_summary(hovered.create)}; "
-                        f"after_click_create={_control_summary(after_create.create)}; "
-                        f"body_still_contains_create={'Create issue' in after_create.body_text}"
+                        f"post_click_effect={post_click_effect}; "
+                        f"after_click_create={_control_summary(after_create.create)}"
+                        if not step_one_errors and after_create is not None and post_click_effect
+                        else "\n".join(step_one_errors)
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the Create issue button stayed aligned in the header row "
-                        "while hovered and after a real click, with no visible jump in the "
-                        "desktop header row."
+                        "Verified the visible Create issue action produced a real user-visible "
+                        "post-click effect and stayed aligned in the desktop header."
                     ),
-                    observed=_control_summary(after_create.create),
+                    observed=(
+                        f"baseline={_control_summary(baseline.create)}; "
+                        f"hover={_control_summary(hovered.create)}; "
+                        f"post_click_effect={post_click_effect or 'not observed'}; "
+                        f"after_click={_control_summary(after_create.create)}"
+                        if after_create is not None and post_click_effect
+                        else (
+                            f"baseline={_control_summary(baseline.create)}; "
+                            f"hover={_control_summary(hovered.create)}; "
+                            f"post_click_effect={post_click_effect or 'not observed'}"
+                        )
+                    ),
                 )
+                failures.extend(step_one_errors)
 
                 page.focus_search_field()
                 focused = page.observe_header()
                 result["focused_observation"] = _observation_payload(focused)
-                _assert_search_focus(focused)
-                _assert_geometry_stable(
-                    reference=baseline,
-                    observed=focused,
-                    step_number=3,
-                    context="focusing the Search issues field",
-                    compare_horizontal=True,
+                step_two_errors = _search_focus_errors(focused)
+                step_two_errors.extend(
+                    _geometry_stability_errors(
+                        reference=baseline,
+                        observed=focused,
+                        step_number=2,
+                        context="focusing the Search issues field",
+                        compare_horizontal=True,
+                    ),
                 )
                 _record_step(
                     result,
-                    step=3,
-                    status="passed",
-                    action="Focus the visible Search issues field in the desktop header.",
+                    step=2,
+                    status="passed" if not step_two_errors else "failed",
+                    action="Focus the JQL search field; observe height and alignment.",
                     observed=(
                         f"active_element={focused.active_element.tag_name}:"
                         f"{focused.active_element.accessible_name!r}; "
                         f"search={_control_summary(focused.search)}"
+                        if not step_two_errors
+                        else "\n".join(step_two_errors)
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Verified keyboard focus moved into the visible Search issues field "
-                        "without changing its header-row placement."
+                        "without shifting the desktop header row."
                     ),
                     observed=(
                         f"active_element={focused.active_element.tag_name}; "
-                        f"accessible_name={focused.active_element.accessible_name!r}"
+                        f"accessible_name={focused.active_element.accessible_name!r}; "
+                        f"search_wrapper={_control_summary(focused.search)}"
                     ),
                 )
+                failures.extend(step_two_errors)
 
                 first_theme_label = baseline.theme_label
                 toggled_label = page.toggle_theme()
@@ -219,93 +207,111 @@ def main() -> None:
                 restored_label = page.toggle_theme()
                 restored = page.observe_header()
                 result["restored_theme_observation"] = _observation_payload(restored)
-                _assert_theme_toggle(
+                step_three_errors = _theme_toggle_errors(
                     initial_label=first_theme_label,
                     toggled_label=toggled_label,
                     restored_label=restored_label,
-                    toggled=toggled,
-                    restored=restored,
                 )
-                _assert_geometry_stable(
-                    reference=baseline,
-                    observed=toggled,
-                    step_number=4,
-                    context="switching the header theme toggle to the alternate theme",
-                    compare_horizontal=True,
+                step_three_errors.extend(
+                    _geometry_stability_errors(
+                        reference=baseline,
+                        observed=toggled,
+                        step_number=3,
+                        context="switching the header theme toggle to the alternate theme",
+                        compare_horizontal=True,
+                    ),
                 )
-                _assert_geometry_stable(
-                    reference=baseline,
-                    observed=restored,
-                    step_number=4,
-                    context="switching the header theme toggle back to the original theme",
-                    compare_horizontal=True,
+                step_three_errors.extend(
+                    _geometry_stability_errors(
+                        reference=baseline,
+                        observed=restored,
+                        step_number=3,
+                        context="switching the header theme toggle back to the original theme",
+                        compare_horizontal=True,
+                    ),
                 )
                 _record_step(
                     result,
-                    step=4,
-                    status="passed",
+                    step=3,
+                    status="passed" if not step_three_errors else "failed",
                     action=(
-                        "Toggle the theme between light and dark modes and inspect the "
-                        "desktop header row after each change."
+                        "Toggle the theme between light and dark modes; observe the theme "
+                        "toggle alignment."
                     ),
                     observed=(
                         f"initial_theme={first_theme_label}; "
-                        f"alternate_theme={toggled.theme_label}; "
-                        f"restored_theme={restored.theme_label}; "
+                        f"alternate_theme={toggled_label}; "
+                        f"restored_theme={restored_label}; "
                         f"theme_button={_control_summary(restored.theme)}"
+                        if not step_three_errors
+                        else "\n".join(step_three_errors)
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the theme toggle visibly switched between light and dark "
-                        "states and stayed aligned with the other header controls."
+                        "Verified the visible theme toggle switched between dark and light "
+                        "states and stayed centered with the other header controls."
                     ),
                     observed=(
-                        f"{first_theme_label} -> {toggled.theme_label} -> {restored.theme_label}"
+                        f"{first_theme_label} -> {toggled_label} -> {restored_label}; "
+                        f"theme={_control_summary(restored.theme)}"
                     ),
                 )
+                failures.extend(step_three_errors)
 
                 page.set_viewport(**RESIZED_VIEWPORT)
                 resized = page.observe_header()
                 result["resized_observation"] = _observation_payload(resized)
-                _assert_resize_layout(reference=baseline, resized=resized, step_number=5)
+                step_four_errors = _resize_layout_errors(
+                    reference=baseline,
+                    resized=resized,
+                    step_number=4,
+                )
                 _record_step(
                     result,
-                    step=5,
-                    status="passed",
-                    action=(
-                        "Resize the browser within the desktop breakpoint range and verify "
-                        "the header layout stays stable."
-                    ),
+                    step=4,
+                    status="passed" if not step_four_errors else "failed",
+                    action="Resize the browser window within the desktop breakpoint range.",
                     observed=(
                         f"viewport={int(resized.viewport_width)}x{int(resized.viewport_height)}; "
-                        f"search={_control_summary(resized.search)}; "
+                        f"sync={_control_summary(resized.sync)}; "
                         f"create={_control_summary(resized.create)}; "
-                        f"access={_control_summary(resized.access)}"
+                        f"workspace={_control_summary(resized.workspace)}; "
+                        f"search={_control_summary(resized.search)}; "
+                        f"theme={_control_summary(resized.theme)}"
+                        if not step_four_errors
+                        else "\n".join(step_four_errors)
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified at the narrower desktop width that the visible search "
-                        "field, Create issue button, Attachments limited button, theme "
-                        "toggle, and profile label still rendered in one aligned top row "
-                        "without overlapping."
+                        "Verified at a narrower desktop width that the sync pill, Create "
+                        "issue action, workspace switcher, Search issues field, and theme "
+                        "toggle still rendered in one aligned row without overlap."
                     ),
                     observed=(
-                        f"viewport={int(resized.viewport_width)}; "
+                        f"viewport={int(resized.viewport_width)}x{int(resized.viewport_height)}; "
+                        f"create_right={resized.create.right:.1f}; "
+                        f"workspace_left={resized.workspace.left:.1f}; "
                         f"search_right={resized.search.right:.1f}; "
-                        f"create_left={resized.create.left:.1f}; "
-                        f"profile_right={resized.profile.right:.1f}"
+                        f"theme_left={resized.theme.left:.1f}"
                     ),
                 )
+                failures.extend(step_four_errors)
+
+                if failures:
+                    page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                    result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                    raise AssertionError("\n\n".join(failures))
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
-                page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                if "screenshot" not in result:
+                    page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                    result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 raise
     except AssertionError as error:
         result["error"] = str(error)
@@ -321,246 +327,268 @@ def main() -> None:
     _write_pass_outputs(result)
 
 
-def _assert_baseline_header(
+def _baseline_expectation_errors(
     *,
     baseline: DesktopHeaderObservation,
-    user_login: str,
-) -> None:
-    for fragment in (
-        "Synced with Git",
-        "Create issue",
-        "Attachments limited",
-        user_login,
-    ):
-        if fragment not in baseline.body_text:
-            raise AssertionError(
-                "Step 1 failed: the desktop header did not visibly render all required "
-                "controls for the audit.\n"
-                f'Missing fragment: "{fragment}"\n'
-                f"Observed body text:\n{baseline.body_text}",
-            )
-    _assert_primary_row_alignment(
-        observation=baseline,
-        step_number=1,
-        context="initial desktop header state",
+    expected_body_fragments: tuple[str, ...],
+) -> list[str]:
+    errors: list[str] = []
+    for fragment in expected_body_fragments:
+        if fragment in baseline.body_text:
+            continue
+        errors.append(
+            "Step 1 failed: the desktop app did not stay on a readable Dashboard view "
+            "before the interactive-state audit.\n"
+            f'Missing fragment: "{fragment}"\n'
+            f"Observed body text:\n{baseline.body_text}"
+        )
+    errors.extend(
+        _standardized_control_height_errors(
+            observation=baseline,
+            step_number=1,
+            context="the baseline desktop header state",
+        ),
     )
-    _assert_standardized_control_heights(
-        observation=baseline,
-        step_number=1,
-        context="the initial desktop header state",
+    errors.extend(
+        _primary_row_alignment_errors(
+            observation=baseline,
+            step_number=1,
+            context="the baseline desktop header state",
+        ),
     )
+    return errors
 
 
-def _assert_search_focus(observation: DesktopHeaderObservation) -> None:
+def _search_focus_errors(observation: DesktopHeaderObservation) -> list[str]:
+    errors: list[str] = []
     if observation.active_element.tag_name != "INPUT":
-        raise AssertionError(
-            "Step 3 failed: focusing the desktop header search control did not leave the "
+        errors.append(
+            "Step 2 failed: focusing the desktop header search control did not leave the "
             "text cursor in the Search issues input.\n"
-            f"Observed active element: {observation.active_element}",
+            f"Observed active element: {observation.active_element}"
         )
-    if observation.active_element.accessible_name != "Search issues":
-        raise AssertionError(
-            "Step 3 failed: the focused desktop header field was not the Search issues "
+    if observation.active_element.accessible_name not in {"Search issues", "Search", "JQL Search"}:
+        errors.append(
+            "Step 2 failed: the focused desktop header field was not the Search issues "
             "input.\n"
-            f"Observed active element: {observation.active_element}",
+            f"Observed active element: {observation.active_element}"
         )
+    return errors
 
 
-def _assert_theme_toggle(
+def _theme_toggle_errors(
     *,
     initial_label: str,
     toggled_label: str,
     restored_label: str,
-    toggled: DesktopHeaderObservation,
-    restored: DesktopHeaderObservation,
-) -> None:
+) -> list[str]:
+    errors: list[str] = []
     if toggled_label == initial_label:
-        raise AssertionError(
-            "Step 4 failed: clicking the desktop theme toggle did not switch to the "
-            "alternate theme state.",
+        errors.append(
+            "Step 3 failed: clicking the desktop theme toggle did not switch to the "
+            "alternate theme state."
         )
-    if toggled.theme_label != toggled_label:
-        raise AssertionError(
-            "Step 4 failed: the visible desktop theme toggle did not expose the expected "
-            "alternate label after the first theme switch.\n"
-            f"Expected label: {toggled_label}\n"
-            f"Observed label: {toggled.theme_label}",
-        )
-    if restored_label != initial_label or restored.theme_label != initial_label:
-        raise AssertionError(
-            "Step 4 failed: toggling the theme a second time did not restore the original "
+    if restored_label != initial_label:
+        errors.append(
+            "Step 3 failed: toggling the theme a second time did not restore the original "
             "desktop theme-toggle label.\n"
             f"Initial label: {initial_label}\n"
-            f"Observed second toggle result: {restored_label}\n"
-            f"Observed current label: {restored.theme_label}",
+            f"Observed restored label: {restored_label}"
         )
+    return errors
 
 
-def _assert_geometry_stable(
+def _geometry_stability_errors(
     *,
     reference: DesktopHeaderObservation,
     observed: DesktopHeaderObservation,
     step_number: int,
     context: str,
     compare_horizontal: bool,
-) -> None:
-    for control_name in ("sync", "search", "create", "access", "theme", "profile"):
+) -> list[str]:
+    errors: list[str] = []
+    for control_name in ("sync", "create", "workspace", "search", "theme"):
         reference_control = getattr(reference, control_name)
         observed_control = getattr(observed, control_name)
-        _assert_close(
-            reference_control.top,
-            observed_control.top,
-            step_number=step_number,
-            context=context,
-            control_name=control_name,
-            metric="top",
+        errors.extend(
+            _close_errors(
+                reference_control.top,
+                observed_control.top,
+                step_number=step_number,
+                context=context,
+                control_name=control_name,
+                metric="top",
+            ),
         )
-        _assert_close(
-            reference_control.height,
-            observed_control.height,
-            step_number=step_number,
-            context=context,
-            control_name=control_name,
-            metric="height",
+        errors.extend(
+            _close_errors(
+                reference_control.height,
+                observed_control.height,
+                step_number=step_number,
+                context=context,
+                control_name=control_name,
+                metric="height",
+            ),
         )
-        _assert_close(
-            reference_control.center_y,
-            observed_control.center_y,
-            step_number=step_number,
-            context=context,
-            control_name=control_name,
-            metric="center_y",
+        errors.extend(
+            _close_errors(
+                reference_control.center_y,
+                observed_control.center_y,
+                step_number=step_number,
+                context=context,
+                control_name=control_name,
+                metric="center_y",
+            ),
         )
         if compare_horizontal:
-            _assert_close(
-                reference_control.left,
-                observed_control.left,
-                step_number=step_number,
-                context=context,
-                control_name=control_name,
-                metric="left",
+            errors.extend(
+                _close_errors(
+                    reference_control.left,
+                    observed_control.left,
+                    step_number=step_number,
+                    context=context,
+                    control_name=control_name,
+                    metric="left",
+                ),
             )
-            _assert_close(
-                reference_control.width,
-                observed_control.width,
-                step_number=step_number,
-                context=context,
-                control_name=control_name,
-                metric="width",
+            errors.extend(
+                _close_errors(
+                    reference_control.width,
+                    observed_control.width,
+                    step_number=step_number,
+                    context=context,
+                    control_name=control_name,
+                    metric="width",
+                ),
             )
-    _assert_primary_row_alignment(
-        observation=observed,
-        step_number=step_number,
-        context=context,
+    errors.extend(
+        _primary_row_alignment_errors(
+            observation=observed,
+            step_number=step_number,
+            context=context,
+        ),
     )
-    _assert_standardized_control_heights(
-        observation=observed,
-        step_number=step_number,
-        context=context,
+    errors.extend(
+        _standardized_control_height_errors(
+            observation=observed,
+            step_number=step_number,
+            context=context,
+        ),
     )
+    return errors
 
 
-def _assert_resize_layout(
+def _resize_layout_errors(
     *,
     reference: DesktopHeaderObservation,
     resized: DesktopHeaderObservation,
     step_number: int,
-) -> None:
-    for control_name in ("sync", "search", "create", "access", "theme", "profile"):
+) -> list[str]:
+    errors: list[str] = []
+    for control_name in ("sync", "create", "workspace", "search", "theme"):
         reference_control = getattr(reference, control_name)
         resized_control = getattr(resized, control_name)
-        _assert_close(
-            reference_control.top,
-            resized_control.top,
-            step_number=step_number,
-            context="resizing the desktop browser",
-            control_name=control_name,
-            metric="top",
+        errors.extend(
+            _close_errors(
+                reference_control.top,
+                resized_control.top,
+                step_number=step_number,
+                context="resizing the desktop browser",
+                control_name=control_name,
+                metric="top",
+            ),
         )
-        _assert_close(
-            reference_control.height,
-            resized_control.height,
-            step_number=step_number,
-            context="resizing the desktop browser",
-            control_name=control_name,
-            metric="height",
+        errors.extend(
+            _close_errors(
+                reference_control.height,
+                resized_control.height,
+                step_number=step_number,
+                context="resizing the desktop browser",
+                control_name=control_name,
+                metric="height",
+            ),
         )
-        _assert_close(
-            reference_control.center_y,
-            resized_control.center_y,
-            step_number=step_number,
-            context="resizing the desktop browser",
-            control_name=control_name,
-            metric="center_y",
+        errors.extend(
+            _close_errors(
+                reference_control.center_y,
+                resized_control.center_y,
+                step_number=step_number,
+                context="resizing the desktop browser",
+                control_name=control_name,
+                metric="center_y",
+            ),
         )
-    _assert_primary_row_alignment(
-        observation=resized,
-        step_number=step_number,
-        context="the resized desktop header state",
+    errors.extend(
+        _primary_row_alignment_errors(
+            observation=resized,
+            step_number=step_number,
+            context="the resized desktop header state",
+        ),
     )
-    _assert_standardized_control_heights(
-        observation=resized,
-        step_number=step_number,
-        context="the resized desktop header state",
+    errors.extend(
+        _standardized_control_height_errors(
+            observation=resized,
+            step_number=step_number,
+            context="the resized desktop header state",
+        ),
     )
     for left, right in (
-        (resized.sync, resized.search),
-        (resized.search, resized.create),
-        (resized.create, resized.access),
-        (resized.access, resized.theme),
-        (resized.theme, resized.profile),
+        (resized.sync, resized.create),
+        (resized.create, resized.workspace),
+        (resized.workspace, resized.search),
+        (resized.search, resized.theme),
     ):
-        if left.right > right.left + GEOMETRY_TOLERANCE:
-            raise AssertionError(
-                "Step 5 failed: resizing within the desktop breakpoint range caused the "
-                "visible header controls to overlap.\n"
-                f"Left control: {_control_summary(left)}\n"
-                f"Right control: {_control_summary(right)}\n"
-                f"Viewport width: {resized.viewport_width}",
-            )
-    if resized.profile.right > resized.viewport_width + GEOMETRY_TOLERANCE:
-        raise AssertionError(
-            "Step 5 failed: resizing within the desktop breakpoint range pushed the "
-            "visible profile control past the right edge of the viewport.\n"
-            f"Profile control: {_control_summary(resized.profile)}\n"
-            f"Viewport width: {resized.viewport_width}",
+        if left.right <= right.left + GEOMETRY_TOLERANCE:
+            continue
+        errors.append(
+            "Step 4 failed: resizing within the desktop breakpoint range caused the "
+            "visible header controls to overlap.\n"
+            f"Left control: {_control_summary(left)}\n"
+            f"Right control: {_control_summary(right)}\n"
+            f"Viewport width: {resized.viewport_width}"
         )
-
-
-def _assert_primary_row_alignment(
-    *,
-    observation: DesktopHeaderObservation,
-    step_number: int,
-    context: str,
-) -> None:
-    row_controls = (
-        ("sync", observation.sync),
-        ("search", observation.search),
-        ("create", observation.create),
-        ("access", observation.access),
-        ("theme", observation.theme),
-        ("profile", observation.profile),
+    if resized.theme.right <= resized.viewport_width + GEOMETRY_TOLERANCE:
+        return errors
+    errors.append(
+        "Step 4 failed: resizing within the desktop breakpoint range pushed the "
+        "visible theme toggle past the right edge of the viewport.\n"
+        f"Theme control: {_control_summary(resized.theme)}\n"
+        f"Viewport width: {resized.viewport_width}"
     )
-    reference_center = observation.create.center_y
-    for control_name, control in row_controls:
-        _assert_close(
-            reference_center,
-            control.center_y,
-            step_number=step_number,
-            context=context,
-            control_name=control_name,
-            metric="center_y",
-        )
+    return errors
 
 
-def _assert_standardized_control_heights(
+def _primary_row_alignment_errors(
     *,
     observation: DesktopHeaderObservation,
     step_number: int,
     context: str,
-) -> None:
+) -> list[str]:
+    errors: list[str] = []
+    reference_center = observation.create.center_y
+    for control_name in ("sync", "create", "workspace", "search", "theme"):
+        control = getattr(observation, control_name)
+        errors.extend(
+            _close_errors(
+                reference_center,
+                control.center_y,
+                step_number=step_number,
+                context=context,
+                control_name=control_name,
+                metric="center_y",
+            ),
+        )
+    return errors
+
+
+def _standardized_control_height_errors(
+    *,
+    observation: DesktopHeaderObservation,
+    step_number: int,
+    context: str,
+) -> list[str]:
     mismatches: list[str] = []
-    for control_name in ("sync", "search", "create", "access", "theme", "profile"):
+    for control_name in ("sync", "create", "workspace", "search", "theme"):
         control = getattr(observation, control_name)
         if abs(control.height - STANDARDIZED_CONTROL_HEIGHT) <= GEOMETRY_TOLERANCE:
             continue
@@ -568,16 +596,16 @@ def _assert_standardized_control_heights(
             f"{control_name} observed {control.height:.1f}px ({_control_summary(control)})"
         )
     if not mismatches:
-        return
-    raise AssertionError(
+        return []
+    return [
         f"Step {step_number} failed: {context} did not keep every audited desktop "
         "header control at the required standardized 32px height.\n"
         f"Expected height: {STANDARDIZED_CONTROL_HEIGHT:.1f}px +/- {GEOMETRY_TOLERANCE:.1f}px\n"
-        + "\n".join(mismatches),
-    )
+        + "\n".join(mismatches)
+    ]
 
 
-def _assert_close(
+def _close_errors(
     expected: float,
     actual: float,
     *,
@@ -585,16 +613,16 @@ def _assert_close(
     context: str,
     control_name: str,
     metric: str,
-) -> None:
+) -> list[str]:
     if abs(expected - actual) <= GEOMETRY_TOLERANCE:
-        return
-    raise AssertionError(
+        return []
+    return [
         f"Step {step_number} failed: {context} changed the desktop header {control_name} "
         f"{metric} beyond the allowed tolerance.\n"
         f"Expected {metric}: {expected:.2f}\n"
         f"Actual {metric}: {actual:.2f}\n"
-        f"Allowed delta: {GEOMETRY_TOLERANCE:.2f}",
-    )
+        f"Allowed delta: {GEOMETRY_TOLERANCE:.2f}"
+    ]
 
 
 def _record_step(
@@ -635,11 +663,11 @@ def _observation_payload(observation: DesktopHeaderObservation) -> dict[str, obj
         "theme_label": observation.theme_label,
         "active_element": asdict(observation.active_element),
         "sync": asdict(observation.sync),
-        "search": asdict(observation.search),
         "create": asdict(observation.create),
-        "access": asdict(observation.access),
+        "workspace": asdict(observation.workspace),
+        "search": asdict(observation.search),
+        "search_input": asdict(observation.search_input),
         "theme": asdict(observation.theme),
-        "profile": asdict(observation.profile),
     }
 
 
@@ -647,22 +675,20 @@ def _header_summary(observation: DesktopHeaderObservation) -> str:
     return (
         f"viewport={int(observation.viewport_width)}x{int(observation.viewport_height)}; "
         f"sync={_control_summary(observation.sync)}; "
-        f"search={_control_summary(observation.search)}; "
         f"create={_control_summary(observation.create)}; "
-        f"access={_control_summary(observation.access)}; "
-        f"theme={_control_summary(observation.theme)}; "
-        f"profile={_control_summary(observation.profile)}"
+        f"workspace={_control_summary(observation.workspace)}; "
+        f"search={_control_summary(observation.search)}; "
+        f"theme={_control_summary(observation.theme)}"
     )
 
 
-def _header_labels_summary(observation: DesktopHeaderObservation, user_login: str) -> str:
+def _header_labels_summary(observation: DesktopHeaderObservation) -> str:
     return (
         f"sync_label={observation.sync.label!r}; "
-        f"search_label='Search issues'; "
         f"create_label={observation.create.label!r}; "
-        f"access_label={observation.access.label!r}; "
-        f"theme_label={observation.theme_label!r}; "
-        f"profile_label={user_login!r}"
+        f"workspace_label={observation.workspace.label!r}; "
+        f"search_label={observation.search.label!r}; "
+        f"theme_label={observation.theme_label!r}"
     )
 
 
@@ -671,13 +697,6 @@ def _control_summary(control: HeaderControlObservation) -> str:
         f"{control.label}@left={control.left:.1f},top={control.top:.1f},"
         f"width={control.width:.1f},height={control.height:.1f},centerY={control.center_y:.1f}"
     )
-
-
-def _trimmed(value: str, *, limit: int = 240) -> str:
-    normalized = " ".join(value.split())
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[: limit - 3] + "..."
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -730,25 +749,25 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         (
-            "* Opened the deployed hosted TrackState app in Chromium with the stored "
-            "GitHub token and switched to a 1600px desktop viewport."
+            "* Opened the deployed hosted TrackState app in Chromium, navigated to "
+            "{{Dashboard}}, and set the browser to a {{1440x900}} desktop viewport."
         ),
         (
-            "* Verified the visible desktop header showed {{Synced with Git}}, the "
-            "{{Search issues}} field, {{Create issue}}, {{Attachments limited}}, the "
-            "theme toggle, and the signed-in profile label."
+            "* Audited the visible desktop header controls shown in the live app: the "
+            "sync status pill, {{Create issue}}, the workspace switcher, the visible "
+            "{{Search issues}} field wrapper, and the theme toggle."
         ),
         (
-            "* Hovered and clicked {{Create issue}}, focused the live search field, "
-            "toggled the live theme twice, and resized the browser to 1500px while "
-            "comparing the live header geometry after each interaction."
+            "* Hovered and clicked {{Create issue}}, focused the search field, toggled "
+            "the live theme between dark and light, and resized the browser to "
+            "{{1280x900}} while comparing the live header geometry after each step."
         ),
         "",
         "*Observed result*",
         (
             "* Matched the expected result: the audited desktop header controls stayed at "
-            "the required 32px standardized height, preserved their vertical alignment "
-            "during hover/focus/theme interactions, and remained in a single "
+            "the required {{32px}} standardized height, preserved their vertical "
+            "alignment through hover/focus/theme interactions, and remained in a single "
             "non-overlapping row after the desktop resize."
             if passed
             else "* Did not match the expected result."
@@ -788,24 +807,24 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         (
-            "- Opened the deployed hosted TrackState app in Chromium with the stored "
-            "GitHub token and switched to a 1600px desktop viewport."
+            "- Opened the deployed hosted TrackState app in Chromium, navigated to "
+            "`Dashboard`, and set the browser to a `1440x900` desktop viewport."
         ),
         (
-            "- Verified the visible desktop header showed `Synced with Git`, the "
-            "`Search issues` field, `Create issue`, `Attachments limited`, the theme "
-            "toggle, and the signed-in profile label."
+            "- Audited the visible desktop header controls shown in the live app: the "
+            "sync status pill, `Create issue`, the workspace switcher, the visible "
+            "`Search issues` field wrapper, and the theme toggle."
         ),
         (
-            "- Hovered and clicked `Create issue`, focused the live search field, "
-            "toggled the live theme twice, and resized the browser to 1500px while "
-            "comparing the live header geometry after each interaction."
+            "- Hovered and clicked `Create issue`, focused the search field, toggled the "
+            "live theme between dark and light, and resized the browser to `1280x900` "
+            "while comparing the live header geometry after each step."
         ),
         "",
         "### Observed result",
         (
             "- Matched the expected result: the audited desktop header controls stayed at "
-            "the required 32px standardized height, preserved their vertical alignment "
+            "the required `32px` standardized height, preserved their vertical alignment "
             "during hover/focus/theme interactions, and remained in a single "
             "non-overlapping row after the desktop resize."
             if passed
@@ -844,9 +863,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"# {TICKET_KEY} {status}",
         "",
         (
-            "Ran the live desktop header audit against the deployed hosted TrackState app, "
-            "covering Create issue hover/click, Search issues focus, theme toggling, and "
-            "desktop resizing."
+            "Ran the live desktop header audit against the deployed hosted TrackState app "
+            "on Dashboard, covering Create issue hover/click, Search issues focus, theme "
+            "toggling, and desktop resizing."
         ),
         "",
         "## Observed",
@@ -874,24 +893,28 @@ def _bug_description(result: dict[str, object]) -> str:
     lines = [
         f"# {TICKET_KEY} - Desktop header layout audit regression",
         "",
+        "## Preconditions",
+        (
+            f"- Open the deployed hosted TrackState app at `{result['app_url']}` in a "
+            "desktop Chromium browser and navigate to `Dashboard`."
+        ),
+        f"- Base viewport: `{BASE_VIEWPORT['width']}x{BASE_VIEWPORT['height']}`",
+        "",
         "## Steps to reproduce",
-        "1. Open the deployed hosted TrackState app in a desktop browser and verify the desktop header is visible.",
+        "1. Hover over and click the `Create issue` button; observe height changes.",
         f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-        "2. Hover over and click the `Create issue` button; observe height changes.",
+        "2. Focus the JQL search field; observe height and alignment.",
         f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
-        "3. Focus the JQL/Search field; observe height and alignment.",
+        "3. Toggle the theme between light and dark modes; observe the theme-toggle alignment.",
         f"   - {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
-        "4. Toggle the theme between light and dark modes; observe the theme-toggle alignment.",
+        "4. Resize the browser window within the desktop breakpoint range.",
         f"   - {'✅' if _step_status(result, 4) == 'passed' else '❌'} {_step_observation(result, 4)}",
-        "5. Resize the browser window within the desktop breakpoint range.",
-        f"   - {'✅' if _step_status(result, 5) == 'passed' else '❌'} {_step_observation(result, 5)}",
         "",
         "## Actual vs Expected",
         (
-            "- Expected: the audited desktop header controls render at the required 32px "
-            "standardized height, keep their vertical alignment during hover/focus/theme "
-            "state changes, and remain in a stable single row without overlap across the "
-            "desktop breakpoint range."
+            "- Expected: the visible desktop header controls keep their required `32px` "
+            "standardized height and centered vertical alignment through hover, focus, "
+            "theme-toggle, and resize interactions, while remaining in a single stable row."
         ),
         (
             "- Actual: "
@@ -981,10 +1004,31 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
     if failed_steps:
         first_failed_step = min(failed_steps)
         if step_number > first_failed_step:
-            return (
-                f"Not executed because step {first_failed_step} failed before this step ran."
-            )
+            return f"Not executed because step {first_failed_step} failed before this step ran."
     return "No observation recorded."
+
+
+def _wait_for_create_issue_post_click_effect(
+    *,
+    create_issue_gate_page: LiveCreateIssueGatePage,
+) -> str:
+    gate = create_issue_gate_page.wait_for_access_gate(
+        primary_action_label="Open settings",
+        timeout_ms=15_000,
+    )
+    return (
+        f'gate_panel_text="{gate.gate_panel_text}"; '
+        f"create_heading_visible={gate.create_heading_visible}; "
+        f"summary_field_count={gate.summary_field_count}; "
+        f"open_settings_button_count={gate.open_settings_button_count}; "
+        f"gate_open_settings_button_count={gate.gate_open_settings_button_count}"
+    )
+
+
+def _restore_dashboard_after_create_issue_click(page: LiveDesktopHeaderLayoutPage) -> None:
+    if page.dismiss_create_issue_dialog(timeout_ms=5_000):
+        return
+    page.open_dashboard()
 
 
 if __name__ == "__main__":

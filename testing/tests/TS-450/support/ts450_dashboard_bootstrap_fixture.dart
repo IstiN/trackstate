@@ -137,7 +137,13 @@ class _Ts450DelayedSearchRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+    String? sourceName,
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 }
 
 class _Ts450BootstrapProvider implements TrackStateProviderAdapter {

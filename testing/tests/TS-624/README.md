@@ -8,8 +8,8 @@ The automation:
 2. creates Issue A (`TS-1`) and Issue B (`TS-2`) through the real CLI
 3. runs `trackstate ticket link --type "is blocked by"` from Issue A to Issue B
 4. verifies the CLI response reports the visible link operation details
-5. checks the repository stores exactly one canonical `blocks` relation from
-   Issue B back to Issue A in `links.json`
+5. checks the persisted `links.json` data is normalized to the canonical
+   `blocks` relation from Issue B back to Issue A
 
 ## Run this test
 

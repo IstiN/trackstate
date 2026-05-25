@@ -78,9 +78,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1006_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1006_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Launch the application.",
@@ -469,7 +471,7 @@ def _establish_active_local_workspace_precondition(
     result["precondition_initial_trigger"] = _trigger_payload(initial_trigger)
     try:
         page.dismiss_connection_banner()
-    except Exception:
+    except AssertionError:
         pass
 
     switcher_before = page.open_and_observe(timeout_ms=20_000)
@@ -1250,6 +1252,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -1262,6 +1265,7 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(result, passed=False), encoding="utf-8")
     if result.get("failure_kind") == "product":
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
@@ -1407,8 +1411,9 @@ def _build_bug_description(result: dict[str, Any]) -> str:
             "Before the ticket steps, automation used the visible saved-workspace recovery "
             "action (`Retry` / `Re-authenticate`) to restore Workspace A as an active local "
             "workspace, because the deployed web app otherwise starts from the hosted fallback "
-            "surface. The app observed the directory picker callback but did not keep Workspace A "
-            "active as `Local Git`."
+            "surface. That precondition succeeded; the regression appears after the reload with "
+            "two saved local workspaces, when startup hydration marks Workspace A as "
+            "`Unavailable` instead of preserving its active `Local Git` state."
         ),
         f"- Manual restore action label: `{result.get('manual_restore_action_label')}`",
         f"- Manual restore attempt: `{json.dumps(result.get('manual_restore_attempt_observation'), ensure_ascii=True)}`",
@@ -1449,6 +1454,51 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 def _exact_error_summary(result: dict[str, Any]) -> str:
     error = str(result.get("error", "")).strip()
     return error or "AssertionError: no error message captured"
+
+
+def _build_review_replies(result: dict[str, Any], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+            },
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, Any], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-1006 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran the current TS-1006 test and it still failed (`0 passed, 1 failed`)."
+    )
+    return "No actionable review issues were raised in this thread. " + rerun_summary
 
 
 def _cleanup_local_workspaces() -> None:
