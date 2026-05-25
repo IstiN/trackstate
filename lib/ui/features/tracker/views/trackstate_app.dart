@@ -10806,6 +10806,11 @@ class _IssueDetail extends StatefulWidget {
 
 class _IssueDetailState extends State<_IssueDetail> {
   late final TextEditingController _commentController;
+  late final List<FocusNode> _collaborationTabFocusNodes =
+      List<FocusNode>.generate(
+        4,
+        (index) => FocusNode(debugLabel: 'issue-detail-tab-$index'),
+      );
   int _selectedCollaborationTab = 0;
   PickedAttachment? _selectedAttachment;
   String? _attachmentUploadNotice;
@@ -10880,6 +10885,9 @@ class _IssueDetailState extends State<_IssueDetail> {
   @override
   void dispose() {
     _commentController.dispose();
+    for (final focusNode in _collaborationTabFocusNodes) {
+      focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -11088,9 +11096,14 @@ class _IssueDetailState extends State<_IssueDetail> {
     ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: FocusScope(
+        debugLabel: 'issue-detail-${issue.key}',
+        autofocus: true,
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -11153,6 +11166,7 @@ class _IssueDetailState extends State<_IssueDetail> {
           _IssueDetailTabs(
             selectedIndex: _selectedCollaborationTab,
             tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
+            focusNodes: _collaborationTabFocusNodes,
             failedTabIndexes: {
               if (widget.viewModel.hasIssueDeferredError(
                 issue.key,
@@ -11178,6 +11192,12 @@ class _IssueDetailState extends State<_IssueDetail> {
             onSelected: (index) {
               setState(() {
                 _selectedCollaborationTab = index;
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) {
+                  return;
+                }
+                _collaborationTabFocusNodes[index].requestFocus();
               });
               switch (index) {
                 case 0:
@@ -11243,13 +11263,15 @@ class _IssueDetailState extends State<_IssueDetail> {
               ),
               onRetry: () => widget.viewModel.ensureIssueHistoryLoaded(issue),
             ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _IssueDetailActionButton extends StatelessWidget {
+class _IssueDetailActionButton extends StatefulWidget {
   const _IssueDetailActionButton({
     required this.label,
     required this.onPressed,
@@ -11263,12 +11285,27 @@ class _IssueDetailActionButton extends StatelessWidget {
   final double? sortOrder;
 
   @override
+  State<_IssueDetailActionButton> createState() =>
+      _IssueDetailActionButtonState();
+}
+
+class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
+  late final FocusNode _focusNode = FocusNode(debugLabel: widget.label);
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final child = ExcludeSemantics(child: Text(label));
-    final button = emphasized
+    final child = ExcludeSemantics(child: Text(widget.label));
+    final button = widget.emphasized
         ? FilledButton(
-            onPressed: onPressed,
+            focusNode: _focusNode,
+            onPressed: widget.onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
               foregroundColor: colors.page,
@@ -11280,7 +11317,8 @@ class _IssueDetailActionButton extends StatelessWidget {
             child: child,
           )
         : OutlinedButton(
-            onPressed: onPressed,
+            focusNode: _focusNode,
+            onPressed: widget.onPressed,
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.text,
               side: BorderSide(color: colors.border),
@@ -11291,17 +11329,25 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    final semanticButton = Semantics(
-      button: true,
-      label: label,
-      sortKey: _semanticsSortKey(sortOrder),
+    final semanticButton = AnimatedBuilder(
+      animation: _focusNode,
       child: button,
+      builder: (context, child) => Semantics(
+        button: true,
+        enabled: widget.onPressed != null,
+        focusable: widget.onPressed != null,
+        focused: _focusNode.hasFocus,
+        label: widget.label,
+        sortKey: _semanticsSortKey(widget.sortOrder),
+        onTap: widget.onPressed,
+        child: ExcludeSemantics(child: child!),
+      ),
     );
-    if (sortOrder == null) {
+    if (widget.sortOrder == null) {
       return semanticButton;
     }
     return FocusTraversalOrder(
-      order: NumericFocusOrder(sortOrder!),
+      order: NumericFocusOrder(widget.sortOrder!),
       child: semanticButton,
     );
   }
@@ -14784,12 +14830,14 @@ class _IssueDetailTabs extends StatelessWidget {
   const _IssueDetailTabs({
     required this.selectedIndex,
     required this.tabs,
+    required this.focusNodes,
     this.failedTabIndexes = const <int>{},
     required this.onSelected,
   });
 
   final int selectedIndex;
   final List<String> tabs;
+  final List<FocusNode> focusNodes;
   final Set<int> failedTabIndexes;
   final ValueChanged<int> onSelected;
 
@@ -14802,6 +14850,7 @@ class _IssueDetailTabs extends StatelessWidget {
         for (var index = 0; index < tabs.length; index++)
           _IssueDetailTabChip(
             label: tabs[index],
+            focusNode: focusNodes[index],
             selected: index == selectedIndex,
             showFailureIndicator: failedTabIndexes.contains(index),
             onPressed: () => onSelected(index),
@@ -14814,12 +14863,14 @@ class _IssueDetailTabs extends StatelessWidget {
 class _IssueDetailTabChip extends StatelessWidget {
   const _IssueDetailTabChip({
     required this.label,
+    required this.focusNode,
     required this.selected,
     required this.showFailureIndicator,
     required this.onPressed,
   });
 
   final String label;
+  final FocusNode focusNode;
   final bool selected;
   final bool showFailureIndicator;
   final VoidCallback onPressed;
@@ -14832,6 +14883,7 @@ class _IssueDetailTabChip extends StatelessWidget {
       selected: selected,
       label: label,
       child: InkWell(
+        focusNode: focusNode,
         borderRadius: BorderRadius.circular(999),
         onTap: onPressed,
         child: ExcludeSemantics(
@@ -14904,9 +14956,11 @@ class _CommentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
         if (writeBlocked) ...[
           _AccessCallout(
             semanticLabel: l10n.comments,
@@ -14940,6 +14994,7 @@ class _CommentsTab extends StatelessWidget {
           child: _IssueDetailActionButton(
             label: l10n.postComment,
             emphasized: true,
+            sortOrder: 1,
             onPressed: writeBlocked || isLoading ? null : onSave,
           ),
         ),
@@ -14951,6 +15006,7 @@ class _CommentsTab extends StatelessWidget {
             message: errorText!,
             tone: _DeferredSectionTone.error,
             actionLabel: l10n.retry,
+            actionSortOrder: 2,
             onAction: onRetry,
           )
         else if (isLoading || !issue.hasCommentsLoaded)
@@ -14965,7 +15021,8 @@ class _CommentsTab extends StatelessWidget {
         else
           for (final comment in issue.comments)
             _CommentBubble(comment: comment),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -15019,9 +15076,11 @@ class _AttachmentsTab extends StatelessWidget {
         viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
         if (accessMessage.isNotEmpty) ...[
           _AccessCallout(
             semanticLabel: l10n.attachments,
@@ -15102,6 +15161,7 @@ class _AttachmentsTab extends StatelessWidget {
                   children: [
                     _IssueDetailActionButton(
                       label: l10n.chooseAttachment,
+                      sortOrder: 1,
                       onPressed: canChooseAttachment
                           ? onChooseAttachment
                           : null,
@@ -15109,11 +15169,13 @@ class _AttachmentsTab extends StatelessWidget {
                     _IssueDetailActionButton(
                       label: l10n.uploadAttachment,
                       emphasized: true,
+                      sortOrder: 2,
                       onPressed: canUploadAttachment ? onUpload : null,
                     ),
                     if (selectedAttachment != null)
                       _IssueDetailActionButton(
                         label: l10n.clearSelectedAttachment,
+                        sortOrder: 3,
                         onPressed: isSaving ? null : onClearSelection,
                       ),
                   ],
@@ -15130,6 +15192,7 @@ class _AttachmentsTab extends StatelessWidget {
             message: errorText!,
             tone: _DeferredSectionTone.error,
             actionLabel: l10n.retry,
+            actionSortOrder: 4,
             onAction: onRetry,
           )
         else if (isLoading || !issue.hasAttachmentsLoaded)
@@ -15144,7 +15207,8 @@ class _AttachmentsTab extends StatelessWidget {
         else
           for (final attachment in issue.attachments)
             _AttachmentRow(attachment: attachment, onDownload: onDownload),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -15294,6 +15358,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     required this.message,
     required this.tone,
     this.actionLabel,
+    this.actionSortOrder,
     this.onAction,
   });
 
@@ -15302,6 +15367,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
   final String message;
   final _DeferredSectionTone tone;
   final String? actionLabel;
+  final double? actionSortOrder;
   final VoidCallback? onAction;
 
   @override
@@ -15313,6 +15379,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     };
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       label: semanticLabel,
       child: Container(
         width: double.infinity,
@@ -15329,19 +15396,43 @@ class _DeferredSectionStateCard extends StatelessWidget {
               const LinearProgressIndicator(minHeight: 2),
               const SizedBox(height: 12),
             ],
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: accentColor),
+            Row(
+              children: [
+                if (tone == _DeferredSectionTone.error) ...[
+                  TrackStateIcon(
+                    TrackStateIconGlyph.issue,
+                    color: accentColor,
+                    semanticLabel: semanticLabel,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: accentColor),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            Text(message),
+            Text(
+              message,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(
+                color: tone == _DeferredSectionTone.error
+                    ? colors.muted
+                    : colors.text,
+              ),
+            ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 12),
               _IssueDetailActionButton(
                 label: actionLabel!,
                 onPressed: onAction,
+                sortOrder: actionSortOrder,
               ),
             ],
           ],

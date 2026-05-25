@@ -507,6 +507,56 @@ void main() {
   );
 
   test(
+    'view model keeps successful comments loaded and retries only the failed comment artifact',
+    () async {
+      final provider = _CommentRetryTrackingProvider(
+        failingCommentPaths: {'DEMO/DEMO-1/comments/0001.md'},
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      await viewModel.ensureIssueCommentsLoaded(issue);
+
+      expect(
+        viewModel.issueDeferredError(issue.key, IssueDeferredSection.comments),
+        contains('Synthetic comment outage'),
+      );
+      expect(
+        viewModel.selectedIssue?.comments.map((comment) => comment.storagePath),
+        ['DEMO/DEMO-1/comments/0002.md'],
+      );
+      expect(viewModel.selectedIssue?.hasCommentsLoaded, isFalse);
+
+      provider.readLog.clear();
+      provider.clearFailures();
+
+      await viewModel.ensureIssueCommentsLoaded(viewModel.selectedIssue!);
+
+      expect(
+        provider.readLog.where((path) => path.contains('/comments/')).toList(),
+        ['DEMO/DEMO-1/comments/0001.md'],
+      );
+      expect(
+        viewModel.selectedIssue?.comments.map((comment) => comment.storagePath),
+        [
+          'DEMO/DEMO-1/comments/0001.md',
+          'DEMO/DEMO-1/comments/0002.md',
+        ],
+      );
+      expect(viewModel.selectedIssue?.hasCommentsLoaded, isTrue);
+      expect(
+        viewModel.hasIssueDeferredError(issue.key, IssueDeferredSection.comments),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'view model reports local persistence after a successful move',
     () async {
       final viewModel = TrackerViewModel(
@@ -3072,4 +3122,198 @@ class _DelayedHydrationPaginationRepository
     );
     return hydrated;
   }
+}
+
+class _CommentRetryTrackingProvider implements TrackStateProviderAdapter {
+  _CommentRetryTrackingProvider({Set<String> failingCommentPaths = const {}})
+    : _failingCommentPaths = {...failingCommentPaths};
+
+  final List<String> readLog = <String>[];
+  final Set<String> _failingCommentPaths;
+  RepositoryConnection? _connection;
+
+  static const Map<String, String> _files = {
+    'DEMO/project.json': '''
+{
+  "key": "DEMO",
+  "name": "Demo Project",
+  "configPath": "config"
+}
+''',
+    'DEMO/config/statuses.json': '''
+[
+  {"id": "todo", "name": "To Do"}
+]
+''',
+    'DEMO/config/issue-types.json': '''
+[
+  {"id": "story", "name": "Story"}
+]
+''',
+    'DEMO/config/fields.json': '''
+[
+  {"id": "summary", "name": "Summary", "type": "string", "required": true}
+]
+''',
+    'DEMO/.trackstate/index/issues.json': '''
+[
+  {
+    "key": "DEMO-1",
+    "path": "DEMO/DEMO-1/main.md",
+    "parent": null,
+    "epic": null,
+    "summary": "Comments retry should stay targeted",
+    "issueType": "story",
+    "status": "todo",
+    "labels": [],
+    "updated": "2026-05-25T00:00:00Z",
+    "children": [],
+    "archived": false
+  }
+]
+''',
+    'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Comments retry should stay targeted
+updated: 2026-05-25T00:00:00Z
+---
+
+# Description
+
+Retry should not reread unaffected comments.
+''',
+    'DEMO/DEMO-1/comments/0001.md': '''
+---
+author: ana
+updated: 2026-05-25T00:01:00Z
+---
+
+Failed comment path.
+''',
+    'DEMO/DEMO-1/comments/0002.md': '''
+---
+author: denis
+updated: 2026-05-25T00:02:00Z
+---
+
+Healthy comment path.
+''',
+  };
+
+  void clearFailures() => _failingCommentPaths.clear();
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => _connection?.repository ?? 'IstiN/trackstate';
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connection = connection;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async => [
+    for (final path in _files.keys) RepositoryTreeEntry(path: path, type: 'blob'),
+  ];
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    readLog.add(path);
+    if (_failingCommentPaths.contains(path)) {
+      throw TrackStateProviderException('Synthetic comment outage for $path');
+    }
+    final content = _files[path];
+    if (content == null) {
+      throw TrackStateProviderException('File not found: $path');
+    }
+    return RepositoryTextFile(path: path, content: content, revision: 'abc123');
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => _connection?.branch ?? dataRef;
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == dataRef);
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'commit-sha',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryPermission> getPermission() async =>
+      const RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        canCheckCollaborators: false,
+      );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'comment-retry-provider-revision',
+      sessionRevision: 'true:true',
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        canCheckCollaborators: false,
+      ),
+    ),
+  );
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
 }

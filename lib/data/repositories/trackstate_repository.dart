@@ -387,12 +387,13 @@ class ProviderBackedTrackStateRepository
     final acceptanceMarkdown = shouldLoadDetail
         ? await _tryReadIssueAcceptance(issueRoot)
         : _acceptanceCriteriaMarkdown(currentIssue.acceptanceCriteria);
-    final comments = shouldLoadComments
+    final commentsResult = shouldLoadComments
         ? await _loadComments(
             blobPaths: _snapshotBlobPaths,
             issueRoot: issueRoot,
+            existingComments: currentIssue.comments,
           )
-        : currentIssue.comments;
+        : _CommentHydrationResult(comments: currentIssue.comments);
     final links = shouldLoadDetail
         ? await _loadLinks(blobPaths: _snapshotBlobPaths, issueRoot: issueRoot)
         : currentIssue.links;
@@ -404,7 +405,7 @@ class ProviderBackedTrackStateRepository
           storagePath: currentIssue.storagePath,
           markdown: markdown,
           acceptanceMarkdown: acceptanceMarkdown,
-          comments: comments,
+          comments: commentsResult.comments,
           links: links,
           attachments: attachments,
           repositoryIndexEntry: currentSnapshot.repositoryIndex.entryForKey(
@@ -416,10 +417,18 @@ class ProviderBackedTrackStateRepository
           resolutionDefinitions: currentSnapshot.project.resolutionDefinitions,
         ).copyWith(
           hasDetailLoaded: shouldLoadDetail,
-          hasCommentsLoaded: shouldLoadComments,
+          hasCommentsLoaded:
+              shouldLoadComments && commentsResult.error == null,
           hasAttachmentsLoaded: shouldLoadAttachments,
         );
     _replaceIssueInSnapshot(hydratedIssue);
+    if (commentsResult.error != null) {
+      throw TrackStatePartialHydrationException(
+        message: '${commentsResult.error}',
+        partialIssue: hydratedIssue,
+        failedScopes: const {IssueHydrationScope.comments},
+      );
+    }
     return hydratedIssue;
   }
 
@@ -1741,10 +1750,9 @@ class ProviderBackedTrackStateRepository
       final acceptance = blobPaths.contains(acceptancePath)
           ? await _getRepositoryText(acceptancePath)
           : null;
-      final comments = await _loadComments(
-        blobPaths: blobPaths,
-        issueRoot: issueRoot,
-      );
+      final comments =
+          (await _loadComments(blobPaths: blobPaths, issueRoot: issueRoot))
+              .comments;
       final links = await _loadLinks(
         blobPaths: blobPaths,
         issueRoot: issueRoot,
@@ -2751,9 +2759,10 @@ class ProviderBackedTrackStateRepository
     );
   }
 
-  Future<List<IssueComment>> _loadComments({
+  Future<_CommentHydrationResult> _loadComments({
     required Set<String> blobPaths,
     required String issueRoot,
+    List<IssueComment> existingComments = const <IssueComment>[],
   }) async {
     final commentPrefix = _joinPath(issueRoot, 'comments/');
     final commentPaths =
@@ -2763,11 +2772,25 @@ class ProviderBackedTrackStateRepository
             )
             .toList()
           ..sort();
+    final existingByPath = {
+      for (final comment in existingComments)
+        if (comment.storagePath.isNotEmpty) comment.storagePath: comment,
+    };
     final comments = <IssueComment>[];
+    Object? firstError;
     for (final path in commentPaths) {
-      comments.add(_parseComment(path, await _getRepositoryText(path)));
+      final existing = existingByPath[path];
+      if (existing != null) {
+        comments.add(existing);
+        continue;
+      }
+      try {
+        comments.add(_parseComment(path, await _getRepositoryText(path)));
+      } on Object catch (error) {
+        firstError ??= error;
+      }
     }
-    return comments;
+    return _CommentHydrationResult(comments: comments, error: firstError);
   }
 
   Future<List<IssueLink>> _loadLinks({
@@ -3677,6 +3700,24 @@ class DemoTrackStateRepository implements TrackStateRepository {
 
 class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
+}
+
+class TrackStatePartialHydrationException extends TrackStateRepositoryException {
+  const TrackStatePartialHydrationException({
+    required String message,
+    required this.partialIssue,
+    required this.failedScopes,
+  }) : super(message);
+
+  final TrackStateIssue partialIssue;
+  final Set<IssueHydrationScope> failedScopes;
+}
+
+class _CommentHydrationResult {
+  const _CommentHydrationResult({required this.comments, this.error});
+
+  final List<IssueComment> comments;
+  final Object? error;
 }
 
 class _HistoryIssueState {

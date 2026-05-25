@@ -2083,6 +2083,22 @@ class TrackerViewModel extends ChangeNotifier {
       _applyTargetedIssueRefresh(hydrated);
       _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          issue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       _setIssueDeferredError(
         issue.key,
@@ -2462,6 +2478,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _applyTargetedIssueRefresh(hydrated);
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       for (final scope in scopes) {
         _setIssueDeferredError(
@@ -2636,6 +2668,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _applyTargetedIssueRefresh(hydrated);
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on TrackStatePartialHydrationException catch (error) {
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(error.partialIssue);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      for (final failedScope in error.failedScopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(failedScope),
+          '$error',
+        );
+      }
     } on Object catch (error) {
       for (final scope in scopes) {
         _setIssueDeferredError(
