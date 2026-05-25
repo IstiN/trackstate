@@ -162,6 +162,29 @@ class LiveIssueDetailCollaborationPage:
             return labeled_button_count
         return self._session.count(self._button_selector, has_text=fragment)
 
+    def button_label_fragment_disabled_count(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            (fragment) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .filter((element) => {
+                const label = element.getAttribute("aria-label") ?? "";
+                const text = (element.innerText ?? element.textContent ?? "").trim();
+                const isVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
+                return isVisible &&
+                  (label.includes(fragment) || text.includes(fragment)) &&
+                  element.getAttribute("aria-disabled") === "true";
+              }).length
+            """,
+            arg=fragment,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid disabled "
+                f"button count for {fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
     def theme_toggle_label(self) -> str:
         for label in ("Dark theme", "Light theme"):
             if self.button_label_fragment_count(label) > 0:

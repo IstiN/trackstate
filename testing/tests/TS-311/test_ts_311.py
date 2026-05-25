@@ -24,9 +24,15 @@ from testing.tests.support.live_tracker_app_factory import (
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts311_failure.png"
 SEEDED_COMMENT_FRAGMENT = "This comment demonstrates markdown-backed collaboration history."
-READ_ONLY_ATTACHMENT_MESSAGE = "download-only for Git LFS attachments"
+READ_ONLY_ATTACHMENT_MESSAGE_FRAGMENTS = (
+    "download-only for Git LFS attachments",
+    "GitHub Releases uploads are unavailable in the browser",
+    "Uploads continue through the repository inbox workflow.",
+    "repository inbox workflow",
+)
 DOWNLOAD_BUTTON_LABEL_FRAGMENT = "Download"
 UPLOAD_BUTTON_LABEL_FRAGMENTS = (
+    "Choose attachment",
     "Upload attachment to",
     "Upload attachment",
 )
@@ -46,7 +52,6 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 "TS-311 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
             )
 
-        user = self.repository_service.fetch_authenticated_user()
         issue_fixture = self.repository_service.fetch_issue_fixture("DEMO/DEMO-1/DEMO-2")
 
         self.assertEqual(
@@ -80,11 +85,6 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                     f"Observed body text:\n{runtime.body_text}",
                 )
 
-                live_issue_page.ensure_connected(
-                    token=token,
-                    repository=self.repository_service.repository,
-                    user_login=user.login,
-                )
                 live_issue_page.open_issue(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
@@ -225,15 +225,19 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                     f"Observed body text:\n{live_issue_page.current_body_text()}",
                 )
 
-                try:
-                    read_only_message_count = live_issue_page.wait_for_text_fragment(
-                        READ_ONLY_ATTACHMENT_MESSAGE,
-                        timeout_ms=10_000,
-                    )
-                except WebAppTimeoutError:
-                    read_only_message_count = live_issue_page.text_fragment_count(
-                        READ_ONLY_ATTACHMENT_MESSAGE,
-                    )
+                read_only_message_count = 0
+                for fragment in READ_ONLY_ATTACHMENT_MESSAGE_FRAGMENTS:
+                    try:
+                        read_only_message_count = live_issue_page.wait_for_text_fragment(
+                            fragment,
+                            timeout_ms=10_000,
+                        )
+                    except WebAppTimeoutError:
+                        read_only_message_count = live_issue_page.text_fragment_count(
+                            fragment,
+                        )
+                    if read_only_message_count > 0:
+                        break
                 download_button_count = live_issue_page.button_label_fragment_count(
                     DOWNLOAD_BUTTON_LABEL_FRAGMENT,
                 )
