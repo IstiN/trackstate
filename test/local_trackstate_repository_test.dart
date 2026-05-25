@@ -1031,6 +1031,129 @@ void main() {
   );
 
   test(
+    'local repository saves settings when reserved priority field omits embedded options',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","configPath":"config"}\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"in-progress","name":"In Progress","category":"indeterminate"},'
+            '{"id":"in-review","name":"In Review","category":"indeterminate"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story","workflow":"delivery-workflow"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"priority","name":"Priority","type":"option","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/priorities.json',
+        '[{"id":"highest","name":"Highest"},'
+            '{"id":"high","name":"High"},'
+            '{"id":"medium","name":"Medium"},'
+            '{"id":"low","name":"Low"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","in-progress","in-review","done"],'
+            '"transitions":[{"id":"start","name":"Start work","from":"todo","to":"in-progress"},'
+            '{"id":"review","name":"Request review","from":"in-progress","to":"in-review"},'
+            '{"id":"complete","name":"Complete","from":"in-review","to":"done"},'
+            '{"id":"reopen","name":"Reopen","from":"done","to":"todo"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO']);
+      await _git(repo.path, ['commit', '-m', 'Seed setup-style settings fixture']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      final originalFields = File(
+        '${repo.path}/DEMO/config/fields.json',
+      ).readAsStringSync();
+      final beforeHead =
+          (await Process.run('git', ['-C', repo.path, 'rev-parse', 'HEAD']))
+              .stdout
+              .toString()
+              .trim();
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          statusDefinitions: [
+            ...snapshot.project.statusDefinitions,
+            const TrackStateConfigEntry(
+              id: 'blocked',
+              name: 'Blocked',
+              category: 'indeterminate',
+            ),
+          ],
+          workflowDefinitions: [
+            for (final workflow in snapshot.project.workflowDefinitions)
+              if (workflow.id == 'delivery-workflow')
+                workflow.copyWith(
+                  transitions: [
+                    for (final transition in workflow.transitions)
+                      if (transition.id == 'reopen')
+                        transition.copyWith(name: 'Reopen issue')
+                      else
+                        transition,
+                  ],
+                )
+              else
+                workflow,
+          ],
+        ),
+      );
+
+      final afterHead =
+          (await Process.run('git', ['-C', repo.path, 'rev-parse', 'HEAD']))
+              .stdout
+              .toString()
+              .trim();
+
+      expect(afterHead, isNot(beforeHead));
+      expect(
+        updatedSnapshot.project.statusDefinitions.map((status) => status.id),
+        contains('blocked'),
+      );
+      expect(
+        updatedSnapshot.project.workflowDefinitions
+            .singleWhere((workflow) => workflow.id == 'delivery-workflow')
+            .transitions
+            .singleWhere((transition) => transition.id == 'reopen')
+            .name,
+        'Reopen issue',
+      );
+      expect(
+        File('${repo.path}/DEMO/config/statuses.json').readAsStringSync(),
+        contains('"blocked"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+        contains('"Reopen issue"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/fields.json').readAsStringSync(),
+        originalFields,
+      );
+    },
+  );
+
+  test(
     'local repository assigns legacy issue types to the persisted default workflow',
     () async {
       final repo = await _createLocalRepository();
