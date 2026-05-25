@@ -16,13 +16,15 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+const String _hostedWorkspaceId = 'hosted:stable/repo@main';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
 
   testWidgets(
-    'startup exposes the shell with restricted access after the timeout fallback while delayed auth remains in progress in web-style restore flow',
+    'startup switches into the hosted restricted fallback session while delayed auth remains in progress in web-style restore flow',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -115,8 +117,16 @@ void main() {
       expect(delayedRepository.session?.canWrite, isFalse);
       expect(delayedRepository.session?.canCreateBranch, isFalse);
       expect(find.text('Connect GitHub'), findsWidgets);
+      expect(
+        find.bySemanticsLabel(
+          RegExp(
+            r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+          ),
+        ),
+        findsWidgets,
+      );
       final savedStateBeforeConnect = await service.loadState();
-      expect(savedStateBeforeConnect.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateBeforeConnect.activeWorkspaceId, _hostedWorkspaceId);
       expect(
         savedStateBeforeConnect.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -137,7 +147,7 @@ void main() {
       expect(find.text('Dashboard'), findsWidgets);
       expect(find.text('Add workspace'), findsNothing);
       final savedState = await service.loadState();
-      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedState.activeWorkspaceId, _hostedWorkspaceId);
       expect(
         delayedRepository.session?.connectionState,
         ProviderConnectionState.connected,

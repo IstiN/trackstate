@@ -47,7 +47,7 @@ void main() {
   });
 
   testWidgets(
-    'web startup preserves the saved active local workspace when the browser handle is missing and opens the shell fallback',
+    'web startup switches to the hosted fallback workspace when the browser handle is missing and opens the shell fallback',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -110,9 +110,10 @@ void main() {
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
       _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -187,6 +188,7 @@ void main() {
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
       _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       delayedRepository.completeUserProbe();
       await tester.pump();
@@ -199,7 +201,7 @@ void main() {
       expect(delayedRepository.session?.canWrite, isTrue);
       expect(delayedRepository.session?.canCreateBranch, isTrue);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -208,7 +210,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup starts the real browser /user probe after opening the shell fallback for a missing browser handle',
+    'web startup starts the real browser /user probe after switching into the hosted fallback shell for a missing browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -274,9 +276,10 @@ void main() {
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
       _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -349,6 +352,7 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
     },
   );
@@ -415,6 +419,7 @@ void main() {
       expect(delayedRepository.initialSearchRequestCount, 1);
       expect(delayedRepository.initialSearchPending, isTrue);
       _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
 
       delayedRepository.completeInitialSearch();
@@ -484,7 +489,7 @@ void main() {
 
       expect(delayedRepository.userProbePending, isTrue);
       _expectRestrictedFallbackShell(delayedRepository);
-      await _switchToHostedWorkspace(tester);
+      _expectHostedFallbackTrigger();
       final savedStateAfterSwitch = await workspaceProfiles.loadState();
       expect(savedStateAfterSwitch.activeWorkspaceId, _hostedWorkspaceId);
       _expectRestrictedFallbackShell(delayedRepository);
@@ -782,6 +787,15 @@ void _expectRestrictedFallbackShell(
   expect(repository.session?.canCreateBranch, isFalse);
 }
 
+void _expectHostedFallbackTrigger() {
+  expect(
+    find.bySemanticsLabel(
+      RegExp(r'Workspace switcher: Hosted setup workspace, .*Needs sign-in'),
+    ),
+    findsWidgets,
+  );
+}
+
 void _expectShellReadySurface() {
   expect(
     find.byKey(const ValueKey('workspace-switcher-trigger')),
@@ -803,20 +817,6 @@ Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
     findsWidgets,
   );
   await tester.tapAt(const Offset(8, 8));
-  await tester.pumpAndSettle();
-}
-
-Future<void> _switchToHostedWorkspace(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
-  await tester.pumpAndSettle();
-  final openButton = find.byKey(
-    const ValueKey('workspace-open-$_hostedWorkspaceId'),
-  );
-  await tester.ensureVisible(openButton);
-  await tester.tap(openButton, warnIfMissed: false);
-  await tester.pump();
-  await tester.tap(find.byKey(const ValueKey('workspace-add-button')));
-  await tester.pump();
   await tester.pumpAndSettle();
 }
 

@@ -14,7 +14,7 @@ void main() {
   });
 
   testWidgets(
-    'desktop web workspace switcher stays dismissible with browser-owned focus',
+    'desktop web workspace switcher stays dismissible after keyboard navigation',
     (tester) async {
       if (!kIsWeb) {
         return;
@@ -62,18 +62,10 @@ void main() {
         );
         await _pumpUntilVisible(tester, find.byType(TextField));
 
-        final desktopCandidates = <String, Finder>{
-          'Workspace switcher': find.byKey(
-            const ValueKey('workspace-switcher-trigger'),
-          ),
-          'Active workspace': find.byKey(
-            const ValueKey('workspace-hosted:alpha/repo@main'),
-          ),
-          'Search issues': find.byType(TextField),
-          'Repository': find.widgetWithText(TextFormField, 'Repository'),
-        };
-
-        await tester.tap(desktopCandidates['Workspace switcher']!);
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+          warnIfMissed: false,
+        );
         await tester.pumpAndSettle();
 
         await _pumpUntilVisible(
@@ -104,7 +96,7 @@ void main() {
   );
 
   testWidgets(
-    'desktop web workspace open action stages a pending switch before Save and switch commits it',
+    'desktop web workspace open action switches workspaces and closes the panel',
     (tester) async {
       if (!kIsWeb) {
         return;
@@ -167,14 +159,6 @@ void main() {
           find.byKey(const ValueKey('workspace-open-hosted:beta/repo@main')),
           warnIfMissed: false,
         );
-        await tester.pump();
-        await tester.pumpAndSettle();
-
-        expect(
-          find.byKey(const ValueKey('workspace-switcher-sheet')),
-          findsOneWidget,
-        );
-        await tester.tap(find.byKey(const ValueKey('workspace-add-button')));
         await tester.pump();
         await tester.pumpAndSettle();
 

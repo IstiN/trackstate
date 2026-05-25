@@ -87,9 +87,6 @@ bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
 String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
     'trackstate-workspace-switcher-$action-$workspaceId';
 
-String _workspaceSwitcherRowFocusBridgeId(String workspaceId) =>
-    'trackstate-workspace-switcher-row-focus-$workspaceId';
-
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
   required bool isWeb,
@@ -588,7 +585,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         continue;
       }
       final selectedState = await widget.workspaceProfileService.selectProfile(
-        workspace.id,
+        prepared.workspace?.id ?? workspace.id,
       );
       _pendingWorkspaceRestoreFailure = null;
       if (lastFailure != null) {
@@ -644,7 +641,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     return hostedWorkspaces.first;
   }
 
-  Future<TrackerViewModel?> _preparePreservedLocalHostedFallbackViewModel(
+  Future<_PreparedWorkspaceSwitch?> _preparePreservedLocalHostedFallbackSwitch(
     TrackerViewModel previousViewModel, {
     required bool deferAccessRestore,
   }) async {
@@ -668,7 +665,11 @@ class _TrackStateAppState extends State<TrackStateApp>
       } else {
         await fallbackViewModel.load(deferAccessRestore: deferAccessRestore);
       }
-      return fallbackViewModel;
+      return _PreparedWorkspaceSwitch(
+        viewModel: fallbackViewModel,
+        workspace: fallbackWorkspace,
+        localConfigurationKey: null,
+      );
     } on Object catch (error) {
       _rememberWorkspaceValidationFailure(
         fallbackWorkspace,
@@ -773,22 +774,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
     bool markUnavailable = false,
   }) async {
-    final hostedFallbackViewModel =
-        await _preparePreservedLocalHostedFallbackViewModel(
+    final hostedFallbackSwitch =
+        await _preparePreservedLocalHostedFallbackSwitch(
           previousViewModel,
           deferAccessRestore: deferAccessRestore,
         );
-    if (hostedFallbackViewModel != null) {
+    if (hostedFallbackSwitch != null) {
       if (markUnavailable) {
         await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
       } else {
         _workspaceValidationFailures.remove(workspace.id);
       }
-      return _PreparedWorkspaceSwitch(
-        viewModel: hostedFallbackViewModel,
-        workspace: workspace,
-        localConfigurationKey: null,
-      );
+      return hostedFallbackSwitch;
     }
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
@@ -1797,10 +1794,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           ? browser_workspace_switcher_focus_monitor
                 .captureBrowserViewportScrollSnapshot()
           : null;
-      _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
-      if (activeWorkspaceId != null) {
-        _workspaceSwitcherRowFocusRequestVersion += 1;
-      }
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1811,12 +1805,6 @@ class _TrackStateAppState extends State<TrackStateApp>
             .syncBrowserWorkspaceSwitcherRowTabIndices(
               activeWorkspaceId: activeWorkspaceId,
             );
-        if (kIsWeb) {
-          _requestDesktopWorkspaceSwitcherBrowserFocus(
-            browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId),
-          );
-          return;
-        }
       }
       _workspaceSwitcherTriggerFocusNode.requestFocus();
       if (kIsWeb) {
@@ -1840,10 +1828,6 @@ class _TrackStateAppState extends State<TrackStateApp>
               },
               onBrowserFocusOutside: () {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
-                  return;
-                }
-                if (_desktopWorkspaceSwitcherBrowserFocusRequest != null) {
-                  _scheduleDesktopWorkspaceSwitcherBrowserBlurCheck();
                   return;
                 }
                 _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
@@ -1904,9 +1888,6 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _isDesktopWorkspaceSwitcherFocused() {
-    if (_desktopWorkspaceSwitcherBrowserFocusRequest != null) {
-      return true;
-    }
     if (kIsWeb &&
         browser_workspace_switcher_focus_monitor
             .isBrowserFocusWithinWorkspaceSwitcher()) {
@@ -2117,11 +2098,6 @@ class _TrackStateAppState extends State<TrackStateApp>
                 requestedFocusedWorkspaceId:
                     _requestedWorkspaceSwitcherRowFocusId,
                 focusRequestVersion: _workspaceSwitcherRowFocusRequestVersion,
-                onPendingWorkspaceSelection: kIsWeb && !compact
-                    ? () => _requestDesktopWorkspaceSwitcherBrowserFocus(
-                        _workspaceSwitcherSaveFocusId,
-                      )
-                    : null,
                 onSelectWorkspace: (workspace) {
                   closeSwitcher();
                   unawaited(_switchToWorkspace(workspace));
@@ -4578,7 +4554,7 @@ class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
         ignoring: !visible,
         child: TapRegion(
           groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
-          onTapOutside: visible && !kIsWeb ? (_) => onDismiss() : null,
+          onTapOutside: visible ? (_) => onDismiss() : null,
           child: Material(
             color: visible ? colors.surface : Colors.transparent,
             elevation: visible ? 16 : 0,
@@ -7567,7 +7543,6 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.onMoveWorkspaceSelection,
     required this.onSelectFirstWorkspace,
     required this.onSelectLastWorkspace,
-    this.onPendingWorkspaceSelection,
   });
 
   final Key? sheetKey;
@@ -7586,7 +7561,6 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onSelectFirstWorkspace;
   final VoidCallback onSelectLastWorkspace;
-  final VoidCallback? onPendingWorkspaceSelection;
 
   @override
   State<_WorkspaceSwitcherSheet> createState() =>
@@ -7678,9 +7652,6 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     setState(() {
       _selectedWorkspaceId = workspace.id;
     });
-    if (kIsWeb) {
-      widget.onPendingWorkspaceSelection?.call();
-    }
   }
 
   void _saveAndSwitchSelectedWorkspace() {
@@ -7720,89 +7691,6 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       widget.viewModel,
       widget.workspaces,
       widget.localWorkspaceAvailability,
-    );
-    final savedWorkspaceRows = Column(
-      children: [
-        for (
-          var index = 0;
-          index < widget.workspaces.profiles.length;
-          index += 1
-        ) ...[
-          Builder(
-            builder: (context) {
-              final workspace = widget.workspaces.profiles[index];
-              final workspaceId = workspace.id;
-              final isSelected = workspaceId == selectedWorkspaceId;
-              final isUnavailableLocal =
-                  workspace.isLocal &&
-                  widget.localWorkspaceAvailability[workspaceId] == false;
-              final showLocalHostedAccessAction =
-                  workspace.isLocal && widget.viewModel.usesLocalPersistence;
-              return _WorkspaceSwitcherRow(
-                key: ValueKey('workspace-$workspaceId'),
-                workspace: workspace,
-                isActive: isSelected,
-                stateLabel: _workspaceStateLabel(
-                  l10n,
-                  widget.viewModel,
-                  workspace,
-                  activeWorkspaceId: activeWorkspaceId,
-                  authenticatedWorkspaceIds: widget.authenticatedWorkspaceIds,
-                  hostedWorkspaceAccessModes: widget.hostedWorkspaceAccessModes,
-                  localWorkspaceAvailability: widget.localWorkspaceAvailability,
-                ),
-                focusOrderBase: index * 3.0 + 1,
-                primaryActionLabel: isUnavailableLocal
-                    ? l10n.retry
-                    : showLocalHostedAccessAction
-                    ? (widget.viewModel.hasLocalHostedAccessSession
-                          ? l10n.manageGitHubAccess
-                          : l10n.connectGitHub)
-                    : null,
-                primaryActionSemanticLabel: isUnavailableLocal
-                    ? '${l10n.retry}: ${workspace.displayName}'
-                    : null,
-                onPrimaryAction: isUnavailableLocal
-                    ? () => widget.onRetryUnavailableLocalWorkspace(workspace)
-                    : showLocalHostedAccessAction
-                    ? () => _showRepositoryAccessDialog(
-                        context,
-                        widget.viewModel,
-                        allowLocalGitHubConnection: true,
-                      )
-                    : null,
-                showOpenAction:
-                    workspaceId != activeWorkspaceId && !isUnavailableLocal,
-                onSelect: isUnavailableLocal
-                    ? null
-                    : () => _selectSavedWorkspace(workspace),
-                onOpen: workspaceId == activeWorkspaceId || isUnavailableLocal
-                    ? null
-                    : () {
-                        if (kIsWeb) {
-                          _selectSavedWorkspace(workspace);
-                          return;
-                        }
-                        widget.onSelectWorkspace(workspace);
-                      },
-                onDelete: () => widget.onDeleteWorkspace(workspace),
-                onMoveWorkspaceSelection: widget.onMoveWorkspaceSelection,
-                onSelectFirstWorkspace: widget.onSelectFirstWorkspace,
-                onSelectLastWorkspace: widget.onSelectLastWorkspace,
-                onSummaryFocusRequesterChanged: (requestFocus) {
-                  if (requestFocus == null) {
-                    _workspaceRowFocusRequesters.remove(workspaceId);
-                    return;
-                  }
-                  _workspaceRowFocusRequesters[workspaceId] = requestFocus;
-                },
-              );
-            },
-          ),
-          if (index != widget.workspaces.profiles.length - 1)
-            const SizedBox(height: 8),
-        ],
-      ],
     );
     final workspaceRowActionCount = widget.workspaces.profiles.length * 3;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
@@ -7869,7 +7757,106 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
             else
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 280),
-                child: SingleChildScrollView(child: savedWorkspaceRows),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (
+                        var index = 0;
+                        index < widget.workspaces.profiles.length;
+                        index += 1
+                      ) ...[
+                        Builder(
+                          builder: (context) {
+                            final workspace = widget.workspaces.profiles[index];
+                            final workspaceId = workspace.id;
+                            final isSelected =
+                                workspaceId == selectedWorkspaceId;
+                            final isUnavailableLocal =
+                                workspace.isLocal &&
+                                widget.localWorkspaceAvailability[workspaceId] ==
+                                    false;
+                            final showLocalHostedAccessAction =
+                                workspace.isLocal &&
+                                widget.viewModel.usesLocalPersistence;
+                            return _WorkspaceSwitcherRow(
+                              key: ValueKey('workspace-$workspaceId'),
+                              workspace: workspace,
+                              isActive: isSelected,
+                              stateLabel: _workspaceStateLabel(
+                                l10n,
+                                widget.viewModel,
+                                workspace,
+                                activeWorkspaceId: activeWorkspaceId,
+                                authenticatedWorkspaceIds:
+                                    widget.authenticatedWorkspaceIds,
+                                hostedWorkspaceAccessModes:
+                                    widget.hostedWorkspaceAccessModes,
+                                localWorkspaceAvailability:
+                                    widget.localWorkspaceAvailability,
+                              ),
+                              focusOrderBase: index * 3.0 + 1,
+                              primaryActionLabel: isUnavailableLocal
+                                  ? l10n.retry
+                                  : showLocalHostedAccessAction
+                                  ? (widget
+                                            .viewModel
+                                            .hasLocalHostedAccessSession
+                                        ? l10n.manageGitHubAccess
+                                        : l10n.connectGitHub)
+                                  : null,
+                              primaryActionSemanticLabel: isUnavailableLocal
+                                  ? '${l10n.retry}: ${workspace.displayName}'
+                                  : null,
+                              onPrimaryAction: isUnavailableLocal
+                                  ? () =>
+                                        widget.onRetryUnavailableLocalWorkspace(
+                                          workspace,
+                                        )
+                                  : showLocalHostedAccessAction
+                                  ? () => _showRepositoryAccessDialog(
+                                      context,
+                                      widget.viewModel,
+                                      allowLocalGitHubConnection: true,
+                                    )
+                                  : null,
+                              showOpenAction:
+                                  workspaceId != activeWorkspaceId &&
+                                  !isUnavailableLocal,
+                              onSelect: isUnavailableLocal
+                                  ? null
+                                  : () => _selectSavedWorkspace(workspace),
+                              onOpen:
+                                  workspaceId == activeWorkspaceId ||
+                                      isUnavailableLocal
+                                  ? null
+                                  : () => widget.onSelectWorkspace(workspace),
+                              onDelete: () =>
+                                  widget.onDeleteWorkspace(workspace),
+                              onMoveWorkspaceSelection:
+                                  widget.onMoveWorkspaceSelection,
+                              onSelectFirstWorkspace:
+                                  widget.onSelectFirstWorkspace,
+                              onSelectLastWorkspace:
+                                  widget.onSelectLastWorkspace,
+                              onSummaryFocusRequesterChanged: (requestFocus) {
+                                if (requestFocus == null) {
+                                  _workspaceRowFocusRequesters.remove(
+                                    workspaceId,
+                                  );
+                                  return;
+                                }
+                                _workspaceRowFocusRequesters[workspaceId] =
+                                    requestFocus;
+                              },
+                            );
+                          },
+                        ),
+                        if (index != widget.workspaces.profiles.length - 1)
+                          const SizedBox(height: 8),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             const SizedBox(height: 16),
             Text(
@@ -8196,7 +8183,6 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
-            focusTargetId: _workspaceSwitcherRowFocusBridgeId(workspace.id),
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
             rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
             selectedRow: isActive,
