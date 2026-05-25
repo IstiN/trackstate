@@ -272,11 +272,14 @@ class GitHubTrackStateProvider
   @override
   Future<String> resolveWriteBranch() async {
     final configuredBranch = _connection?.branch.trim() ?? '';
-    if (configuredBranch.isEmpty || _fullGitShaPattern.hasMatch(configuredBranch)) {
+    if (configuredBranch.isEmpty ||
+        _fullGitShaPattern.hasMatch(configuredBranch)) {
       return sourceRef;
     }
     if (configuredBranch.startsWith('refs/heads/')) {
-      final branchName = configuredBranch.substring('refs/heads/'.length).trim();
+      final branchName = configuredBranch
+          .substring('refs/heads/'.length)
+          .trim();
       if (branchName.isNotEmpty) {
         return branchName;
       }
@@ -1382,6 +1385,11 @@ class GitHubTrackStateProvider
       'Cannot save ${change.path} because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': change.path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 
