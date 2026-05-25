@@ -5,10 +5,9 @@ standardized control height and alignment across hover, focus, theme-toggle,
 and desktop-resize interactions.
 
 The automation:
-1. opens the hosted TrackState app in Chromium with the stored GitHub token
-2. verifies the visible desktop header shows the sync pill, `Search issues`,
-   `Create issue`, `Attachments limited`, the theme toggle, and the signed-in
-   profile label
+1. opens the hosted TrackState app in Chromium and navigates to `Dashboard`
+2. verifies the visible desktop header shows the sync status pill, `Create issue`,
+   the workspace switcher, the `Search issues` field, and the theme toggle
 3. asserts the audited header controls render at the required 32px height in
    the baseline desktop state
 4. repeats the height/alignment audit after hovering and clicking `Create
@@ -30,8 +29,8 @@ mkdir -p outputs && python testing/tests/TS-616/test_ts_616.py
 
 ## Required environment / config
 
-- `GH_TOKEN` or `GITHUB_TOKEN` must be set so the hosted app can authenticate
-  to the live setup repository.
+- No GitHub token is required for this audit; it runs against the deployed
+  hosted app in the default read-only desktop state.
 - The test targets the deployed TrackState app configured by
   `testing/core/config/live_setup_test_config.py`.
 
