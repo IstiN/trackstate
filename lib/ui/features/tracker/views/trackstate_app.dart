@@ -11074,6 +11074,28 @@ class _IssueDetailState extends State<_IssueDetail> {
     return widget.viewModel.hasIssueDeferredError(issue.key, section);
   }
 
+  void _selectCollaborationTab(int index) {
+    setState(() {
+    _selectedCollaborationTab = index;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) {
+      return;
+    }
+    _collaborationTabFocusNodes[index].requestFocus();
+    });
+    switch (index) {
+    case 0:
+      widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+    case 1:
+      widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+    case 2:
+      widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+    case 3:
+      widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+    }
+  }
+
   @override
   void dispose() {
     _commentController.dispose();
@@ -11275,6 +11297,10 @@ class _IssueDetailState extends State<_IssueDetail> {
         onPressed: widget.viewModel.isSaving ? null : widget.onCreateChildIssue,
       ),
       _IssueDetailActionButton(
+        label: l10n.comment,
+        onPressed: canUseWriteActions ? () => _selectCollaborationTab(1) : null,
+      ),
+      _IssueDetailActionButton(
         label: l10n.edit,
         onPressed: canUseWriteActions
             ? () => _openEditDialog(workflowOnly: false)
@@ -11381,27 +11407,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                   ))
                     3,
                 },
-                onSelected: (index) {
-                  setState(() {
-                    _selectedCollaborationTab = index;
-                  });
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted) {
-                      return;
-                    }
-                    _collaborationTabFocusNodes[index].requestFocus();
-                  });
-                  switch (index) {
-                    case 0:
-                      widget.viewModel.ensureIssueDetailLoaded(issue);
-                    case 1:
-                      widget.viewModel.ensureIssueCommentsLoaded(issue);
-                    case 2:
-                      widget.viewModel.ensureIssueAttachmentsLoaded(issue);
-                    case 3:
-                      widget.viewModel.ensureIssueHistoryLoaded(issue);
-                  }
-                },
+                onSelected: _selectCollaborationTab,
               ),
               const SizedBox(height: 16),
               if (_selectedCollaborationTab == 0)
