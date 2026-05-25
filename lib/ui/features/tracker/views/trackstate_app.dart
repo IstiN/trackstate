@@ -13362,25 +13362,22 @@ class _LabelTokenField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textField = TextField(
+      controller: controller,
+      focusNode: focusNode,
+      enabled: enabled,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(labelText: label, helperText: helperText),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Semantics(
+        _wrapCompatibleTextFieldSemantics(
+          controller: controller,
           label: label,
-          textField: true,
           enabled: enabled,
-          value: controller.text,
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            enabled: enabled,
-            onChanged: onChanged,
-            onSubmitted: onSubmitted,
-            decoration: InputDecoration(
-              labelText: label,
-              helperText: helperText,
-            ),
-          ),
+          child: textField,
         ),
         if (labels.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -13399,6 +13396,280 @@ class _LabelTokenField extends StatelessWidget {
       ],
     );
   }
+}
+
+Widget _wrapCompatibleTextFieldSemantics({
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required Widget child,
+}) {
+  if (kIsWeb) {
+    return child;
+  }
+  return Semantics(
+    label: label,
+    textField: true,
+    enabled: enabled,
+    value: controller.text,
+    child: child,
+  );
+}
+
+Widget _buildWebCompatibleTextField({
+  Key? key,
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  String? helperText,
+  String? errorText,
+  int? minLines,
+  int? maxLines = 1,
+  bool alignLabelWithHint = false,
+}) {
+  final textField = TextField(
+    key: key,
+    controller: controller,
+    minLines: minLines,
+    maxLines: maxLines,
+    enabled: enabled,
+    decoration: InputDecoration(
+      labelText: label,
+      helperText: helperText,
+      errorText: errorText,
+      alignLabelWithHint: alignLabelWithHint,
+    ),
+  );
+  return _wrapCompatibleTextFieldSemantics(
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    child: textField,
+  );
+}
+
+class _CollaboratorSuggestionField extends StatefulWidget {
+  const _CollaboratorSuggestionField({
+    this.fieldKey,
+    required this.controller,
+    required this.label,
+    required this.enabled,
+    required this.suggestions,
+  });
+
+  final Key? fieldKey;
+  final TextEditingController controller;
+  final String label;
+  final bool enabled;
+  final List<String> suggestions;
+
+  @override
+  State<_CollaboratorSuggestionField> createState() =>
+      _CollaboratorSuggestionFieldState();
+}
+
+class _CollaboratorSuggestionFieldState
+    extends State<_CollaboratorSuggestionField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedSuggestions = widget.suggestions
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    return RawAutocomplete<String>(
+      textEditingController: widget.controller,
+      focusNode: _focusNode,
+      displayStringForOption: (option) => option,
+      optionsBuilder: (textEditingValue) {
+        if (!widget.enabled) {
+          return const Iterable<String>.empty();
+        }
+        final query = textEditingValue.text.trim().toLowerCase();
+        if (query.isEmpty) {
+          return normalizedSuggestions.take(8);
+        }
+        return normalizedSuggestions.where(
+          (option) => option.toLowerCase().contains(query),
+        );
+      },
+      fieldViewBuilder:
+          (context, textEditingController, fieldFocusNode, onFieldSubmitted) {
+            final textField = TextField(
+              key: widget.fieldKey,
+              controller: textEditingController,
+              focusNode: fieldFocusNode,
+              enabled: widget.enabled,
+              onSubmitted: (_) => onFieldSubmitted(),
+              decoration: InputDecoration(labelText: widget.label),
+            );
+            return _wrapCompatibleTextFieldSemantics(
+              controller: textEditingController,
+              label: widget.label,
+              enabled: widget.enabled,
+              child: textField,
+            );
+          },
+      optionsViewBuilder: (context, onSelected, options) {
+        final entries = options.toList(growable: false);
+        if (entries.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Semantics(
+            label: '${widget.label} suggestions',
+            container: true,
+            explicitChildNodes: true,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: math.min(
+                    560,
+                    MediaQuery.sizeOf(context).width - 48,
+                  ),
+                  maxHeight: 240,
+                ),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) {
+                    return Builder(
+                      builder: (context) {
+                        final option = entries[index];
+                        final isHighlighted =
+                            AutocompleteHighlightedOption.of(context) == index;
+                        return InkWell(
+                          onTap: () => onSelected(option),
+                          child: Container(
+                            color: isHighlighted
+                                ? Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withValues(alpha: 0.08)
+                                : null,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            child: Text(
+                              option,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CreateIssueCollaboratorOptions {
+  const _CreateIssueCollaboratorOptions._(this.values);
+
+  final List<String> values;
+
+  factory _CreateIssueCollaboratorOptions.fromViewModel(
+    TrackerViewModel viewModel,
+  ) {
+    final priority = <String>[];
+    final issueUsers = <String>[];
+    final seen = <String>{};
+
+    void add(List<String> bucket, String? value) {
+      final trimmed = value?.trim() ?? '';
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (!seen.add(normalized)) {
+        return;
+      }
+      bucket.add(trimmed);
+    }
+
+    add(priority, viewModel.connectedUser?.login);
+    add(priority, viewModel.providerSession?.resolvedUserIdentity);
+    for (final issue in viewModel.issues) {
+      add(issueUsers, issue.assignee);
+      add(issueUsers, issue.reporter);
+    }
+    issueUsers.sort(
+      (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+    );
+    return _CreateIssueCollaboratorOptions._([...priority, ...issueUsers]);
+  }
+}
+
+Widget _buildCreateIssueFieldInput({
+  Key? key,
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required List<String> collaboratorSuggestions,
+  required TrackStateFieldDefinition? fieldDefinition,
+  String? helperText,
+  String? errorText,
+  int? minLines,
+  int? maxLines = 1,
+  bool alignLabelWithHint = false,
+}) {
+  if (fieldDefinition?.type == 'user') {
+    return _CollaboratorSuggestionField(
+      fieldKey: key,
+      controller: controller,
+      label: label,
+      enabled: enabled,
+      suggestions: collaboratorSuggestions,
+    );
+  }
+  return _buildWebCompatibleTextField(
+    key: key,
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    helperText: helperText,
+    errorText: errorText,
+    minLines: minLines,
+    maxLines: maxLines,
+    alignLabelWithHint: alignLabelWithHint,
+  );
+}
+
+Widget _buildAssigneeField({
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required List<String> collaboratorSuggestions,
+}) {
+  return _CollaboratorSuggestionField(
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    suggestions: collaboratorSuggestions,
+  );
 }
 
 class _CreateIssueDialog extends StatefulWidget {
@@ -13676,6 +13947,8 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
         ? null
         : _defaultCreateStatus(project);
     final derivedEpic = _issueByKey(_derivedEpicKey());
+    final collaboratorSuggestions =
+        _CreateIssueCollaboratorOptions.fromViewModel(widget.viewModel).values;
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 980;
@@ -13764,42 +14037,24 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 onChanged: _applyIssueType,
                               ),
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildWebCompatibleTextField(
+                                controller: _summaryController,
                                 label: summaryLabel,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
-                                    errorText:
-                                        _didAttemptSubmit &&
-                                            _summaryController.text
-                                                .trim()
-                                                .isEmpty
-                                        ? l10n.summaryRequired
-                                        : null,
-                                  ),
-                                ),
+                                errorText:
+                                    _didAttemptSubmit &&
+                                        _summaryController.text.trim().isEmpty
+                                    ? l10n.summaryRequired
+                                    : null,
                               ),
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildWebCompatibleTextField(
+                                controller: _descriptionController,
                                 label: l10n.description,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 3,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
-                                  ),
-                                ),
+                                minLines: 3,
+                                maxLines: null,
+                                alignLabelWithHint: true,
                               ),
                               const SizedBox(height: 12),
                               _DropdownCreateField(
@@ -13907,18 +14162,12 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 ),
                               ],
                               const SizedBox(height: 12),
-                              Semantics(
+                              _buildAssigneeField(
+                                controller: _assigneeController,
                                 label: assigneeLabel,
-                                textField: true,
                                 enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                  ),
-                                ),
+                                collaboratorSuggestions:
+                                    collaboratorSuggestions,
                               ),
                               const SizedBox(height: 12),
                               _LabelTokenField(
@@ -13938,32 +14187,22 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               ),
                               for (final field in createFields) ...[
                                 const SizedBox(height: 12),
-                                Semantics(
+                                _buildCreateIssueFieldInput(
+                                  key: ValueKey('create-field-${field.id}'),
+                                  controller:
+                                      _customFieldControllers[field.id]!,
                                   label: _createIssueFieldLabel(
                                     project,
                                     field,
                                     metadataLocale,
                                   ),
-                                  textField: true,
-                                  child: TextField(
-                                    key: ValueKey('create-field-${field.id}'),
-                                    controller:
-                                        _customFieldControllers[field.id],
-                                    minLines: field.type == 'markdown' ? 3 : 1,
-                                    maxLines: field.type == 'markdown'
-                                        ? null
-                                        : 1,
-                                    enabled: canEditFields,
-                                    decoration: InputDecoration(
-                                      labelText: _createIssueFieldLabel(
-                                        project,
-                                        field,
-                                        metadataLocale,
-                                      ),
-                                      alignLabelWithHint:
-                                          field.type == 'markdown',
-                                    ),
-                                  ),
+                                  enabled: canEditFields,
+                                  collaboratorSuggestions:
+                                      collaboratorSuggestions,
+                                  fieldDefinition: field,
+                                  minLines: field.type == 'markdown' ? 3 : 1,
+                                  maxLines: field.type == 'markdown' ? null : 1,
+                                  alignLabelWithHint: field.type == 'markdown',
                                 ),
                               ],
                             ],
