@@ -794,6 +794,107 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'provider-backed repository force refresh reloads updated comment content',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Sync refresh should not keep stale comments',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-25T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Sync refresh should not keep stale comments
+updated: 2026-05-25T00:00:00Z
+---
+
+# Description
+
+Force refreshes should reread repository comments.
+''',
+          'DEMO/DEMO-1/comments/0001.md': '''
+---
+author: demo-user
+created: 2026-05-25T00:00:00Z
+---
+
+Original comment body.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      final initial = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.comments},
+      );
+
+      expect(initial.comments.single.body, 'Original comment body.');
+
+      provider.files['DEMO/DEMO-1/comments/0001.md'] = '''
+---
+author: demo-user
+created: 2026-05-25T00:00:00Z
+updated: 2026-05-25T00:05:00Z
+---
+
+Updated comment body from sync.
+''';
+
+      final refreshed = await repository.hydrateIssue(
+        initial,
+        scopes: const {IssueHydrationScope.comments},
+        force: true,
+      );
+
+      expect(refreshed.comments.single.body, 'Updated comment body from sync.');
+      expect(refreshed.comments.single.updatedAt, '2026-05-25T00:05:00Z');
+    },
+  );
+
+  test(
     'checked-in setup template includes repository index artifacts',
     () async {
       final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
