@@ -25,7 +25,10 @@ class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
             raise RuntimeError(
                 "WorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(script=_build_preload_script(self._workspace_state))
+        script = _build_preload_script(self._workspace_state)
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 
@@ -48,14 +51,15 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
             raise RuntimeError(
                 "StoredWorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(
-            script=_build_preload_script(
-                self._workspace_state,
-                repository=self._repository,
-                token=self._token,
-                workspace_token_profile_ids=self._workspace_token_profile_ids,
-            ),
+        script = _build_preload_script(
+            self._workspace_state,
+            repository=self._repository,
+            token=self._token,
+            workspace_token_profile_ids=self._workspace_token_profile_ids,
         )
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 
@@ -78,7 +82,10 @@ def _build_preload_script(
         "}",
     ]
     if repository and token:
-        repository_storage_key = repository.replace("/", ".")
+        repository_keys = {
+            repository.replace("/", "."),
+            repository.lower().replace("/", "."),
+        }
         workspace_storage_keys = _workspace_token_storage_keys(
             workspace_state,
             workspace_token_profile_ids=workspace_token_profile_ids,
@@ -87,8 +94,14 @@ def _build_preload_script(
             [
                 f"const token = {json.dumps(token)};",
                 "for (const key of [",
-                f"  'trackstate.githubToken.{repository_storage_key}',",
-                f"  'flutter.trackstate.githubToken.{repository_storage_key}',",
+                *[
+                    f"  {json.dumps(storage_key)},"
+                    for repository_storage_key in sorted(repository_keys)
+                    for storage_key in (
+                        f"trackstate.githubToken.{repository_storage_key}",
+                        f"flutter.trackstate.githubToken.{repository_storage_key}",
+                    )
+                ],
                 *[f"  {json.dumps(key)}," for key in workspace_storage_keys],
                 "]) {",
                 "  window.localStorage.setItem(key, token);",

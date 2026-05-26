@@ -41,7 +41,7 @@ LOCAL_TARGET = "/tmp/trackstate-ts892-workspace"
 LOCAL_DISPLAY_NAME = "Deleted local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 STARTUP_RETRY_WAIT_SECONDS = 15
-LINKED_BUGS = ["TS-882"]
+LINKED_BUGS = ["TS-882", "TS-894", "TS-896"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -440,36 +440,40 @@ def _assert_permanent_error_state(
             f"Observed trigger label: {trigger.semantic_label!r}\n"
             f"Observed switcher text:\n{switcher.switcher_text}",
         )
+    failures: list[str] = []
     if local_row.state_label != "Unavailable" and "Local Unavailable" not in local_row.visible_text:
-        raise AssertionError(
-            "Step 4 failed: the deleted local workspace row did not remain in the "
-            "`Local Unavailable` state after startup retries were exhausted.\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+        failures.append(
+            "the deleted local workspace row did not remain in the `Local Unavailable` "
+            "state after startup retries were exhausted.",
         )
     if local_row.state_label == "Local Git" or "Local Git" in local_row.visible_text:
-        raise AssertionError(
-            "Step 4 failed: the deleted local workspace row recovered to `Local Git` "
-            "instead of remaining unavailable.\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+        failures.append(
+            "the deleted local workspace row recovered to `Local Git` instead of "
+            "remaining unavailable.",
         )
     if selected_row is not None and (
         selected_row.display_name == HOSTED_DISPLAY_NAME
         or selected_row.target_type_label == "Hosted"
     ):
-        raise AssertionError(
-            "Step 4 failed: the application kept `Hosted setup workspace` selected as "
-            "the active workspace even though the saved deleted local workspace row was "
-            "still present as `Local Unavailable`.\n"
-            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+        failures.append(
+            "the application kept `Hosted setup workspace` selected as the active "
+            "workspace even though the saved deleted local workspace row was still "
+            "present.",
         )
     if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
-        raise AssertionError(
-            "Step 4 failed: the header trigger still defaulted to the hosted setup "
-            "workspace after the permanent local failure.\n"
-            f"Observed trigger label: {trigger.semantic_label!r}\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+        failures.append(
+            "the header trigger still defaulted to the hosted setup workspace after "
+            "the permanent local failure.",
         )
+    if failures:
+        details = [
+            f"Step 4 failed: {failures[0]}",
+            *[f"Also observed: {failure}" for failure in failures[1:]],
+            f"Observed trigger label: {trigger.semantic_label!r}",
+            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}",
+            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+        ]
+        raise AssertionError("\n".join(details))
 
 
 def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str, object]:
@@ -695,8 +699,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    actual_summary = _actual_behavior_summary(result)
     lines = [
-        f"# {TICKET_KEY} - Permanent local workspace failure falls back to hosted selection",
+        f"# {TICKET_KEY} - {actual_summary}",
         "",
         "## Exact steps to reproduce",
         *_bug_step_lines(result),
@@ -708,11 +713,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual vs Expected",
         f"- **Expected:** {EXPECTED_RESULT}",
-        (
-            "- **Actual:** After the deleted local workspace stayed visible as "
-            "`Local Unavailable`, the header trigger and selected workspace row still "
-            "showed `Hosted setup workspace` as the active selection."
-        ),
+        f"- **Actual:** {_actual_behavior_detail(result)}",
         (
             f"- **Observed trigger:** `{_safe_dict_get(result.get('final_trigger_observation'), 'semantic_label')}`"
         ),
@@ -783,6 +784,51 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     return str(result.get("error", "The permanent local-workspace scenario failed."))
 
 
+def _actual_behavior_summary(result: dict[str, object]) -> str:
+    local_row = result.get("local_row")
+    if isinstance(local_row, dict):
+        state_label = str(local_row.get("state_label") or "").strip()
+        if state_label == "Local Git":
+            return "Permanent local workspace failure keeps deleted workspace active as Local Git"
+        if state_label:
+            return (
+                "Permanent local workspace failure leaves deleted workspace in "
+                f"unexpected state {state_label}"
+            )
+    selected_row = result.get("selected_row")
+    if isinstance(selected_row, dict):
+        display_name = str(selected_row.get("display_name") or "").strip()
+        if display_name == HOSTED_DISPLAY_NAME:
+            return "Permanent local workspace failure falls back to hosted selection"
+    return "Permanent local workspace failure does not match the expected unavailable state"
+
+
+def _actual_behavior_detail(result: dict[str, object]) -> str:
+    local_row = result.get("local_row")
+    if isinstance(local_row, dict):
+        state_label = str(local_row.get("state_label") or "").strip()
+        display_name = str(local_row.get("display_name") or "").strip()
+        if state_label == "Local Git":
+            return (
+                f"The deleted local workspace row for `{display_name}` stayed selected and "
+                "rendered as `Local Git` instead of `Local Unavailable` after startup "
+                "retries were exhausted."
+            )
+        if state_label:
+            return (
+                f"The deleted local workspace row for `{display_name}` rendered as "
+                f"`{state_label}` instead of `Local Unavailable` after startup retries "
+                "were exhausted."
+            )
+    selected_row = result.get("selected_row")
+    if isinstance(selected_row, dict):
+        display_name = str(selected_row.get("display_name") or "").strip()
+        if display_name:
+            return (
+                f"The application kept `{display_name}` selected as the active workspace "
+                "instead of leaving the deleted local workspace unavailable."
+            )
+    return str(result.get("error", "The observed behavior did not match the expected unavailable state."))
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])

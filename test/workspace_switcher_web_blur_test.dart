@@ -108,6 +108,89 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'desktop web workspace open action keeps focus on the browser-owned control',
+    (tester) async {
+      if (!kIsWeb) {
+        return;
+      }
+
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:beta/repo@main',
+              displayName: 'beta/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'beta/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => const DemoTrackStateRepository(),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsOneWidget,
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-open-hosted:beta/repo@main')),
+          warnIfMissed: false,
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        expect(service.state.activeWorkspaceId, 'hosted:beta/repo@main');
+        expect(
+          FocusManager.instance.primaryFocus,
+          isNull,
+          reason:
+              'Selecting a saved workspace on web should keep focus in the '
+              'browser-owned path instead of re-entering Flutter focus nodes.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
@@ -129,6 +212,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   }
 
   @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    state = state.copyWith(activeWorkspaceId: null);
+    return state;
+  }
+
+  @override
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
   ) async => null;
@@ -141,6 +230,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
     String workspaceId,
     HostedWorkspaceAccessMode? accessMode,
   ) async => state;
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async => state;
 
   @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {

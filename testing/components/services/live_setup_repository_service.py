@@ -62,6 +62,13 @@ class LiveHostedCatalogEntry:
 
 
 @dataclass(frozen=True)
+class LiveHostedRepositoryFile:
+    path: str
+    sha: str
+    content: str
+
+
+@dataclass(frozen=True)
 class LiveHostedLocaleState:
     project_path: str
     locale: str
@@ -237,7 +244,7 @@ class LiveSetupRepositoryService:
             if entry_id and name
         ]
 
-    def fetch_repo_file(self, path: str) -> HostedRepositoryFile:
+    def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
         response = self._read_json(
             f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
         )
@@ -247,7 +254,7 @@ class LiveSetupRepositoryService:
         sha = str(response.get("sha", "")).strip()
         if not sha:
             raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
-        return HostedRepositoryFile(
+        return LiveHostedRepositoryFile(
             path=path,
             sha=sha,
             content=base64.b64decode(encoded).decode("utf-8"),
@@ -320,7 +327,6 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
-
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")

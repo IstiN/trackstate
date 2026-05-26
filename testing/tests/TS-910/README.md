@@ -6,7 +6,8 @@ first interactive element inside the panel.
 
 The automation:
 1. opens the deployed TrackState web app in Chromium with a stored hosted token
-   and a preloaded set of hosted workspace profiles
+   and a preloaded set of hosted workspace profiles at the default desktop
+   viewport of 1440x900
 2. opens the desktop workspace switcher and confirms the visible panel renders
    the workspace rows plus the footer controls
 3. moves keyboard focus to the selected first saved workspace row inside the

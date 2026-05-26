@@ -654,9 +654,10 @@ class RepositoryHistoryCommit {
 }
 
 class TrackStateProviderException implements Exception {
-  const TrackStateProviderException(this.message);
+  const TrackStateProviderException(this.message, {this.details = const {}});
 
   final String message;
+  final Map<String, Object?> details;
 
   @override
   String toString() => message;
