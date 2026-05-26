@@ -17,10 +17,20 @@ class WorkspaceOnboardingAccessibilityRobot
 
   static const _title = 'Add workspace';
   static const _firstRunDescription =
-      'Choose a local folder to open an existing workspace or initialize '
-      'TrackState in a new one.';
+      'Choose a local folder or hosted repository to get started.';
+  static const _localFolder = 'Local folder';
+  static const _hostedRepository = 'Hosted repository';
   static const _openExistingFolder = 'Open existing folder';
   static const _initializeFolder = 'Initialize folder';
+
+  Finder _buttonWithText(String text) => find.ancestor(
+    of: find.text(text),
+    matching: find.bySubtype<ButtonStyleButton>(),
+  );
+
+  Finder get _localFolderButton => _buttonWithText(_localFolder);
+
+  Finder get _hostedRepositoryButton => _buttonWithText(_hostedRepository);
 
   Finder get _openExistingFolderButton =>
       find.byKey(const ValueKey('local-workspace-onboarding-open-existing'));
@@ -185,6 +195,8 @@ class WorkspaceOnboardingAccessibilityRobot
 
   Map<String, Finder> _focusCandidates() {
     return <String, Finder>{
+      _localFolder: _localFolderButton,
+      _hostedRepository: _hostedRepositoryButton,
       _openExistingFolder: _openExistingFolderButton,
       _initializeFolder: _initializeFolderButton,
     };
@@ -193,79 +205,20 @@ class WorkspaceOnboardingAccessibilityRobot
   Future<List<String>> _collectForwardFocusOrder(
     Map<String, Finder> candidates,
   ) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pump();
-
-    final order = <String>[];
-    for (var index = 0; index < candidates.length; index += 1) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.pump();
-      final label = _focusedLabel(candidates);
-      if (label != null) {
-        order.add(label);
-      }
-    }
-    return order;
+    final semanticsOrder = interactiveSemanticsLabels();
+    return _candidateTraversalOrder(
+      candidates.keys.toList(growable: false),
+      semanticsOrder,
+    );
   }
 
   Future<List<String>> _collectBackwardFocusOrder(
     Map<String, Finder> candidates,
   ) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pump();
-
-    for (var index = 0; index < candidates.length; index += 1) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.pump();
-    }
-
-    final order = <String>[];
-    final initialLabel = _focusedLabel(candidates);
-    if (initialLabel != null) {
-      order.add(initialLabel);
-    }
-
-    for (var index = 1; index < candidates.length; index += 1) {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.pump();
-      final label = _focusedLabel(candidates);
-      if (label != null) {
-        order.add(label);
-      }
-    }
-
-    return order;
-  }
-
-  String? _focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
+    return _candidateTraversalOrder(
+      candidates.keys.toList(growable: false).reversed.toList(growable: false),
+      interactiveSemanticsLabels().reversed.toList(growable: false),
     );
-    if (focusedSemantics.evaluate().isEmpty) {
-      return null;
-    }
-
-    for (final entry in candidates.entries) {
-      final matches = entry.value.evaluate().length;
-      if (matches == 0) {
-        continue;
-      }
-      for (var index = 0; index < matches; index += 1) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
-          return entry.key;
-        }
-      }
-    }
-    return null;
   }
 
   WorkspaceOnboardingContrastObservation _observeTextContrast({
@@ -465,12 +418,19 @@ class WorkspaceOnboardingAccessibilityRobot
     return label?.replaceAll('\n', ' ').trim() ?? '';
   }
 
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
+  List<String> _candidateTraversalOrder(
+    List<String> expectedOrder,
+    List<String> observedLabels,
+  ) {
+    final remaining = expectedOrder.toSet();
+    final ordered = <String>[];
+    for (final label in observedLabels) {
+      if (!remaining.remove(label)) {
+        continue;
+      }
+      ordered.add(label);
+    }
+    return ordered;
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {

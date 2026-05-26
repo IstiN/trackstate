@@ -3538,11 +3538,17 @@ class _LocalWorkspaceOnboardingPanel extends StatefulWidget {
     required this.directoryPicker,
     required this.onboardingService,
     required this.onComplete,
+    this.showInitialFieldHints = false,
+    this.openExistingFocusOrder,
+    this.initializeFocusOrder,
   });
 
   final WorkspaceDirectoryPicker directoryPicker;
   final LocalWorkspaceOnboardingService onboardingService;
   final _LocalWorkspaceOnboardingOpener onComplete;
+  final bool showInitialFieldHints;
+  final double? openExistingFocusOrder;
+  final double? initializeFocusOrder;
 
   @override
   State<_LocalWorkspaceOnboardingPanel> createState() =>
@@ -3750,40 +3756,64 @@ class _LocalWorkspaceOnboardingPanelState
         Row(
           children: [
             Expanded(
-              child: _PrimaryButton(
-                buttonKey: const ValueKey(
-                  'local-workspace-onboarding-open-existing',
-                ),
-                label: l10n.localWorkspaceOnboardingOpenExisting,
-                icon: TrackStateIconGlyph.folder,
-                onPressed: _isSubmitting
-                    ? null
-                    : () => unawaited(
-                        _chooseFolder(
-                          _LocalWorkspaceOnboardingIntent.openExisting,
+              child: _withFocusOrder(
+                order: widget.openExistingFocusOrder,
+                child: _PrimaryButton(
+                  buttonKey: const ValueKey(
+                    'local-workspace-onboarding-open-existing',
+                  ),
+                  label: l10n.localWorkspaceOnboardingOpenExisting,
+                  icon: TrackStateIconGlyph.folder,
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => unawaited(
+                          _chooseFolder(
+                            _LocalWorkspaceOnboardingIntent.openExisting,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _SecondaryButton(
-                buttonKey: const ValueKey(
-                  'local-workspace-onboarding-initialize-folder',
-                ),
-                label: l10n.localWorkspaceOnboardingInitializeFolder,
-                icon: TrackStateIconGlyph.plus,
-                onPressed: _isSubmitting
-                    ? null
-                    : () => unawaited(
-                        _chooseFolder(
-                          _LocalWorkspaceOnboardingIntent.initialize,
+              child: _withFocusOrder(
+                order: widget.initializeFocusOrder,
+                child: _SecondaryButton(
+                  buttonKey: const ValueKey(
+                    'local-workspace-onboarding-initialize-folder',
+                  ),
+                  label: l10n.localWorkspaceOnboardingInitializeFolder,
+                  icon: TrackStateIconGlyph.plus,
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => unawaited(
+                          _chooseFolder(
+                            _LocalWorkspaceOnboardingIntent.initialize,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ],
         ),
+        if (widget.showInitialFieldHints && inspection == null) ...[
+          const SizedBox(height: 20),
+          _SettingsTextField(
+            fieldKey: const ValueKey(
+              'local-workspace-onboarding-initial-repository-path',
+            ),
+            label: l10n.repositoryPath,
+            helperText: l10n.workspaceOnboardingLocalFolderHelper,
+            enabled: false,
+          ),
+          const SizedBox(height: 12),
+          _SettingsTextField(
+            fieldKey: const ValueKey('local-workspace-onboarding-initial-branch'),
+            label: l10n.branch,
+            initialValue: 'main',
+            enabled: false,
+          ),
+        ],
         if (_isPickingFolder) ...[
           const SizedBox(height: 16),
           Row(
@@ -3924,6 +3954,16 @@ class _LocalWorkspaceOnboardingPanelState
           ),
         ],
       ],
+    );
+  }
+
+  Widget _withFocusOrder({required double? order, required Widget child}) {
+    if (order == null) {
+      return child;
+    }
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(order),
+      child: child,
     );
   }
 }
@@ -4067,6 +4107,7 @@ class _WorkspaceOnboardingScreenState
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final isHosted = _selectedTarget == _WorkspaceOnboardingTarget.hosted;
+    final isFirstLaunch = !widget.canCancel;
     return Scaffold(
       backgroundColor: colors.page,
       body: SafeArea(
@@ -4085,7 +4126,7 @@ class _WorkspaceOnboardingScreenState
                           title: l10n.addWorkspace,
                           subtitle: widget.canCancel
                               ? l10n.workspaceOnboardingDescription
-                              : l10n.workspaceOnboardingFirstRunDescription,
+                              : l10n.workspaceOnboardingFirstLaunchDescription,
                         ),
                       ),
                       if (widget.canCancel && widget.onCancel != null)
@@ -4100,108 +4141,120 @@ class _WorkspaceOnboardingScreenState
                   _SurfaceCard(
                     semanticLabel: l10n.addWorkspace,
                     explicitChildNodes: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _SettingsProviderButton(
-                                label: l10n.localFolder,
-                                selected:
-                                    _selectedTarget ==
-                                    _WorkspaceOnboardingTarget.local,
-                                onPressed: () => unawaited(
-                                  _selectTarget(
-                                    _WorkspaceOnboardingTarget.local,
+                    child: FocusTraversalGroup(
+                      policy: OrderedTraversalPolicy(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(1),
+                                  child: _SettingsProviderButton(
+                                    label: l10n.localFolder,
+                                    selected:
+                                        _selectedTarget ==
+                                        _WorkspaceOnboardingTarget.local,
+                                    onPressed: () => unawaited(
+                                      _selectTarget(
+                                        _WorkspaceOnboardingTarget.local,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _SettingsProviderButton(
-                                label: l10n.hostedRepository,
-                                selected:
-                                    _selectedTarget ==
-                                    _WorkspaceOnboardingTarget.hosted,
-                                onPressed: () => unawaited(
-                                  _selectTarget(
-                                    _WorkspaceOnboardingTarget.hosted,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(2),
+                                  child: _SettingsProviderButton(
+                                    label: l10n.hostedRepository,
+                                    selected:
+                                        _selectedTarget ==
+                                        _WorkspaceOnboardingTarget.hosted,
+                                    onPressed: () => unawaited(
+                                      _selectTarget(
+                                        _WorkspaceOnboardingTarget.hosted,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        if (isHosted) ...[
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-hosted-repository',
-                            ),
-                            label: l10n.repository,
-                            controller: _hostedRepositoryController,
-                            helperText:
-                                l10n.workspaceOnboardingRepositoryHelper,
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-hosted-branch',
-                            ),
-                            label: l10n.branch,
-                            controller: _hostedBranchController,
-                          ),
-                          const SizedBox(height: 12),
-                          ListenableBuilder(
-                            listenable: Listenable.merge(<Listenable>[
-                              _hostedRepositoryController,
-                              _hostedBranchController,
-                            ]),
-                            builder: (context, _) {
-                              return _HostedWorkspaceIdentityPreview(
-                                repository: _hostedRepositoryController.text,
-                                branch: _hostedBranchController.text,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          _HostedRepositorySuggestions(
-                            repositories: _hostedRepositories,
-                            isLoading: _isLoadingHostedRepositories,
-                            loadError: _hostedRepositoryLoadError,
-                            canBrowseRepositories:
-                                widget.canBrowseHostedRepositories,
-                            onSelectRepository:
-                                _selectHostedRepositorySuggestion,
-                          ),
-                          if (_errorText != null) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              _errorText!,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: colors.error),
-                            ),
-                          ],
                           const SizedBox(height: 20),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton(
-                              key: const ValueKey('workspace-onboarding-open'),
-                              onPressed: _isSubmitting ? null : _submit,
-                              child: Text(l10n.openWorkspace),
+                          if (isHosted) ...[
+                            _SettingsTextField(
+                              fieldKey: const ValueKey(
+                                'workspace-onboarding-hosted-repository',
+                              ),
+                              label: l10n.repository,
+                              controller: _hostedRepositoryController,
+                              helperText:
+                                  l10n.workspaceOnboardingRepositoryHelper,
                             ),
-                          ),
-                        ] else ...[
-                          _LocalWorkspaceOnboardingPanel(
-                            directoryPicker: widget.directoryPicker,
-                            onboardingService:
-                                widget.localWorkspaceOnboardingService,
-                            onComplete: widget.onOpenLocalWorkspace,
-                          ),
+                            const SizedBox(height: 12),
+                            _SettingsTextField(
+                              fieldKey: const ValueKey(
+                                'workspace-onboarding-hosted-branch',
+                              ),
+                              label: l10n.branch,
+                              controller: _hostedBranchController,
+                            ),
+                            const SizedBox(height: 12),
+                            ListenableBuilder(
+                              listenable: Listenable.merge(<Listenable>[
+                                _hostedRepositoryController,
+                                _hostedBranchController,
+                              ]),
+                              builder: (context, _) {
+                                return _HostedWorkspaceIdentityPreview(
+                                  repository: _hostedRepositoryController.text,
+                                  branch: _hostedBranchController.text,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            _HostedRepositorySuggestions(
+                              repositories: _hostedRepositories,
+                              isLoading: _isLoadingHostedRepositories,
+                              loadError: _hostedRepositoryLoadError,
+                              canBrowseRepositories:
+                                  widget.canBrowseHostedRepositories,
+                              onSelectRepository:
+                                  _selectHostedRepositorySuggestion,
+                            ),
+                            if (_errorText != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _errorText!,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: colors.error),
+                              ),
+                            ],
+                            const SizedBox(height: 20),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton(
+                                key: const ValueKey('workspace-onboarding-open'),
+                                onPressed: _isSubmitting ? null : _submit,
+                                child: Text(l10n.openWorkspace),
+                              ),
+                            ),
+                          ] else ...[
+                            _LocalWorkspaceOnboardingPanel(
+                              directoryPicker: widget.directoryPicker,
+                              onboardingService:
+                                  widget.localWorkspaceOnboardingService,
+                              onComplete: widget.onOpenLocalWorkspace,
+                              showInitialFieldHints: isFirstLaunch,
+                              openExistingFocusOrder: isFirstLaunch ? 3 : null,
+                              initializeFocusOrder: isFirstLaunch ? 4 : null,
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ],
