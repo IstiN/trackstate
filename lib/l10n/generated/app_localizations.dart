@@ -1264,6 +1264,15 @@ abstract class AppLocalizations {
   /// **'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.'**
   String get repositoryAccessReadOnlyMessage;
 
+  /// No description provided for @repositoryAccessCapabilitySummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.'**
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  );
+
   /// No description provided for @repositoryAccessAttachmentRestrictedTitle.
   ///
   /// In en, this message translates to:
@@ -1563,6 +1572,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Read-only'**
   String get workspaceStateReadOnly;
+
+  /// No description provided for @workspaceStateSyncIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync issue'**
+  String get workspaceStateSyncIssue;
 
   /// No description provided for @workspaceStateNeedsSignIn.
   ///

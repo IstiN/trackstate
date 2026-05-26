@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 import json
-from typing import Sequence
+from typing import Any, Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
 
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
@@ -351,7 +360,6 @@ class PlaywrightWebAppSession(WebAppSession):
         timeout_ms: int = 60_000,
     ) -> str:
         return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
-
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -406,7 +414,6 @@ class PlaywrightWebAppSession(WebAppSession):
                 "Timed out waiting for the page to satisfy a function condition.",
             ) from error
         return wait_handle.json_value()
-
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """

@@ -16,48 +16,13 @@ permissions:
   actions: read
 
 jobs:
-  check-skip:
-    runs-on: ubuntu-latest
+  sm-agent:
+    # Filter out cancelled AI Teammate runs (only react to success/failure).
+    # Scheduled and manual triggers always run.
     if: >-
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success' ||
       github.event.workflow_run.conclusion == 'failure'
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Check if other AI Teammate runs are in progress
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if [ "${{ github.event_name }}" != "workflow_run" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Use a single age cutoff for both in_progress and queued runs.
-          # Runs older than 30 minutes are considered long-running and ignored
-          # so one slow rework/development doesn't block SM for its full duration.
-          STALE_CUTOFF=$(date -u -d '30 minutes ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-30M '+%Y-%m-%dT%H:%M:%SZ')
-          ACTIVE=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status in_progress --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$STALE_CUTOFF\")] | length")
-          ACTIVE_STALE=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status in_progress --json databaseId,createdAt --jq "[.[] | select(.createdAt <= \"$STALE_CUTOFF\")] | length")
-          QUEUED=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$STALE_CUTOFF\")] | length")
-          QUEUED_STALE=$(gh run list --repo ${{ github.repository }} --workflow ai-teammate.yml --status queued --json databaseId,createdAt --jq "[.[] | select(.createdAt <= \"$STALE_CUTOFF\")] | length")
-          echo "Active (recent): $ACTIVE, Active (>30min): $ACTIVE_STALE, Queued (recent): $QUEUED, Queued (>30min): $QUEUED_STALE"
-          STALE_TOTAL=$((ACTIVE_STALE + QUEUED_STALE))
-          if [ "$STALE_TOTAL" -gt 0 ]; then
-            echo "⚠️ Ignoring $STALE_TOTAL long-running/stale run(s) older than 30 minutes"
-          fi
-          if [ "$ACTIVE" -gt 0 ] || [ "$QUEUED" -gt 0 ]; then
-            echo "Skipping SM — other AI Teammate runs still active, SM will trigger when they finish"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "No recent AI Teammate runs — SM should process new state"
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  sm-agent:
-    needs: check-skip
-    if: needs.check-skip.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: sm-agent

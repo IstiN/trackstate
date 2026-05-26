@@ -47,6 +47,9 @@ THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
 LINKED_BUGS = [
+    "TS-1135",
+    "TS-1133",
+    "TS-1044",
     "TS-1041",
     "TS-1039",
     "TS-1021",

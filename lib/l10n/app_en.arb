@@ -319,6 +319,17 @@
   "repositoryAccessDisconnectedMessage": "Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.",
   "repositoryAccessReadOnlyTitle": "This repository session is read-only",
   "repositoryAccessReadOnlyMessage": "This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.",
+  "repositoryAccessCapabilitySummary": "Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.",
+  "@repositoryAccessCapabilitySummary": {
+    "placeholders": {
+      "canWrite": {
+        "type": "String"
+      },
+      "canCreateBranch": {
+        "type": "String"
+      }
+    }
+  },
   "repositoryAccessAttachmentRestrictedTitle": "Attachments stay download-only in the browser",
   "repositoryAccessAttachmentRestrictedMessage": "Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.",
   "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
@@ -384,6 +395,7 @@
   "workspaceStateLocal": "Local",
   "workspaceStateConnected": "Connected",
   "workspaceStateReadOnly": "Read-only",
+  "workspaceStateSyncIssue": "Sync issue",
   "workspaceStateNeedsSignIn": "Needs sign-in",
   "workspaceStateSavedHostedWorkspace": "Saved hosted workspace",
   "workspaceStateUnavailable": "Unavailable",

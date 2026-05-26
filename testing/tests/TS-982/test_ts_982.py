@@ -44,7 +44,8 @@ SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Set
 LINKED_BUGS = ["TS-977", "TS-991", "TS-1014", "TS-1027", "TS-1144"]
 INJECTED_FAILURE_STATUS_CODE = 500
 INJECTED_FAILURE_ATTEMPT = 1
-SETTLE_TIMEOUT_SECONDS = 20
+SETTLE_TIMEOUT_SECONDS = 30
+SETTLED_RECOVERY_SAMPLES = 3
 FAILURE_MESSAGE_FRAGMENTS = (
     "Sync error, attention needed",
     "GitHub connection failed (500)",
@@ -57,9 +58,10 @@ AUTH_FALLBACK_FRAGMENTS = (
 )
 REQUIRED_SWITCHER_STATE = "Sync issue"
 REWORK_SUMMARY = (
-    "Updates TS-982 to fail the live startup branch-sync request, wait for the "
-    "post-failure state to settle, and only pass when the shell stays mounted "
-    "and Workspace switcher shows the exact `Sync issue` recovery state."
+    "Updates TS-982 to fail the live startup branch-sync request, wait for a "
+    "stable post-failure `Sync issue` state across consecutive samples, and "
+    "only pass when the shell stays mounted and Workspace switcher shows the "
+    "exact `Sync issue` recovery state."
 )
 REQUEST_STEPS = [
     "Launch the TrackState application.",
@@ -203,14 +205,20 @@ def main() -> None:
                 )
                 failures.append(step_two_error)
 
+            recovery_stability: dict[str, object] = {}
             settled_recovery_state, settled_recovery_observation = poll_until(
-                probe=lambda: _observe_settled_recovery_state(tracker_page, page),
+                probe=lambda: _observe_settled_recovery_state(
+                    tracker_page,
+                    page,
+                    recovery_stability=recovery_stability,
+                ),
                 is_satisfied=_settled_recovery_state_ready,
                 timeout_seconds=SETTLE_TIMEOUT_SECONDS,
                 interval_seconds=2,
             )
             result["settled_recovery_observation"] = settled_recovery_observation
             result["settled_recovery_state_ready"] = settled_recovery_state
+            result["settled_recovery_required_samples"] = SETTLED_RECOVERY_SAMPLES
 
             try:
                 shell_observation = tracker_page.observe_interactive_shell(
@@ -261,43 +269,13 @@ def main() -> None:
                 )
                 failures.append(step_three_error)
 
-            try:
-                switcher = page.open_and_observe()
-                panel = page.observe_open_panel(
-                    expected_container_kinds=("anchored-panel", "surface"),
-                    timeout_ms=4_000,
-                )
-                result["switcher_observation"] = _switcher_payload(switcher)
-                result["panel_observation"] = _panel_payload(panel)
-                sync_issue_row = _find_sync_issue_row(switcher)
-                result["fallback_row"] = _row_payload(sync_issue_row)
-                _assert_workspace_switcher_fallback(
-                    switcher=switcher,
-                    panel=panel,
-                    sync_issue_row=sync_issue_row,
-                    settled_recovery_observation=settled_recovery_observation,
-                )
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=(
-                        "Workspace switcher stayed open and exposed the saved hosted "
-                        f"workspace with the exact `{REQUIRED_SWITCHER_STATE}` recovery "
-                        "state instead of an auth/sign-in fallback.\n"
-                        f"fallback_row={json.dumps(result['fallback_row'], ensure_ascii=True)}\n"
-                        f"settled_recovery={json.dumps(settled_recovery_observation, ensure_ascii=True)}\n"
-                        f"panel={json.dumps(result['panel_observation'], ensure_ascii=True)}"
-                    ),
-                )
-            except Exception as error:
+            if not settled_recovery_state:
                 step_four_error = (
-                    "Step 4 failed: the workspace switcher did not expose a visible fallback "
-                    "workspace state after the startup sync failure.\n"
-                    f"error={error}\n"
-                    f"switcher_observation={json.dumps(result.get('switcher_observation'), ensure_ascii=True)}\n"
-                    f"panel_observation={json.dumps(result.get('panel_observation'), ensure_ascii=True)}"
+                    "Step 4 failed: the startup recovery state did not settle into the "
+                    f"exact `{REQUIRED_SWITCHER_STATE}` final state for "
+                    f"{SETTLED_RECOVERY_SAMPLES} consecutive samples within the wait "
+                    "window.\n"
+                    f"settled_recovery={json.dumps(settled_recovery_observation, ensure_ascii=True)}"
                 )
                 _record_step(
                     result,
@@ -307,6 +285,55 @@ def main() -> None:
                     observed=step_four_error,
                 )
                 failures.append(step_four_error)
+            else:
+                try:
+                    switcher = page.open_and_observe()
+                    panel = page.observe_open_panel(
+                        expected_container_kinds=("anchored-panel", "surface"),
+                        timeout_ms=4_000,
+                    )
+                    result["switcher_observation"] = _switcher_payload(switcher)
+                    result["panel_observation"] = _panel_payload(panel)
+                    sync_issue_row = _find_sync_issue_row(switcher)
+                    result["fallback_row"] = _row_payload(sync_issue_row)
+                    _assert_workspace_switcher_fallback(
+                        switcher=switcher,
+                        panel=panel,
+                        sync_issue_row=sync_issue_row,
+                        settled_recovery_observation=settled_recovery_observation,
+                    )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "Workspace switcher stayed open and exposed the saved hosted "
+                            f"workspace with the exact `{REQUIRED_SWITCHER_STATE}` recovery "
+                            "state instead of an auth/sign-in fallback after the trigger "
+                            f"stayed stable for {SETTLED_RECOVERY_SAMPLES} consecutive "
+                            "samples.\n"
+                            f"fallback_row={json.dumps(result['fallback_row'], ensure_ascii=True)}\n"
+                            f"settled_recovery={json.dumps(settled_recovery_observation, ensure_ascii=True)}\n"
+                            f"panel={json.dumps(result['panel_observation'], ensure_ascii=True)}"
+                        ),
+                    )
+                except Exception as error:
+                    step_four_error = (
+                        "Step 4 failed: the workspace switcher did not expose a visible fallback "
+                        "workspace state after the startup sync failure.\n"
+                        f"error={error}\n"
+                        f"switcher_observation={json.dumps(result.get('switcher_observation'), ensure_ascii=True)}\n"
+                        f"panel_observation={json.dumps(result.get('panel_observation'), ensure_ascii=True)}"
+                    )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=step_four_error,
+                    )
+                    failures.append(step_four_error)
 
             _record_human_verification(
                 result,
@@ -441,6 +468,8 @@ def _safe_mode_window_reached(observation: dict[str, Any]) -> bool:
 def _observe_settled_recovery_state(
     tracker_page,
     page: LiveWorkspaceSwitcherPage,
+    *,
+    recovery_stability: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     body_text = tracker_page.body_text()
     trigger_payload: dict[str, Any] | None
@@ -454,19 +483,61 @@ def _observe_settled_recovery_state(
     visible_auth_fragments = [
         fragment for fragment in AUTH_FALLBACK_FRAGMENTS if fragment in body_text
     ]
-    return {
+    observation = {
         "body_preview": body_text[:500],
         "body_text": body_text,
         "trigger_observation": trigger_payload,
         "visible_failure_fragments": visible_failure_fragments,
         "visible_auth_fragments": visible_auth_fragments,
     }
+    state_signature = _settled_recovery_state_signature(observation)
+    consecutive_samples = (
+        _record_stable_sample(recovery_stability, state_signature)
+        if recovery_stability is not None
+        else 1
+    )
+    observation["state_signature"] = state_signature
+    observation["consecutive_samples"] = consecutive_samples
+    return observation
 
 
 def _settled_recovery_state_ready(observation: dict[str, Any]) -> bool:
     trigger_observation = observation.get("trigger_observation") or {}
     state_label = str(trigger_observation.get("state_label", "")).strip()
-    return bool(state_label and state_label != "Needs sign-in")
+    consecutive_samples = int(observation.get("consecutive_samples", 0))
+    return (
+        state_label == REQUIRED_SWITCHER_STATE
+        and not observation.get("visible_auth_fragments")
+        and consecutive_samples >= SETTLED_RECOVERY_SAMPLES
+    )
+
+
+def _settled_recovery_state_signature(observation: dict[str, Any]) -> str:
+    trigger_observation = observation.get("trigger_observation") or {}
+    return json.dumps(
+        {
+            "trigger_display_name": trigger_observation.get("display_name"),
+            "trigger_state_label": trigger_observation.get("state_label"),
+            "visible_failure_fragments": observation.get("visible_failure_fragments", []),
+            "visible_auth_fragments": observation.get("visible_auth_fragments", []),
+            "body_preview": observation.get("body_preview"),
+        },
+        sort_keys=True,
+    )
+
+
+def _record_stable_sample(
+    tracker: dict[str, object],
+    signature: str,
+) -> int:
+    previous_signature = tracker.get("signature")
+    if previous_signature == signature:
+        next_count = int(tracker.get("count", 0)) + 1
+    else:
+        next_count = 1
+    tracker["signature"] = signature
+    tracker["count"] = next_count
+    return next_count
 
 
 def _assert_shell_is_interactive(
