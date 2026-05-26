@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
+    ScreenRect,
 )
 from testing.components.services.live_comment_metadata_contrast_probe import (
     CommentMetadataContrastObservation,
@@ -312,7 +313,16 @@ def _observe_comment_metadata(
     screenshot_path: Path,
     theme_name: str,
 ) -> CommentMetadataContrastObservation:
-    row_rect = live_issue_page.find_semantics_rect_containing_text(COMMENT_TIMESTAMP)
+    comment_card = live_issue_page.wait_for_comment_card(
+        COMMENT_BODY,
+        required_fragments=(COMMENT_AUTHOR, COMMENT_TIMESTAMP),
+    )
+    row_rect = ScreenRect(
+        left=comment_card.left,
+        top=comment_card.top,
+        width=comment_card.width,
+        height=comment_card.height,
+    )
     live_issue_page.screenshot(str(screenshot_path))
     return probe.observe(
         screenshot_path=screenshot_path,
@@ -805,11 +815,11 @@ def _review_reply_text(payload: dict[str, object], *, status: str) -> str:
         else f"Re-ran `{RUN_COMMAND}`: failed with `{str(payload.get('error', '')).strip()}`."
     )
     return (
-        "Fixed: TS-333 no longer hard-stops on repository auth before the ticket behavior. "
-        "The test now opens the issue and Comments surface in read-only hosted mode when "
-        "available, and product-defect classification now excludes auth/connectivity gates "
-        "such as `Needs sign-in` / `Connect GitHub` while still treating real collaboration "
-        f"surface and contrast failures as product results. {rerun_summary}"
+        "Fixed: TS-333 now measures the weakest visible metadata color inside the comment "
+        "header band instead of the strongest text in an expanded timestamp crop. The probe "
+        "uses the specific seeded comment card, limits sampling to the metadata strip, and "
+        "evaluates the minimum significant foreground contrast so darker nearby body text "
+        f"cannot mask a muted timestamp token. {rerun_summary}"
     )
 
 

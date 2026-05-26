@@ -34,6 +34,10 @@ class CommentCardObservation:
     body_fragment: str
     visible_text: str
     accessible_label: str
+    left: float
+    top: float
+    width: float
+    height: float
 
 
 @dataclass(frozen=True)
@@ -530,6 +534,8 @@ class LiveIssueDetailCollaborationPage:
                   label,
                   text,
                   combined: [text, label].filter((value) => value.length > 0).join("\\n"),
+                  left: rect.left,
+                  top: rect.top,
                   width: rect.width,
                   height: rect.height,
                   area: rect.width * rect.height,
@@ -613,6 +619,10 @@ class LiveIssueDetailCollaborationPage:
             body_fragment=body_fragment,
             visible_text=visible_text,
             accessible_label=accessible_label,
+            left=float(payload.get("left", 0.0)),
+            top=float(payload.get("top", 0.0)),
+            width=float(payload.get("width", 0.0)),
+            height=float(payload.get("height", 0.0)),
         )
     def issue_detail_accessible_label(
         self,
