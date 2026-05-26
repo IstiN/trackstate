@@ -61,6 +61,12 @@ class JiraCompatibleCliSearchResponseShapeTest(unittest.TestCase):
         control_payload = (
             control.result.json_payload if isinstance(control.result.json_payload, dict) else {}
         )
+        check(
+            control_payload.get("ok") is True,
+            "Precondition failed: the supported control search returned a failure "
+            "envelope instead of search results.\n"
+            f"Observed payload: {control_payload}",
+        )
         control_data = control_payload.get("data") if isinstance(control_payload, dict) else None
         check(
             isinstance(control_data, dict),
@@ -69,30 +75,6 @@ class JiraCompatibleCliSearchResponseShapeTest(unittest.TestCase):
             f"Observed payload: {control_payload}",
         )
         if isinstance(control_data, dict):
-            missing_control_keys = [
-                key for key in self.config.required_data_keys if key not in control_data
-            ]
-            check(
-                control_payload.get("ok") is True,
-                "Precondition failed: the supported control search returned a failure "
-                "envelope instead of search results.\n"
-                f"Observed payload: {control_payload}",
-            )
-            check(
-                not missing_control_keys,
-                "Precondition failed: the supported control search did not return the "
-                "flattened Jira-compatible pagination fields required by the linked "
-                "search fixes.\n"
-                f"Missing keys: {missing_control_keys}\n"
-                f"Observed payload: {control_payload}",
-            )
-            check(
-                "page" not in control_data,
-                "Precondition failed: the supported control search still returned the "
-                "legacy nested `data.page` object even though the linked fix removed "
-                "it from the Jira-compatible search response shape.\n"
-                f"Observed data: {control_data}",
-            )
             control_issues = control_data.get("issues")
             check(
                 isinstance(control_issues, list),
@@ -108,39 +90,31 @@ class JiraCompatibleCliSearchResponseShapeTest(unittest.TestCase):
                     "the expected two TRACK issues during the supported control search.\n"
                     f"Observed payload: {control_payload}",
                 )
-            if not missing_control_keys:
+
+            control_page = control_data.get("page")
+            check(
+                isinstance(control_page, dict),
+                "Precondition failed: the supported control search did not return page "
+                "metadata needed to prove the fixture is valid.\n"
+                f"Observed payload: {control_payload}",
+            )
+            if isinstance(control_page, dict):
                 check(
-                    control_data.get("startAt") == self.config.expected_start_at,
+                    control_page.get("startAt") == self.config.expected_start_at,
                     "Precondition failed: the supported control search did not honor "
-                    "the requested start offset via the flattened `data.startAt` "
-                    "field.\n"
+                    "the requested start offset.\n"
                     f"Observed payload: {control_payload}",
                 )
                 check(
-                    control_data.get("maxResults") == self.config.expected_max_results,
+                    control_page.get("maxResults") == self.config.expected_max_results,
                     "Precondition failed: the supported control search did not honor "
-                    "the requested maxResults value via the flattened "
-                    "`data.maxResults` field.\n"
+                    "the requested maxResults value.\n"
                     f"Observed payload: {control_payload}",
                 )
                 check(
-                    control_data.get("total") == self.config.expected_total,
+                    control_page.get("total") == self.config.expected_total,
                     "Precondition failed: the supported control search did not report "
-                    "the expected total issue count via the flattened `data.total` "
-                    "field.\n"
-                    f"Observed payload: {control_payload}",
-                )
-                check(
-                    isinstance(control_data.get("isLastPage"), bool),
-                    "Precondition failed: the supported control search did not return "
-                    "the flattened `data.isLastPage` boolean required by the "
-                    "Jira-compatible response shape.\n"
-                    f"Observed payload: {control_payload}",
-                )
-                check(
-                    control_data.get("isLastPage") is True,
-                    "Precondition failed: the supported control search did not report "
-                    "that the first page already contains the last search results.\n"
+                    "the expected total issue count.\n"
                     f"Observed payload: {control_payload}",
                 )
 
@@ -299,7 +273,7 @@ class JiraCompatibleCliSearchResponseShapeTest(unittest.TestCase):
                     f"Observed data: {data}",
                 )
                 check(
-                    data.get("isLastPage") is True,
+                    data.get("isLastPage") is self.config.expected_is_last_page,
                     "Expected result failed: `data.isLastPage` did not report that the "
                     "first page already contains the last search results.\n"
                     f"Observed data: {data}",

@@ -15,6 +15,7 @@ from testing.components.services.live_setup_repository_service import (
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config
+from testing.core.interfaces.web_app_session import WebAppTimeoutError
 from testing.tests.support.live_tracker_app_factory import (
     create_live_tracker_app_with_stored_token,
 )
@@ -147,8 +148,17 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 )
 
                 live_issue_page.open_collaboration_tab("Comments")
+                try:
+                    visible_comment_count = live_issue_page.wait_for_text_fragment(
+                        SEEDED_COMMENT_FRAGMENT,
+                        timeout_ms=10_000,
+                    )
+                except WebAppTimeoutError:
+                    visible_comment_count = live_issue_page.text_fragment_count(
+                        SEEDED_COMMENT_FRAGMENT,
+                    )
                 self.assertGreater(
-                    live_issue_page.text_fragment_count(SEEDED_COMMENT_FRAGMENT),
+                    visible_comment_count,
                     0,
                     "Step 2 failed: opening the Comments tab did not reveal the seeded "
                     "comment content for DEMO-2.\n"
@@ -156,15 +166,37 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 )
 
                 live_issue_page.open_collaboration_tab("History")
+                try:
+                    hidden_comment_count = (
+                        live_issue_page.wait_for_text_fragment_to_disappear(
+                            SEEDED_COMMENT_FRAGMENT,
+                            timeout_ms=10_000,
+                        )
+                    )
+                except WebAppTimeoutError:
+                    hidden_comment_count = live_issue_page.text_fragment_count(
+                        SEEDED_COMMENT_FRAGMENT,
+                    )
                 self.assertEqual(
-                    live_issue_page.text_fragment_count(SEEDED_COMMENT_FRAGMENT),
+                    hidden_comment_count,
                     0,
                     "Step 2 failed: opening the History tab left the Comments tab content "
                     "visible, so tab navigation did not switch collaboration panels.\n"
                     f"Observed body text:\n{live_issue_page.current_body_text()}",
                 )
+                try:
+                    hidden_attachment_count = (
+                        live_issue_page.wait_for_text_fragment_to_disappear(
+                            seeded_attachment_name,
+                            timeout_ms=10_000,
+                        )
+                    )
+                except WebAppTimeoutError:
+                    hidden_attachment_count = live_issue_page.text_fragment_count(
+                        seeded_attachment_name,
+                    )
                 self.assertEqual(
-                    live_issue_page.text_fragment_count(seeded_attachment_name),
+                    hidden_attachment_count,
                     0,
                     "Step 2 failed: opening the History tab left the Attachments tab "
                     "content visible, so tab navigation did not switch collaboration "
@@ -173,17 +205,32 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 )
 
                 live_issue_page.open_collaboration_tab("Attachments")
+                try:
+                    visible_attachment_count = live_issue_page.wait_for_text_fragment(
+                        seeded_attachment_name,
+                        timeout_ms=10_000,
+                    )
+                except WebAppTimeoutError:
+                    visible_attachment_count = live_issue_page.text_fragment_count(
+                        seeded_attachment_name,
+                    )
                 self.assertGreater(
-                    live_issue_page.text_fragment_count(seeded_attachment_name),
+                    visible_attachment_count,
                     0,
                     "Step 3 failed: opening the Attachments tab did not reveal the seeded "
                     f"attachment {seeded_attachment_name}.\n"
                     f"Observed body text:\n{live_issue_page.current_body_text()}",
                 )
 
-                read_only_message_count = live_issue_page.text_fragment_count(
-                    READ_ONLY_ATTACHMENT_MESSAGE,
-                )
+                try:
+                    read_only_message_count = live_issue_page.wait_for_text_fragment(
+                        READ_ONLY_ATTACHMENT_MESSAGE,
+                        timeout_ms=10_000,
+                    )
+                except WebAppTimeoutError:
+                    read_only_message_count = live_issue_page.text_fragment_count(
+                        READ_ONLY_ATTACHMENT_MESSAGE,
+                    )
                 download_button_count = live_issue_page.button_label_fragment_count(
                     DOWNLOAD_BUTTON_LABEL_FRAGMENT,
                 )
