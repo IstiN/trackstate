@@ -7,8 +7,8 @@ The automation:
 1. launches the production onboarding screen with empty SharedPreferences
 2. verifies the first screen shows both `Local folder` and `Hosted repository`
 3. switches to `Hosted repository`
-4. verifies the hosted form visibly renders the ticket-required `Repository Path`
-   and `Branch` fields
+4. verifies the hosted form visibly renders the hosted `Repository` and
+   `Branch` fields plus the repository helper copy
 5. tabs through the rendered controls to confirm the keyboard path reaches the
    hosted setup inputs in logical order
 
@@ -33,10 +33,10 @@ flutter test testing/tests/TS-1151/test_ts_1151.dart --reporter expanded
 
 ```text
 Pass: a fresh first-launch user can see both onboarding choices, switch to the
-hosted flow, see visible Repository Path and Branch inputs, and reach those
-controls with the keyboard.
+hosted flow, see visible Repository and Branch inputs plus the repository
+helper copy, and reach those controls with the keyboard.
 
 Fail: the hosted choice is missing, the hosted form does not render the
-ticket-required inputs, or the keyboard path does not traverse the hosted
-controls in logical order.
+hosted Repository/Branch contract, or the keyboard path does not traverse the
+hosted controls in logical order.
 ```

@@ -16,13 +16,13 @@ const String _testFilePath = 'testing/tests/TS-1151/test_ts_1151.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-1151/test_ts_1151.dart --reporter expanded';
 const String _expectedResult =
-    "The application explicitly enables the advanced setup path; the 'Repository Path' and 'Branch' input fields are successfully injected into the widget tree, and the keyboard focus node path correctly traverses through these input fields.";
+    "The application explicitly enables the hosted setup path on first launch; the visible 'Repository' and 'Branch' inputs, the repository helper copy, and the keyboard focus path are rendered according to the hosted onboarding UI contract.";
 
 const List<String> _requestSteps = <String>[
   'Launch the TrackState application.',
   "Confirm the onboarding screen displays the selection toggle for 'Local folder' and 'Hosted repository'.",
   "Select the 'Hosted repository' option if it is not selected by default.",
-  "Verify that the 'Repository Path' and 'Branch' input fields are rendered and visible.",
+  "Verify that the hosted 'Repository' and 'Branch' input fields and helper copy are rendered and visible.",
   'Use the keyboard (Tab key) to navigate through the rendered controls.',
 ];
 
@@ -32,7 +32,11 @@ const List<String> _initialChoiceTexts = <String>[
   'Hosted repository',
 ];
 
-const List<String> _hostedFieldTexts = <String>['Repository Path', 'Branch'];
+const List<String> _hostedFieldTexts = <String>['Repository', 'Branch'];
+const List<String> _hostedHelperTexts = <String>[
+  'Enter the repository as owner/repo.',
+  'Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.',
+];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -158,10 +162,13 @@ void main() {
             );
           }
 
-          final missingHostedFieldTexts = _missingExpectedTexts(
-            expected: _hostedFieldTexts,
+          final missingHostedTexts = _missingExpectedTexts(
+            expected: <String>[..._hostedFieldTexts, ..._hostedHelperTexts],
             observed: hostedState.visibleTexts,
           );
+          final hostedFieldValuesVisible =
+              hostedState.hostedRepositoryValue != null &&
+              hostedState.hostedBranchValue != null;
           final fieldSemantics = <String>[
             if (hostedState.hostedRepositoryValue != null) 'repository-field',
             if (hostedState.hostedBranchValue != null) 'branch-field',
@@ -169,21 +176,27 @@ void main() {
           _recordStep(
             result,
             step: 4,
-            status: missingHostedFieldTexts.isEmpty ? 'passed' : 'failed',
+            status: missingHostedTexts.isEmpty && hostedFieldValuesVisible
+                ? 'passed'
+                : 'failed',
             action: _requestSteps[3],
             observed:
-                'missing_hosted_field_texts=${_formatList(missingHostedFieldTexts)}; '
+                'missing_hosted_texts=${_formatList(missingHostedTexts)}; '
                 'visible_texts=${_formatList(hostedState.visibleTexts)}; '
                 'interactive_labels=${_formatList(hostedState.interactiveSemanticsLabels)}; '
+                'repository_value=${hostedState.hostedRepositoryValue}; '
+                'branch_value=${hostedState.hostedBranchValue}; '
                 'rendered_fields=${_formatList(fieldSemantics)}',
           );
-          if (missingHostedFieldTexts.isNotEmpty) {
+          if (missingHostedTexts.isNotEmpty || !hostedFieldValuesVisible) {
             failures.add(
-              'Step 4 failed: the hosted onboarding form did not visibly render the ticket-required field labels.\n'
-              'Expected visible labels: ${_formatList(_hostedFieldTexts)}\n'
-              'Missing visible labels: ${_formatList(missingHostedFieldTexts)}\n'
+              'Step 4 failed: the hosted onboarding form did not visibly render the hosted UI contract.\n'
+              'Expected visible texts: ${_formatList(<String>[..._hostedFieldTexts, ..._hostedHelperTexts])}\n'
+              'Missing visible texts: ${_formatList(missingHostedTexts)}\n'
               'Observed visible texts: ${_formatList(hostedState.visibleTexts)}\n'
-              'Observed interactive semantics labels: ${_formatList(hostedState.interactiveSemanticsLabels)}',
+              'Observed interactive semantics labels: ${_formatList(hostedState.interactiveSemanticsLabels)}\n'
+              'Hosted repository field visible: ${hostedState.hostedRepositoryValue != null}\n'
+              'Hosted branch field visible: ${hostedState.hostedBranchValue != null}',
             );
           }
 
@@ -197,8 +210,8 @@ void main() {
               action: _requestSteps[4],
               observed:
                   'keyboard_path_unavailable=true; '
-                  'hosted_repository_field_visible=${hostedState.hostedRepositoryValue != null}; '
-                  'hosted_branch_field_visible=${hostedState.hostedBranchValue != null}',
+                  'hosted_repository_field_visible=${hostedFieldValuesVisible && hostedState.hostedRepositoryValue != null}; '
+                  'hosted_branch_field_visible=${hostedFieldValuesVisible && hostedState.hostedBranchValue != null}',
             );
             failures.add(
               'Step 5 failed: the keyboard path could not be exercised because the hosted repository form fields were not rendered.',
@@ -275,10 +288,12 @@ void main() {
           _recordHumanVerification(
             result,
             check:
-                'Switched to the Hosted repository path and verified the visible field labels, helper copy, and keyboard traversal from the user-facing controls.',
+                'Switched to the Hosted repository path and verified the visible hosted labels, helper copy, field values, and keyboard traversal from the user-facing controls.',
             observed:
                 'visible_texts=${_formatList(hostedState.visibleTexts)}; '
                 'interactive_labels=${_formatList(hostedState.interactiveSemanticsLabels)}; '
+                'repository_value=${hostedState.hostedRepositoryValue}; '
+                'branch_value=${hostedState.hostedBranchValue}; '
                 'focus_order=${_formatList(focusOrder)}',
           );
 
@@ -387,7 +402,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     'h4. What was checked by automation',
     '* Launched the production first-launch onboarding route with an empty SharedPreferences-backed workspace profile store.',
     '* Verified the visible first-launch choices for {noformat}Local folder{noformat} and {noformat}Hosted repository{noformat}.',
-    "* Switched to the hosted onboarding path and checked the visible field labels for {noformat}Repository Path{noformat} and {noformat}Branch{noformat}.",
+    '* Switched to the hosted onboarding path and checked the visible {noformat}Repository{noformat} and {noformat}Branch{noformat} labels, hosted helper copy, and rendered hosted field values.',
     '* Used keyboard Tab navigation to capture the hosted onboarding focus path across the rendered controls.',
     '',
     'h4. Human-style verification',
@@ -395,7 +410,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. Observed result',
     passed
-        ? '* Matched the expected result: the fresh first-launch flow exposed the hosted setup path, showed the requested field labels, and keyboard traversal reached the hosted inputs in logical order.'
+        ? '* Matched the expected result: the fresh first-launch flow exposed the hosted setup path, showed the hosted Repository/Branch contract and helper copy, and keyboard traversal reached the hosted inputs in logical order.'
         : '* Did not match the expected result. See the failed step details, visible texts, focus order, and exact assertion below.',
     '* Expected result: {noformat}${result['expected_result']}{noformat}',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
@@ -446,7 +461,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '## What was checked by automation',
     '- Launched the production first-launch onboarding route with no saved workspace profiles.',
     '- Verified the visible `Local folder` and `Hosted repository` chooser controls.',
-    '- Switched to the hosted path and checked the visible `Repository Path` and `Branch` labels.',
+    '- Switched to the hosted path and checked the visible `Repository` and `Branch` labels, hosted helper copy, and rendered hosted field values.',
     '- Captured the keyboard Tab path across the rendered hosted onboarding controls.',
     '',
     '## Human-style verification',
@@ -454,7 +469,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '## Observed result',
     passed
-        ? '- Matched the expected result: the hosted first-launch path was visible, the requested fields were rendered, and keyboard traversal reached them in logical order.'
+        ? '- Matched the expected result: the hosted first-launch path was visible, the hosted Repository/Branch contract was rendered, and keyboard traversal reached those inputs in logical order.'
         : '- Did not match the expected result. See the failed step details, actual visible texts, and exact error.',
     '- **Expected result:**',
     '',
@@ -517,8 +532,8 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     '## Summary',
     passed
-        ? 'The fresh first-launch onboarding flow exposed the hosted setup path, rendered the requested field labels, and allowed keyboard traversal through the hosted inputs.'
-        : 'The fresh first-launch onboarding flow did not match the requested hosted setup behavior. See the step results and exact error for the product-visible mismatch.',
+        ? 'The fresh first-launch onboarding flow exposed the hosted setup path, rendered the hosted Repository/Branch labels plus helper copy, and allowed keyboard traversal through the hosted inputs.'
+        : 'The fresh first-launch onboarding flow did not match the hosted onboarding UI contract. See the step results and exact error for the product-visible mismatch.',
     '',
     '## Step results',
     ..._markdownStepLines(result),
@@ -540,10 +555,10 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
 
 String _bugDescription(Map<String, Object?> result) {
   final lines = <String>[
-    '# $_ticketKey regression: first-launch hosted onboarding does not match the requested field visibility and keyboard flow',
+    '# $_ticketKey regression: first-launch hosted onboarding does not match the hosted field visibility and keyboard flow',
     '',
     '## Summary',
-    'The first-launch onboarding route for a fresh user does not satisfy the hosted setup expectations from $_ticketKey. The hosted flow was exercised through the production widget tree, but the observed visible labels and/or keyboard traversal did not match the requested `Repository Path` + `Branch` onboarding experience.',
+    'The first-launch onboarding route for a fresh user does not satisfy the hosted setup expectations from $_ticketKey. The hosted flow was exercised through the production widget tree, but the observed visible labels, helper copy, field visibility, and/or keyboard traversal did not match the production hosted `Repository` + `Branch` onboarding contract.',
     '',
     '## Steps to reproduce',
     ..._bugReproLines(result),
