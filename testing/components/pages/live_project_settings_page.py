@@ -123,7 +123,7 @@ class LiveProjectSettingsPage:
     _status_id_selector = 'input[aria-label="ID"]'
     _status_name_selector = 'input[aria-label="Name"]'
     _transition_name_selector = 'input[aria-label="Transition name"]'
-    _save_settings_selector = 'flt-semantics[aria-label="Save settings"]'
+    _save_settings_selector = 'flt-semantics[role="button"][aria-label="Save settings"]'
     _close_selector = 'flt-semantics[aria-label="Close"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -227,8 +227,12 @@ class LiveProjectSettingsPage:
             user_login=user_login,
             repository=repository,
         )
+        connected_marker = f"Connected as {user_login} to {repository}."
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if (
+            connected_banner in current_body
+            or connected_marker in current_body
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
@@ -272,8 +276,18 @@ class LiveProjectSettingsPage:
                 )
 
             try:
-                self._session.wait_for_text(
-                    connected_banner,
+                self._session.wait_for_function(
+                    """
+                    ({ expectedBanner, expectedMarker }) => {
+                      const bodyText = document.body?.innerText ?? '';
+                      return bodyText.includes(expectedBanner)
+                        || bodyText.includes(expectedMarker);
+                    }
+                    """,
+                    arg={
+                        "expectedBanner": connected_banner,
+                        "expectedMarker": connected_marker,
+                    },
                     timeout_ms=timeout_seconds * 1_000,
                 )
                 return self.body_text()
@@ -290,7 +304,7 @@ class LiveProjectSettingsPage:
                 raise AssertionError(
                     "Step 2 failed: the hosted session never exposed the connected "
                     "write-capable banner after the token submit.\n"
-                    f"Expected banner: {connected_banner}\n"
+                    f"Expected one of: {connected_banner} OR {connected_marker}\n"
                     f"Observed body text:\n{current_body}",
                 ) from None
 
@@ -550,7 +564,11 @@ class LiveProjectSettingsPage:
             state="hidden",
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._save_settings_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Save settings",
+            timeout_ms=30_000,
+        )
         status_list_text = self.body_text()
         return status_dialog_text, status_list_text
 
@@ -588,29 +606,48 @@ class LiveProjectSettingsPage:
         )
         workflow_dialog_text = self.body_text()
         self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
-        self._session.wait_for_selector(self._save_settings_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Save settings",
+            timeout_ms=30_000,
+        )
         workflow_tab_text = self.body_text()
         return workflow_dialog_text, workflow_tab_text
 
     def save_settings(self) -> str:
-        self._session.click(self._save_settings_selector, timeout_ms=30_000)
-        self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
+        self.click_save_settings(timeout_ms=30_000)
+        self.wait_for_save_cycle_completion(timeout_ms=120_000)
         return self.body_text()
 
     def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
         self._scroll_into_view(self._save_settings_selector)
-        self._session.click(self._save_settings_selector, timeout_ms=timeout_ms)
+        self._session.click(
+            self._button_selector,
+            has_text="Save settings",
+            timeout_ms=timeout_ms,
+        )
         return self.body_text()
 
     def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
         self._session.wait_for_function(
             """
-            (selector) => {
-              const button = document.querySelector(selector);
+            () => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"][aria-label="Save settings"]'))
+                .find((candidate) => isVisible(candidate));
               return !!button && button.getAttribute('aria-disabled') !== 'true';
             }
             """,
-            arg=self._save_settings_selector,
             timeout_ms=timeout_ms,
         )
         return self.body_text()
@@ -618,9 +655,21 @@ class LiveProjectSettingsPage:
     def read_save_state(self) -> ProjectSettingsSaveState:
         payload = self._session.evaluate(
             r"""
-            (selector) => {
+            () => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const bodyText = document.body?.innerText ?? '';
-              const button = document.querySelector(selector);
+              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"][aria-label="Save settings"]'))
+                .find((candidate) => isVisible(candidate));
               const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
               return {
                 bodyText,
@@ -629,7 +678,6 @@ class LiveProjectSettingsPage:
               };
             }
             """,
-            arg=self._save_settings_selector,
         )
         if not isinstance(payload, dict):
             raise AssertionError(

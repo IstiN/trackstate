@@ -46,14 +46,15 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1137/te
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 SAVE_OUTCOME_WAIT_SECONDS = 15.0
 SAVE_OUTCOME_POLL_SECONDS = 1.0
-LINKED_BUGS = ["TS-1094", "TS-1090"]
+LINKED_BUGS = ["TS-1148", "TS-1094", "TS-1090"]
 LINKED_BUG_NOTES = (
-    "Reviewed input/TS-1137/linked_bugs.md before writing the test. TS-1094 is "
-    "Done and establishes that Settings writes must be atomic, while TS-1090 "
-    "confirms the shipped Settings flow already surfaces save failures for invalid "
-    "catalog writes. This regression therefore drives the live Settings UI with a "
-    "zero-delta save and waits for the post-click state instead of asserting "
-    "immediately."
+    "Reviewed input/TS-1137/linked_bugs.md before writing the test. TS-1148 is "
+    "Done and establishes that a zero-delta Settings save must surface a no-commit "
+    "failure instead of a Git tree lookup error. TS-1094 confirms Settings writes "
+    "must stay atomic, while TS-1090 confirms the shipped Settings flow already "
+    "surfaces save failures for invalid catalog writes. This regression therefore "
+    "drives the live Settings UI with a zero-delta save and waits for the post-click "
+    "state instead of asserting immediately."
 )
 REQUEST_STEPS = [
     "Navigate to the Settings Admin Workspace.",
@@ -66,6 +67,7 @@ EXPECTED_RESULT = (
     "produced; the system returns a failure response to the client instead of a "
     "false success."
 )
+ZERO_DELTA_WORKFLOW_ID = "delivery-workflow"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -97,6 +99,7 @@ def main() -> None:
         token=token,
     )
     baseline_head_sha = repository_service.branch_head_sha()
+    zero_delta_target = _resolve_zero_delta_transition(service.fetch_workflow_config_map())
 
     result: dict[str, Any] = {
         "ticket": TICKET_KEY,
@@ -112,6 +115,7 @@ def main() -> None:
         "linked_bugs": LINKED_BUGS,
         "linked_bug_notes": LINKED_BUG_NOTES,
         "baseline_head_sha": baseline_head_sha,
+        "zero_delta_target": zero_delta_target,
         "steps": [],
         "human_verification": [],
         "is_product_failure": False,
@@ -201,7 +205,23 @@ def main() -> None:
                 ),
             )
 
+            workflows_tab_text = settings_page.open_workflows_tab()
+            first_dialog_text, first_workflows_text = settings_page.update_workflow_transition_name(
+                workflow_name=str(zero_delta_target["workflow_name"]),
+                transition_index=int(zero_delta_target["transition_index"]),
+                transition_name=str(zero_delta_target["temporary_transition_name"]),
+            )
+            second_dialog_text, second_workflows_text = settings_page.update_workflow_transition_name(
+                workflow_name=str(zero_delta_target["workflow_name"]),
+                transition_index=int(zero_delta_target["transition_index"]),
+                transition_name=str(zero_delta_target["original_transition_name"]),
+            )
             pre_save_state = settings_page.read_save_state()
+            result["workflows_tab_text"] = workflows_tab_text
+            result["first_dialog_text"] = first_dialog_text
+            result["first_workflows_text"] = first_workflows_text
+            result["second_dialog_text"] = second_dialog_text
+            result["second_workflows_text"] = second_workflows_text
             result["pre_save_state"] = _save_state_payload(pre_save_state)
             if pre_save_state.save_failure_text is not None:
                 message = (
@@ -219,36 +239,56 @@ def main() -> None:
                 )
                 record_not_reached_steps(result, starting_step=3, request_steps=REQUEST_STEPS)
                 raise AssertionError(message)
-
             record_step(
                 result,
                 step=2,
                 status="passed",
                 action=REQUEST_STEPS[1],
                 observed=(
-                    "Kept the live Settings draft unchanged on the default Statuses view, so "
-                    "clicking Save settings exercised a zero-delta persistence attempt. "
+                    "Opened the Workflows tab, renamed one transition, then restored the "
+                    "original name so the in-memory draft returned to the deployed catalog "
+                    "state before saving. "
                     f"baseline_head_sha={baseline_head_sha}; "
-                    f"save_button_enabled={pre_save_state.save_button_enabled!r}; "
+                    f"workflow_name={zero_delta_target['workflow_name']!r}; "
+                    f"transition_index={zero_delta_target['transition_index']!r}; "
+                    f"original_transition_name={zero_delta_target['original_transition_name']!r}; "
+                    f"temporary_transition_name={zero_delta_target['temporary_transition_name']!r}; "
+                    f"save_button_enabled_after_revert={pre_save_state.save_button_enabled!r}; "
                     f"visible_body_text={snippet(pre_save_state.body_text)!r}"
+                ),
+            )
+            record_human_verification(
+                result,
+                check=(
+                    "Watched the Workflows tab as a user, changed one transition label, and "
+                    "restored the original wording before saving to confirm the visible "
+                    "catalog returned to its starting text while Save settings stayed "
+                    "available."
+                ),
+                observed=(
+                    f"workflow_name={zero_delta_target['workflow_name']!r}; "
+                    f"original_transition_name={zero_delta_target['original_transition_name']!r}; "
+                    f"temporary_transition_name={zero_delta_target['temporary_transition_name']!r}; "
+                    f"save_button_enabled_after_revert={pre_save_state.save_button_enabled!r}; "
+                    f"workflows_body_text={snippet(second_workflows_text)!r}"
                 ),
             )
 
             after_click_body = settings_page.click_save_settings()
             result["after_click_body_text"] = after_click_body
-            settings_page.wait_for_save_cycle_completion()
-            post_click_settle_state = settings_page.read_save_state()
-            result["post_click_settle_state"] = _save_state_payload(post_click_settle_state)
+            post_click_state = settings_page.read_save_state()
+            result["post_click_state"] = _save_state_payload(post_click_state)
             record_step(
                 result,
                 step=3,
                 status="passed",
                 action=REQUEST_STEPS[2],
                 observed=(
-                    "Clicked the visible Save settings action without editing the catalogs and "
-                    "waited for the save control to become enabled again. "
-                    f"post_click_save_button_enabled={post_click_settle_state.save_button_enabled!r}; "
-                    f"post_click_visible_error={post_click_settle_state.save_failure_text!r}"
+                    "Clicked the visible Save settings action after restoring the workflow "
+                    "transition to its original value and captured the immediate post-click "
+                    "state before polling for the final user-visible outcome. "
+                    f"post_click_save_button_enabled={post_click_state.save_button_enabled!r}; "
+                    f"post_click_visible_error={post_click_state.save_failure_text!r}"
                 ),
             )
 
@@ -396,6 +436,44 @@ def _evaluate_final_outcome(
         )
 
     return None
+
+
+def _resolve_zero_delta_transition(
+    workflow_map: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    workflow = workflow_map.get(ZERO_DELTA_WORKFLOW_ID)
+    if not isinstance(workflow, dict):
+        raise AssertionError(
+            "Precondition failed: the live hosted repository no longer exposes the "
+            f"{ZERO_DELTA_WORKFLOW_ID!r} workflow in DEMO/config/workflows.json.",
+        )
+    workflow_name = str(workflow.get("name", "")).strip()
+    transitions = workflow.get("transitions")
+    if not workflow_name or not isinstance(transitions, list) or not transitions:
+        raise AssertionError(
+            "Precondition failed: the live hosted workflow configuration did not expose "
+            "a named workflow with at least one transition for the zero-delta save "
+            "revert scenario.",
+        )
+    first_transition = transitions[0]
+    if not isinstance(first_transition, dict):
+        raise AssertionError(
+            "Precondition failed: the selected live workflow transition entry is not a "
+            "JSON object.",
+        )
+    original_transition_name = str(first_transition.get("name", "")).strip()
+    if not original_transition_name:
+        raise AssertionError(
+            "Precondition failed: the selected live workflow transition is missing its "
+            "display name.",
+        )
+    return {
+        "workflow_id": ZERO_DELTA_WORKFLOW_ID,
+        "workflow_name": workflow_name,
+        "transition_index": 0,
+        "original_transition_name": original_transition_name,
+        "temporary_transition_name": f"{original_transition_name} temp",
+    }
 
 
 def _looks_like_no_commit_error(message: str) -> bool:
