@@ -14,6 +14,7 @@ required_tools=(
   ditto
   tar
   shasum
+  file
   bash
   gh
 )
