@@ -1886,6 +1886,93 @@ void main() {
   );
 
   test(
+    'local repository rejects zero-delta project settings saves when no git commit is produced',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story","workflow":"delivery-workflow"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","done"],'
+            '"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed validated settings fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      final normalizedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog,
+      );
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      await expectLater(
+        () => repository.saveProjectSettings(
+          normalizedSnapshot.project.settingsCatalog,
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('No Git commit was produced'),
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
+    },
+  );
+
+  test(
     'local repository falls back to built-in fields when fields.json is missing',
     () async {
       final repo = await _createLocalRepository();
