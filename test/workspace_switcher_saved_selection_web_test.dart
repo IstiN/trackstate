@@ -83,10 +83,17 @@ void main() {
         );
         expect(saveButtonBeforeSelection.onPressed, isNull);
 
-        await tester.tap(
-          find.byKey(ValueKey('workspace-${alternateWorkspace.id}')),
-          warnIfMissed: false,
+        final alternateSummaryButton = tester.widget<OutlinedButton>(
+          find.descendant(
+            of: workspaceSwitcherSheet,
+            matching: find.widgetWithText(
+              OutlinedButton,
+              alternateWorkspace.displayName,
+            ),
+          ),
         );
+        expect(alternateSummaryButton.onPressed, isNotNull);
+        alternateSummaryButton.onPressed!();
         await tester.pumpAndSettle();
 
         final saveButtonAfterSelection = tester.widget<FilledButton>(
