@@ -414,43 +414,41 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
   final selectedRowIndex = focusTargets.indexWhere(
     (target) => target.isSelectedWorkspaceRow,
   );
-  if (!backwards &&
-      selectedRowIndex != -1 &&
-      (_isBrowserWorkspaceSwitcherTriggerFallbackFocus(
-            activeElement: activeElement,
-            focusTargets: focusTargets,
-            currentIndex: currentIndex,
-          ) ||
-          _isBrowserWorkspaceSwitcherFallbackFocus(
-            activeElement: activeElement,
-            focusTargets: focusTargets,
-            currentIndex: currentIndex,
-          ))) {
-    if (_focusElement(focusTargets[selectedRowIndex].element)) {
-      return _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher;
-    }
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  final focusStops = [
+    for (final target in focusTargets)
+      () {
+        final rect = target.element.getBoundingClientRect();
+        return BrowserWorkspaceSwitcherTabStopSnapshot(
+          isFocusable: true,
+          isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+          isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+          isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+          isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+          visualTop: rect.top,
+          visualLeft: rect.left,
+        );
+      }(),
+  ];
+  final fallbackTargetIndex = _workspaceSwitcherFallbackTargetIndex(
+    backwards: backwards,
+    activeElement: activeElement,
+    focusTargets: focusTargets,
+    focusStops: focusStops,
+    currentIndex: currentIndex,
+    selectedRowIndex: selectedRowIndex,
+  );
+  if (fallbackTargetIndex != null) {
+    return _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+      focusTargets: focusTargets,
+      targetIndex: fallbackTargetIndex,
+    );
   }
   if (currentIndex == null) {
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
   final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
-    focusStops: [
-      for (final target in focusTargets)
-        () {
-          final rect = target.element.getBoundingClientRect();
-          return BrowserWorkspaceSwitcherTabStopSnapshot(
-            isFocusable: true,
-            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
-            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
-            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
-            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
-            visualTop: rect.top,
-            visualLeft: rect.left,
-          );
-        }(),
-    ],
+    focusStops: focusStops,
     currentIndex: currentIndex,
     backwards: backwards,
   );
@@ -458,6 +456,57 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
+  return _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+    focusTargets: focusTargets,
+    targetIndex: targetIndex,
+  );
+}
+
+int? _workspaceSwitcherFallbackTargetIndex({
+  required bool backwards,
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required List<BrowserWorkspaceSwitcherTabStopSnapshot> focusStops,
+  required int? currentIndex,
+  required int selectedRowIndex,
+}) {
+  if (selectedRowIndex == -1) {
+    return null;
+  }
+  final isFallbackFocus = backwards
+      ? _isBrowserWorkspaceSwitcherReverseFallbackFocus(
+          activeElement: activeElement,
+          focusTargets: focusTargets,
+          currentIndex: currentIndex,
+        )
+      : _isBrowserWorkspaceSwitcherTriggerFallbackFocus(
+              activeElement: activeElement,
+              focusTargets: focusTargets,
+              currentIndex: currentIndex,
+            ) ||
+            _isBrowserWorkspaceSwitcherFallbackFocus(
+              activeElement: activeElement,
+              focusTargets: focusTargets,
+              currentIndex: currentIndex,
+            );
+  if (!isFallbackFocus) {
+    return null;
+  }
+  if (!backwards) {
+    return selectedRowIndex;
+  }
+  return browserWorkspaceSwitcherTabHandoffIndex(
+    focusStops: focusStops,
+    currentIndex: selectedRowIndex,
+    backwards: true,
+  );
+}
+
+_BrowserWorkspaceSwitcherTabMoveResult
+_moveBrowserWorkspaceSwitcherTabFocusToTarget({
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int targetIndex,
+}) {
   final targetElement = focusTargets[targetIndex].element;
   // Attempt focus immediately; the result tells us whether the browser already
   // accepted the focus change. For BrowserFocusableControl PlatformView
@@ -490,9 +539,7 @@ void _guardTabHandoffFocus(web.Element target) {
       timer?.cancel();
       return;
     }
-    (target as web.HTMLElement).focus(
-      web.FocusOptions(preventScroll: true),
-    );
+    (target as web.HTMLElement).focus(web.FocusOptions(preventScroll: true));
     if (attempts >= maxAttempts) {
       timer?.cancel();
     }
@@ -539,6 +586,28 @@ bool _isBrowserWorkspaceSwitcherFallbackFocus({
 
   return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
       'flutter-view';
+}
+
+bool _isBrowserWorkspaceSwitcherReverseFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher &&
+        !currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  if (_workspaceSwitcherTriggerElementFor(activeElement) != null) {
+    return true;
+  }
+  return _isBrowserWorkspaceSwitcherFallbackFocus(
+    activeElement: activeElement,
+    focusTargets: focusTargets,
+    currentIndex: currentIndex,
+  );
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
