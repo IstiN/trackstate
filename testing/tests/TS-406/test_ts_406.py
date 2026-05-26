@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
+import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -30,11 +31,30 @@ BUG_WORKFLOW_NAME = "Bug Workflow"
 BUG_ISSUE_TYPE_ID = "bug"
 BUG_ISSUE_TYPE_NAME = "Bug"
 WORKFLOW_TRANSITION_NAME = "Complete bug"
+STEP_7_ACTION = "Click Save and verify the Bug workflow assignment persists."
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts406_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts406_success.png"
 PERSISTENCE_TIMEOUT_SECONDS = 120
 PERSISTENCE_POLL_SECONDS = 5
+TICKET_STEPS = [
+    "Navigate to Settings > Workflows.",
+    "Create a new workflow named 'Bug Workflow'.",
+    "Select 'To Do' and 'Done' as allowed statuses and define a transition between them.",
+    "Click 'Save'.",
+    "Navigate to the 'Issue Types' tab.",
+    "Edit the 'Bug' issue type and select 'Bug Workflow' in the assigned workflow field.",
+    "Click 'Save' and verify persistence.",
+]
+
+
+class ProductFailure(AssertionError):
+    pass
 
 
 def main() -> None:
@@ -209,58 +229,71 @@ def main() -> None:
 
                 save_body_text = settings_page.save_project_settings()
                 result["save_settings_body_text"] = save_body_text
-                save_failure_text = _wait_for_save_failure(settings_page)
-                result["save_failure_text"] = save_failure_text
-                if save_failure_text is not None:
-                    raise AssertionError(
-                        "Step 7 failed: Save settings displayed a visible validation error "
-                        "instead of persisting the workflow assignment.\n"
-                        f"Observed body text:\n{save_failure_text}",
-                    )
-                persisted_config = _wait_for_repository_persistence(service)
-                result["persisted_repository_config"] = persisted_config
+                try:
+                    save_failure_text = _wait_for_save_failure(settings_page)
+                    result["save_failure_text"] = save_failure_text
+                    if save_failure_text is not None:
+                        raise ProductFailure(
+                            "Step 7 failed: Save settings displayed a visible validation "
+                            "error instead of persisting the workflow assignment.\n"
+                            f"Observed body text:\n{save_failure_text}",
+                        )
+                    persisted_config = _wait_for_repository_persistence(service)
+                    result["persisted_repository_config"] = persisted_config
 
-                runtime_after_reload = tracker_page.open()
-                result["runtime_after_reload"] = {
-                    "kind": runtime_after_reload.kind,
-                    "body_text": runtime_after_reload.body_text,
-                }
-                if runtime_after_reload.kind != "ready":
-                    raise AssertionError(
-                        "Step 7 failed: after saving settings, the hosted app did not "
-                        "re-open cleanly for the persistence check.\n"
-                        f"Observed body text:\n{runtime_after_reload.body_text}",
-                    )
-                settings_page.open_settings_admin()
-                workflow_row_after_reload = _reload_workflow_row(settings_page)
-                issue_type_row_after_reload = _reload_issue_type_row(settings_page)
-                result["workflow_row_after_reload"] = workflow_row_after_reload
-                result["issue_type_row_after_reload"] = issue_type_row_after_reload
+                    runtime_after_reload = tracker_page.open()
+                    result["runtime_after_reload"] = {
+                        "kind": runtime_after_reload.kind,
+                        "body_text": runtime_after_reload.body_text,
+                    }
+                    if runtime_after_reload.kind != "ready":
+                        raise ProductFailure(
+                            "Step 7 failed: after saving settings, the hosted app did not "
+                            "re-open cleanly for the persistence check.\n"
+                            f"Observed body text:\n{runtime_after_reload.body_text}",
+                        )
+                    settings_page.open_settings_admin()
+                    workflow_row_after_reload = _reload_workflow_row(settings_page)
+                    issue_type_row_after_reload = _reload_issue_type_row(settings_page)
+                    result["workflow_row_after_reload"] = workflow_row_after_reload
+                    result["issue_type_row_after_reload"] = issue_type_row_after_reload
 
-                if "ID: bug-workflow" not in workflow_row_after_reload:
-                    raise AssertionError(
-                        "Step 7 failed: re-opening Settings did not keep the visible Bug "
-                        "Workflow row in the Workflows tab.\n"
-                        f"Observed workflow row after reload:\n{workflow_row_after_reload}",
-                    )
-                if "Workflow: bug-workflow" not in issue_type_row_after_reload:
-                    raise AssertionError(
-                        "Step 7 failed: re-opening Settings did not keep the visible Bug "
-                        "issue type linked to bug-workflow.\n"
-                        f"Observed issue type row after reload:\n{issue_type_row_after_reload}",
-                    )
+                    if "ID: bug-workflow" not in workflow_row_after_reload:
+                        raise ProductFailure(
+                            "Step 7 failed: re-opening Settings did not keep the visible Bug "
+                            "Workflow row in the Workflows tab.\n"
+                            f"Observed workflow row after reload:\n{workflow_row_after_reload}",
+                        )
+                    if "Workflow: bug-workflow" not in issue_type_row_after_reload:
+                        raise ProductFailure(
+                            "Step 7 failed: re-opening Settings did not keep the visible Bug "
+                            "issue type linked to bug-workflow.\n"
+                            f"Observed issue type row after reload:\n{issue_type_row_after_reload}",
+                        )
 
-                _record_step(
-                    result,
-                    step=7,
-                    status="passed",
-                    action="Click Save and verify the Bug workflow assignment persists.",
-                    observed=(
-                        f"{workflow_row_after_reload}\n"
-                        f"{issue_type_row_after_reload}\n"
-                        f"{json.dumps(persisted_config, indent=2)}"
-                    ),
-                )
+                    _record_step(
+                        result,
+                        step=7,
+                        status="passed",
+                        action=STEP_7_ACTION,
+                        observed=(
+                            f"{workflow_row_after_reload}\n"
+                            f"{issue_type_row_after_reload}\n"
+                            f"{json.dumps(persisted_config, indent=2)}"
+                        ),
+                    )
+                except AssertionError as error:
+                    if 7 not in _step_result_map(result):
+                        _record_step(
+                            result,
+                            step=7,
+                            status="failed",
+                            action=STEP_7_ACTION,
+                            observed=str(error),
+                        )
+                    if isinstance(error, ProductFailure):
+                        raise
+                    raise ProductFailure(str(error)) from error
                 _record_human_verification(
                     result,
                     check=(
@@ -285,16 +318,22 @@ def main() -> None:
                 settings_page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
+    except ProductFailure as error:
+        result["error"] = str(error)
+        result["traceback"] = traceback.format_exc()
+        _write_failure_outputs(result, product_failure=True)
+        print(json.dumps(result, indent=2))
+        raise
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
-        _write_result_if_requested(result)
+        _write_failure_outputs(result, product_failure=False)
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_result_if_requested(result)
+        _write_failure_outputs(result, product_failure=False)
         print(json.dumps(result, indent=2))
         raise
     else:
@@ -304,7 +343,7 @@ def main() -> None:
             "Bug Workflow exists as a named project workflow and the Bug issue type "
             "persists with workflow ID bug-workflow."
         )
-        _write_result_if_requested(result)
+        _write_pass_outputs(result)
         print(json.dumps(result, indent=2))
 
 
@@ -466,15 +505,309 @@ def _record_human_verification(
     )
 
 
-def _write_result_if_requested(payload: dict[str, object]) -> None:
-    configured_path = os.environ.get("TS406_RESULT_PATH")
-    result_path = (
-        Path(configured_path)
-        if configured_path
-        else REPO_ROOT / "outputs" / "ts406_result.json"
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            },
+        )
+        + "\n",
+        encoding="utf-8",
     )
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+
+
+def _write_failure_outputs(
+    result: dict[str, object],
+    *,
+    product_failure: bool,
+) -> None:
+    error = str(result.get("error", "AssertionError: unknown failure"))
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error,
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    if product_failure:
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    screenshot_path = result.get("screenshot", SCREENSHOT_PATH)
+    lines = [
+        f"h3. {TICKET_KEY} {status}",
+        "",
+        "*Automation coverage*",
+        "* Opened the deployed hosted tracker and reached *Project settings administration*.",
+        "* Navigated through *Settings > Workflows* and created the named *Bug Workflow* draft with only *To Do* and *Done* plus one transition.",
+        "* Switched to *Issue Types*, assigned *Bug Workflow* to the *Bug* issue type, and used the production *Save settings* action.",
+        "* Verified the outcome from both the visible hosted UI and the repository-backed config data.",
+        "",
+        "*Observed result*",
+        (
+            "* Matched the expected result: the named workflow was created, assigned to *Bug*, and persisted after reload."
+            if passed
+            else "* Did not match the expected result."
+        ),
+        (
+            f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
+            f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
+            f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
+        ),
+        f"* Screenshot: {{{{{screenshot_path}}}}}",
+        "",
+        "*Step results*",
+        *_step_lines(result, jira=True),
+        "",
+        "*Human-style verification*",
+        *_human_lines(result, jira=True),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _pr_body(result: dict[str, object], *, passed: bool) -> str:
+    status = "Passed" if passed else "Failed"
+    screenshot_path = result.get("screenshot", SCREENSHOT_PATH)
+    lines = [
+        f"## {TICKET_KEY} {status}",
+        "",
+        "### Automation",
+        "- Opened the deployed hosted tracker and reached `Project settings administration`.",
+        "- Navigated through `Settings > Workflows` and created the named `Bug Workflow` draft with only `To Do` and `Done` plus one transition.",
+        "- Switched to `Issue Types`, assigned `Bug Workflow` to the `Bug` issue type, and used the production `Save settings` action.",
+        "- Verified the outcome from both the visible hosted UI and the repository-backed config data.",
+        "",
+        "### Observed result",
+        (
+            "- Matched the expected result: the named workflow was created, assigned to `Bug`, and persisted after reload."
+            if passed
+            else "- Did not match the expected result."
+        ),
+        (
+            f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
+            f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
+        ),
+        f"- Screenshot: `{screenshot_path}`",
+        "",
+        "### Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "### Human-style verification",
+        *_human_lines(result, jira=False),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "### Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "passed" if passed else "failed"
+    screenshot_path = result.get("screenshot", SCREENSHOT_PATH)
+    lines = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        "Ran the live workflow administration scenario against the hosted TrackState setup repository.",
+        "",
+        "## Observed",
+        f"- Screenshot: `{screenshot_path}`",
+        f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
+        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
+        f"- Summary: {result.get('summary', result.get('error', 'No summary available.'))}",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _bug_description(result: dict[str, object]) -> str:
+    screenshot_path = result.get("screenshot", SCREENSHOT_PATH)
+    failure_step = _failure_step_number(result)
+    step_records = _step_result_map(result)
+    lines = [
+        f"# {TICKET_KEY} - Workflow administration persistence regression",
+        "",
+        "## Steps to reproduce",
+    ]
+    for index, ticket_step in enumerate(TICKET_STEPS, start=1):
+        observed = step_records.get(index)
+        if observed is not None:
+            observation = str(observed.get("observed", "")).strip()
+            lines.append(
+                f"{index}. {ticket_step} "
+                f"({'passed' if str(observed.get('status')) == 'passed' else 'failed'}) "
+                f"{_step_icon(str(observed.get('status', 'failed')))}"
+            )
+            if observation:
+                lines.append(f"   - Observed: {observation}")
+            continue
+        if failure_step == index:
+            lines.append(f"{index}. {ticket_step} (failed) ❌")
+            lines.append(f"   - Observed: {result.get('error', 'No error captured.')}")
+        elif failure_step is not None and index > failure_step:
+            lines.append(f"{index}. {ticket_step} (not reached)")
+        else:
+            lines.append(f"{index}. {ticket_step} (not completed)")
+    lines.extend(
+        [
+            "",
+            "## Actual vs Expected",
+            (
+                "* Expected: saving Project settings persists the new `bug-workflow` entry "
+                "to `DEMO/config/workflows.json` and updates `DEMO/config/issue-types.json` "
+                "so `bug` references `bug-workflow`."
+            ),
+            (
+                f"* Actual: {result.get('error', 'The live scenario did not match the expected result.')}"
+            ),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Environment",
+            f"- URL: `{result['app_url']}`",
+            f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
+            "- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.system()}`",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{screenshot_path}`",
+            "",
+            "## Human-style verification",
+            *_human_lines(result, jira=False),
+        ],
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _step_result_map(result: dict[str, object]) -> dict[int, dict[str, object]]:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return {}
+    mapped: dict[int, dict[str, object]] = {}
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_number = step.get("step")
+        if isinstance(step_number, int):
+            mapped[step_number] = step
+    return mapped
+
+
+def _failure_step_number(result: dict[str, object]) -> int | None:
+    error = str(result.get("error", ""))
+    match = re.search(r"Step (\d+) failed", error)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _step_icon(status: str) -> str:
+    return "✅" if status == "passed" else "❌"
+
+
+def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    lines: list[str] = []
+    steps = result.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        message = "* No step evidence was captured before the failure." if jira else "- No step evidence was captured before the failure."
+        return [message]
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_number = step.get("step", "?")
+        status = str(step.get("status", "failed"))
+        action = str(step.get("action", "")).strip()
+        observed = str(step.get("observed", "")).strip()
+        if jira:
+            lines.append(f"* Step {step_number} {_step_icon(status)} {action}")
+            if observed:
+                lines.append(f"** Observed: {{noformat}}{observed}{{noformat}}")
+        else:
+            lines.append(f"- Step {step_number} {_step_icon(status)} {action}")
+            if observed:
+                lines.append(f"  - Observed: `{observed}`")
+    failure_step = _failure_step_number(result)
+    if failure_step is not None and failure_step not in _step_result_map(result):
+        failure_line = f"Step {failure_step} ❌ {result.get('error', 'Failure captured without step details.')}"
+        lines.append(f"* {failure_line}" if jira else f"- {failure_line}")
+    return lines
+
+
+def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    checks = result.get("human_verification", [])
+    if not isinstance(checks, list) or not checks:
+        message = (
+            "* No separate human-style verification notes were captured."
+            if jira
+            else "- No separate human-style verification notes were captured."
+        )
+        return [message]
+    lines: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        description = str(check.get("check", "")).strip()
+        observed = str(check.get("observed", "")).strip()
+        if jira:
+            lines.append(f"* {description}")
+            if observed:
+                lines.append(f"** Observed: {{noformat}}{observed}{{noformat}}")
+        else:
+            lines.append(f"- {description}")
+            if observed:
+                lines.append(f"  - Observed: `{observed}`")
+    return lines
 
 
 if __name__ == "__main__":
