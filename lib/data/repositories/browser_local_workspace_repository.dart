@@ -15,12 +15,20 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   );
 }
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
 }) {
-  platform.rememberBrowserLocalWorkspaceSelection(
+  return platform.rememberBrowserLocalWorkspaceSelection(
     workspacePath: workspacePath,
     selection: selection,
+  );
+}
+
+Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
+  bool clearPersisted = false,
+}) {
+  return platform.debugResetBrowserLocalWorkspaceSelectionCache(
+    clearPersisted: clearPersisted,
   );
 }
