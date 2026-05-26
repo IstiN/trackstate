@@ -41,7 +41,7 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-982/tes
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
-LINKED_BUGS = ["TS-977", "TS-991", "TS-1014", "TS-1027"]
+LINKED_BUGS = ["TS-977", "TS-991", "TS-1014", "TS-1027", "TS-1144"]
 INJECTED_FAILURE_STATUS_CODE = 500
 INJECTED_FAILURE_ATTEMPT = 1
 SETTLE_TIMEOUT_SECONDS = 20
