@@ -1,0 +1,13 @@
+test_id: TS-889
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and two preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from Dashboard.
+  - Waits for the opening transition to remain visibly open for 1500 ms before checking focus.
+  - Verifies the active element is inside the visible switcher panel rather than on FLUTTER-VIEW or the workspace-switcher trigger.
+  - Covers linked bug TS-884, whose fix must transfer focus into the open switcher for keyboard interaction.

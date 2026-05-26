@@ -1,0 +1,10 @@
+test_id: TS-457
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the live `trackstate create --summary "New Story" --issueType Story --epic EPIC-101 --target local` command against a seeded disposable Local Git repository.
+  - Verifies the canonical TrackState success envelope and confirms the created issue folder is nested under the epic directory.

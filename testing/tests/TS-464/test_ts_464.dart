@@ -156,7 +156,6 @@ void main() {
             const Duration(milliseconds: 300),
           );
         }
-
         final localeTextsAfterAdd = robot.visibleTexts();
         if (!localeTextsAfterAdd.contains('fr')) {
           failures.add(
