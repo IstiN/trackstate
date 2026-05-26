@@ -40,6 +40,6 @@ action for the LFS-backed attachment.
 
 Fail: Any collaboration tab is missing, collaboration content leaks onto the
 default detail surface, the hosted Attachments tab lacks the download-only
-message, upload controls remain visible, or the download action is missing or
-disabled.
+message, a hosted upload path remains usable, or the download action is missing
+or disabled.
 ```

@@ -174,12 +174,15 @@ def main() -> None:
                     _exercise_comments_tab(
                         live_issue_page=live_issue_page,
                         comment_body=comment_body,
+                        attachment_name=attachment_name,
                         result=result,
                         failures=failures,
                     )
                 if tab_counts["History"] > 0:
                     _exercise_history_tab(
                         live_issue_page=live_issue_page,
+                        comment_body=comment_body,
+                        attachment_name=attachment_name,
                         result=result,
                         failures=failures,
                     )
@@ -237,6 +240,7 @@ def _exercise_comments_tab(
     *,
     live_issue_page: LiveIssueDetailCollaborationPage,
     comment_body: str,
+    attachment_name: str,
     result: dict[str, object],
     failures: list[str],
 ) -> None:
@@ -277,6 +281,13 @@ def _exercise_comments_tab(
             f"Expected comment text: {comment_body}\n"
             f"Observed body text:\n{comments_text}",
         )
+    if attachment_name in comments_text:
+        failures.append(
+            "Step 3 failed: the seeded attachment content became visible in the "
+            '"Comments" tab before the user opened "Attachments".\n'
+            f"Unexpected text: {attachment_name}\n"
+            f"Observed body text:\n{comments_text}",
+        )
     _record_step(
         result,
         step=3,
@@ -289,6 +300,8 @@ def _exercise_comments_tab(
 def _exercise_history_tab(
     *,
     live_issue_page: LiveIssueDetailCollaborationPage,
+    comment_body: str,
+    attachment_name: str,
     result: dict[str, object],
     failures: list[str],
 ) -> None:
@@ -318,11 +331,29 @@ def _exercise_history_tab(
             "after it was opened.\n"
             f"Observed body text:\n{history_text}",
         )
+    if comment_body in history_text:
+        failures.append(
+            "Step 4 failed: the seeded comment body was still visible after switching "
+            'away from "Comments" to "History", so tab navigation did not fully gate '
+            "the collaboration panels.\n"
+            f"Unexpected text: {comment_body}\n"
+            f"Observed body text:\n{history_text}",
+        )
+    if attachment_name in history_text:
+        failures.append(
+            "Step 4 failed: the seeded attachment content became visible before the "
+            '"Attachments" tab was opened.\n'
+            f"Unexpected text: {attachment_name}\n"
+            f"Observed body text:\n{history_text}",
+        )
     _record_step(
         result,
         step=4,
         status="passed",
-        action="Open the History tab and verify the issue detail switches to that tab.",
+        action=(
+            "Open the History tab and verify the issue detail switches away from "
+            "Comments without revealing attachment content."
+        ),
         observed=history_text,
     )
 
@@ -357,6 +388,17 @@ def _exercise_attachments_tab(
         fragment: live_issue_page.visible_button_label_fragment_count(fragment)
         for fragment in UPLOAD_CONTROL_FRAGMENTS
     }
+    upload_button_disabled_counts = {
+        fragment: live_issue_page.button_label_fragment_disabled_count(fragment)
+        for fragment in UPLOAD_CONTROL_FRAGMENTS
+    }
+    upload_button_enabled_counts = {
+        fragment: max(
+            0,
+            upload_button_counts[fragment] - upload_button_disabled_counts[fragment],
+        )
+        for fragment in UPLOAD_CONTROL_FRAGMENTS
+    }
     attachments_observation = {
         "selected": live_issue_page.selected_tab_count("Attachments"),
         "body_text": attachments_text,
@@ -376,6 +418,8 @@ def _exercise_attachments_tab(
             "upload_button_enabled": upload_controls.upload_button_enabled,
         },
         "upload_button_counts": upload_button_counts,
+        "upload_button_disabled_counts": upload_button_disabled_counts,
+        "upload_button_enabled_counts": upload_button_enabled_counts,
         "visible_file_input_count": live_issue_page.visible_file_input_count(),
     }
     _tab_observations(result)["Attachments"] = attachments_observation
@@ -425,17 +469,21 @@ def _exercise_attachments_tab(
             "requires download to remain available for LFS-backed attachments.\n"
             f"Observed body text:\n{attachments_text}",
         )
-    upload_controls_visible = (
-        upload_controls.choose_button_count > 0 or upload_controls.upload_button_count > 0
+    upload_controls_usable = (
+        upload_controls.choose_button_enabled or upload_controls.upload_button_enabled
     )
-    if attachments_observation["visible_file_input_count"] > 0 or upload_controls_visible or any(
-        count > 0 for count in upload_button_counts.values()
+    if (
+        attachments_observation["visible_file_input_count"] > 0
+        or upload_controls_usable
+        or any(count > 0 for count in upload_button_enabled_counts.values())
     ):
         failures.append(
-            "Step 5 failed: the hosted Attachments tab still exposed upload controls "
-            "instead of a download-only experience for Git LFS attachments.\n"
+            "Step 5 failed: the hosted Attachments tab still exposed a usable upload "
+            "path instead of a download-only experience for Git LFS attachments.\n"
             f"Observed upload controls: {attachments_observation['upload_controls']}\n"
             f"Visible upload button counts: {upload_button_counts}\n"
+            f"Disabled upload button counts: {upload_button_disabled_counts}\n"
+            f"Enabled upload button counts: {upload_button_enabled_counts}\n"
             f"Visible file input count: {attachments_observation['visible_file_input_count']}\n"
             f"Observed body text:\n{attachments_text}",
         )
@@ -444,8 +492,8 @@ def _exercise_attachments_tab(
         step=5,
         status="passed",
         action=(
-            "Open the Attachments tab and verify download-only guidance, hidden upload "
-            "controls, and an available download action for the seeded attachment."
+            "Open the Attachments tab and verify download-only guidance, no usable "
+            "upload path, and an available download action for the seeded attachment."
         ),
         observed=attachments_text,
     )
