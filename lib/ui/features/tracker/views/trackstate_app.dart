@@ -658,7 +658,19 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: fallbackWorkspace.id,
       );
-      await fallbackViewModel.load(deferAccessRestore: deferAccessRestore);
+      final loadFuture = fallbackViewModel.load(
+        deferAccessRestore: deferAccessRestore,
+      );
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(loadFuture);
+        final publishedFallback = await fallbackViewModel
+            .publishHostedStartupFallbackShell();
+        if (!publishedFallback) {
+          await loadFuture;
+        }
+      } else {
+        await loadFuture;
+      }
       if (fallbackViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(
           fallbackViewModel.message,

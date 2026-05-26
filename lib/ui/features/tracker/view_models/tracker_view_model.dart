@@ -2184,6 +2184,35 @@ class TrackerViewModel extends ChangeNotifier {
     );
   }
 
+  Future<bool> publishHostedStartupFallbackShell() async {
+    if (_snapshot != null) {
+      return true;
+    }
+    final repository = _repository;
+    if (repository is! ProviderBackedTrackStateRepository ||
+        repository.usesLocalPersistence) {
+      return false;
+    }
+    final snapshot = repository.buildHostedStartupFallbackSnapshot();
+    await _applyReloadedSnapshot(
+      snapshot,
+      previousSelectedIssue: _selectedIssue,
+      preferredSelectedIssueKey: _selectedIssue?.key,
+    );
+    if (_message == null && snapshot.loadWarnings.isNotEmpty) {
+      _message = TrackerMessage.repositoryConfigFallback(
+        snapshot.loadWarnings.first,
+      );
+    }
+    if (hasStartupRecovery && _snapshot != null) {
+      _section = TrackerSection.settings;
+    }
+    if (!_disposed) {
+      notifyListeners();
+    }
+    return true;
+  }
+
   Future<void> _loadInitialSearchPage({
     required int requestToken,
     required bool rethrowOnError,

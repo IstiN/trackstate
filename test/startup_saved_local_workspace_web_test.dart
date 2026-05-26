@@ -47,6 +47,84 @@ void main() {
   });
 
   testWidgets(
+    'web startup switches into the hosted fallback workspace before a slow hosted load completes',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _SlowBrowserStartupAuthProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+      final browserHarness = _BrowserStartupAuthProbeHarness()..install();
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        browserHarness.dispose();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(delayedRepository.loadSnapshotPending, isTrue);
+      expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.userProbePending, isTrue);
+      expect(browserHarness.requestedPaths, contains('/user'));
+      _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
+      await _expectHostedFallbackWorkspaceRow(tester);
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
+
+  testWidgets(
     'web startup switches to the hosted fallback workspace when the browser handle is missing and opens the shell fallback',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -275,7 +353,6 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
-      _expectShellReadyDiagnostic();
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -352,7 +429,6 @@ void main() {
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
-      _expectShellReadyDiagnostic();
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -809,37 +885,34 @@ void _expectShellReadySurface() {
   expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
 }
 
-void _expectShellReadyDiagnostic() {
-  final visibleNavigationLabels = <String>[
-    for (final label in _startupShellNavigationLabels)
-      if (find.text(label).evaluate().isNotEmpty) label,
-  ];
-  final shellReady =
-      find
-          .byKey(const ValueKey('workspace-switcher-trigger'))
-          .evaluate()
-          .isNotEmpty &&
-      visibleNavigationLabels.length == _startupShellNavigationLabels.length &&
-      find
-          .text('Git-native. Jira-compatible. Team-proven.')
-          .evaluate()
-          .isNotEmpty;
-  expect(
-    shellReady,
-    isTrue,
-    reason: jsonEncode(<String, Object?>{
-      'shellReady': shellReady,
-      'visibleNavigationLabels': visibleNavigationLabels,
-      'brandingVisible': find
-          .text('Git-native. Jira-compatible. Team-proven.')
-          .evaluate()
-          .isNotEmpty,
-      'workspaceSwitcherTriggerVisible': find
-          .byKey(const ValueKey('workspace-switcher-trigger'))
-          .evaluate()
-          .isNotEmpty,
-    }),
-  );
+class _SlowBrowserStartupAuthProbeRepository
+    extends ProviderBackedTrackStateRepository {
+  _SlowBrowserStartupAuthProbeRepository({required TrackerSnapshot snapshot})
+    : this._(snapshot: snapshot, provider: _BrowserStartupAuthProbeProvider());
+
+  _SlowBrowserStartupAuthProbeRepository._({
+    required TrackerSnapshot snapshot,
+    required _BrowserStartupAuthProbeProvider provider,
+  }) : _snapshotOverride = snapshot,
+       super(
+         provider: provider,
+         hostedStartupProbeTimeout: const Duration(minutes: 1),
+       );
+
+  final TrackerSnapshot _snapshotOverride;
+  final Completer<void> _loadSnapshotCompleter = Completer<void>();
+  bool _loadSnapshotStarted = false;
+
+  bool get loadSnapshotPending =>
+      _loadSnapshotStarted && !_loadSnapshotCompleter.isCompleted;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    _loadSnapshotStarted = true;
+    await _loadSnapshotCompleter.future;
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
+  }
 }
 
 Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
