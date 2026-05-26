@@ -1941,7 +1941,21 @@ class ProviderBackedTrackStateRepository
 
   Future<_LoadedSnapshotInputs> _loadSnapshotInputs() async {
     final loadWarnings = <String>[];
-    final tree = await _provider.listTree(ref: _provider.dataRef);
+    List<RepositoryTreeEntry> tree;
+    try {
+      tree = await _loadHostedStartupProbe<List<RepositoryTreeEntry>>(
+        'listTree(${_provider.dataRef})',
+        () => _provider.listTree(ref: _provider.dataRef),
+      );
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: 'repository tree',
+        ),
+      );
+      tree = const <RepositoryTreeEntry>[];
+    }
     _snapshotTree = tree;
     final blobPaths = tree
         .where((entry) => entry.type == 'blob')
@@ -1953,7 +1967,7 @@ class ProviderBackedTrackStateRepository
       orElse: () => '',
     );
     if (projectPath.isEmpty) {
-      if (!usesLocalPersistence) {
+      if (!usesLocalPersistence && loadWarnings.isEmpty) {
         throw const TrackStateRepositoryException(
           'project.json was not found in the repository.',
         );
@@ -1967,7 +1981,9 @@ class ProviderBackedTrackStateRepository
           key: _deriveFallbackProjectKey(workspaceName),
           name: workspaceName,
           repository: _provider.repositoryLabel,
-          branch: await _provider.resolveWriteBranch(),
+          branch: usesLocalPersistence
+              ? await _provider.resolveWriteBranch()
+              : _provider.dataRef,
           defaultLocale: 'en',
           supportedLocales: const <String>['en'],
           issueTypeDefinitions: _issueTypeDefinitions,
