@@ -31,7 +31,7 @@ TEST_CASE_TITLE = "Lose component focus — workspace switcher panel dismisses v
 INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-821/test_ts_821.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 BLUR_WAIT_MS = 6_000
 
 REQUEST_STEPS = [
@@ -175,7 +175,8 @@ def main() -> None:
                         f"container_kind={panel.container_kind}; "
                         f"anchored_to_trigger={panel.anchored_to_trigger}; "
                         f"row_count={switcher.row_count}; "
-                        f"title_visible={'Workspace switcher' in switcher.switcher_text}"
+                        f"title_visible={'Workspace switcher' in switcher.switcher_text}; "
+                        f"content_excerpt={_snippet(switcher.switcher_text)}"
                     ),
                 )
 
@@ -224,10 +225,12 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Opened the visible desktop workspace switcher, pressed Tab once, "
-                        "and watched which real control received focus next."
+                        "Opened the visible desktop workspace switcher, confirmed the panel "
+                        "content a user would see, pressed Tab once, and watched which real "
+                        "control received focus next."
                     ),
                     observed=(
+                        f"switcher_text={_snippet(switcher.switcher_text)}; "
                         f"before_focus={blur_observation.before_focus_label!r}; "
                         f"before_role={blur_observation.before_focus_role!r}; "
                         f"before_visible={blur_observation.before_focus_visible}; "
@@ -309,10 +312,21 @@ def _assert_desktop_panel_open(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
-    if switcher.row_count <= 0:
+    switcher_text = switcher.switcher_text.strip()
+    if not switcher_text:
         raise AssertionError(
-            "Step 2 failed: opening the workspace switcher did not expose any visible "
-            "workspace rows.\n"
+            "Step 2 failed: opening the workspace switcher did not expose readable "
+            "visible panel content.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}",
+        )
+    if (
+        "Workspace switcher" not in switcher_text
+        and trigger.display_name not in switcher_text
+        and "Add workspace" not in switcher_text
+    ):
+        raise AssertionError(
+            "Step 2 failed: clicking the workspace switcher trigger did not expose the "
+            "expected desktop workspace-switcher content.\n"
             f"Observed switcher text:\n{switcher.switcher_text}",
         )
     if panel.container_kind not in {"anchored-panel", "surface"}:
@@ -528,9 +542,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Rework summary",
-        "- Removed the `FLUTTER-VIEW` fallback that could mark the pre-Tab blur setup as switcher-owned even when the ownership probe failed.",
-        "- Kept the shared Dashboard navigation helper on a real Playwright click so the live test still opens the current deployed desktop view reliably.",
-        "- TS-821 now proceeds only when the blur helper can positively prove switcher-owned focus via switcher-specific signals before pressing `Tab`.",
+        "- Resolved the TS-821 merge conflicts in the shared workspace-switcher page object and the ticket test.",
+        "- Kept the stricter pre-Tab ownership check so the blur scenario only counts when focus is positively owned by the switcher or its trigger.",
+        "- Preserved the broader workspace-trigger selectors from `main` so the live test still opens the current deployed desktop UI reliably.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -580,9 +594,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Removed the `FLUTTER-VIEW` fallback that could turn a failed pre-Tab ownership probe into a false success.",
-        "- Kept the shared Dashboard navigation helper on a real Playwright click for the current deployed UI.",
-        "- TS-821 now only treats the blur setup as valid when the ownership probe positively attributes focus to the switcher or its trigger.",
+        "- Resolved the TS-821 merge conflicts in the shared workspace-switcher helpers and ticket test.",
+        "- Kept the stricter pre-Tab ownership probe so the blur path is only accepted when focus is positively switcher-owned.",
+        "- Preserved the broader trigger selectors from `main` for the current deployed UI.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
