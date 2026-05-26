@@ -26,6 +26,7 @@ class StartupAuthProbeDiagnostics {
   String? _authProbePath;
   Duration? _timeout;
   bool _awaitingShellReady = false;
+  bool _fallbackShellReadyPending = false;
   bool _loggedDiagnostic = false;
 
   void reset() {
@@ -33,6 +34,7 @@ class StartupAuthProbeDiagnostics {
     _authProbePath = null;
     _timeout = null;
     _awaitingShellReady = false;
+    _fallbackShellReadyPending = false;
     _loggedDiagnostic = false;
   }
 
@@ -43,6 +45,9 @@ class StartupAuthProbeDiagnostics {
     }
     _authProbeStartedAt = _now();
     _authProbePath = normalizedPath;
+    if (_fallbackShellReadyPending && !_loggedDiagnostic) {
+      _logFallbackShellReady(timeout: _timeout ?? Duration.zero);
+    }
   }
 
   void recordTimeoutFallback({required Duration timeout}) {
@@ -77,9 +82,25 @@ class StartupAuthProbeDiagnostics {
         _authProbePath == null) {
       return;
     }
+    _logFallbackShellReady(timeout: _timeout ?? Duration.zero);
+  }
+
+  void recordFallbackShellReady({required Duration timeout}) {
+    if (_loggedDiagnostic) {
+      return;
+    }
+    _timeout ??= timeout;
+    if (_authProbeStartedAt == null || _authProbePath == null) {
+      _fallbackShellReadyPending = true;
+      return;
+    }
+    _logFallbackShellReady(timeout: _timeout ?? timeout);
+  }
+
+  void _logFallbackShellReady({required Duration timeout}) {
     final deltaSeconds =
         _now().difference(_authProbeStartedAt!).inMilliseconds / 1000;
-    final timeoutSeconds = (_timeout ?? Duration.zero).inMilliseconds / 1000;
+    final timeoutSeconds = timeout.inMilliseconds / 1000;
     _logger(
       'TrackState startup fallback diagnostic: '
       'auth probe ${_authProbePath!} started; '
@@ -88,6 +109,7 @@ class StartupAuthProbeDiagnostics {
       'timeout_seconds=${timeoutSeconds.toStringAsFixed(2)}',
     );
     _awaitingShellReady = false;
+    _fallbackShellReadyPending = false;
     _loggedDiagnostic = true;
   }
 }

@@ -8,5 +8,5 @@ dependencies:
   args: ^2.7.0
   flutter:
     path: packages/flutter
-  http:
-    path: packages/http
+  http: ^1.6.0
+  meta: ^1.16.0

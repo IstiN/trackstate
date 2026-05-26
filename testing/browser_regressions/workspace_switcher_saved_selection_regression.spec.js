@@ -218,16 +218,18 @@ async function resolveSavedWorkspaceRowClickTarget(page, displayName) {
           || text.startsWith('Delete: ')
           || label === 'Active'
           || text === 'Active';
-        const rowSpecificId =
+        const rowSpecificControl =
           rowId.startsWith('trackstate-workspace-switcher-row-')
-          || focusId.startsWith('trackstate-workspace-switcher-row-')
+          || focusId.startsWith('trackstate-workspace-switcher-row-');
+        const rowSpecificId =
+          rowSpecificControl
           || identifier.startsWith('trackstate-workspace-switcher-row-');
         const looksLikeCurrentRow =
           ariaCurrent.toLowerCase() === 'true'
           || ariaSelected.toLowerCase() === 'true'
           || combined.includes('Active');
         const matchesDisplayName = combined.includes(targetDisplayName);
-        const rowLikeCandidate = rowSpecificId || looksLikeCurrentRow;
+        const rowLikeCandidate = rowSpecificControl || looksLikeCurrentRow;
         if (
           !matchesDisplayName
           || !rowLikeCandidate

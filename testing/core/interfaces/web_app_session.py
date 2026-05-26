@@ -220,7 +220,6 @@ class WebAppSession(Protocol):
         arg: object | None = None,
         timeout_ms: int = 30_000,
     ) -> object: ...
-
     def active_element(self) -> FocusedElementObservation: ...
 
     def wait_for_download_after_keypress(
