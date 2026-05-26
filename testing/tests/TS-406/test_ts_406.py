@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import platform
 import re
 import sys
@@ -32,6 +31,7 @@ BUG_WORKFLOW_NAME = "Bug Workflow"
 BUG_ISSUE_TYPE_ID = "bug"
 BUG_ISSUE_TYPE_NAME = "Bug"
 WORKFLOW_TRANSITION_NAME = "Complete bug"
+STEP_7_ACTION = "Click Save and verify the Bug workflow assignment persists."
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -51,6 +51,10 @@ TICKET_STEPS = [
     "Edit the 'Bug' issue type and select 'Bug Workflow' in the assigned workflow field.",
     "Click 'Save' and verify persistence.",
 ]
+
+
+class ProductFailure(AssertionError):
+    pass
 
 
 def main() -> None:
@@ -225,58 +229,71 @@ def main() -> None:
 
                 save_body_text = settings_page.save_project_settings()
                 result["save_settings_body_text"] = save_body_text
-                save_failure_text = _wait_for_save_failure(settings_page)
-                result["save_failure_text"] = save_failure_text
-                if save_failure_text is not None:
-                    raise AssertionError(
-                        "Step 7 failed: Save settings displayed a visible validation error "
-                        "instead of persisting the workflow assignment.\n"
-                        f"Observed body text:\n{save_failure_text}",
-                    )
-                persisted_config = _wait_for_repository_persistence(service)
-                result["persisted_repository_config"] = persisted_config
+                try:
+                    save_failure_text = _wait_for_save_failure(settings_page)
+                    result["save_failure_text"] = save_failure_text
+                    if save_failure_text is not None:
+                        raise ProductFailure(
+                            "Step 7 failed: Save settings displayed a visible validation "
+                            "error instead of persisting the workflow assignment.\n"
+                            f"Observed body text:\n{save_failure_text}",
+                        )
+                    persisted_config = _wait_for_repository_persistence(service)
+                    result["persisted_repository_config"] = persisted_config
 
-                runtime_after_reload = tracker_page.open()
-                result["runtime_after_reload"] = {
-                    "kind": runtime_after_reload.kind,
-                    "body_text": runtime_after_reload.body_text,
-                }
-                if runtime_after_reload.kind != "ready":
-                    raise AssertionError(
-                        "Step 7 failed: after saving settings, the hosted app did not "
-                        "re-open cleanly for the persistence check.\n"
-                        f"Observed body text:\n{runtime_after_reload.body_text}",
-                    )
-                settings_page.open_settings_admin()
-                workflow_row_after_reload = _reload_workflow_row(settings_page)
-                issue_type_row_after_reload = _reload_issue_type_row(settings_page)
-                result["workflow_row_after_reload"] = workflow_row_after_reload
-                result["issue_type_row_after_reload"] = issue_type_row_after_reload
+                    runtime_after_reload = tracker_page.open()
+                    result["runtime_after_reload"] = {
+                        "kind": runtime_after_reload.kind,
+                        "body_text": runtime_after_reload.body_text,
+                    }
+                    if runtime_after_reload.kind != "ready":
+                        raise ProductFailure(
+                            "Step 7 failed: after saving settings, the hosted app did not "
+                            "re-open cleanly for the persistence check.\n"
+                            f"Observed body text:\n{runtime_after_reload.body_text}",
+                        )
+                    settings_page.open_settings_admin()
+                    workflow_row_after_reload = _reload_workflow_row(settings_page)
+                    issue_type_row_after_reload = _reload_issue_type_row(settings_page)
+                    result["workflow_row_after_reload"] = workflow_row_after_reload
+                    result["issue_type_row_after_reload"] = issue_type_row_after_reload
 
-                if "ID: bug-workflow" not in workflow_row_after_reload:
-                    raise AssertionError(
-                        "Step 7 failed: re-opening Settings did not keep the visible Bug "
-                        "Workflow row in the Workflows tab.\n"
-                        f"Observed workflow row after reload:\n{workflow_row_after_reload}",
-                    )
-                if "Workflow: bug-workflow" not in issue_type_row_after_reload:
-                    raise AssertionError(
-                        "Step 7 failed: re-opening Settings did not keep the visible Bug "
-                        "issue type linked to bug-workflow.\n"
-                        f"Observed issue type row after reload:\n{issue_type_row_after_reload}",
-                    )
+                    if "ID: bug-workflow" not in workflow_row_after_reload:
+                        raise ProductFailure(
+                            "Step 7 failed: re-opening Settings did not keep the visible Bug "
+                            "Workflow row in the Workflows tab.\n"
+                            f"Observed workflow row after reload:\n{workflow_row_after_reload}",
+                        )
+                    if "Workflow: bug-workflow" not in issue_type_row_after_reload:
+                        raise ProductFailure(
+                            "Step 7 failed: re-opening Settings did not keep the visible Bug "
+                            "issue type linked to bug-workflow.\n"
+                            f"Observed issue type row after reload:\n{issue_type_row_after_reload}",
+                        )
 
-                _record_step(
-                    result,
-                    step=7,
-                    status="passed",
-                    action="Click Save and verify the Bug workflow assignment persists.",
-                    observed=(
-                        f"{workflow_row_after_reload}\n"
-                        f"{issue_type_row_after_reload}\n"
-                        f"{json.dumps(persisted_config, indent=2)}"
-                    ),
-                )
+                    _record_step(
+                        result,
+                        step=7,
+                        status="passed",
+                        action=STEP_7_ACTION,
+                        observed=(
+                            f"{workflow_row_after_reload}\n"
+                            f"{issue_type_row_after_reload}\n"
+                            f"{json.dumps(persisted_config, indent=2)}"
+                        ),
+                    )
+                except AssertionError as error:
+                    if 7 not in _step_result_map(result):
+                        _record_step(
+                            result,
+                            step=7,
+                            status="failed",
+                            action=STEP_7_ACTION,
+                            observed=str(error),
+                        )
+                    if isinstance(error, ProductFailure):
+                        raise
+                    raise ProductFailure(str(error)) from error
                 _record_human_verification(
                     result,
                     check=(
@@ -301,10 +318,16 @@ def main() -> None:
                 settings_page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
-    except AssertionError as error:
+    except ProductFailure as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result, product_failure=True)
+        print(json.dumps(result, indent=2))
+        raise
+    except AssertionError as error:
+        result["error"] = str(error)
+        result["traceback"] = traceback.format_exc()
+        _write_failure_outputs(result, product_failure=False)
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:

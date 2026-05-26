@@ -32,11 +32,28 @@ class LiveProjectSettingsAdminPage:
         repository: str,
         user_login: str,
     ) -> str:
-        observation = self._tracker_page.connect_with_token(
-            token=token,
-            repository=repository,
+        current_body = self.current_body_text()
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
             user_login=user_login,
-        )
+            repository=repository,
+        ):
+            return current_body
+        try:
+            observation = self._tracker_page.connect_with_token(
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+        except AssertionError:
+            current_body = self.current_body_text()
+            if TrackStateTrackerPage.body_has_connected_banner(
+                current_body,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return current_body
+            raise
         return observation.body_text
 
     def open_settings_admin(self) -> str:
@@ -172,12 +189,7 @@ class LiveProjectSettingsAdminPage:
 
     def save_project_settings(self) -> str:
         save_label = "Save settings"
-        self._scroll_into_view(self.BUTTON_SELECTOR, has_text=save_label)
-        self.session.click(
-            self.BUTTON_SELECTOR,
-            has_text=save_label,
-            timeout_ms=30_000,
-        )
+        self._click_visible_semantics_control(label=save_label, role="button")
         self.session.wait_for_function(
             """
             ({ selector, label }) => {
@@ -213,6 +225,49 @@ class LiveProjectSettingsAdminPage:
     def _click_button_text(self, text: str) -> None:
         self._scroll_into_view(self.BUTTON_SELECTOR, has_text=text)
         self.session.click(self.BUTTON_SELECTOR, has_text=text, timeout_ms=30_000)
+
+    def _click_visible_semantics_control(self, *, label: str, role: str) -> None:
+        clicked = self.session.evaluate(
+            """
+            ({ expectedLabel, expectedRole }) => {
+              const isVisible = (candidate) => {
+                const rect = candidate.getBoundingClientRect();
+                const style = window.getComputedStyle(candidate);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const normalize = (value) => (value ?? '').trim();
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  const role = candidate.getAttribute('role') ?? '';
+                  const aria = normalize(candidate.getAttribute('aria-label'));
+                  const text = normalize(candidate.innerText);
+                  return role === expectedRole
+                    && isVisible(candidate)
+                    && (aria === expectedLabel || text === expectedLabel);
+                })
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+                })[0];
+              if (!match) {
+                return false;
+              }
+              match.scrollIntoView({ block: 'center', inline: 'center' });
+              match.click();
+              return true;
+            }
+            """,
+            arg={"expectedLabel": label, "expectedRole": role},
+        )
+        if clicked is not True:
+            raise AssertionError(
+                f'The Settings surface did not expose a visible {role} labeled "{label}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
     def _scroll_page(self, *, y: int) -> None:
         self.session.evaluate(
