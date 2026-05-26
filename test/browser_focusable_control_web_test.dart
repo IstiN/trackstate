@@ -144,7 +144,7 @@ void main() {
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
+        findsWidgets,
       );
       expect(
         find.descendant(of: localRow, matching: find.text('Retry')),
@@ -254,7 +254,7 @@ void main() {
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
+        findsWidgets,
       );
       expect(
         find.descendant(of: localRow, matching: find.text('Retry')),

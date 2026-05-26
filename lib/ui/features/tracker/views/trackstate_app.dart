@@ -946,6 +946,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
             markUnavailable: requiresBrowserReselection,
+            requireAuthenticatedHostedFallback: true,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -976,6 +977,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
             markUnavailable: requiresBrowserReselection,
+            requireAuthenticatedHostedFallback: true,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -995,16 +997,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
   }
 
-  Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
+  Future<_PreparedWorkspaceSwitch?> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
     TrackerViewModel previousViewModel, {
     bool deferAccessRestore = false,
     bool markUnavailable = false,
+    bool requireAuthenticatedHostedFallback = false,
   }) async {
     final hostedFallbackSwitch =
         await _preparePreservedLocalHostedFallbackSwitch(
           previousViewModel,
           deferAccessRestore: deferAccessRestore,
+          requireAuthenticatedWorkspace: requireAuthenticatedHostedFallback,
         );
     if (hostedFallbackSwitch != null) {
       if (markUnavailable) {
@@ -1013,6 +1017,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         _workspaceValidationFailures.remove(workspace.id);
       }
       return hostedFallbackSwitch;
+    }
+    if (requireAuthenticatedHostedFallback) {
+      return null;
     }
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {

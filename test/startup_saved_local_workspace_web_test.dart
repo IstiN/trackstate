@@ -212,6 +212,97 @@ void main() {
   );
 
   testWidgets(
+    'web startup keeps the workspace switcher open when the browser handle is missing and no hosted token exists',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+
+      var hostedRepositoryOpened = false;
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                hostedRepositoryOpened = true;
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'Workspace switcher: Hosted setup workspace, .*Needs sign-in'),
+        ),
+        findsNothing,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsWidgets,
+      );
+      expect(hostedRepositoryOpened, isFalse);
+
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
+
+  testWidgets(
     'web startup commits the hosted fallback shell before workspace persistence finishes for preserved local restore',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -781,6 +872,7 @@ void main() {
         ),
         select: false,
       );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _SearchBlockingBrowserStartupRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
