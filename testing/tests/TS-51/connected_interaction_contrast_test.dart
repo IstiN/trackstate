@@ -23,6 +23,7 @@ void main() {
           sharedPreferences: const {
             'trackstate.githubToken.trackstate.trackstate': 'stored-token',
           },
+          viewportSize: const Size(1440, 900),
         );
         await robot.openSettings();
 
