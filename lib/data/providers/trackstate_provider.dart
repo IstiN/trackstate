@@ -40,6 +40,10 @@ abstract interface class RepositoryPermissionChecker {
   Future<RepositoryPermission> getPermission();
 }
 
+abstract interface class RepositorySyncChecker {
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
 abstract interface class RepositoryCatalogReader {
   Future<List<HostedRepositoryReference>> listAccessibleRepositories();
 }
@@ -87,6 +91,7 @@ abstract interface class TrackStateProviderAdapter
         RepositorySessionManager,
         RepositoryCommitManager,
         RepositoryPermissionChecker,
+        RepositorySyncChecker,
         RepositoryAttachmentStore {
   ProviderType get providerType;
   String get repositoryLabel;
@@ -188,6 +193,66 @@ class RepositoryTreeEntry {
 
   final String path;
   final String type;
+}
+
+class RepositorySyncState {
+  const RepositorySyncState({
+    required this.providerType,
+    required this.repositoryRevision,
+    required this.sessionRevision,
+    required this.connectionState,
+    this.workingTreeRevision,
+    this.permission,
+  });
+
+  final ProviderType providerType;
+  final String repositoryRevision;
+  final String sessionRevision;
+  final ProviderConnectionState connectionState;
+  final String? workingTreeRevision;
+  final RepositoryPermission? permission;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'provider_type': providerType.name,
+      'repository_revision': repositoryRevision,
+      'session_revision': sessionRevision,
+      'connection_state': connectionState.name,
+      'working_tree_revision': workingTreeRevision,
+      'permission': permission?.toJson(),
+    };
+  }
+}
+
+class RepositorySyncCheck {
+  const RepositorySyncCheck({
+    required this.state,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.changedPaths = const <String>{},
+    this.hostedSnapshotReloadDirective,
+  });
+
+  final RepositorySyncState state;
+  final Set<WorkspaceSyncSignal> signals;
+  final Set<String> changedPaths;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
+
+  Map<String, Object?> toJson() {
+    final payload = <String, Object?>{
+      'state': state.toJson(),
+      'signals': signals.map((signal) => signal.name).toList()..sort(),
+      'changed_paths': changedPaths.toList()..sort(),
+    };
+    final loadSnapshotDelta = switch (hostedSnapshotReloadDirective) {
+      HostedSnapshotReloadDirective.enabled => 1,
+      HostedSnapshotReloadDirective.disabled => 0,
+      null => null,
+    };
+    if (loadSnapshotDelta != null) {
+      payload['load_snapshot_delta'] = loadSnapshotDelta;
+    }
+    return payload;
+  }
 }
 
 class RepositoryTextFile {
@@ -437,6 +502,21 @@ class RepositoryPermission {
   final bool supportsReleaseAttachmentWrites;
   final String? releaseAttachmentWriteFailureReason;
   final bool canCheckCollaborators;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'can_read': canRead,
+      'can_write': canWrite,
+      'is_admin': isAdmin,
+      'can_create_branch': canCreateBranch,
+      'can_manage_attachments': canManageAttachments,
+      'attachment_upload_mode': attachmentUploadMode.name,
+      'supports_release_attachment_writes': supportsReleaseAttachmentWrites,
+      'release_attachment_write_failure_reason':
+          releaseAttachmentWriteFailureReason,
+      'can_check_collaborators': canCheckCollaborators,
+    };
+  }
 }
 
 class RepositoryAttachment {
@@ -574,9 +654,10 @@ class RepositoryHistoryCommit {
 }
 
 class TrackStateProviderException implements Exception {
-  const TrackStateProviderException(this.message);
+  const TrackStateProviderException(this.message, {this.details = const {}});
 
   final String message;
+  final Map<String, Object?> details;
 
   @override
   String toString() => message;

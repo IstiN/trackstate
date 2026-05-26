@@ -457,8 +457,14 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
-    PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    PR_BODY_PATH.write_text(
+        _build_pr_body_markdown(result, status="passed"),
+        encoding="utf-8",
+    )
+    RESPONSE_PATH.write_text(
+        _build_response_markdown(result, status="passed"),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(
@@ -596,8 +602,14 @@ def _write_failure_outputs(
     ]
 
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
-    PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    PR_BODY_PATH.write_text(
+        _build_pr_body_markdown(result, status="failed"),
+        encoding="utf-8",
+    )
+    RESPONSE_PATH.write_text(
+        _build_response_markdown(result, status="failed"),
+        encoding="utf-8",
+    )
     if product_defect:
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
     else:
@@ -728,29 +740,114 @@ def _discussion_threads() -> list[dict[str, object]]:
     threads = raw.get("threads")
     if not isinstance(threads, list):
         return []
-    return [thread for thread in threads if isinstance(thread, dict)]
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
 
 
 def _review_reply_text(result: dict[str, object], *, status: str) -> str:
     visible_error = _as_text(result.get("visible_error_text"))
     if status == "passed":
         return (
-            "Fixed: TS-684 now exercises the `TrackStateCli` local attachment-upload "
-            "execution path with the mocked 409 release-creation flow instead of "
-            "calling `ProviderBackedTrackStateRepository.uploadIssueAttachment()` "
-            "directly. The rerun now validates the caller-visible CLI envelope and "
-            f"passed with conflict-specific output: {visible_error}"
+            "Resolved the TS-684 merge/rework branch against `main`, updated the "
+            "probe to match the current attachment-upload contract, and reran the "
+            "local `TrackStateCli` conflict scenario. The current run passed with "
+            f"caller-visible conflict-specific output: {visible_error}"
         )
     return (
-        "Fixed the review concern in the test harness: TS-684 now exercises the "
-        "`TrackStateCli` local attachment-upload execution path with the mocked 409 "
-        "release-creation flow instead of calling "
-        "`ProviderBackedTrackStateRepository.uploadIssueAttachment()` directly. The "
-        "rerun now validates the caller-visible CLI envelope and reproduces the "
-        "remaining product bug: the local CLI still returns the generic "
-        "`REPOSITORY_OPEN_FAILED` wrapper instead of a conflict-specific 409/"
-        f"`tag already exists` error. Observed output: {visible_error}"
+        "Resolved the TS-684 merge/rework branch against `main`, updated the probe "
+        "to match the current attachment-upload contract, and reran the local "
+        "`TrackStateCli` conflict scenario. The test still reproduces the remaining "
+        "product defect because the caller-visible output is not conflict-specific: "
+        f"{visible_error}"
     )
+
+
+def _build_pr_body_markdown(result: dict[str, object], *, status: str) -> str:
+    lines = [
+        "## Rework Summary",
+        "",
+        "### Fixed Issues",
+        "",
+        "**Thread 1 — general review**",
+        "- Issue: No new blocking review defect remained, but the branch had unresolved merge conflicts against `main` and the TS-684 probe package no longer matched the current attachment-upload/test dependency contracts.",
+        "- Fix: Resolved the merge-conflict markers, updated the probe repository override to forward `sourceName`, added the missing test-only `meta` dependency, extended the local stub `http` client with `patch`, and reran the local CLI conflict scenario.",
+        "- Files: `testing/tests/TS-684/test_ts_684.py`, `testing/tests/TS-684/dart_probe/bin/ts684_release_creation_conflict_probe.dart`, `testing/tests/TS-684/dart_probe/pubspec.yaml`, `testing/tests/TS-684/dart_probe/pubspec.lock`, `testing/tests/TS-684/dart_probe/packages/http/lib/http.dart`, `testing/tests/TS-684/dart_probe/packages/http/lib/testing.dart`",
+        "",
+        "### Test Status",
+        (
+            "- Passed: `python testing/tests/TS-684/test_ts_684.py`"
+            if status == "passed"
+            else "- Failed: `python testing/tests/TS-684/test_ts_684.py`"
+        ),
+    ]
+    if status == "failed":
+        lines.append(
+            f"- Product gap remains: `{_as_text(result.get('visible_error_text')) or _as_text(result.get('error'))}`"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _build_response_markdown(result: dict[str, object], *, status: str) -> str:
+    visible_error = _as_text(result.get("visible_error_text"))
+    files_modified = [
+        "- `testing/tests/TS-684/test_ts_684.py`",
+        "- `testing/tests/TS-684/dart_probe/bin/ts684_release_creation_conflict_probe.dart`",
+        "- `testing/tests/TS-684/dart_probe/pubspec.yaml`",
+        "- `testing/tests/TS-684/dart_probe/pubspec.lock`",
+        "- `testing/tests/TS-684/dart_probe/packages/http/lib/http.dart`",
+        "- `testing/tests/TS-684/dart_probe/packages/http/lib/testing.dart`",
+    ]
+    if status == "passed":
+        issues_notes = [
+            "## Issues/Notes",
+            "",
+            "- Resolved the TS-684 merge conflicts against `main` before rerunning the test.",
+            "- The local CLI now surfaces the mocked 409 release-creation conflict without the generic wrapper.",
+        ]
+        coverage = [
+            "## Test Coverage",
+            "",
+            "- Re-ran `python testing/tests/TS-684/test_ts_684.py`.",
+            "- Verified the local CLI path, mocked `404` -> `409` GitHub release flow, caller-visible conflict text, and unchanged attachment state.",
+        ]
+    else:
+        issues_notes = [
+            "## Issues/Notes",
+            "",
+            "- Resolved the TS-684 merge conflicts against `main` before rerunning the test.",
+            "- The rerun still exposes a product defect on the local CLI surface.",
+            f"- Current caller-visible output: `{visible_error or _as_text(result.get('error'))}`",
+        ]
+        coverage = [
+            "## Test Coverage",
+            "",
+            "- Re-ran `python testing/tests/TS-684/test_ts_684.py`.",
+            "- Verified the local CLI path, mocked `404` -> `409` GitHub release flow, and unchanged attachment state.",
+            "- The test still fails because the caller-visible error is not conflict-specific.",
+        ]
+    lines = [
+        *issues_notes,
+        "",
+        "## Approach",
+        "",
+        "- Resolved the merge-conflict markers in the TS-684 Python harness and Dart probe.",
+        "- Updated the probe repository override to forward the current `sourceName` attachment parameter used by `main`.",
+        "- Added the missing test-only probe dependency/runtime support required by the current production imports (`meta` and `http.patch`).",
+        "- Regenerated the TS-684 output artifacts from the rerun result.",
+        "",
+        "## Files Modified",
+        "",
+        *files_modified,
+        "",
+        *coverage,
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _record_step(
