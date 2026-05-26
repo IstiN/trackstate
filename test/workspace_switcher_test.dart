@@ -1334,6 +1334,124 @@ void main() {
   );
 
   testWidgets(
+    'workspace switcher restores an unavailable saved local workspace through manual browser re-authentication before falling back to the picker',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'demo',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+          unavailableLocalWorkspaceIds: {localWorkspaceId},
+        ),
+      );
+      var directoryPickerCalls = 0;
+      var browserAccessRequests = 0;
+      var browserOpenAttempts = 0;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                return '/tmp/demo';
+              },
+          requestBrowserLocalRepositoryAccess:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserAccessRequests += 1;
+                expect(repositoryPath, '/tmp/demo');
+                return _LocalQueuedLoadTrackStateRepository(
+                  loadResults: [await _snapshotForRepository(repositoryPath)],
+                );
+              },
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserOpenAttempts += 1;
+                return null;
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => throw UnsupportedError(
+                'Unsupported operation: Process.run',
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(browserAccessRequests, 1);
+      expect(browserOpenAttempts, 1);
+      expect(
+        directoryPickerCalls,
+        0,
+        reason: 'Manual re-auth should reuse the saved browser handle first.',
+      );
+      expect(service.state.activeWorkspaceId, localWorkspaceId);
+      expect(find.textContaining('/tmp/demo'), findsWidgets);
+      expect(find.textContaining('stable/repo'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'workspace switcher restores an unavailable saved local workspace through the browser retry fallback without reopening the directory picker',
     (tester) async {
       const localWorkspaceId = 'local:/tmp/demo@main';
