@@ -476,8 +476,15 @@ class ProviderBackedTrackStateRepository
                 : currentIssue.comments,
           )
         : _CommentHydrationResult(comments: currentIssue.comments);
+    final repositoryIndexEntry = currentSnapshot.repositoryIndex.entryForKey(
+      currentIssue.key,
+    );
     final links = shouldLoadDetail
-        ? await _loadLinks(blobPaths: _snapshotBlobPaths, issueRoot: issueRoot)
+        ? await _loadLinks(
+            blobPaths: _snapshotBlobPaths,
+            issueRoot: issueRoot,
+            repositoryIndexEntry: repositoryIndexEntry,
+          )
         : currentIssue.links;
     final attachments = shouldLoadAttachments
         ? await _loadAttachments(tree: _snapshotTree, issueRoot: issueRoot)
@@ -490,9 +497,7 @@ class ProviderBackedTrackStateRepository
           comments: commentsResult.comments,
           links: links,
           attachments: attachments,
-          repositoryIndexEntry: currentSnapshot.repositoryIndex.entryForKey(
-            currentIssue.key,
-          ),
+          repositoryIndexEntry: repositoryIndexEntry,
           issueTypeDefinitions: currentSnapshot.project.issueTypeDefinitions,
           statusDefinitions: currentSnapshot.project.statusDefinitions,
           priorityDefinitions: currentSnapshot.project.priorityDefinitions,
@@ -5397,18 +5402,33 @@ RepositoryIndex _normalizeRepositoryIndex(
   List<TrackStateIssue> issues,
 ) {
   final issueByKey = {for (final issue in issues) issue.key: issue};
-  final entriesByKey = {
-    for (final entry in index.entries) entry.key: entry,
-    for (final issue in issues)
-      issue.key: RepositoryIssueIndexEntry(
-        key: issue.key,
-        path: issue.storagePath,
-        parentKey: issue.parentKey,
-        epicKey: issue.epicKey,
-        childKeys: const [],
-        isArchived: issue.isArchived,
-      ),
-  };
+  final entriesByKey = {for (final entry in index.entries) entry.key: entry};
+  for (final issue in issues) {
+    final existingEntry = entriesByKey[issue.key];
+    entriesByKey[issue.key] = RepositoryIssueIndexEntry(
+      key: issue.key,
+      path: issue.storagePath,
+      parentKey: issue.parentKey,
+      epicKey: issue.epicKey,
+      childKeys: const [],
+      isArchived: existingEntry?.isArchived ?? issue.isArchived,
+      summary: existingEntry?.summary ?? issue.summary,
+      issueTypeId: existingEntry?.issueTypeId ?? issue.issueTypeId,
+      statusId: existingEntry?.statusId ?? issue.statusId,
+      priorityId: existingEntry?.priorityId ?? issue.priorityId,
+      assignee: existingEntry?.assignee ?? _nullable(issue.assignee),
+      labels: existingEntry?.labels ?? issue.labels,
+      updatedLabel: existingEntry?.updatedLabel ?? issue.updatedLabel,
+      progress: existingEntry?.progress ?? issue.progress,
+      resolutionId: existingEntry?.resolutionId ?? issue.resolutionId,
+      revision: existingEntry?.revision,
+      links:
+          existingEntry?.links ??
+          issue.links
+              .where((link) => link.direction == 'outward')
+              .toList(growable: false),
+    );
+  }
   final pathByKey = {
     for (final entry in entriesByKey.values) entry.key: entry.path,
   };
