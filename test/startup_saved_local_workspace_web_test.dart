@@ -275,6 +275,7 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
+      _expectShellReadyDiagnostic();
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -351,6 +352,7 @@ void main() {
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
+      _expectShellReadyDiagnostic();
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -805,6 +807,39 @@ void _expectShellReadySurface() {
     expect(find.text(label), findsWidgets);
   }
   expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+}
+
+void _expectShellReadyDiagnostic() {
+  final visibleNavigationLabels = <String>[
+    for (final label in _startupShellNavigationLabels)
+      if (find.text(label).evaluate().isNotEmpty) label,
+  ];
+  final shellReady =
+      find
+          .byKey(const ValueKey('workspace-switcher-trigger'))
+          .evaluate()
+          .isNotEmpty &&
+      visibleNavigationLabels.length == _startupShellNavigationLabels.length &&
+      find
+          .text('Git-native. Jira-compatible. Team-proven.')
+          .evaluate()
+          .isNotEmpty;
+  expect(
+    shellReady,
+    isTrue,
+    reason: jsonEncode(<String, Object?>{
+      'shellReady': shellReady,
+      'visibleNavigationLabels': visibleNavigationLabels,
+      'brandingVisible': find
+          .text('Git-native. Jira-compatible. Team-proven.')
+          .evaluate()
+          .isNotEmpty,
+      'workspaceSwitcherTriggerVisible': find
+          .byKey(const ValueKey('workspace-switcher-trigger'))
+          .evaluate()
+          .isNotEmpty,
+    }),
+  );
 }
 
 Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
