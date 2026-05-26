@@ -128,8 +128,23 @@ class LiveIssueDetailCollaborationPage:
 
     def open_issue(self, *, issue_key: str, issue_summary: str) -> None:
         self.open_jql_search()
+        selector = self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary)
+        if self._session.count(selector) == 0:
+            try:
+                self.search_and_select_issue(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                    query=issue_key,
+                )
+                return
+            except (AssertionError, WebAppTimeoutError):
+                self._open_issue_from_board_card(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+                return
         self._session.click(
-            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            selector,
             timeout_ms=30_000,
         )
         self._session.wait_for_selector(
@@ -587,7 +602,6 @@ class LiveIssueDetailCollaborationPage:
             visible_text=visible_text,
             accessible_label=accessible_label,
         )
-
     def issue_detail_accessible_label(
         self,
         issue_key: str,
@@ -602,8 +616,11 @@ class LiveIssueDetailCollaborationPage:
                 """
                 ({ selector, expectedFragment }) => {
                   return Array.from(document.querySelectorAll(selector))
-                    .map((element) => element.getAttribute('aria-label') ?? '')
-                    .some((label) => label.includes(expectedFragment));
+                    .some((element) => {
+                      const label = element.getAttribute('aria-label') ?? '';
+                      const text = element.innerText ?? '';
+                      return label.includes(expectedFragment) || text.includes(expectedFragment);
+                    });
                 }
                 """,
                 arg={
@@ -616,8 +633,12 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ selector }) => {
               return Array.from(document.querySelectorAll(selector))
-                .map((element) => element.getAttribute('aria-label') ?? '')
-                .filter((label) => label.length > 0)
+                .map((element) => {
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = element.innerText ?? '';
+                  return `${label} ${text}`.trim();
+                })
+                .filter((value) => value.length > 0)
                 .sort((left, right) => right.length - left.length)[0] ?? '';
             }
             """,
@@ -682,6 +703,23 @@ class LiveIssueDetailCollaborationPage:
             expected_fragment=expected_fragment,
         )
         self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        if expected_fragment is not None:
+            self._session.wait_for_function(
+                """
+                ({ selector, expectedFragment }) => {
+                  return Array.from(document.querySelectorAll(selector)).some((element) => {
+                    const label = element?.getAttribute('aria-label') ?? '';
+                    const text = element?.innerText ?? '';
+                    return label.includes(expectedFragment) || text.includes(expectedFragment);
+                  });
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedFragment": expected_fragment,
+                },
+                timeout_ms=timeout_ms,
+            )
         return self.deferred_error_label(
             section_label,
             expected_fragment=expected_fragment,
@@ -834,7 +872,6 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=timeout_ms,
         )
         return str(payload).strip()
-
     def wait_for_deferred_error_to_clear(
         self,
         section_label: str,
@@ -867,7 +904,9 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ selector }) => {
               const element = document.querySelector(selector);
-              return element?.getAttribute('aria-label') ?? '';
+              const label = element?.getAttribute('aria-label') ?? '';
+              const text = element?.innerText ?? '';
+              return `${label} ${text}`.trim();
             }
             """,
             arg={"selector": selector},
@@ -887,11 +926,20 @@ class LiveIssueDetailCollaborationPage:
         *,
         timeout_ms: int = 30_000,
     ) -> None:
-        selector = (
-            self._deferred_error_selector(section_label, expected_fragment="Retry")
-            + ' flt-semantics[role="button"]'
+        group_selector = (
+            'flt-semantics[role="group"]'
+            f'[aria-label*="{self._escape(section_label)} error"] '
+            'flt-semantics[role="button"]'
         )
-        self._session.click(selector, timeout_ms=timeout_ms)
+        root_button_selector = (
+            'flt-semantics[role="button"]'
+            f'[aria-label*="{self._escape(section_label)} error"]'
+            '[aria-label*="Retry"]'
+        )
+        if self._session.count(group_selector) > 0:
+            self._session.click(group_selector, timeout_ms=timeout_ms)
+            return
+        self._session.click(root_button_selector, timeout_ms=timeout_ms)
 
     def focus_collaboration_tab(self, label: str) -> None:
         if self._session.count(self._tab_button_selector, has_text=label) > 0:
@@ -1544,14 +1592,124 @@ class LiveIssueDetailCollaborationPage:
         )
         return int(payload)
 
+    def _open_issue_from_board_card(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        timeout_ms: int = 60_000,
+    ) -> None:
+        self._tracker_page.open_board()
+        bounds = self._board_issue_card_bounds(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
+        self._session.mouse_click(
+            bounds["x"] + (bounds["width"] / 2),
+            bounds["y"] + (bounds["height"] / 2),
+        )
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=timeout_ms,
+        )
+
+    def _board_issue_card_bounds(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> dict[str, float]:
+        payload = self._session.evaluate(
+            """
+            ({ issueKey, issueSummary }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== 'hidden' &&
+                  style.display !== 'none'
+                );
+              };
+              const normalizedSummary = (issueSummary || '').trim();
+              const unquotedSummary = normalizedSummary.replace(/^['"]|['"]$/g, '').trim();
+              const summaryMatches = (candidate) => {
+                if (!normalizedSummary && !unquotedSummary) {
+                  return true;
+                }
+                return [
+                  normalizedSummary,
+                  unquotedSummary,
+                ]
+                  .filter((value) => value.length > 0)
+                  .some((value) => candidate.label.includes(value) || candidate.text.includes(value));
+              };
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    label,
+                    text,
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  (candidate.label.includes(issueKey) || candidate.text.includes(issueKey)) &&
+                  summaryMatches(candidate),
+                )
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+            """,
+            arg={"issueKey": issue_key, "issueSummary": issue_summary},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step 3 failed: the live app did not expose a visible issue surface for "
+                f"{issue_key} in either JQL Search or Board.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
         escaped_key = LiveIssueDetailCollaborationPage._escape(issue_key)
-        escaped_summary = LiveIssueDetailCollaborationPage._escape(issue_summary)
-        return (
+        selectors = [
             'flt-semantics[role="button"]'
-            f'[aria-label*="Open {escaped_key} {escaped_summary}"]'
-        )
+            f'[aria-label*="Open {escaped_key}"]',
+        ]
+        normalized_summary = issue_summary.strip()
+        if normalized_summary:
+            selectors.insert(
+                0,
+                'flt-semantics[role="button"]'
+                f'[aria-label*="Open {escaped_key} '
+                f'{LiveIssueDetailCollaborationPage._escape(normalized_summary)}"]',
+            )
+            unquoted_summary = normalized_summary.strip('"').strip("'").strip()
+            if unquoted_summary and unquoted_summary != normalized_summary:
+                selectors.insert(
+                    1,
+                    'flt-semantics[role="button"]'
+                    f'[aria-label*="Open {escaped_key} '
+                    f'{LiveIssueDetailCollaborationPage._escape(unquoted_summary)}"]',
+                )
+        return ", ".join(selectors)
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
@@ -1580,15 +1738,11 @@ class LiveIssueDetailCollaborationPage:
         *,
         expected_fragment: str | None = None,
     ) -> str:
-        selector = (
-            'flt-semantics[role="button"]'
-            f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
+        _ = expected_fragment
+        return (
+            '[aria-label*="'
+            f'{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
         )
-        if expected_fragment:
-            selector += (
-                f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
-            )
-        return selector
 
     @staticmethod
     def _deferred_loading_selector(section_label: str) -> str:
