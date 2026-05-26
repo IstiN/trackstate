@@ -6,9 +6,10 @@ aligned in the shared header container.
 
 The automation:
 1. opens the hosted TrackState app in Chromium with the stored GitHub token
-2. verifies the visible desktop header shows the sync pill, `Search issues`,
-   `Create issue`, `Attachments limited`, the theme toggle, and the signed-in
-   profile label
+2. connects the hosted session through the live `Connect GitHub` flow, returns
+   to the Dashboard, and verifies the visible desktop header shows the sync
+   pill, `Search issues`, `Create issue`, the workspace-switcher/repository
+   access control, the theme toggle, and the signed-in profile label
 3. measures the rendered heights of each visible header control and checks that
    they match the required 32px target
 4. derives the shared public header ancestor for those controls when the live
@@ -36,6 +37,8 @@ mkdir -p outputs && python testing/tests/TS-614/test_ts_614.py
   to the live setup repository.
 - The test targets the deployed TrackState app configured by
   `testing/core/config/live_setup_test_config.py`.
+- The repository-access header control may render as the hosted workspace
+  switcher with an `Attachments limited` state in its accessible label.
 
 ## Expected pass / fail behavior
 

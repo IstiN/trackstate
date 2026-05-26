@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 from testing.components.services.github_actions_preflight_gate_probe import (
     GitHubActionsPreflightGatePreconditionError,
-    GitHubActionsPreflightGateProbeError,
     GitHubActionsPreflightGateProbeService,
 )
 from testing.core.config.github_actions_preflight_gate_config import (
@@ -58,6 +58,17 @@ class _FakeWorkflowRunLogReader:
     def read_run_log(self, run_id: int) -> str:
         del run_id
         return self._log_text
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
 
 
 class GitHubActionsPreflightGateProbeRegressionTest(unittest.TestCase):
@@ -181,7 +192,23 @@ jobs:
         )
         self.assertIn(("POST", "/repos/IstiN/trackstate/git/refs"), github_api_client.calls)
 
-    def test_validate_preserves_partial_context_when_run_exposes_online_runner(self) -> None:
+    def test_validate_waits_for_settled_runner_mismatch_before_raising(self) -> None:
+        config = GitHubActionsPreflightGateConfig(
+            repository=self.config.repository,
+            default_branch=self.config.default_branch,
+            workflow_name=self.config.workflow_name,
+            workflow_file=self.config.workflow_file,
+            workflow_path=self.config.workflow_path,
+            preflight_job_name=self.config.preflight_job_name,
+            downstream_job_name=self.config.downstream_job_name,
+            expected_preflight_runner=self.config.expected_preflight_runner,
+            expected_runner_labels=list(self.config.expected_runner_labels),
+            expected_failure_markers=list(self.config.expected_failure_markers),
+            recent_runs_limit=self.config.recent_runs_limit,
+            poll_interval_seconds=1,
+            run_timeout_seconds=2,
+            ui_timeout_seconds=self.config.ui_timeout_seconds,
+        )
         github_api_client = _FakeGitHubApiClient(
             {
                 ("GET", "/repos/IstiN/trackstate"): [
@@ -220,9 +247,38 @@ jobs:
                         "html_url": "https://github.com/IstiN/trackstate/actions/runs/91",
                         "created_at": "2026-05-14T18:37:30Z",
                         "display_title": "TS-706",
+                    },
+                    {
+                        "id": 91,
+                        "event": "push",
+                        "head_branch": "main",
+                        "head_sha": "head-sha",
+                        "status": "in_progress",
+                        "conclusion": None,
+                        "html_url": "https://github.com/IstiN/trackstate/actions/runs/91",
+                        "created_at": "2026-05-14T18:37:30Z",
+                        "display_title": "TS-706",
                     }
                 ],
                 ("GET", "/repos/IstiN/trackstate/actions/runs/91/jobs?per_page=20"): [
+                    {
+                        "jobs": [
+                            {
+                                "id": 101,
+                                "name": "Verify macOS runner availability",
+                                "status": "completed",
+                                "conclusion": "success",
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                            },
+                            {
+                                "id": 202,
+                                "name": "Build macOS desktop and CLI artifacts",
+                                "status": "queued",
+                                "conclusion": None,
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
+                            },
+                        ]
+                    },
                     {
                         "jobs": [
                             {
@@ -247,7 +303,7 @@ jobs:
         )
 
         probe = GitHubActionsPreflightGateProbeService(
-            self.config,
+            config,
             github_api_client=github_api_client,
             workflow_run_log_reader=_UnusedWorkflowRunLogReader(),
         )
@@ -263,11 +319,22 @@ jobs:
             created_at="2026-05-14T18:37:30Z",
             display_title="TS-706",
         )
+        clock = _FakeClock()
 
-        with self.assertRaisesRegex(
-            GitHubActionsPreflightGatePreconditionError,
-            "Precondition failed: TS-706 could not reproduce the no-runner failure condition",
-        ) as raised:
+        with (
+            patch(
+                "testing.components.services.github_actions_preflight_gate_probe.time.time",
+                side_effect=clock.time,
+            ),
+            patch(
+                "testing.components.services.github_actions_preflight_gate_probe.time.sleep",
+                side_effect=clock.sleep,
+            ),
+            self.assertRaisesRegex(
+                GitHubActionsPreflightGatePreconditionError,
+                "kept waiting for a runner for at least 2 seconds",
+            ) as raised,
+        ):
             probe.validate()
 
         self.assertNotIn(
@@ -275,9 +342,14 @@ jobs:
             github_api_client.calls,
         )
         self.assertEqual(
+            github_api_client.calls.count(("GET", "/repos/IstiN/trackstate/actions/runs/91")),
+            2,
+        )
+        self.assertEqual(
             raised.exception.partial_result.get("tag_name"),
             "v98.test",
         )
+        self.assertTrue(raised.exception.partial_result.get("stable_runner_mismatch"))
         self.assertEqual(
             raised.exception.partial_result.get("run", {}).get("html_url"),
             "https://github.com/IstiN/trackstate/actions/runs/91",

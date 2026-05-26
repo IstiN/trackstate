@@ -59,10 +59,6 @@ class IssueEditAccessibilityScreen
   List<String> visibleSemanticsLabels() => _robot.visibleSemanticsLabels();
 
   @override
-  List<String> accessibilityFeedbackTexts() =>
-      _robot.accessibilityFeedbackTexts();
-
-  @override
   List<String> semanticsTraversal() => _robot.semanticsTraversal();
 
   @override

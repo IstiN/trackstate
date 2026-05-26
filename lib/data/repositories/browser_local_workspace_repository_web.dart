@@ -232,23 +232,44 @@ class _BrowserLocalWorkspaceProvider
   Future<RepositoryCommitResult> applyFileChanges(
     RepositoryFileChangeRequest request,
   ) async {
+    var changed = false;
     for (final change in request.changes) {
       if (change case final RepositoryTextFileChange textChange) {
         validateRepositoryTextChange(textChange);
+        if (!await _textFileDiffers(textChange.path, textChange.content)) {
+          continue;
+        }
         await _writeTextFile(
           path: textChange.path,
           content: textChange.content,
           create: true,
         );
+        changed = true;
       } else if (change case final RepositoryBinaryFileChange binaryChange) {
+        if (!await _binaryFileDiffers(binaryChange.path, binaryChange.bytes)) {
+          continue;
+        }
         await _writeBinaryFile(
           path: binaryChange.path,
           bytes: binaryChange.bytes,
           create: true,
         );
+        changed = true;
       } else if (change case final RepositoryDeleteFileChange deleteChange) {
+        if (!await _fileExists(deleteChange.path)) {
+          continue;
+        }
         await _deleteFile(deleteChange.path);
+        changed = true;
       }
+    }
+    if (!changed) {
+      return RepositoryCommitResult(
+        branch: request.branch,
+        message: request.message,
+        revision: await _revision(),
+        createdCommit: false,
+      );
     }
     _contentRevision += 1;
     return RepositoryCommitResult(
@@ -341,6 +362,15 @@ class _BrowserLocalWorkspaceProvider
     await parent.removeEntry(segments.last).toDart;
   }
 
+  Future<bool> _fileExists(String path) async {
+    try {
+      await _resolveFileHandle(path);
+      return true;
+    } on TrackStateProviderException {
+      return false;
+    }
+  }
+
   String _fileRevision(String path) => '${_contentRevision + 1}:$path';
 
   List<String> _pathSegments(String path) => path
@@ -410,6 +440,26 @@ class _BrowserLocalWorkspaceProvider
     await writable.close().toDart;
   }
 
+  Future<bool> _binaryFileDiffers(String path, Uint8List bytes) async {
+    try {
+      final fileHandle = await _resolveFileHandle(path);
+      final file = await fileHandle.getFile().toDart;
+      final currentBytes = (await file.arrayBuffer().toDart).toDart
+          .asUint8List();
+      if (currentBytes.length != bytes.length) {
+        return true;
+      }
+      for (var index = 0; index < currentBytes.length; index += 1) {
+        if (currentBytes[index] != bytes[index]) {
+          return true;
+        }
+      }
+      return false;
+    } on TrackStateProviderException {
+      return true;
+    }
+  }
+
   Future<void> _writeTextFile({
     required String path,
     required String content,
@@ -419,6 +469,16 @@ class _BrowserLocalWorkspaceProvider
     final writable = await fileHandle.createWritable().toDart;
     await writable.write(content.toJS).toDart;
     await writable.close().toDart;
+  }
+
+  Future<bool> _textFileDiffers(String path, String content) async {
+    try {
+      final fileHandle = await _resolveFileHandle(path);
+      final file = await fileHandle.getFile().toDart;
+      return (await file.text().toDart).toDart != content;
+    } on TrackStateProviderException {
+      return true;
+    }
   }
 }
 
