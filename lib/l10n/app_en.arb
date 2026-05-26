@@ -345,6 +345,7 @@
   "hostedRepository": "Hosted repository",
   "workspaceOnboardingDescription": "Choose how TrackState should open the next workspace.",
   "workspaceOnboardingFirstRunDescription": "Choose a local folder to open an existing workspace or initialize TrackState in a new one.",
+  "workspaceOnboardingFirstLaunchDescription": "Choose a local folder or hosted repository to get started.",
   "localWorkspaceOnboardingOpenExisting": "Open existing folder",
   "localWorkspaceOnboardingInitializeFolder": "Initialize folder",
   "localWorkspaceOnboardingFolderLabel": "Selected folder",
