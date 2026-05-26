@@ -92,6 +92,13 @@ class ProjectSettingsNavigationState:
 
 
 @dataclass(frozen=True)
+class ProjectSettingsSaveState:
+    body_text: str
+    save_button_enabled: bool
+    save_failure_text: str | None
+
+
+@dataclass(frozen=True)
 class ProjectSettingsAdminTabObservation:
     label: str
     selected_tab_label: str
@@ -102,6 +109,7 @@ class ProjectSettingsAdminTabObservation:
 
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_selector = 'flt-semantics[role="tab"]'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
@@ -131,16 +139,26 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
-        connect_via_text = self._session.count(self._button_selector, has_text="Connect GitHub") > 0
+        connect_via_text = (
+            self._session.count(
+                self._visible_button_selector,
+                has_text="Connect GitHub",
+            )
+            > 0
+        )
         if not connect_via_aria and not connect_via_text:
             raise AssertionError(
                 "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
@@ -151,26 +169,36 @@ class LiveProjectSettingsPage:
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
                 if connect_via_aria:
+                    self._scroll_into_view(self._connect_selector)
                     self._session.click(self._connect_selector, timeout_ms=30_000)
                 else:
+                    connect_button_selector = (
+                        'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+                    )
+                    self._scroll_into_view(connect_button_selector)
                     self._session.click(
-                        self._button_selector,
+                        self._visible_button_selector,
                         has_text="Connect GitHub",
                         timeout_ms=30_000,
                     )
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+            self._scroll_into_view(self._token_input_selector)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-            self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-            self._session.click(
-                self._button_selector,
-                has_text="Connect token",
-                timeout_ms=30_000,
-            )
+            if self._session.count(self._connect_token_selector) > 0:
+                self._scroll_into_view(self._connect_token_selector)
+                self._session.click(self._connect_token_selector, timeout_ms=30_000)
+            else:
+                self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
+                self._session.click(
+                    self._visible_button_selector,
+                    has_text="Connect token",
+                    timeout_ms=30_000,
+                )
 
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                         "GitHub connection failed:",
@@ -182,7 +210,7 @@ class LiveProjectSettingsPage:
                 if any(
                     marker in current_body
                     for marker in (
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                     )
@@ -216,17 +244,21 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
         connect_via_text = self._session.count(
-            self._button_selector,
+            self._visible_button_selector,
             has_text="Connect GitHub",
         ) > 0
         if not connect_via_aria and not connect_via_text:
@@ -247,7 +279,7 @@ class LiveProjectSettingsPage:
                     )
                     self._scroll_into_view(connect_button_selector)
                     self._session.click(
-                        self._button_selector,
+                        self._visible_button_selector,
                         has_text="Connect GitHub",
                         timeout_ms=30_000,
                     )
@@ -259,16 +291,25 @@ class LiveProjectSettingsPage:
                 self._session.click(self._connect_token_selector, timeout_ms=30_000)
             else:
                 self._session.click(
-                    self._button_selector,
+                    self._visible_button_selector,
                     has_text="Connect token",
                     timeout_ms=30_000,
                 )
 
             try:
-                self._session.wait_for_text(
-                    connected_banner,
+                wait_match = self._session.wait_for_any_text(
+                    [
+                        *connected_banners,
+                        "GitHub connection failed:",
+                    ],
                     timeout_ms=timeout_seconds * 1_000,
                 )
+                if wait_match.matched_text == "GitHub connection failed:":
+                    raise AssertionError(
+                        "Step 2 failed: submitting the fine-grained token did not "
+                        "reach a write-capable hosted session.\n"
+                        f"Observed body text:\n{wait_match.body_text}",
+                    )
                 return self.body_text()
             except WebAppTimeoutError:
                 current_body = self.body_text()
@@ -283,7 +324,7 @@ class LiveProjectSettingsPage:
                 raise AssertionError(
                     "Step 2 failed: the hosted session never exposed the connected "
                     "write-capable banner after the token submit.\n"
-                    f"Expected banner: {connected_banner}\n"
+                    f"Expected one of: {connected_banners}\n"
                     f"Observed body text:\n{current_body}",
                 ) from None
 
@@ -292,9 +333,34 @@ class LiveProjectSettingsPage:
         )
 
     def dismiss_connection_banner(self) -> None:
-        if self._session.count(self._close_selector) == 0:
+        if self._session.count(self._button_selector, has_text="Close") == 0:
             return
-        self._session.click(self._close_selector, timeout_ms=30_000)
+        self._session.click(self._button_selector, has_text="Close", timeout_ms=30_000)
+
+    def dismiss_if_open(self, *, timeout_ms: int = 30_000) -> None:
+        current_body = self.body_text()
+        if self._settings_heading not in current_body:
+            return
+        if self._session.count(self._close_selector) == 0:
+            raise AssertionError(
+                "The hosted app still showed Project Settings but did not expose the Close "
+                "action needed to return to the tracker shell.\n"
+                f"Observed body text:\n{current_body}",
+            )
+        self._session.click(self._close_selector, timeout_ms=timeout_ms)
+        try:
+            self._session.wait_for_function(
+                """
+                (settingsHeading) => !(document.body?.innerText ?? '').includes(settingsHeading)
+                """,
+                arg=self._settings_heading,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Closing the Project Settings surface did not return to the tracker shell.\n"
+                f"Observed body text:\n{self.body_text()}",
+            ) from error
 
     def open_settings(self) -> str:
         self._session.click(
@@ -564,6 +630,54 @@ class LiveProjectSettingsPage:
         self._session.click(self._save_settings_selector, timeout_ms=30_000)
         self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
         return self.body_text()
+
+    def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
+        self._scroll_into_view(self._save_settings_selector)
+        self._session.click(self._save_settings_selector, timeout_ms=timeout_ms)
+        return self.body_text()
+
+    def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
+        self._session.wait_for_function(
+            """
+            (selector) => {
+              const button = document.querySelector(selector);
+              return !!button && button.getAttribute('aria-disabled') !== 'true';
+            }
+            """,
+            arg=self._save_settings_selector,
+            timeout_ms=timeout_ms,
+        )
+        return self.body_text()
+
+    def read_save_state(self) -> ProjectSettingsSaveState:
+        payload = self._session.evaluate(
+            r"""
+            (selector) => {
+              const bodyText = document.body?.innerText ?? '';
+              const button = document.querySelector(selector);
+              const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
+              return {
+                bodyText,
+                saveButtonEnabled: !!button && button.getAttribute('aria-disabled') !== 'true',
+                saveFailureText: saveFailureMatch ? saveFailureMatch[0].trim() : null,
+              };
+            }
+            """,
+            arg=self._save_settings_selector,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted Settings page did not expose a readable save-state snapshot.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        save_failure_text = payload.get("saveFailureText")
+        return ProjectSettingsSaveState(
+            body_text=str(payload.get("bodyText", "")),
+            save_button_enabled=bool(payload.get("saveButtonEnabled")),
+            save_failure_text=(
+                str(save_failure_text).strip() if save_failure_text is not None else None
+            ),
+        )
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)

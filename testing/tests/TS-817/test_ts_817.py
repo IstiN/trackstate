@@ -448,7 +448,7 @@ def _find_named_local_row(
             and LOCAL_TARGET in row.detail_text
         ):
             return row
-    return _fallback_local_row_from_switcher_text(switcher.switcher_text)
+    return None
 
 
 def _find_selected_row(
@@ -474,51 +474,6 @@ def _selected_row_from_trigger(
         icon_accessibility_label=None,
         action_labels=("Active",),
         button_labels=("Delete",),
-    )
-
-
-def _fallback_local_row_from_switcher_text(
-    switcher_text: str,
-) -> WorkspaceSwitcherRowObservation | None:
-    normalized = " ".join(switcher_text.split())
-    detail_text = f"{LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}"
-    anchor = f"{LOCAL_DISPLAY_NAME} {detail_text} Local "
-    if anchor not in normalized:
-        return None
-
-    tail = normalized.split(anchor, 1)[1]
-    state_label = None
-    for candidate in (
-        "Local Git",
-        "Unavailable",
-        "Needs sign-in",
-        "Connected",
-        "Read-only",
-        "Attachments limited",
-    ):
-        if tail.startswith(candidate):
-            state_label = candidate
-            tail = tail[len(candidate) :].strip()
-            break
-    if state_label is None:
-        return None
-
-    action = "Active" if tail.startswith("Active") else "Open" if tail.startswith("Open") else None
-    if action is None:
-        return None
-
-    visible_text = f"{LOCAL_DISPLAY_NAME} {detail_text} Local {state_label} {tail}".strip()
-    return WorkspaceSwitcherRowObservation(
-        display_name=LOCAL_DISPLAY_NAME,
-        target_type_label="Local",
-        state_label=state_label,
-        detail_text=detail_text,
-        visible_text=visible_text,
-        selected=action == "Active",
-        semantics_label=None,
-        icon_accessibility_label=None,
-        action_labels=((action,) if action else ()),
-        button_labels=("Delete",) if action == "Active" else ((action, "Delete") if action else ()),
     )
 
 

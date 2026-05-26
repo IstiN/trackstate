@@ -317,6 +317,7 @@ class Ts447PostAuthResumeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => throw const TrackStateRepositoryException(
     'TS-447 fixture does not support attachment uploads.',
   );

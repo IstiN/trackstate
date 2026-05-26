@@ -22,7 +22,8 @@
   "syncStatus": "Synced with Git",
   "workspaceSyncSettings": "Workspace sync",
   "workspaceSyncChecking": "Syncing",
-  "workspaceSyncAttentionNeeded": "Attention needed",
+  "workspaceSyncAttentionNeededVisibleLabel": "Attention needed",
+  "workspaceSyncAttentionNeededSemanticLabel": "Sync error, attention needed",
   "workspaceSyncUnavailable": "Sync unavailable",
   "workspaceSyncPending": "Updates pending",
   "workspaceSyncPendingTitle": "Updates pending",
@@ -83,9 +84,10 @@
   "inReview": "In Review",
   "done": "Done",
   "detail": "Detail",
+  "comment": "Comment",
   "comments": "Comments",
   "attachments": "Attachments",
-  "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
+  "attachmentsDownloadOnlyMessage": "This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.",
   "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
@@ -122,6 +124,7 @@
       }
     }
   },
+  "commentPlaceholder": "Add a comment...",
   "postComment": "Post comment",
   "editedAt": "Edited {timestamp}",
   "@editedAt": {
@@ -416,7 +419,7 @@
       }
     }
   },
-  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "repositoryConfigFallback": "TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}",
   "@repositoryConfigFallback": {
     "placeholders": {
       "error": {
@@ -598,6 +601,7 @@
   "close": "Close",
   "connectGitHub": "Connect GitHub",
   "retry": "Retry",
+  "retryStartup": "Retry startup",
   "editIssue": "Edit issue",
   "optional": "Optional",
   "unassigned": "Unassigned",
@@ -608,11 +612,28 @@
   "noTransitionsAvailable": "No workflow transitions available.",
   "resolutionRequired": "Resolution is required for this transition.",
   "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
-  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
   "@hierarchyChangeConfirmationMessage": {
     "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
       "descendantCount": {
         "type": "int"
+      }
+    }
+  },
+  "hierarchyChangeConfirmationDestinationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.",
+  "@hierarchyChangeConfirmationDestinationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      },
+      "destinationLabel": {
+        "type": "String"
       }
     }
   },
