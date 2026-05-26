@@ -7,6 +7,8 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import 'settings_screen_robot.dart';
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/issue_detail_icon_observation.dart';
+import '../../core/models/issue_detail_row_style_observation.dart';
 import '../../core/models/action_availability.dart';
 import '../../core/models/issue_detail_focus_transition_observation.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
@@ -1214,7 +1216,6 @@ class IssueDetailAccessibilityRobot
     if (interactiveControl.evaluate().isNotEmpty) {
       return _smallestByArea(interactiveControl);
     }
-
     final semantics = find.descendant(
       of: _issueDetail(issueKey),
       matching: find.byWidgetPredicate((widget) {
