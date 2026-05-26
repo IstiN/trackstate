@@ -1,9 +1,11 @@
 @JS()
 library;
 
+import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
 import 'package:web/web.dart' as web;
 
 import '../../domain/models/trackstate_models.dart';
@@ -19,6 +21,10 @@ extension type _DirectoryValuesAccessor._(JSObject _value) implements JSObject {
 
 final Map<String, web.FileSystemDirectoryHandle> _selectedDirectoriesByPath =
     <String, web.FileSystemDirectoryHandle>{};
+const String _workspaceHandleDatabaseName =
+    'trackstate.browserLocalWorkspaceHandles';
+const String _workspaceHandleStoreName = 'workspaceHandles';
+const int _workspaceHandleDatabaseVersion = 1;
 
 Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   required String repositoryPath,
@@ -29,10 +35,14 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   if (normalizedPath.isEmpty) {
     return null;
   }
-  final handle = _selectedDirectoriesByPath[normalizedPath];
+  final cachedHandle = _selectedDirectoriesByPath[normalizedPath];
+  final handle =
+      cachedHandle ??
+      await _restoreBrowserLocalWorkspaceSelection(normalizedPath);
   if (handle == null) {
     return null;
   }
+  _selectedDirectoriesByPath[normalizedPath] = handle;
   return _BrowserLocalTrackStateRepository(
     directoryHandle: handle,
     repositoryPath: normalizedPath,
@@ -41,10 +51,10 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   );
 }
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
-}) {
+}) async {
   final normalizedPath = _normalizeWorkspacePath(workspacePath);
   if (normalizedPath.isEmpty) {
     return;
@@ -54,9 +64,177 @@ void rememberBrowserLocalWorkspaceSelection({
     return;
   }
   _selectedDirectoriesByPath[normalizedPath] = handle;
+  await _persistBrowserLocalWorkspaceSelection(normalizedPath, handle);
 }
 
 String _normalizeWorkspacePath(String path) => path.trim();
+
+@visibleForTesting
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) async {
+  _selectedDirectoriesByPath.clear();
+  if (!clearPersisted) {
+    return;
+  }
+  await _clearPersistedBrowserLocalWorkspaceSelections();
+}
+
+Future<web.FileSystemDirectoryHandle?> _restoreBrowserLocalWorkspaceSelection(
+  String workspacePath,
+) async {
+  final database = await _openWorkspaceHandleDatabase();
+  try {
+    final transaction = database.transaction(
+      _workspaceHandleStoreName.toJS,
+      'readonly',
+    );
+    final request = transaction
+        .objectStore(_workspaceHandleStoreName)
+        .get(workspacePath.toJS);
+    final result = await _awaitDatabaseRequest(request);
+    await _awaitDatabaseTransaction(transaction);
+    if (result == null) {
+      return null;
+    }
+    final handle = result as web.FileSystemDirectoryHandle;
+    if (handle.kind != 'directory') {
+      await _deletePersistedBrowserLocalWorkspaceSelection(workspacePath);
+      return null;
+    }
+    return handle;
+  } finally {
+    database.close();
+  }
+}
+
+Future<void> _persistBrowserLocalWorkspaceSelection(
+  String workspacePath,
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final database = await _openWorkspaceHandleDatabase();
+  try {
+    final transaction = database.transaction(
+      _workspaceHandleStoreName.toJS,
+      'readwrite',
+    );
+    transaction
+        .objectStore(_workspaceHandleStoreName)
+        .put(handle, workspacePath.toJS);
+    await _awaitDatabaseTransaction(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+Future<void> _deletePersistedBrowserLocalWorkspaceSelection(
+  String workspacePath,
+) async {
+  final database = await _openWorkspaceHandleDatabase();
+  try {
+    final transaction = database.transaction(
+      _workspaceHandleStoreName.toJS,
+      'readwrite',
+    );
+    transaction
+        .objectStore(_workspaceHandleStoreName)
+        .delete(workspacePath.toJS);
+    await _awaitDatabaseTransaction(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+Future<void> _clearPersistedBrowserLocalWorkspaceSelections() async {
+  final database = await _openWorkspaceHandleDatabase();
+  try {
+    final transaction = database.transaction(
+      _workspaceHandleStoreName.toJS,
+      'readwrite',
+    );
+    transaction.objectStore(_workspaceHandleStoreName).clear();
+    await _awaitDatabaseTransaction(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+Future<web.IDBDatabase> _openWorkspaceHandleDatabase() {
+  final completer = Completer<web.IDBDatabase>();
+  final request = web.window.indexedDB.open(
+    _workspaceHandleDatabaseName,
+    _workspaceHandleDatabaseVersion,
+  );
+  request.onupgradeneeded = ((web.Event _) {
+    final database = request.result as web.IDBDatabase;
+    if (!database.objectStoreNames.contains(_workspaceHandleStoreName)) {
+      database.createObjectStore(_workspaceHandleStoreName);
+    }
+  }).toJS;
+  request.onsuccess = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.complete(request.result as web.IDBDatabase);
+    }
+  }).toJS;
+  request.onerror = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        request.error ??
+            StateError('Could not open browser workspace storage.'),
+      );
+    }
+  }).toJS;
+  request.onblocked = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        StateError('Browser workspace storage is blocked by another tab.'),
+      );
+    }
+  }).toJS;
+  return completer.future;
+}
+
+Future<JSAny?> _awaitDatabaseRequest(web.IDBRequest request) {
+  final completer = Completer<JSAny?>();
+  request.onsuccess = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.complete(request.result);
+    }
+  }).toJS;
+  request.onerror = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        request.error ?? StateError('IndexedDB request failed.'),
+      );
+    }
+  }).toJS;
+  return completer.future;
+}
+
+Future<void> _awaitDatabaseTransaction(web.IDBTransaction transaction) {
+  final completer = Completer<void>();
+  transaction.oncomplete = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.complete();
+    }
+  }).toJS;
+  transaction.onerror = ((web.Event _) {
+    if (!completer.isCompleted) {
+      final request = transaction.error;
+      completer.completeError(
+        request ?? StateError('IndexedDB transaction failed.'),
+      );
+    }
+  }).toJS;
+  transaction.onabort = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        transaction.error ?? StateError('IndexedDB transaction was aborted.'),
+      );
+    }
+  }).toJS;
+  return completer.future;
+}
 
 class _BrowserLocalTrackStateRepository
     extends ProviderBackedTrackStateRepository {

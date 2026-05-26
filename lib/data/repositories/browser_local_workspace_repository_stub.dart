@@ -6,7 +6,11 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   required String writeBranch,
 }) async => null;
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
-}) {}
+}) async {}
+
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) async {}

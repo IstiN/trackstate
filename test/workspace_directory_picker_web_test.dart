@@ -1,18 +1,24 @@
 @TestOn('browser')
 library;
 
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker_web.dart';
 
 void main() {
   late BrowserDirectoryAccessRequester originalRequester;
 
-  setUp(() {
+  setUp(() async {
     originalRequester = browserDirectoryAccessRequester;
+    await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
-  tearDown(() {
+  tearDown(() async {
     browserDirectoryAccessRequester = originalRequester;
+    await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
   test(
@@ -24,7 +30,9 @@ void main() {
             calls += 1;
             expect(confirmButtonText, isNull);
             expect(initialDirectory, '/tmp/demo');
-            return Object();
+            return JSObject()
+              ..['kind'] = 'directory'.toJS
+              ..['name'] = 'demo'.toJS;
           };
 
       final selectedPath = await pickWorkspaceDirectory(
@@ -70,6 +78,31 @@ void main() {
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'browser local repository restores a saved directory handle after a reload',
+    () async {
+      final directoryHandle = JSObject()
+        ..['kind'] = 'directory'.toJS
+        ..['name'] = 'trackstate-demo'.toJS;
+
+      await rememberBrowserLocalWorkspaceSelection(
+        workspacePath: '/tmp/trackstate-demo',
+        selection: directoryHandle,
+      );
+      await clearRememberedBrowserLocalWorkspaceSelections(
+        clearPersisted: false,
+      );
+
+      final repository = await openBrowserLocalWorkspaceRepository(
+        repositoryPath: '/tmp/trackstate-demo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+
+      expect(repository, isNotNull);
     },
   );
 }

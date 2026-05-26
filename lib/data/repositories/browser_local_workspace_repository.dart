@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import 'trackstate_repository.dart';
 import 'browser_local_workspace_repository_stub.dart'
     if (dart.library.js_interop) 'browser_local_workspace_repository_web.dart'
@@ -15,12 +17,21 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   );
 }
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
 }) {
-  platform.rememberBrowserLocalWorkspaceSelection(
+  return platform.rememberBrowserLocalWorkspaceSelection(
     workspacePath: workspacePath,
     selection: selection,
+  );
+}
+
+@visibleForTesting
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) {
+  return platform.clearRememberedBrowserLocalWorkspaceSelections(
+    clearPersisted: clearPersisted,
   );
 }

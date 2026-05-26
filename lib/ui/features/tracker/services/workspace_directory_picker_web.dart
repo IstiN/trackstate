@@ -43,7 +43,7 @@ Future<String?> pickWorkspaceDirectory({
     if (normalizedSelection != null &&
         selection != null &&
         selection is! String) {
-      rememberBrowserLocalWorkspaceSelection(
+      await rememberBrowserLocalWorkspaceSelection(
         workspacePath: normalizedSelection,
         selection: selection,
       );
