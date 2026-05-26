@@ -37,11 +37,23 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   if (normalizedPath.isEmpty) {
     return null;
   }
-  final handle =
-      _selectedDirectoriesByPath[normalizedPath] ??
-      await _browserLocalWorkspaceSelectionsPersistence.restore(
-        workspacePath: normalizedPath,
-      );
+  final cachedHandle = _selectedDirectoriesByPath[normalizedPath];
+  if (cachedHandle != null) {
+    return _BrowserLocalTrackStateRepository(
+      directoryHandle: cachedHandle,
+      repositoryPath: normalizedPath,
+      dataRef: defaultBranch,
+      writeBranch: writeBranch,
+    );
+  }
+  if (!_browserLocalWorkspaceSelectionsPersistence.hasPersistedSelection(
+    workspacePath: normalizedPath,
+  )) {
+    return null;
+  }
+  final handle = await _browserLocalWorkspaceSelectionsPersistence.restore(
+    workspacePath: normalizedPath,
+  );
   if (handle == null) {
     return null;
   }
@@ -91,6 +103,15 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
     return 'trackstate.browserLocalWorkspaceSelections:${location.pathname}${location.search}';
   }
 
+  String get _storageMarkerPrefix {
+    final location = web.window.location;
+    return 'trackstate.browserLocalWorkspaceSelections.marker:${location.pathname}${location.search}:';
+  }
+
+  bool hasPersistedSelection({required String workspacePath}) {
+    return web.window.localStorage.getItem(_markerKey(workspacePath)) == '1';
+  }
+
   Future<void> save({
     required String workspacePath,
     required web.FileSystemDirectoryHandle handle,
@@ -114,6 +135,7 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
           operation: 'commit browser local workspace access',
         ),
       ]);
+      _markPersistedSelection(workspacePath);
     } finally {
       database.close();
     }
@@ -136,6 +158,7 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
         operation: 'restore browser local workspace access',
       );
       if (result == null || result.dartify() == null) {
+        _clearPersistedSelectionMarker(workspacePath);
         return null;
       }
       final handle = result as web.FileSystemDirectoryHandle;
@@ -153,6 +176,7 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
   Future<void> delete({required String workspacePath}) async {
     final database = await _openDatabase();
     if (database == null) {
+      _clearPersistedSelectionMarker(workspacePath);
       return;
     }
     try {
@@ -171,6 +195,7 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
         ),
       ]);
     } finally {
+      _clearPersistedSelectionMarker(workspacePath);
       database.close();
     }
   }
@@ -178,6 +203,7 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
   Future<void> clear() async {
     final database = await _openDatabase();
     if (database == null) {
+      _clearPersistedSelectionMarkers();
       return;
     }
     try {
@@ -194,7 +220,32 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
         ),
       ]);
     } finally {
+      _clearPersistedSelectionMarkers();
       database.close();
+    }
+  }
+
+  String _markerKey(String workspacePath) {
+    return '$_storageMarkerPrefix$workspacePath';
+  }
+
+  void _markPersistedSelection(String workspacePath) {
+    web.window.localStorage.setItem(_markerKey(workspacePath), '1');
+  }
+
+  void _clearPersistedSelectionMarker(String workspacePath) {
+    web.window.localStorage.removeItem(_markerKey(workspacePath));
+  }
+
+  void _clearPersistedSelectionMarkers() {
+    final keys = <String>[
+      for (var index = 0; index < web.window.localStorage.length; index += 1)
+        web.window.localStorage.key(index) ?? '',
+    ];
+    for (final key in keys) {
+      if (key.startsWith(_storageMarkerPrefix)) {
+        web.window.localStorage.removeItem(key);
+      }
     }
   }
 
