@@ -1881,6 +1881,7 @@ class ProviderBackedTrackStateRepository
       final links = await _loadLinks(
         blobPaths: blobPaths,
         issueRoot: issueRoot,
+        repositoryIndexEntry: indexEntriesByPath[path],
       );
       final attachments = await _loadAttachments(
         tree: tree,
@@ -3051,29 +3052,17 @@ class ProviderBackedTrackStateRepository
   Future<List<IssueLink>> _loadLinks({
     required Set<String> blobPaths,
     required String issueRoot,
+    RepositoryIssueIndexEntry? repositoryIndexEntry,
   }) async {
     final linksPath = _joinPath(issueRoot, 'links.json');
-    if (!blobPaths.contains(linksPath)) return const [];
+    if (!blobPaths.contains(linksPath)) {
+      return repositoryIndexEntry?.links ?? const [];
+    }
     final json = await _getRepositoryJson(linksPath);
     if (json is! List) return const [];
     return json
         .whereType<Map>()
-        .map((entry) {
-          final link = IssueLink(
-            type: entry['type']?.toString() ?? 'relates-to',
-            targetKey:
-                entry['target']?.toString() ??
-                entry['targetKey']?.toString() ??
-                '',
-            direction: entry['direction']?.toString() ?? 'outward',
-          );
-          final warning = nonCanonicalIssueLinkMetadataWarning(link);
-          if (warning != null) {
-            // ignore: avoid_print
-            print(warning);
-          }
-          return link;
-        })
+        .map(_issueLinkFromStoredJsonMap)
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
   }
@@ -5210,6 +5199,7 @@ bool _isTrackStateMetadataPath(String path) =>
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   final childKeys = entry['children'];
   final labels = entry['labels'];
+  final links = entry['links'];
   return RepositoryIssueIndexEntry(
     key: entry['key']?.toString() ?? '',
     path: entry['path']?.toString() ?? '',
@@ -5239,7 +5229,29 @@ RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
       _ => null,
     },
     resolutionId: _nullable(entry['resolution']?.toString()),
+    links: links is List
+        ? links
+              .whereType<Map>()
+              .map(_issueLinkFromStoredJsonMap)
+              .where((link) => link.targetKey.isNotEmpty)
+              .toList(growable: false)
+        : const [],
   );
+}
+
+IssueLink _issueLinkFromStoredJsonMap(Map entry) {
+  final link = IssueLink(
+    type: entry['type']?.toString() ?? 'relates-to',
+    targetKey:
+        entry['target']?.toString() ?? entry['targetKey']?.toString() ?? '',
+    direction: entry['direction']?.toString() ?? 'outward',
+  );
+  final warning = nonCanonicalIssueLinkMetadataWarning(link);
+  if (warning != null) {
+    // ignore: avoid_print
+    print(warning);
+  }
+  return link;
 }
 
 DeletedIssueTombstone _deletedIssueTombstone(
@@ -5355,6 +5367,9 @@ RepositoryIndex _deriveRepositoryIndex(
         progress: issue.progress,
         resolutionId: issue.resolutionId,
         revision: null,
+        links: issue.links
+            .where((link) => link.direction == 'outward')
+            .toList(growable: false),
       ),
   ]..sort((a, b) => a.key.compareTo(b.key));
   return RepositoryIndex(entries: entries, deleted: deleted);
