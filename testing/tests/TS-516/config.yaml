@@ -1,0 +1,8 @@
+test_id: TS-516
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production issue-detail Attachments tab with github-releases storage configured and a hosted remembered-token session that supports release-backed browser uploads.
+  - Verifies the storage restriction notice and Open settings recovery action stay hidden while the standard Choose attachment and Upload attachment controls remain visible and enabled.

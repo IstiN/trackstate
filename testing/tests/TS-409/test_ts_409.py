@@ -133,7 +133,8 @@ def main() -> None:
                     observed=runtime.body_text,
                 )
 
-                connected_text = settings_page.ensure_connected(
+                settings_page.open_settings()
+                connected_text = settings_page.ensure_write_capable_connection(
                     token=token,
                     repository=config.repository,
                     user_login=user.login,
@@ -318,7 +319,7 @@ def _perform_settings_mutation(
     transition_name: str,
     transition_index: int,
 ) -> ProjectSettingsUiObservation:
-    settings_text = settings_page.open_settings()
+    settings_text = settings_page.body_text()
     status_dialog_text, status_list_text = settings_page.add_status(
         status_id=status_id,
         status_name=status_name,
@@ -593,7 +594,6 @@ def _record_step(
             "observed": observed,
         },
     )
-
 
 def _record_human_verification(
     result: dict[str, object],
