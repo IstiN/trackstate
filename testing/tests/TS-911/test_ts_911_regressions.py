@@ -194,17 +194,48 @@ class Ts911RegressionsTest(unittest.TestCase):
         self.assertEqual(target["label"], "Save and switch")
         self.assertEqual(target["tag_name"], "FLT-SEMANTICS")
 
-    def test_supporting_wrap_target_context_marks_non_footer_target_as_fallback(self) -> None:
-        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+    def test_best_available_reverse_wrap_target_falls_back_when_tab_stops_missing(self) -> None:
+        target = _LIVE_TEST_MODULE._best_available_reverse_wrap_target(
             {
+                "internal_tab_stops": [],
                 "expected_target": {
-                    "label": "Branch",
+                    "label": "Save and switch",
                 },
             },
         )
 
-        self.assertEqual(context["status"], "fallback")
-        self.assertIn("best available reverse-wrap target", context["note"])
+        self.assertEqual(target["label"], "Save and switch")
+
+    def test_supporting_wrap_target_proof_derives_last_reachable_in_panel_target(self) -> None:
+        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+            {
+                "status": "derived",
+                "expected_target": {
+                    "label": "Branch",
+                },
+                "note": (
+                    "Forward Tab did not prove 'Save and switch' as the terminal reachable "
+                    "control; the last reachable in-panel control in this run was 'Branch'."
+                ),
+            },
+        )
+
+        self.assertEqual(context["status"], "derived")
+        self.assertIn("last reachable in-panel control", context["note"])
+
+    def test_supporting_wrap_target_context_uses_inconclusive_proof_note(self) -> None:
+        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+            {
+                "status": "inconclusive",
+                "expected_target": {
+                    "label": "Branch",
+                },
+                "note": "Forward Tab evidence was inconclusive; using the best available in-panel target 'Branch'.",
+            },
+        )
+
+        self.assertEqual(context["status"], "inconclusive")
+        self.assertIn("best available in-panel target", context["note"])
 
 
 if __name__ == "__main__":

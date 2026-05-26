@@ -8,3 +8,4 @@ dependencies:
   args: ^2.7.0
   http:
     path: packages/http
+  meta: ^1.16.0
