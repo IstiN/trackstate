@@ -1,18 +1,23 @@
 @TestOn('browser')
 library;
 
+import 'dart:js_interop';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker_web.dart';
 
 void main() {
   late BrowserDirectoryAccessRequester originalRequester;
 
-  setUp(() {
+  setUp(() async {
     originalRequester = browserDirectoryAccessRequester;
+    await debugResetBrowserLocalWorkspaceSelectionCache(clearPersisted: true);
   });
 
-  tearDown(() {
+  tearDown(() async {
     browserDirectoryAccessRequester = originalRequester;
+    await debugResetBrowserLocalWorkspaceSelectionCache(clearPersisted: true);
   });
 
   test(
@@ -24,7 +29,7 @@ void main() {
             calls += 1;
             expect(confirmButtonText, isNull);
             expect(initialDirectory, '/tmp/demo');
-            return Object();
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
           };
 
       final selectedPath = await pickWorkspaceDirectory(
@@ -79,4 +84,8 @@ class _AbortError implements Exception {
 
   @override
   String toString() => 'AbortError: The user aborted a request.';
+}
+
+extension type _FakeDirectoryHandle._(JSObject _) implements JSObject {
+  external factory _FakeDirectoryHandle({String kind, String name});
 }

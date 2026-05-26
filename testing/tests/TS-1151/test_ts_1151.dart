@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
@@ -217,21 +215,7 @@ void main() {
               'Step 5 failed: the keyboard path could not be exercised because the hosted repository form fields were not rendered.',
             );
           } else {
-            focusOrder = await _collectFocusOrder(
-              tester,
-              candidates: <String, Finder>{
-                'Local folder': _choiceButtonFinder('Local folder'),
-                'Hosted repository': _choiceButtonFinder('Hosted repository'),
-                'Repository field': find.byKey(
-                  const ValueKey('workspace-onboarding-hosted-repository'),
-                ),
-                'Branch field': find.byKey(
-                  const ValueKey('workspace-onboarding-hosted-branch'),
-                ),
-                'Open': find.byKey(const ValueKey('workspace-onboarding-open')),
-              },
-              stopAt: 'Open',
-            );
+            focusOrder = await screen.collectHostedRepositoryFocusOrder();
             result['focus_order'] = focusOrder;
 
             final localIndex = focusOrder.indexOf('Local folder');
@@ -686,72 +670,6 @@ List<String> _missingExpectedTexts({
   return expected
       .where((text) => !observed.contains(text))
       .toList(growable: false);
-}
-
-Finder _choiceButtonFinder(String label) {
-  final button = find.ancestor(
-    of: find.text(label),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  return button.evaluate().isNotEmpty ? button.first : find.text(label);
-}
-
-Future<List<String>> _collectFocusOrder(
-  WidgetTester tester, {
-  required Map<String, Finder> candidates,
-  required String stopAt,
-  int maxTabs = 16,
-}) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pump();
-
-  final order = <String>[];
-  for (var i = 0; i < maxTabs; i += 1) {
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.pump();
-    final label = _focusedLabel(candidates);
-    if (label != null && (order.isEmpty || order.last != label)) {
-      order.add(label);
-      if (label == stopAt) {
-        break;
-      }
-    }
-  }
-  return order;
-}
-
-String? _focusedLabel(Map<String, Finder> candidates) {
-  final focusContext = FocusManager.instance.primaryFocus?.context;
-  if (focusContext == null) {
-    return null;
-  }
-
-  for (final entry in candidates.entries) {
-    final matches = entry.value.evaluate().length;
-    if (matches == 0) {
-      continue;
-    }
-    for (var index = 0; index < matches; index += 1) {
-      final candidate = entry.value.at(index);
-      final targetElements = candidate.evaluate().toSet();
-      if (targetElements.contains(focusContext)) {
-        return entry.key;
-      }
-
-      var found = false;
-      focusContext.visitAncestorElements((element) {
-        if (targetElements.contains(element)) {
-          found = true;
-          return false;
-        }
-        return true;
-      });
-      if (found) {
-        return entry.key;
-      }
-    }
-  }
-  return null;
 }
 
 List<Map<String, Object?>> _resultSteps(Map<String, Object?> result) {

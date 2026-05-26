@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -44,8 +45,9 @@ const List<String> _shellNavigationLabels = <String>[
 final List<String> _startupDiagnosticMessages = <String>[];
 
 void main() {
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await debugResetBrowserLocalWorkspaceSelectionCache(clearPersisted: true);
     _startupDiagnosticMessages.clear();
     final previousDiagnostics = startupAuthProbeDiagnostics;
     startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
