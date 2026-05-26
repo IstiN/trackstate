@@ -104,8 +104,8 @@ class LiveIssueDetailCollaborationPage:
         user_login: str,
     ) -> None:
         connected_banners = TrackStateTrackerPage.connected_banner_variants(
-            user_login=user_login,
             repository=repository,
+            user_login=user_login,
         )
         if not self._is_connected(user_login=user_login, repository=repository):
             try:
