@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 import json
-import re
 import time
 from dataclasses import dataclass, field
 from threading import Lock
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Page, Request, Route, sync_playwright
 
@@ -99,10 +99,6 @@ class StartupRecoveryRateLimitRuntime(
         self._observation = observation
         self._failure_message = failure_message
         self._retry_after_seconds = retry_after_seconds
-        self._blocked_request_pattern = re.compile(
-            rf"^https://api\.github\.com/.*/contents/"
-            rf"{re.escape(self._observation.blocked_repository_path)}\\?ref=.*$",
-        )
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -112,14 +108,14 @@ class StartupRecoveryRateLimitRuntime(
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 1200})
-        self._context.route(self._blocked_request_pattern, self._handle_github_api_route)
+        self._context.route("https://api.github.com/**", self._handle_github_api_route)
         self._page = self._context.new_page()
         self._page.on("request", self._handle_page_request)
         return PlaywrightWebAppSession(self._page)
 
     def _handle_github_api_route(self, route: Route) -> None:
         url = route.request.url
-        if self._blocked_request_pattern.search(url):
+        if self._is_blocked_request(url):
             route.fulfill(
                 status=403,
                 content_type="application/json",
@@ -142,7 +138,7 @@ class StartupRecoveryRateLimitRuntime(
 
     def _handle_page_request(self, request: Request) -> None:
         url = request.url
-        if not self._blocked_request_pattern.search(url):
+        if not self._is_blocked_request(url):
             return
         snapshot = self._capture_ui_snapshot()
         self._observation.record_blocked_request(
@@ -207,6 +203,16 @@ class StartupRecoveryRateLimitRuntime(
             for label in ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
             if label in body_text
         ]
+
+    def _is_blocked_request(self, url: str) -> bool:
+        parsed_url = urlsplit(url)
+        expected_path_suffix = f"/contents/{self._observation.blocked_repository_path}"
+        return (
+            parsed_url.scheme == "https"
+            and parsed_url.netloc == "api.github.com"
+            and parsed_url.path.endswith(expected_path_suffix)
+            and bool(parse_qs(parsed_url.query).get("ref"))
+        )
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         if self._context is not None:
