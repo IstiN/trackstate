@@ -1,0 +1,45 @@
+test_id: TS-590
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - gh CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release upload access to the hosted setup repository
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage and pointed at the live setup repository as origin.
+  - Pre-creates a matching draft GitHub Release for TS-123 with the correct tag and title, but a manually edited custom body.
+  - Executes the exact local CLI command `trackstate attachment upload --issue TS-123 --file note.txt --target local`.
+  - Passes only when the upload reuses the seeded release and normalizes the release body to the standard machine-managed note visible through both the API and `gh release view`.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-123 --file note.txt --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-123
+    - --file
+    - note.txt
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-590 Project
+  issue_key: TS-123
+  issue_summary: TS-590 release body normalization fixture
+  source_file_name: note.txt
+  source_file_text: |-
+    TS-590 upload payload
+    Reusing a matching release must normalize the body back to the machine-managed note.
+  release_tag_prefix_base: ts590-assets-
+  seeded_release_body: Custom release body edited by a user
+  expected_release_body: |
+    TrackState-managed attachment container for TS-123.
+  attachment_media_type: text/plain
+  manifest_poll_timeout_seconds: 120
+  manifest_poll_interval_seconds: 4
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4
+  gh_poll_timeout_seconds: 120
+  gh_poll_interval_seconds: 4
