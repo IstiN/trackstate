@@ -67,7 +67,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workspaceSyncChecking => 'Syncing';
 
   @override
-  String get workspaceSyncAttentionNeeded => 'Attention needed';
+  String get workspaceSyncAttentionNeededVisibleLabel => 'Attention needed';
+
+  @override
+  String get workspaceSyncAttentionNeededSemanticLabel =>
+      'Sync error, attention needed';
 
   @override
   String get workspaceSyncUnavailable => 'Sync unavailable';
@@ -168,6 +172,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get detail => 'Detail';
 
   @override
+  String get comment => 'Comment';
+
+  @override
   String get comments => 'Comments';
 
   @override
@@ -175,7 +182,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsDownloadOnlyMessage =>
-      'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
+      'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.';
 
   @override
   String get attachmentsLimitedUploadMessage =>
@@ -223,6 +230,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String downloadAttachment(String fileName) {
     return 'Download $fileName';
   }
+
+  @override
+  String get commentPlaceholder => 'Add a comment...';
 
   @override
   String get postComment => 'Post comment';
@@ -872,7 +882,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String repositoryConfigFallback(String error) {
-    return 'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. $error';
+    return 'TrackState.AI fell back to startup-safe repository defaults so the shell could open. $error';
   }
 
   @override
@@ -888,6 +898,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String workspaceRestoreFailed(String workspaceName, String reason) {
     return 'No valid saved workspace could be restored. Last skipped workspace: $workspaceName. $reason';
+  }
+
+  @override
+  String selectedIssueUnavailable(String issueKey) {
+    return '$issueKey is no longer available in this workspace.';
   }
 
   @override
@@ -994,6 +1009,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.';
 
   @override
+  String get localGitHostedAccessDescription =>
+      'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.';
+
+  @override
   String get close => 'Close';
 
   @override
@@ -1001,6 +1020,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get retry => 'Retry';
+
+  @override
+  String get retryStartup => 'Retry startup';
 
   @override
   String get editIssue => 'Edit issue';
@@ -1035,7 +1057,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get hierarchyChangeConfirmationTitle => 'Confirm hierarchy move';
 
   @override
-  String hierarchyChangeConfirmationMessage(int descendantCount) {
+  String hierarchyChangeConfirmationMessage(
+    String issueLabel,
+    int descendantCount,
+  ) {
     String _temp0 = intl.Intl.pluralLogic(
       descendantCount,
       locale: localeName,
@@ -1043,7 +1068,23 @@ class AppLocalizationsEn extends AppLocalizations {
       one: '1 descendant',
       zero: 'no descendants',
     );
-    return 'Saving this hierarchy change will move the selected issue together with $_temp0 to a new canonical path.';
+    return 'Saving this hierarchy change will move $issueLabel together with $_temp0 to a new canonical path.';
+  }
+
+  @override
+  String hierarchyChangeConfirmationDestinationMessage(
+    String issueLabel,
+    int descendantCount,
+    String destinationLabel,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      descendantCount,
+      locale: localeName,
+      other: '$descendantCount descendants',
+      one: '1 descendant',
+      zero: 'no descendants',
+    );
+    return 'Saving this hierarchy change will move $issueLabel together with $_temp0 to $destinationLabel.';
   }
 
   @override

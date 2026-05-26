@@ -376,6 +376,7 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 void _recordStep(
@@ -420,6 +421,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewRepliesJson());
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -431,6 +433,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewRepliesJson());
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -702,4 +705,8 @@ String _actualResultLine(Map<String, Object?> result) {
     return 'Step ${failedStep['step']} failed while checking "${failedStep['action']}". Observed: ${failedStep['observed']}';
   }
   return 'The test failed before a detailed step observation was recorded.';
+}
+
+String _reviewRepliesJson() {
+  return '${jsonEncode(const <String, Object>{'replies': <Object>[]})}\n';
 }

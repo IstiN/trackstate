@@ -1,5 +1,7 @@
 import '../../core/interfaces/workspace_onboarding_driver.dart';
 import '../../core/interfaces/workspace_onboarding_screen.dart';
+import '../../core/models/workspace_onboarding_choice_observation.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
 class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
@@ -16,6 +18,9 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
   Future<void> openAddWorkspace() => _driver.openAddWorkspace();
 
   @override
+  Future<void> chooseOpenExistingFolder() => _driver.chooseOpenExistingFolder();
+
+  @override
   Future<void> chooseExistingFolder() => _driver.selectExistingFolder();
 
   @override
@@ -24,6 +29,14 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
   @override
   Future<void> chooseHostedRepositorySuggestion(String fullName) =>
       _driver.selectHostedRepositorySuggestion(fullName);
+
+  @override
+  Future<void> enterLocalWorkspaceName(String value) =>
+      _driver.enterLocalWorkspaceName(value);
+
+  @override
+  Future<void> enterLocalWriteBranch(String value) =>
+      _driver.enterLocalWriteBranch(value);
 
   @override
   Future<void> enterHostedRepository(String repository) =>
@@ -38,6 +51,19 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
 
   @override
   WorkspaceOnboardingState captureState() => _driver.captureState();
+
+  @override
+  WorkspaceOnboardingChoiceObservation observeTargetChoices() =>
+      _driver.observeTargetChoices();
+
+  @override
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  }) {
+    return _driver.observeShellEntryPoint(
+      workspaceDisplayName: workspaceDisplayName,
+    );
+  }
 
   @override
   bool isAccessCalloutVisible({

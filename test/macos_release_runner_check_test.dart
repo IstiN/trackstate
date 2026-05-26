@@ -34,44 +34,55 @@ void main() {
       'trackstate-macos-runner-check-',
     );
     binDir = Directory('${tempDir.path}/bin')..createSync();
-    scriptPath =
-        '${Directory.current.path}/tool/check_macos_release_runner.sh';
+    scriptPath = '${Directory.current.path}/tool/check_macos_release_runner.sh';
 
     await writeExecutable(
       'flutter',
       '#!/usr/bin/env bash\n'
-      'echo "Flutter 3.35.3 • channel stable • fake"\n',
+          'echo "Flutter update freshness banner"\n'
+          'echo "Flutter 3.35.3 • channel stable • fake"\n'
+          'echo "Tools • Dart 3.9.2"\n',
     );
     await writeExecutable(
       'dart',
       '#!/usr/bin/env bash\n'
-      'echo "Dart SDK version: 3.9.2 (stable) (Fake)" >&2\n',
+          'echo "Dart SDK version: 3.9.2 (stable) (Fake)" >&2\n',
     );
     await writeExecutable(
       'xcodebuild',
       '#!/usr/bin/env bash\n'
-      'echo "Xcode 16.1"\n'
-      'echo "Build version 16B40"\n',
+          'echo "Xcode 16.1"\n'
+          'echo "Build version 16B40"\n',
     );
     await writeExecutable(
       'zip',
       '#!/usr/bin/env bash\n'
-      'echo "zip"\n',
+          'echo "zip"\n',
     );
     await writeExecutable(
       'ditto',
       '#!/usr/bin/env bash\n'
-      'echo "ditto"\n',
+          'echo "ditto"\n',
     );
     await writeExecutable(
       'tar',
       '#!/usr/bin/env bash\n'
-      'echo "tar"\n',
+          'echo "tar"\n',
     );
     await writeExecutable(
       'shasum',
       '#!/usr/bin/env bash\n'
-      'echo "shasum"\n',
+          'echo "shasum"\n',
+    );
+    await writeExecutable(
+      'file',
+      '#!/usr/bin/env bash\n'
+          'echo "file"\n',
+    );
+    await writeExecutable(
+      'gh',
+      '#!/usr/bin/env bash\n'
+          'echo "gh version 2.0.0"\n',
     );
   });
 
@@ -87,16 +98,62 @@ void main() {
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     expect(
       '${result.stdout}',
-      contains('Runner readiness verified for Flutter 3.35.3'),
+      contains('Runner readiness verified for Flutter 3.35.3 (minimum 3.35.3)'),
     );
   });
+
+  test(
+    'runner readiness script accepts newer Flutter and Dart versions',
+    () async {
+      await writeExecutable(
+        'flutter',
+        '#!/usr/bin/env bash\n'
+            'echo "Flutter 3.38.9 • channel stable • fake"\n',
+      );
+      await writeExecutable(
+        'dart',
+        '#!/usr/bin/env bash\n'
+            'echo "Dart SDK version: 3.10.0 (stable) (Fake)" >&2\n',
+      );
+
+      final result = await runReadinessCheck();
+
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      expect(
+        '${result.stdout}',
+        contains(
+          'Runner readiness verified for Flutter 3.38.9 (minimum 3.35.3)',
+        ),
+      );
+      expect('${result.stdout}', contains('Dart 3.10.0 (minimum 3.9.2)'));
+    },
+  );
+
+  test(
+    'runner readiness script fails when Flutter is below the minimum',
+    () async {
+      await writeExecutable(
+        'flutter',
+        '#!/usr/bin/env bash\n'
+            'echo "Flutter 3.34.9 • channel stable • fake"\n',
+      );
+
+      final result = await runReadinessCheck();
+
+      expect(result.exitCode, isNonZero);
+      expect(
+        '${result.stdout}${result.stderr}',
+        contains('Flutter 3.35.3 or newer is required'),
+      );
+    },
+  );
 
   test('runner readiness script fails when Xcode is too old', () async {
     await writeExecutable(
       'xcodebuild',
       '#!/usr/bin/env bash\n'
-      'echo "Xcode 15.4"\n'
-      'echo "Build version 15F31d"\n',
+          'echo "Xcode 15.4"\n'
+          'echo "Build version 15F31d"\n',
     );
 
     final result = await runReadinessCheck();
@@ -107,4 +164,28 @@ void main() {
       contains('Xcode 16 or newer is required'),
     );
   });
+
+  test(
+    'runner readiness script reads full Flutter output without pipe breakage',
+    () async {
+      await writeExecutable(
+        'flutter',
+        '#!/usr/bin/env bash\n'
+            'echo "┌ Flutter notice ┐"\n'
+            'echo "│ Additional output before the version │"\n'
+            'echo "Flutter 3.35.3 • channel stable • fake"\n'
+            'echo "Additional output after the version"\n',
+      );
+
+      final result = await runReadinessCheck();
+
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      expect(
+        '${result.stdout}',
+        contains(
+          'Runner readiness verified for Flutter 3.35.3 (minimum 3.35.3)',
+        ),
+      );
+    },
+  );
 }
