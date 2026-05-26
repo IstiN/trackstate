@@ -90,12 +90,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -166,12 +160,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -244,12 +232,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -331,12 +313,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -408,12 +384,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -476,12 +446,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,
@@ -547,12 +511,6 @@ void main() {
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openBrowserLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => null,
           openHostedRepository:
               ({
                 required String repository,

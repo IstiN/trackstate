@@ -502,8 +502,15 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!mounted) {
       return;
     }
+    final nextActiveWorkspaceId = resolveWorkspaceSwitcherSelectedWorkspaceId(
+      currentSelectedWorkspaceId: _workspaceState.activeWorkspaceId,
+      previousWorkspaces: state ?? _workspaceState,
+      nextWorkspaces: workspaceState,
+    );
     setState(() {
-      _workspaceState = workspaceState;
+      _workspaceState = workspaceState.copyWith(
+        activeWorkspaceId: nextActiveWorkspaceId,
+      );
       _authenticatedWorkspaceIds = authenticatedWorkspaceIds;
       _hostedWorkspaceAccessModes = hostedWorkspaceAccessModes;
       _localWorkspaceAvailability = localWorkspaceAvailability;
