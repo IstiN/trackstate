@@ -219,6 +219,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   String? _pendingStartupLocalFallbackWorkspaceId;
   String? _startupHostedFallbackWorkspaceId;
   bool _isSwitchingStartupHostedFallback = false;
+  bool _isPersistingStartupHostedFallbackSelection = false;
 
   @override
   void initState() {
@@ -257,6 +258,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _pendingStartupLocalFallbackWorkspaceId = null;
     _startupHostedFallbackWorkspaceId = null;
     _isSwitchingStartupHostedFallback = false;
+    _isPersistingStartupHostedFallbackSelection = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
     unawaited(_initializeWorkspaceProfiles());
@@ -460,7 +462,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         activeWorkspace.isHosted &&
         activeWorkspace.id == viewModel.workspaceId) {
       final liveAccessMode = _hostedWorkspaceAccessModeForViewModel(viewModel);
-      if (activeWorkspace.hostedAccessMode != liveAccessMode) {
+      final shouldDeferHostedAccessModePersistence =
+          _isPersistingStartupHostedFallbackSelection &&
+          activeWorkspace.id == _startupHostedFallbackWorkspaceId;
+      if (!shouldDeferHostedAccessModePersistence &&
+          activeWorkspace.hostedAccessMode != liveAccessMode) {
         workspaceState = await widget.workspaceProfileService
             .saveHostedAccessMode(activeWorkspace.id, liveAccessMode);
       }
@@ -641,6 +647,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           },
         );
         _startupHostedFallbackWorkspaceId = restoredWorkspaceId;
+        _isPersistingStartupHostedFallbackSelection = true;
         _pendingStartupLocalFallbackWorkspaceId = null;
         _pendingWorkspaceRestoreFailure = null;
         if (lastFailure != null) {
@@ -651,27 +658,34 @@ class _TrackStateAppState extends State<TrackStateApp>
             ),
           );
         }
-        await _commitPreparedWorkspaceSwitch(
-          prepared,
-          previousViewModel: previousViewModel,
-          workspaceState: optimisticState,
-        );
-        var selectedState = await widget.workspaceProfileService.selectProfile(
-          restoredWorkspaceId,
-        );
-        selectedState =
-            await _persistPreparedHostedWorkspaceState(
-              prepared,
-              workspaceState: selectedState,
-            ) ??
-            selectedState;
-        if (!mounted) {
-          return true;
+        try {
+          await _commitPreparedWorkspaceSwitch(
+            prepared,
+            previousViewModel: previousViewModel,
+            workspaceState: optimisticState,
+          );
+          var selectedState = await widget.workspaceProfileService.selectProfile(
+            restoredWorkspaceId,
+          );
+          selectedState =
+              await _persistPreparedHostedWorkspaceState(
+                prepared,
+                workspaceState: selectedState,
+              ) ??
+              selectedState;
+          if (!mounted) {
+            return true;
+          }
+          setState(() {
+            _workspaceState = selectedState;
+          });
+          await _refreshWorkspaceSwitcherState(selectedState);
+        } finally {
+          _isPersistingStartupHostedFallbackSelection = false;
+          if (viewModel.workspaceId == restoredWorkspaceId) {
+            _startupHostedFallbackWorkspaceId = null;
+          }
         }
-        setState(() {
-          _workspaceState = selectedState;
-        });
-        await _refreshWorkspaceSwitcherState(selectedState);
         return true;
       }
       var selectedState = await widget.workspaceProfileService.selectProfile(
@@ -1590,6 +1604,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         prepared.workspace?.id == _startupHostedFallbackWorkspaceId;
     if (!preservesStartupHostedFallback) {
       _startupHostedFallbackWorkspaceId = null;
+      _isPersistingStartupHostedFallbackSelection = false;
     }
     setState(() {
       viewModel = prepared.viewModel;
@@ -1622,6 +1637,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
     if (preservesStartupHostedFallback &&
+        !_isPersistingStartupHostedFallbackSelection &&
         viewModel.workspaceId == _startupHostedFallbackWorkspaceId) {
       _startupHostedFallbackWorkspaceId = null;
     }
