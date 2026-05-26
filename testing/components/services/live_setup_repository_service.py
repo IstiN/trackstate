@@ -327,6 +327,7 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
+
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
