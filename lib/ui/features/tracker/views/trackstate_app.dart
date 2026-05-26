@@ -216,6 +216,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   Timer? _desktopWorkspaceSwitcherBrowserBlurCheckTimer;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
   bool _isEnsuringCurrentContextWorkspaceMigration = false;
+  String? _pendingStartupLocalFallbackWorkspaceId;
+  bool _isSwitchingStartupHostedFallback = false;
 
   @override
   void initState() {
@@ -251,6 +253,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
     _isDesktopWorkspaceSwitcherVisible = false;
+    _pendingStartupLocalFallbackWorkspaceId = null;
+    _isSwitchingStartupHostedFallback = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
     unawaited(_initializeWorkspaceProfiles());
@@ -462,6 +466,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     final authenticatedWorkspaceIds = <String>{};
     final hostedWorkspaceAccessModes = <String, HostedWorkspaceAccessMode>{};
     final localWorkspaceAvailability = <String, bool>{};
+    WorkspaceProfile? startupUnavailableLocalWorkspace;
     for (final workspace in workspaceState.profiles) {
       if (workspace.isHosted) {
         final token = await widget.authStore.readToken(
@@ -485,6 +490,12 @@ class _TrackStateAppState extends State<TrackStateApp>
             isAvailable: false,
           );
           localWorkspaceAvailability[workspace.id] = false;
+          if (_shouldSwitchStartupUnavailableLocalWorkspace(
+            workspace,
+            workspaceState,
+          )) {
+            startupUnavailableLocalWorkspace = workspace;
+          }
           continue;
         }
         localWorkspaceAvailability[workspace.id] = !workspaceState
@@ -520,6 +531,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         ),
       );
     });
+    if (startupUnavailableLocalWorkspace != null) {
+      await _switchStartupUnavailableLocalWorkspaceToHostedFallback(
+        startupUnavailableLocalWorkspace,
+      );
+    }
   }
 
   bool _shouldMarkActiveLocalWorkspaceUnavailableFromSync(
@@ -664,8 +680,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     return nextState;
   }
 
-  Future<WorkspaceProfile?>
-  _resolvePreservedLocalHostedFallbackWorkspace() async {
+  Future<WorkspaceProfile?> _resolvePreservedLocalHostedFallbackWorkspace({
+    bool requireAuthenticatedWorkspace = false,
+  }) async {
     final hostedWorkspaces = _workspaceState.profiles
         .where((workspace) => workspace.isHosted)
         .toList(growable: false);
@@ -681,15 +698,21 @@ class _TrackStateAppState extends State<TrackStateApp>
         return workspace;
       }
     }
+    if (requireAuthenticatedWorkspace) {
+      return null;
+    }
     return hostedWorkspaces.first;
   }
 
   Future<_PreparedWorkspaceSwitch?> _preparePreservedLocalHostedFallbackSwitch(
     TrackerViewModel previousViewModel, {
     required bool deferAccessRestore,
+    bool requireAuthenticatedWorkspace = false,
   }) async {
     final fallbackWorkspace =
-        await _resolvePreservedLocalHostedFallbackWorkspace();
+        await _resolvePreservedLocalHostedFallbackWorkspace(
+          requireAuthenticatedWorkspace: requireAuthenticatedWorkspace,
+        );
     if (fallbackWorkspace == null) {
       return null;
     }
@@ -884,6 +907,58 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  bool _shouldSwitchStartupUnavailableLocalWorkspace(
+    WorkspaceProfile workspace,
+    WorkspaceProfilesState workspaceState,
+  ) {
+    return kIsWeb &&
+        widget.repository == null &&
+        !_isSwitchingStartupHostedFallback &&
+        _pendingStartupLocalFallbackWorkspaceId == workspace.id &&
+        workspaceState.profiles.any((profile) => profile.isHosted);
+  }
+
+  Future<void> _switchStartupUnavailableLocalWorkspaceToHostedFallback(
+    WorkspaceProfile workspace,
+  ) async {
+    if (_isSwitchingStartupHostedFallback) {
+      return;
+    }
+    _isSwitchingStartupHostedFallback = true;
+    try {
+      final previousViewModel = viewModel;
+      final prepared = await _preparePreservedLocalHostedFallbackSwitch(
+        previousViewModel,
+        deferAccessRestore: true,
+        requireAuthenticatedWorkspace: true,
+      );
+      if (prepared == null || prepared.workspace == null || !mounted) {
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        return;
+      }
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        prepared.workspace!.id,
+      );
+      selectedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: selectedState,
+          ) ??
+          selectedState;
+      await _commitPreparedWorkspaceSwitch(
+        prepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+    } finally {
+      if (_pendingStartupLocalFallbackWorkspaceId == workspace.id &&
+          !viewModel.usesLocalPersistence) {
+        _pendingStartupLocalFallbackWorkspaceId = null;
+      }
+      _isSwitchingStartupHostedFallback = false;
+    }
+  }
+
   Future<WorkspaceProfilesState> _saveLocalWorkspaceAvailability(
     String workspaceId, {
     required bool isAvailable,
@@ -989,6 +1064,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!mounted) {
       return;
     }
+    _pendingStartupLocalFallbackWorkspaceId =
+        widget.repository == null &&
+            kIsWeb &&
+            loadedState.selectedWorkspace?.isLocal == true
+        ? loadedState.selectedWorkspace!.id
+        : null;
     setState(() {
       _workspaceState = loadedState;
     });
@@ -1001,6 +1082,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       setState(() {
         _workspaceProfilesReady = true;
       });
+      _pendingStartupLocalFallbackWorkspaceId = null;
       await viewModel.load(deferAccessRestore: true);
       return;
     }
@@ -1033,6 +1115,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         _showsWorkspaceOnboarding = true;
         _workspaceProfilesReady = true;
       });
+      _pendingStartupLocalFallbackWorkspaceId = null;
       return;
     }
     await viewModel.load(deferAccessRestore: true);
@@ -1049,6 +1132,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
       _workspaceProfilesReady = true;
     });
+    _pendingStartupLocalFallbackWorkspaceId = null;
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
@@ -1454,6 +1538,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         _requestedWorkspaceSwitcherRowFocusId = null;
       }
     });
+    if (prepared.workspace == null || !prepared.workspace!.isLocal) {
+      _pendingStartupLocalFallbackWorkspaceId = null;
+    }
     if (!identical(previousViewModel, prepared.viewModel)) {
       previousViewModel.dispose();
     }

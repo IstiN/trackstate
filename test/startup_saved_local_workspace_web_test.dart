@@ -32,13 +32,6 @@ external JSFunction get _consoleInfo;
 @JS('console.info')
 external set _consoleInfo(JSFunction value);
 
-const List<String> _startupShellNavigationLabels = <String>[
-  'Dashboard',
-  'Board',
-  'JQL Search',
-  'Hierarchy',
-  'Settings',
-];
 const String _hostedWorkspaceId = 'hosted:stable/repo@main';
 
 void main() {
@@ -333,6 +326,98 @@ void main() {
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
+      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
+
+  testWidgets(
+    'web startup switches into the hosted fallback workspace after a restored local sync error while /user remains pending',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+      final localRepository = _SyncErrorLocalTrackStateRepository(
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+        error: StateError(
+          'Saved workspace path no longer matches the expected TrackState repository.',
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => localRepository,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      var savedStateAfterStartup = await workspaceProfiles.loadState();
+      for (
+        var index = 0;
+        index < 20 &&
+            savedStateAfterStartup.activeWorkspaceId != _hostedWorkspaceId;
+        index += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+        savedStateAfterStartup = await workspaceProfiles.loadState();
+      }
+
+      expect(delayedRepository.userProbeRequestCount, 1);
+      expect(delayedRepository.userProbePending, isTrue);
+      expect(delayedRepository.requestedPaths, contains('/user'));
+      _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
+      await _expectHostedFallbackWorkspaceRow(tester);
+      await _expectBlockedCreateIssueGate(tester);
       _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
@@ -922,10 +1007,16 @@ void _expectShellReadySurface() {
     find.byKey(const ValueKey('workspace-switcher-trigger')),
     findsOneWidget,
   );
-  for (final label in _startupShellNavigationLabels) {
+  expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+  for (final label in const <String>[
+    'Dashboard',
+    'Board',
+    'JQL Search',
+    'Hierarchy',
+    'Settings',
+  ]) {
     expect(find.text(label), findsWidgets);
   }
-  expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
 }
 
 class _SlowBrowserStartupAuthProbeRepository
@@ -956,6 +1047,24 @@ class _SlowBrowserStartupAuthProbeRepository
     replaceCachedState(snapshot: _snapshotOverride);
     return _snapshotOverride;
   }
+}
+
+class _SyncErrorLocalTrackStateRepository extends DemoTrackStateRepository
+    implements WorkspaceSyncRepository {
+  const _SyncErrorLocalTrackStateRepository({
+    required super.snapshot,
+    required this.error,
+  });
+
+  final Object error;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => throw error;
 }
 
 class _RealHostedStartupDelayedAuthHarness {
