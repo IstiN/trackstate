@@ -4,6 +4,15 @@ import '../domain/models/trackstate_models.dart';
 class JiraCompatibilityRequestService {
   const JiraCompatibilityRequestService();
 
+  void validate({
+    required String method,
+    required String path,
+    Map<String, String> query = const <String, String>{},
+    Map<String, Object?>? body,
+  }) {
+    _validateRequest(method: method, path: path, query: query, body: body);
+  }
+
   Future<Object?> execute({
     required TrackStateRepository repository,
     required String method,
@@ -11,6 +20,90 @@ class JiraCompatibilityRequestService {
     Map<String, String> query = const <String, String>{},
     Map<String, Object?>? body,
   }) async {
+    final request = _validateRequest(
+      method: method,
+      path: path,
+      query: query,
+      body: body,
+    );
+    if (request is _ValidatedSearchRequest) {
+      return _executeSearch(repository: repository, request: request);
+    }
+    if (request is _ValidatedIssueRequest) {
+      return _executeIssueGet(repository: repository, request: request);
+    }
+    return _executeCommentList(
+      repository: repository,
+      request: request as _ValidatedCommentRequest,
+    );
+  }
+
+  Future<Map<String, Object?>> _executeSearch({
+    required TrackStateRepository repository,
+    required _ValidatedSearchRequest request,
+  }) async {
+    final page = await repository.searchIssuePage(
+      request.jql,
+      startAt: request.startAt,
+      maxResults: request.maxResults,
+    );
+    return <String, Object?>{
+      'startAt': page.startAt,
+      'maxResults': page.maxResults,
+      'total': page.total,
+      'issues': [
+        for (final issue in page.issues)
+          _issueJson(
+            issue: issue,
+            issuePath:
+                '${request.path.startsWith('/rest/api/3/') ? '/rest/api/3' : '/rest/api/2'}/issue/${Uri.encodeComponent(issue.key)}',
+            requestedFields: request.requestedFields,
+          ),
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> _executeIssueGet({
+    required TrackStateRepository repository,
+    required _ValidatedIssueRequest request,
+  }) async {
+    final issue = await _loadIssue(repository, request.issueKey);
+    return _issueJson(
+      issue: issue,
+      issuePath: request.path,
+      requestedFields: request.requestedFields,
+    );
+  }
+
+  Future<Map<String, Object?>> _executeCommentList({
+    required TrackStateRepository repository,
+    required _ValidatedCommentRequest request,
+  }) async {
+    final issue = await _loadIssue(repository, request.issueKey);
+    final comments = issue.comments
+        .skip(request.startAt)
+        .take(request.maxResults ?? issue.comments.length)
+        .toList();
+    return <String, Object?>{
+      'startAt': request.startAt,
+      'maxResults': request.maxResults ?? issue.comments.length,
+      'total': issue.comments.length,
+      'comments': [
+        for (final comment in comments)
+          _commentJson(
+            comment,
+            '${request.path}/${Uri.encodeComponent(comment.id)}',
+          ),
+      ],
+    };
+  }
+
+  _ValidatedCompatibilityRequest _validateRequest({
+    required String method,
+    required String path,
+    required Map<String, String> query,
+    required Map<String, Object?>? body,
+  }) {
     final normalizedMethod = method.trim().toUpperCase();
     if (!const <String>{
       'GET',
@@ -34,16 +127,43 @@ class JiraCompatibilityRequestService {
       );
     }
 
-    final searchMatch = RegExp(
-      r'^/rest/api/(2|3)/search$',
-    ).firstMatch(normalizedPath);
-    if (searchMatch != null) {
-      return _executeSearch(
-        repository: repository,
-        method: normalizedMethod,
+    if (RegExp(r'^/rest/api/(2|3)/search$').hasMatch(normalizedPath)) {
+      if (normalizedMethod != 'GET' && normalizedMethod != 'POST') {
+        throw JiraCompatibilityRequestException(
+          code: 'UNSUPPORTED_REQUEST',
+          message:
+              'jira_execute_request does not support $normalizedMethod $normalizedPath.',
+        );
+      }
+      final payload = <String, Object?>{...query, ...?body};
+      _ensureOnlySupportedKeys(payload, const <String>{
+        'jql',
+        'startAt',
+        'maxResults',
+        'fields',
+      }, path: normalizedPath);
+      return _ValidatedSearchRequest(
         path: normalizedPath,
-        query: query,
-        body: body,
+        method: normalizedMethod,
+        jql: _requiredString(payload, 'jql', path: normalizedPath),
+        startAt:
+            _readNonNegativeInt(
+              payload['startAt'],
+              'startAt',
+              path: normalizedPath,
+            ) ??
+            0,
+        maxResults:
+            _readNonNegativeInt(
+              payload['maxResults'],
+              'maxResults',
+              path: normalizedPath,
+            ) ??
+            50,
+        requestedFields: _parseFieldSelection(
+          payload['fields'],
+          path: normalizedPath,
+        ),
       );
     }
 
@@ -51,13 +171,30 @@ class JiraCompatibilityRequestService {
       r'^/rest/api/(2|3)/issue/([^/]+)$',
     ).firstMatch(normalizedPath);
     if (issueMatch != null) {
-      return _executeIssueGet(
-        repository: repository,
-        method: normalizedMethod,
+      if (normalizedMethod != 'GET') {
+        throw JiraCompatibilityRequestException(
+          code: 'UNSUPPORTED_REQUEST',
+          message:
+              'jira_execute_request does not support $normalizedMethod $normalizedPath.',
+        );
+      }
+      if (body != null && body.isNotEmpty) {
+        throw JiraCompatibilityRequestException(
+          code: 'INVALID_REQUEST',
+          message: 'GET $normalizedPath does not accept a request body.',
+        );
+      }
+      _ensureOnlySupportedKeys(query, const <String>{
+        'fields',
+      }, path: normalizedPath);
+      return _ValidatedIssueRequest(
         path: normalizedPath,
+        method: normalizedMethod,
         issueKey: Uri.decodeComponent(issueMatch.group(2)!),
-        query: query,
-        body: body,
+        requestedFields: _parseFieldSelection(
+          query['fields'],
+          path: normalizedPath,
+        ),
       );
     }
 
@@ -65,13 +202,39 @@ class JiraCompatibilityRequestService {
       r'^/rest/api/(2|3)/issue/([^/]+)/comment$',
     ).firstMatch(normalizedPath);
     if (commentMatch != null) {
-      return _executeCommentList(
-        repository: repository,
-        method: normalizedMethod,
+      if (normalizedMethod != 'GET') {
+        throw JiraCompatibilityRequestException(
+          code: 'UNSUPPORTED_REQUEST',
+          message:
+              'jira_execute_request does not support $normalizedMethod $normalizedPath.',
+        );
+      }
+      if (body != null && body.isNotEmpty) {
+        throw JiraCompatibilityRequestException(
+          code: 'INVALID_REQUEST',
+          message: 'GET $normalizedPath does not accept a request body.',
+        );
+      }
+      _ensureOnlySupportedKeys(query, const <String>{
+        'startAt',
+        'maxResults',
+      }, path: normalizedPath);
+      return _ValidatedCommentRequest(
         path: normalizedPath,
+        method: normalizedMethod,
         issueKey: Uri.decodeComponent(commentMatch.group(2)!),
-        query: query,
-        body: body,
+        startAt:
+            _readNonNegativeInt(
+              query['startAt'],
+              'startAt',
+              path: normalizedPath,
+            ) ??
+            0,
+        maxResults: _readNonNegativeInt(
+          query['maxResults'],
+          'maxResults',
+          path: normalizedPath,
+        ),
       );
     }
 
@@ -82,127 +245,6 @@ class JiraCompatibilityRequestService {
           '/rest/api/2/search, /rest/api/3/search, /rest/api/2/issue/{key}, '
           '/rest/api/3/issue/{key}, and /rest/api/2|3/issue/{key}/comment.',
     );
-  }
-
-  Future<Map<String, Object?>> _executeSearch({
-    required TrackStateRepository repository,
-    required String method,
-    required String path,
-    required Map<String, String> query,
-    required Map<String, Object?>? body,
-  }) async {
-    if (method != 'GET' && method != 'POST') {
-      throw JiraCompatibilityRequestException(
-        code: 'UNSUPPORTED_REQUEST',
-        message: 'jira_execute_request does not support $method $path.',
-      );
-    }
-
-    final payload = <String, Object?>{...query, ...?body};
-    _ensureOnlySupportedKeys(payload, const <String>{
-      'jql',
-      'startAt',
-      'maxResults',
-      'fields',
-    }, path: path);
-
-    final jql = _requiredString(payload, 'jql', path: path);
-    final startAt =
-        _readNonNegativeInt(payload['startAt'], 'startAt', path: path) ?? 0;
-    final maxResults =
-        _readNonNegativeInt(payload['maxResults'], 'maxResults', path: path) ??
-        50;
-    final requestedFields = _parseFieldSelection(payload['fields'], path: path);
-    final page = await repository.searchIssuePage(
-      jql,
-      startAt: startAt,
-      maxResults: maxResults,
-    );
-    return <String, Object?>{
-      'startAt': page.startAt,
-      'maxResults': page.maxResults,
-      'total': page.total,
-      'issues': [
-        for (final issue in page.issues)
-          _issueJson(
-            issue: issue,
-            issuePath:
-                '${path.startsWith('/rest/api/3/') ? '/rest/api/3' : '/rest/api/2'}/issue/${Uri.encodeComponent(issue.key)}',
-            requestedFields: requestedFields,
-          ),
-      ],
-    };
-  }
-
-  Future<Map<String, Object?>> _executeIssueGet({
-    required TrackStateRepository repository,
-    required String method,
-    required String path,
-    required String issueKey,
-    required Map<String, String> query,
-    required Map<String, Object?>? body,
-  }) async {
-    if (method != 'GET') {
-      throw JiraCompatibilityRequestException(
-        code: 'UNSUPPORTED_REQUEST',
-        message: 'jira_execute_request does not support $method $path.',
-      );
-    }
-    if (body != null && body.isNotEmpty) {
-      throw JiraCompatibilityRequestException(
-        code: 'INVALID_REQUEST',
-        message: 'GET $path does not accept a request body.',
-      );
-    }
-    _ensureOnlySupportedKeys(query, const <String>{'fields'}, path: path);
-    final issue = await _loadIssue(repository, issueKey);
-    return _issueJson(
-      issue: issue,
-      issuePath: path,
-      requestedFields: _parseFieldSelection(query['fields'], path: path),
-    );
-  }
-
-  Future<Map<String, Object?>> _executeCommentList({
-    required TrackStateRepository repository,
-    required String method,
-    required String path,
-    required String issueKey,
-    required Map<String, String> query,
-    required Map<String, Object?>? body,
-  }) async {
-    if (method != 'GET') {
-      throw JiraCompatibilityRequestException(
-        code: 'UNSUPPORTED_REQUEST',
-        message: 'jira_execute_request does not support $method $path.',
-      );
-    }
-    if (body != null && body.isNotEmpty) {
-      throw JiraCompatibilityRequestException(
-        code: 'INVALID_REQUEST',
-        message: 'GET $path does not accept a request body.',
-      );
-    }
-    _ensureOnlySupportedKeys(query, const <String>{
-      'startAt',
-      'maxResults',
-    }, path: path);
-    final issue = await _loadIssue(repository, issueKey);
-    final startAt =
-        _readNonNegativeInt(query['startAt'], 'startAt', path: path) ?? 0;
-    final maxResults =
-        _readNonNegativeInt(query['maxResults'], 'maxResults', path: path) ??
-        issue.comments.length;
-    final comments = issue.comments.skip(startAt).take(maxResults).toList();
-    return <String, Object?>{
-      'startAt': startAt,
-      'maxResults': maxResults,
-      'total': issue.comments.length,
-      'comments': [
-        for (final comment in comments)
-          _commentJson(comment, '$path/${Uri.encodeComponent(comment.id)}'),
-      ],
-    };
   }
 
   Future<TrackStateIssue> _loadIssue(
@@ -444,4 +486,56 @@ class JiraCompatibilityRequestException implements Exception {
 
   final String code;
   final String message;
+}
+
+abstract class _ValidatedCompatibilityRequest {
+  const _ValidatedCompatibilityRequest({
+    required this.path,
+    required this.method,
+  });
+
+  final String path;
+  final String method;
+}
+
+class _ValidatedSearchRequest extends _ValidatedCompatibilityRequest {
+  const _ValidatedSearchRequest({
+    required super.path,
+    required super.method,
+    required this.jql,
+    required this.startAt,
+    required this.maxResults,
+    required this.requestedFields,
+  });
+
+  final String jql;
+  final int startAt;
+  final int maxResults;
+  final Set<String>? requestedFields;
+}
+
+class _ValidatedIssueRequest extends _ValidatedCompatibilityRequest {
+  const _ValidatedIssueRequest({
+    required super.path,
+    required super.method,
+    required this.issueKey,
+    required this.requestedFields,
+  });
+
+  final String issueKey;
+  final Set<String>? requestedFields;
+}
+
+class _ValidatedCommentRequest extends _ValidatedCompatibilityRequest {
+  const _ValidatedCommentRequest({
+    required super.path,
+    required super.method,
+    required this.issueKey,
+    required this.startAt,
+    required this.maxResults,
+  });
+
+  final String issueKey;
+  final int startAt;
+  final int? maxResults;
 }

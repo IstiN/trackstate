@@ -182,7 +182,6 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
                     f"Expected revision: {revision}\n"
                     f"Observed stdout:\n{stdout}",
                 )
-
     def _assert_successful_envelope(
         self,
         *,
