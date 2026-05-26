@@ -511,11 +511,39 @@ class _TrackStateAppState extends State<TrackStateApp>
             .contains(workspace.id);
         continue;
       }
+      if (kIsWeb &&
+          activeWorkspace?.isLocal == true &&
+          workspace.id == activeWorkspace!.id) {
+        localWorkspaceAvailability[workspace.id] = !workspaceState
+            .unavailableLocalWorkspaceIds
+            .contains(workspace.id);
+        continue;
+      }
       if (workspaceState.unavailableLocalWorkspaceIds.contains(workspace.id)) {
         localWorkspaceAvailability[workspace.id] = false;
+        if (activeWorkspace?.id == workspace.id &&
+            _shouldSwitchStartupUnavailableLocalWorkspace(
+              workspace,
+              workspaceState,
+            )) {
+          startupUnavailableLocalWorkspace = workspace;
+        }
         continue;
       }
       final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
+      if (!isAvailable) {
+        workspaceState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: false,
+        );
+        if (activeWorkspace?.id == workspace.id &&
+            _shouldSwitchStartupUnavailableLocalWorkspace(
+              workspace,
+              workspaceState,
+            )) {
+          startupUnavailableLocalWorkspace = workspace;
+        }
+      }
       localWorkspaceAvailability[workspace.id] = isAvailable;
     }
     if (!mounted) {
@@ -664,9 +692,8 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel: previousViewModel,
             workspaceState: optimisticState,
           );
-          var selectedState = await widget.workspaceProfileService.selectProfile(
-            restoredWorkspaceId,
-          );
+          var selectedState = await widget.workspaceProfileService
+              .selectProfile(restoredWorkspaceId);
           selectedState =
               await _persistPreparedHostedWorkspaceState(
                 prepared,
@@ -723,6 +750,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfilesState state,
     WorkspaceProfile workspace,
   ) {
+    if (kIsWeb &&
+        widget.repository == null &&
+        workspace.id == state.activeWorkspaceId) {
+      return false;
+    }
     return workspace.isLocal &&
         state.unavailableLocalWorkspaceIds.contains(workspace.id);
   }
@@ -810,6 +842,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       if (deferAccessRestore && kIsWeb) {
         unawaited(loadFuture);
+        await Future<void>.microtask(() {});
         final publishedFallback = await fallbackViewModel
             .publishHostedStartupFallbackShell();
         if (!publishedFallback) {
@@ -849,7 +882,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
   }) async {
     try {
-      final repository = await _openWorkspaceRepository(workspace);
+      final repositoryOpen = _openWorkspaceRepository(workspace);
+      final repository =
+          preserveActiveLocalSelectionOnStartupFailure &&
+              workspace.isLocal &&
+              kIsWeb
+          ? await repositoryOpen.timeout(
+              const Duration(seconds: 2),
+              onTimeout: () => throw StateError(
+                'Saved local workspace access is unavailable until the folder is reselected in this browser.',
+              ),
+            )
+          : await repositoryOpen;
       final nextViewModel = _createViewModel(
         repository: repository,
         previous: previousViewModel,
@@ -1023,8 +1067,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       // Commit the UI immediately with an optimistic workspace state so the
       // hosted restricted shell is visible before the persistence writes
       // complete (which may require the /user auth probe to finish).
-      final optimisticHostedAccessMode =
-          _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+      final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
+        prepared.viewModel,
+      );
       final optimisticState = _workspaceState.copyWith(
         profiles: [
           for (final profile in _workspaceState.profiles)
@@ -1191,9 +1236,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       _workspaceState = loadedState;
     });
     await _awaitActiveLocalWorkspaceRevalidation(loadedState);
-    await _refreshWorkspaceSwitcherState(loadedState);
+    if (!mounted) {
+      return;
+    }
+    var startupState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _workspaceState = startupState;
+    });
+    await _refreshWorkspaceSwitcherState(startupState);
     if (widget.repository != null) {
-      if (loadedState.selectedWorkspace case final activeWorkspace?) {
+      if (startupState.selectedWorkspace case final activeWorkspace?) {
         viewModel.updateWorkspaceScope(activeWorkspace.id);
       }
       setState(() {
@@ -1203,10 +1258,20 @@ class _TrackStateAppState extends State<TrackStateApp>
       await viewModel.load(deferAccessRestore: true);
       return;
     }
-    if (loadedState.hasProfiles) {
+    if (_workspaceProfilesReady &&
+        _workspaceState.activeWorkspaceId != null &&
+        viewModel.workspaceId == _workspaceState.activeWorkspaceId) {
+      _scheduleWebStartupRefresh();
+      return;
+    }
+    startupState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    if (startupState.hasProfiles) {
       if (kIsWeb) {
         final restored = await _restoreWorkspaceFromSavedState(
-          loadedState,
+          startupState,
           allowFallbackFromActive: false,
           deferAccessRestore: true,
           preserveActiveLocalSelectionOnUnsupportedAccess: true,
@@ -1215,19 +1280,19 @@ class _TrackStateAppState extends State<TrackStateApp>
         if (restored || !mounted) {
           return;
         }
-        await _handleStartupWorkspaceRestoreFailure(loadedState);
+        await _handleStartupWorkspaceRestoreFailure(startupState);
         return;
       }
       final restored = await _restoreWorkspaceFromSavedState(
-        loadedState,
+        startupState,
         allowFallbackFromActive: false,
       );
       if (!restored) {
-        await _handleStartupWorkspaceRestoreFailure(loadedState);
+        await _handleStartupWorkspaceRestoreFailure(startupState);
       }
       return;
     }
-    if (_shouldShowWorkspaceOnboarding(loadedState)) {
+    if (_shouldShowWorkspaceOnboarding(startupState)) {
       setState(() {
         _showsWorkspaceOnboarding = true;
         _workspaceProfilesReady = true;
@@ -1296,7 +1361,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<void> _awaitActiveLocalWorkspaceRevalidation(
     WorkspaceProfilesState state,
   ) async {
-    if (widget.repository != null) {
+    if (widget.repository != null || kIsWeb) {
       return;
     }
     final activeWorkspace = state.selectedWorkspace;
@@ -6096,10 +6161,7 @@ String? _repositoryAccessCapabilitySummary(
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected ||
     HostedRepositoryAccessMode.readOnly =>
-      l10n.repositoryAccessCapabilitySummary(
-        'false',
-        'false',
-      ),
+      l10n.repositoryAccessCapabilitySummary('false', 'false'),
     HostedRepositoryAccessMode.writable ||
     HostedRepositoryAccessMode.attachmentRestricted => null,
   };
@@ -6472,13 +6534,12 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label:
-          [
-            semanticLabel,
-            title,
-            message,
-            if (detailMessage != null) detailMessage!,
-          ].join(' '),
+      label: [
+        semanticLabel,
+        title,
+        message,
+        if (detailMessage != null) detailMessage!,
+      ].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -8614,8 +8675,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                   order: NumericFocusOrder(
                     focusOrderBase +
                         (widget.showOpenAction ? 1 : 0) +
-                        ((primaryActionLabel != null &&
-                                onPrimaryAction != null)
+                        ((primaryActionLabel != null && onPrimaryAction != null)
                             ? 1
                             : 0),
                   ),
@@ -8646,7 +8706,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       Text(primaryActionSemanticLabel),
                     if (widget.showOpenAction && onOpen != null)
                       Text('${l10n.openWorkspace}: ${workspace.displayName}'),
-                    if (!isActive) Text('${l10n.delete}: ${workspace.displayName}'),
+                    if (!isActive)
+                      Text('${l10n.delete}: ${workspace.displayName}'),
                   ],
                 ),
               ),

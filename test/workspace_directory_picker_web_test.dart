@@ -4,20 +4,24 @@ library;
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker_web.dart';
 
 void main() {
   late BrowserDirectoryAccessRequester originalRequester;
+  late BrowserWorkspaceSelectionPersister originalPersister;
 
   setUp(() async {
     originalRequester = browserDirectoryAccessRequester;
+    originalPersister = browserWorkspaceSelectionPersister;
     await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
   tearDown(() async {
     browserDirectoryAccessRequester = originalRequester;
+    browserWorkspaceSelectionPersister = originalPersister;
     await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
@@ -41,6 +45,40 @@ void main() {
 
       expect(calls, 1);
       expect(selectedPath, '/tmp/demo');
+    },
+  );
+
+  test(
+    'browser workspace picker preserves the selected path when persistence fails',
+    () async {
+      final reportedErrors = <FlutterErrorDetails>[];
+      final previousOnError = FlutterError.onError;
+      addTearDown(() {
+        FlutterError.onError = previousOnError;
+      });
+      FlutterError.onError = reportedErrors.add;
+      browserDirectoryAccessRequester =
+          ({String? confirmButtonText, String? initialDirectory}) async {
+            expect(initialDirectory, '/tmp/demo');
+            return JSObject()
+              ..['kind'] = 'directory'.toJS
+              ..['name'] = 'demo'.toJS;
+          };
+      browserWorkspaceSelectionPersister =
+          ({required String workspacePath, required Object selection}) async =>
+              throw StateError('IndexedDB write failed');
+
+      final selectedPath = await pickWorkspaceDirectory(
+        initialDirectory: '/tmp/demo',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(selectedPath, '/tmp/demo');
+      expect(reportedErrors, hasLength(1));
+      expect(
+        reportedErrors.single.exceptionAsString(),
+        contains('IndexedDB write failed'),
+      );
     },
   );
 
@@ -105,6 +143,27 @@ void main() {
       expect(repository, isNotNull);
     },
   );
+
+  test(
+    'browser local repository returns null quickly when no saved directory handle exists',
+    () async {
+      final repositoryFuture = openBrowserLocalWorkspaceRepository(
+        repositoryPath: '/tmp/missing-workspace',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final result = await Future.any<Object?>([
+        repositoryFuture,
+        Future<Object?>.delayed(
+          const Duration(seconds: 1),
+          () => const _Timeout(),
+        ),
+      ]);
+
+      expect(result, isNot(const _Timeout()));
+      expect(result, isNull);
+    },
+  );
 }
 
 class _AbortError implements Exception {
@@ -112,4 +171,8 @@ class _AbortError implements Exception {
 
   @override
   String toString() => 'AbortError: The user aborted a request.';
+}
+
+class _Timeout {
+  const _Timeout();
 }
