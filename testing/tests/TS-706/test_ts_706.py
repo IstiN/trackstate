@@ -449,13 +449,14 @@ def _collect_precondition_run_evidence(
         )
         downstream_url = _read_nested_string(downstream_job, "html_url")
         visible_warning = _runner_permission_warning(result)
-        if visible_warning:
+        if visible_warning and result.get("stable_runner_mismatch") is True:
             result["precondition_failure"] = False
             result["product_failure"] = True
             result["error"] = (
                 "AssertionError: Step 4 failed: the Ubuntu preflight gate succeeded with a "
                 "visible warning that the token could not read repository runners, and the "
-                "downstream macOS job queued instead of failing fast."
+                "downstream macOS job was still waiting for a runner after the workflow had "
+                "the full observation window to settle."
             )
             _record_step(
                 result,
@@ -466,7 +467,8 @@ def _collect_precondition_run_evidence(
                     "The live run did not match the expected result: the run page showed "
                     f"`{visible_warning}`, the preflight job page showed "
                     f"`Verify macOS runner availability` succeeded, and the downstream macOS "
-                    f"job entered `{downstream_status}` instead of the workflow failing fast. "
+                    f"job was still `{downstream_status}` after waiting for the workflow to "
+                    "settle instead of the workflow failing fast. "
                     f"Preflight job URL: {preflight_url}. Downstream job URL: "
                     f"{downstream_url or '<missing>'}."
                 ),
@@ -943,6 +945,14 @@ def _review_reply_text(
             "as `PRECONDITION NOT MET` / `BLOCKED` in the human-facing outputs instead of "
             "classifying it as a ticket-facing product failure. The live run, job URLs, "
             f"and partial observation context are still preserved for rerun triage. {rerun_summary}"
+        )
+    if root_comment_id == 3301685395:
+        return (
+            "Fixed: TS-706 no longer flips the queued downstream-job path into a product "
+            "failure while the workflow is still in progress. The probe now waits through "
+            "the configured observation window and only reclassifies that path if the "
+            "warning plus queued/waiting job state is still present after the workflow had "
+            f"time to settle. {rerun_summary}"
         )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "

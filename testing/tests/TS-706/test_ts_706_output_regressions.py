@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -64,6 +65,112 @@ class TS706OutputRegressionTest(unittest.TestCase):
             finally:
                 for name, value in original_paths.items():
                     setattr(ts_706, name, value)
+
+    def test_precondition_warning_requires_stable_signal_before_product_failure(self) -> None:
+        config = ts_706.GitHubActionsPreflightGateConfig(
+            repository="IstiN/trackstate",
+            default_branch="main",
+            workflow_name="Apple Release Builds",
+            workflow_file="build-native.yml",
+            workflow_path=".github/workflows/build-native.yml",
+            preflight_job_name="Verify macOS runner availability",
+            downstream_job_name="Build macOS desktop and CLI artifacts",
+            expected_preflight_runner="ubuntu-latest",
+            expected_runner_labels=[
+                "self-hosted",
+                "macOS",
+                "trackstate-release",
+                "ARM64",
+            ],
+            expected_failure_markers=["No runner registered for", "none are online"],
+            recent_runs_limit=20,
+            poll_interval_seconds=5,
+            run_timeout_seconds=240,
+            ui_timeout_seconds=60,
+        )
+        original_open_actions_page = ts_706._open_actions_page
+        warning_text = (
+            "Skipping macOS runner availability preflight because the token cannot read "
+            "repository runners. The build job will still target the required self-hosted "
+            "labels and GitHub Actions will queue it until a matching runner is available."
+        )
+        base_result = {
+            "repository": "IstiN/trackstate",
+            "default_branch": "main",
+            "workflow_name": "Apple Release Builds",
+            "tag_name": "v98.test",
+            "head_sha": "head-sha",
+            "error": "Precondition failed: queued run observed",
+            "precondition_failure": True,
+            "product_failure": False,
+            "steps": [],
+            "human_verification": [],
+            "run": {
+                "id": 91,
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91",
+                "status": "in_progress",
+            },
+            "preflight_job": {
+                "name": "Verify macOS runner availability",
+                "conclusion": "success",
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+            },
+            "downstream_job": {
+                "name": "Build macOS desktop and CLI artifacts",
+                "status": "queued",
+                "conclusion": None,
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
+            },
+        }
+        observations = iter(
+            [
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91",
+                    matched_text="Verify macOS runner availability",
+                    body_text=warning_text,
+                    screenshot_path="/tmp/run.png",
+                ),
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                    matched_text="success",
+                    body_text=warning_text,
+                    screenshot_path="/tmp/job.png",
+                ),
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91",
+                    matched_text="Verify macOS runner availability",
+                    body_text=warning_text,
+                    screenshot_path="/tmp/run.png",
+                ),
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                    matched_text="success",
+                    body_text=warning_text,
+                    screenshot_path="/tmp/job.png",
+                ),
+            ]
+        )
+        try:
+            ts_706._open_actions_page = lambda **_: next(observations)
+
+            transient_result = deepcopy(base_result)
+            ts_706._collect_precondition_run_evidence(transient_result, config)
+
+            self.assertTrue(transient_result["precondition_failure"])
+            self.assertFalse(transient_result["product_failure"])
+            self.assertIn("Precondition failed:", transient_result["error"])
+            self.assertEqual(transient_result["steps"][-1]["status"], "blocked")
+
+            stable_result = deepcopy(base_result)
+            stable_result["stable_runner_mismatch"] = True
+            ts_706._collect_precondition_run_evidence(stable_result, config)
+
+            self.assertFalse(stable_result["precondition_failure"])
+            self.assertTrue(stable_result["product_failure"])
+            self.assertIn("Step 4 failed", stable_result["error"])
+            self.assertEqual(stable_result["steps"][-1]["status"], "failed")
+        finally:
+            ts_706._open_actions_page = original_open_actions_page
 
 
 if __name__ == "__main__":
