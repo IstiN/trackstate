@@ -890,7 +890,7 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
         failures.append(
             f"focus landed on {active.get('accessible_name')!r} instead of the first internal target {first_internal_label!r}",
         )
-    if str(active.get("accessible_name") or "").startswith("Workspace switcher:"):
+    if _state_active_is_workspace_trigger(state):
         failures.append("focus stayed on the workspace-switcher trigger instead of the first internal target")
 
     if failures:
@@ -923,7 +923,7 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
         failures.append("keyboard focus was not owned by the workspace switcher after Shift+Tab")
     if not bool(focus.get("active_within_switcher")):
         failures.append("focus escaped the workspace switcher after Shift+Tab")
-    if bool(focus.get("active_on_trigger")) or active_label.startswith("Workspace switcher:"):
+    if _state_active_is_workspace_trigger(state):
         failures.append("focus moved to the workspace-switcher trigger instead of wrapping inside the panel")
     if bool(monitor.get("ever_hidden_after_visible")):
         failures.append("the workspace switcher panel became hidden during the reverse-wrap attempt")
@@ -1059,13 +1059,34 @@ def _is_switcher_internal_focus_state(state: dict[str, object]) -> bool:
         bool(focus.get("focus_owned_by_switcher"))
         and bool(focus.get("active_within_switcher"))
         and not bool(focus.get("active_on_trigger"))
-        and not _is_workspace_trigger_focus_label(active_label)
+        and not _state_active_is_workspace_trigger(state)
         and bool(active.get("accessible_name") or active.get("text"))
     )
 
 
 def _is_workspace_trigger_focus_label(value: object) -> bool:
     return str(value or "").startswith("Workspace switcher:")
+
+
+def _state_active_is_workspace_trigger(state: object) -> bool:
+    active = _active_from_state(state)
+    focus = _focus_from_state(state)
+    if bool(focus.get("active_on_trigger")):
+        return True
+    active_label = str(active.get("accessible_name") or active.get("text") or "")
+    if not _is_workspace_trigger_focus_label(active_label):
+        return False
+    active_tag = str(
+        active.get("tag_name")
+        or focus.get("active_tag_name")
+        or "",
+    ).upper()
+    active_role = str(
+        active.get("role")
+        or focus.get("active_role")
+        or "",
+    ).lower()
+    return active_tag in {"BUTTON", "FLT-SEMANTICS"} or active_role == "button"
 
 
 def _state_with_first_internal_target(

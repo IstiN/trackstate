@@ -101,6 +101,8 @@ class Ts911RegressionsTest(unittest.TestCase):
             },
             "active": {
                 "accessible_name": "Workspace switcher: Hosted main workspace, Hosted, Attachments limited",
+                "role": "button",
+                "tag_name": "BUTTON",
             },
             "focus": {
                 "focus_owned_by_switcher": True,
@@ -125,6 +127,44 @@ class Ts911RegressionsTest(unittest.TestCase):
             "focus moved to the workspace-switcher trigger instead of wrapping inside the panel",
         ):
             _LIVE_TEST_MODULE._assert_reverse_wrap(state)
+
+    def test_reverse_wrap_assertion_does_not_treat_body_fallback_as_trigger(self) -> None:
+        state = {
+            "before": {
+                "accessible_name": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+            },
+            "active": {
+                "accessible_name": "Workspace switcher: Hosted main workspace, Hosted, Attachments limited",
+                "tag_name": "BODY",
+                "role": None,
+            },
+            "focus": {
+                "focus_owned_by_switcher": False,
+                "active_within_switcher": False,
+                "active_on_trigger": False,
+            },
+            "expected_target": {
+                "label": "Save and switch",
+            },
+            "first_internal_target": {
+                "label": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+            },
+            "row_focus": {},
+            "monitor": {
+                "ever_hidden_after_visible": False,
+            },
+            "switcher": {},
+        }
+
+        with self.assertRaises(AssertionError) as context:
+            _LIVE_TEST_MODULE._assert_reverse_wrap(state)
+
+        message = str(context.exception)
+        self.assertIn("focus escaped the workspace switcher after Shift+Tab", message)
+        self.assertNotIn(
+            "focus moved to the workspace-switcher trigger instead of wrapping inside the panel",
+            message,
+        )
 
     def test_visible_footer_target_prefers_live_save_and_switch_control(self) -> None:
         target = _LIVE_TEST_MODULE._visible_footer_target(
