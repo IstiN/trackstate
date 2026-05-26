@@ -433,12 +433,14 @@ class _CliProbeRepository extends ProviderBackedTrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     try {
       return await _delegate.uploadIssueAttachment(
         issue: issue,
         name: name,
         bytes: bytes,
+        sourceName: sourceName,
       );
     } finally {
       replaceCachedState(

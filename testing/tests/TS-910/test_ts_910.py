@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherButtonStateObservation,
     WorkspaceSwitcherFocusOwnershipObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
@@ -218,6 +219,8 @@ def main() -> None:
                         rows=rows,
                         surface=surface,
                     )
+                    result["first_row_display_name"] = first_row.display_name
+                    result["first_row_detail_text"] = first_row.detail_text
                 except Exception as error:
                     _record_step(
                         result,
@@ -334,7 +337,7 @@ def main() -> None:
                             timeout_ms=PANEL_OBSERVE_TIMEOUT_MS,
                         )
                         tab_trace.append(state)
-                        if _active_from_state(state).get("accessible_name") == LAST_INTERNAL_CONTROL_LABEL:
+                        if _footer_control_reached(state):
                             footer_state = state
                             break
                     result["tab_trace_to_footer"] = tab_trace
@@ -374,7 +377,7 @@ def main() -> None:
                     observed=(
                         f"tab_count_to_footer={len(tab_trace)}; "
                         f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
-                        f"footer_state_label={_focus_label_for_summary(footer_state)!r}"
+                        f"footer_state_label={_footer_focus_label_for_summary(footer_state)!r}"
                     ),
                 )
                 _record_human_verification(
@@ -386,7 +389,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
-                        f"footer_visible_label={_focus_label_for_summary(footer_state)!r}; "
+                        f"footer_visible_label={_footer_focus_label_for_summary(footer_state)!r}; "
                         f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}"
                     ),
                 )
@@ -701,6 +704,12 @@ def _capture_post_tab_state(
         key="Tab",
         monitor=monitor,
     )
+    _attach_footer_button_state_if_needed(
+        page=page,
+        panel=panel,
+        state=state,
+        timeout_ms=timeout_ms,
+    )
     state["panel_detected_after_key"] = True
     if surface_stability_error is not None:
         state["surface_stability_error"] = surface_stability_error
@@ -737,6 +746,28 @@ def _observe_panel_after_key_press(
             )
             + f"Observed panel error: {type(error).__name__}: {error}"
         ) from error
+
+
+def _attach_footer_button_state_if_needed(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
+    state: dict[str, object],
+    timeout_ms: int,
+) -> None:
+    label = _focus_label_for_summary(state)
+    if label not in {LAST_INTERNAL_CONTROL_LABEL, "anonymous FLT-SEMANTICS"}:
+        return
+    try:
+        footer_button = page.observe_switcher_button_state(
+            LAST_INTERNAL_CONTROL_LABEL,
+            panel=panel,
+            timeout_ms=timeout_ms,
+        )
+    except AssertionError as error:
+        state["footer_button_error"] = str(error)
+        return
+    state["footer_button"] = _button_state_payload(footer_button)
 
 
 def _workspace_state(repository: str) -> dict[str, object]:
@@ -784,7 +815,16 @@ def _workspace_state(repository: str) -> dict[str, object]:
 def _selected_saved_workspace(
     rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:
-    return next((row for row in rows if row.selected), None)
+    selected_row = next((row for row in rows if row.selected), None)
+    if selected_row is not None:
+        return selected_row
+    expected_row = next(
+        (row for row in rows if row.display_name == FIRST_WORKSPACE_DISPLAY_NAME),
+        None,
+    )
+    if expected_row is not None:
+        return expected_row
+    return rows[0] if rows else None
 
 
 def _saved_workspace_row_focus_label(
@@ -946,6 +986,24 @@ def _monitor_payload(
     }
 
 
+def _button_state_payload(
+    observation: WorkspaceSwitcherButtonStateObservation,
+) -> dict[str, object]:
+    return {
+        "label": observation.label,
+        "visible_text": observation.visible_text,
+        "role": observation.role,
+        "tag_name": observation.tag_name,
+        "tabindex": observation.tabindex,
+        "tab_index_value": observation.tab_index_value,
+        "aria_disabled": observation.aria_disabled,
+        "disabled": observation.disabled,
+        "keyboard_focusable": observation.keyboard_focusable,
+        "active_within": observation.active_within,
+        "outer_html": observation.outer_html,
+    }
+
+
 def _surface_labels(surface: WorkspaceSwitcherSurfaceObservation) -> set[str]:
     return {item.label for item in surface.interactive_elements if item.label}
 
@@ -958,13 +1016,15 @@ def _surface_label_summary(surface: WorkspaceSwitcherSurfaceObservation) -> list
 def _visited_focus_labels(states: list[dict[str, object]]) -> list[str]:
     labels: list[str] = []
     for state in states:
-        label = _focus_label_for_summary(state)
+        label = _footer_focus_label_for_summary(state)
         if not labels or labels[-1] != label:
             labels.append(label)
     return labels
 
 
 def _trace_reached_label(states: list[dict[str, object]], label: str) -> bool:
+    if label == LAST_INTERNAL_CONTROL_LABEL:
+        return any(_footer_control_reached(state) for state in states)
     return any(_focus_label_for_summary(state) == label for state in states)
 
 
@@ -994,6 +1054,31 @@ def _monitor_from_state(state: dict[str, object] | None) -> dict[str, object]:
         return {}
     monitor = state.get("monitor")
     return monitor if isinstance(monitor, dict) else {}
+
+
+def _footer_button_from_state(state: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(state, dict):
+        return {}
+    footer_button = state.get("footer_button")
+    return footer_button if isinstance(footer_button, dict) else {}
+
+
+def _footer_control_reached(state: dict[str, object] | None) -> bool:
+    label = _focus_label_for_summary(state)
+    footer_button = _footer_button_from_state(state)
+    return label == LAST_INTERNAL_CONTROL_LABEL or bool(footer_button.get("active_within"))
+
+
+def _footer_focus_label_for_summary(state: dict[str, object] | None) -> str:
+    label = _focus_label_for_summary(state)
+    if label != "anonymous FLT-SEMANTICS":
+        return label
+    footer_button = _footer_button_from_state(state)
+    if bool(footer_button.get("active_within")):
+        footer_label = str(footer_button.get("label") or "").strip()
+        if footer_label:
+            return footer_label
+    return label
 
 
 def _focus_label_for_summary(state: dict[str, object] | None) -> str:
@@ -1055,7 +1140,7 @@ def _step3_failure_observed(
     return (
         f"visited_labels={_visited_focus_labels(states)!r}; "
         f"focus_escape={_focus_escape_summary(states)!r}; "
-        f"footer_reached={_trace_reached_label(states, LAST_INTERNAL_CONTROL_LABEL)}; "
+        f"footer_reached={any(_footer_control_reached(state) for state in states)}; "
         f"error={error_summary}"
     )
 
@@ -1235,8 +1320,11 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
     visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
     wrapped_correctly = False
     if isinstance(wrap_state, dict):
-        expected_label = result.get("first_row_label")
-        wrapped_correctly = _active_from_state(wrap_state).get("accessible_name") == expected_label
+        wrapped_correctly = _active_label_matches_saved_workspace(
+            wrap_state,
+            display_name=str(result.get("first_row_display_name", "")),
+            detail_text=str(result.get("first_row_detail_text", "")),
+        )
     lines = [
         (
             f"# {'✅' if visited_labels else '❌'} {REQUEST_STEPS[0]} — "

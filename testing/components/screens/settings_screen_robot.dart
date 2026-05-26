@@ -530,7 +530,6 @@ class SettingsScreenRobot {
 
   bool showsAttachmentStorageModeSetting() =>
       isVisibleText('Attachment storage mode');
-
   bool statusSummaryVisible({
     required String name,
     required String id,
@@ -708,26 +707,32 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
       return null;
     }
+
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
           return entry.key;
         }
       }

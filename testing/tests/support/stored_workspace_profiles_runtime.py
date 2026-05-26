@@ -3,11 +3,31 @@ from __future__ import annotations
 import json
 from urllib.parse import quote
 
-from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightWebAppRuntime,
-    PlaywrightStoredTokenWebAppRuntime,
-    PlaywrightWebAppSession,
-)
+try:
+    from testing.frameworks.python.playwright_web_app_session import (
+        PlaywrightWebAppRuntime,
+        PlaywrightStoredTokenWebAppRuntime,
+        PlaywrightWebAppSession,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    class PlaywrightWebAppSession:  # type: ignore[no-redef]
+        pass
+
+    class PlaywrightWebAppRuntime:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self._context = None
+            self._page = None
+
+        def __enter__(self):
+            raise ModuleNotFoundError("playwright")
+
+    class PlaywrightStoredTokenWebAppRuntime(  # type: ignore[no-redef]
+        PlaywrightWebAppRuntime,
+    ):
+        def __init__(self, *, repository: str, token: str) -> None:
+            super().__init__()
+            self._repository = repository
+            self._token = token
 
 
 class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
@@ -25,7 +45,10 @@ class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
             raise RuntimeError(
                 "WorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(script=_build_preload_script(self._workspace_state))
+        script = _build_preload_script(self._workspace_state)
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 
@@ -48,14 +71,15 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
             raise RuntimeError(
                 "StoredWorkspaceProfilesRuntime expected a browser context.",
             )
-        self._context.add_init_script(
-            script=_build_preload_script(
-                self._workspace_state,
-                repository=self._repository,
-                token=self._token,
-                workspace_token_profile_ids=self._workspace_token_profile_ids,
-            ),
+        script = _build_preload_script(
+            self._workspace_state,
+            repository=self._repository,
+            token=self._token,
+            workspace_token_profile_ids=self._workspace_token_profile_ids,
         )
+        self._context.add_init_script(script=script)
+        if self._page is not None:
+            self._page.add_init_script(script=script)
         return session
 
 
