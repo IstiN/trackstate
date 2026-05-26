@@ -392,6 +392,11 @@ class LiveWorkspaceSwitcherPage:
     _search_input_selector = 'input[aria-label="Search issues"]'
     _top_bar_button_selector = 'flt-semantics[role="button"]'
     _trigger_label_prefix = "Workspace switcher:"
+    _trigger_selector = (
+        'button[aria-label^="Workspace switcher:"],'
+        'flt-semantics[aria-label^="Workspace switcher:"],'
+        'flt-semantics[role="button"][aria-label^="Workspace switcher:"]'
+    )
     _button_selector = 'flt-semantics[role="button"]'
     _switcher_heading = "Workspace switcher"
 
@@ -487,8 +492,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         try:
             self._session.focus(
-                self._top_bar_button_selector,
-                has_text="Workspace switcher:",
+                self._trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -2113,10 +2117,19 @@ class LiveWorkspaceSwitcherPage:
               };
               const labelFor = (element) =>
                 normalize(element.getAttribute('aria-label') || element.innerText || '');
-              const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+              const triggerCandidates = Array.from(
+                document.querySelectorAll(
+                  'button[aria-label^="Workspace switcher:"],'
+                  + 'flt-semantics[aria-label^="Workspace switcher:"],'
+                  + 'flt-semantics[role="button"][aria-label^="Workspace switcher:"]',
+                ),
               ).filter(isVisible);
-              const trigger = buttons
+              const buttons = Array.from(
+                document.querySelectorAll(
+                  'button,[role="button"],flt-semantics[role="button"],flt-semantics[aria-label]',
+                ),
+              ).filter(isVisible);
+              const trigger = triggerCandidates
                 .filter((element) => labelFor(element).includes('Workspace switcher:'))
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
@@ -2188,8 +2201,7 @@ class LiveWorkspaceSwitcherPage:
     def open_switcher(self, *, timeout_ms: int = 30_000) -> None:
         try:
             self._session.click(
-                'flt-semantics[role="button"]',
-                has_text="Workspace switcher:",
+                self._trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -4456,8 +4468,7 @@ class LiveWorkspaceSwitcherPage:
 
     def _click_trigger(self, *, timeout_ms: int) -> None:
         self._session.click(
-            self._button_selector,
-            has_text=self._trigger_label_prefix,
+            self._trigger_selector,
             timeout_ms=timeout_ms,
         )
 
