@@ -1,0 +1,11 @@
+test_id: TS-461
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact ticket commands `trackstate jira_delete_ticket TS-10` and `trackstate archive TS-11` from a seeded temporary TrackState repository.
+  - Compiles a temporary CLI binary from this checkout so the seeded repository can remain the current working directory.
+  - Verifies the repository filesystem and visible CLI output to distinguish permanent delete from reversible archive behavior.

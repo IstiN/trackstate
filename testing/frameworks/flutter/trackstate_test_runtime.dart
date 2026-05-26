@@ -1,10 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/repositories/trackstate_repository_factory.dart';
-import 'package:trackstate/data/repositories/trackstate_runtime.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+
+import '../../core/utils/local_git_test_repository.dart';
 
 Future<TrackStateRepository> createLocalGitTestRepository({
   required WidgetTester tester,
@@ -41,9 +42,9 @@ Future<ProviderBackedTrackStateRepository> createLocalGitMutationRepository({
   required WidgetTester tester,
   required String repositoryPath,
 }) async {
-  final repository = createTrackStateRepository(
-    runtime: TrackStateRuntime.localGit,
-    localRepositoryPath: repositoryPath,
+  final repository = LocalTrackStateRepository(
+    repositoryPath: repositoryPath,
+    processRunner: const SyncGitProcessRunner(),
   );
   if (repository case final ProviderBackedTrackStateRepository providerBacked) {
     await preloadProviderBackedLocalGitRepository(
@@ -91,7 +92,8 @@ Future<TrackStateRepository> preloadLocalGitTestRepository({
   );
 }
 
-class _PreloadedLocalGitRepository implements TrackStateRepository {
+class _PreloadedLocalGitRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _PreloadedLocalGitRepository({
     required this.repository,
     required this.snapshot,
@@ -119,6 +121,17 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
       return snapshot;
     }
     return repository.loadSnapshot();
+  }
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
+    if (repository
+        case final ProjectSettingsRepository projectSettingsRepository) {
+      return projectSettingsRepository.saveProjectSettings(settings);
+    }
+    throw StateError(
+      'Local Git preloaded repository does not expose project settings mutations.',
+    );
   }
 
   @override
@@ -186,9 +199,11 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => repository.uploadIssueAttachment(
     issue: issue,
     name: name,
     bytes: bytes,
+    sourceName: sourceName,
   );
 }

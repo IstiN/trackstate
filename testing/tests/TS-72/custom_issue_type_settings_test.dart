@@ -33,12 +33,12 @@ void main() {
         await robot.pumpLocalGitApp(repositoryPath: fixture.directory.path);
         await robot.openSettings();
         robot.expectVisibleSettingsContent();
+        await tester.tap(robot.issueTypesCard);
+        await tester.pumpAndSettle();
 
         final visibleIssueTypes = robot.visibleConfigItems('Issue Types');
-        final workflowItems = robot.visibleConfigItems('Workflow');
 
         print('OBSERVE|Issue Types|${visibleIssueTypes.join(' | ')}');
-        print('OBSERVE|Workflow|${workflowItems.join(' | ')}');
 
         expect(
           robot.configCard('Issue Types'),
@@ -62,7 +62,7 @@ void main() {
           visibleIssueTypes,
           containsAllInOrder(const ['Story', 'Requirement']),
           reason:
-              'The visible Issue Types chips should reflect the repository file ordering so users can discover the new Requirement type.',
+              'The visible Issue Types list should reflect the repository file ordering so users can discover the new Requirement type.',
         );
         expect(
           visibleIssueTypes.where((item) => item == 'Requirement'),
@@ -70,6 +70,10 @@ void main() {
           reason:
               'The Settings UI should render the new Requirement type exactly once rather than duplicating it elsewhere on the page.',
         );
+        await tester.tap(robot.workflowCard);
+        await tester.pumpAndSettle();
+        final workflowItems = robot.visibleConfigItems('Workflows');
+        print('OBSERVE|Workflow|${workflowItems.join(' | ')}');
         expect(
           workflowItems,
           isNot(contains('Requirement')),
