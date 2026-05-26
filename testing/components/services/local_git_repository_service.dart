@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -35,7 +37,8 @@ class LocalGitRepositoryService implements LocalGitRepositoryPort {
   }
 }
 
-class _InitialLoadDelayedTrackStateRepository implements TrackStateRepository {
+class _InitialLoadDelayedTrackStateRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _InitialLoadDelayedTrackStateRepository(
     this._delegate, {
     required this.initialLoadDelay,
@@ -59,6 +62,19 @@ class _InitialLoadDelayedTrackStateRepository implements TrackStateRepository {
     }
     return _delegate.loadSnapshot();
   }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _delegate.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>
@@ -98,4 +114,39 @@ class _InitialLoadDelayedTrackStateRepository implements TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   ) => _delegate.updateIssueStatus(issue, status);
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) =>
+      _delegate.addIssueComment(issue, body);
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) =>
+      _delegate.downloadAttachment(attachment);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) =>
+      _delegate.loadIssueHistory(issue);
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+    String? sourceName,
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
+    if (_delegate case final ProjectSettingsRepository settingsRepository) {
+      return settingsRepository.saveProjectSettings(settings);
+    }
+    throw StateError(
+      'Delayed repository does not support project settings admin.',
+    );
+  }
 }

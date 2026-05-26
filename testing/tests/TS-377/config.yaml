@@ -1,0 +1,10 @@
+test_id: TS-377
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Compiles a temporary `trackstate` executable from this checkout and runs it from a seeded Local Git repository.
+  - Verifies `trackstate read profile --target local` emits a Jira-shaped user object derived from local Git user.name and user.email.

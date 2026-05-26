@@ -1,0 +1,9 @@
+test_id: TS-317
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies JQL Search uses the production-visible Load more pagination pattern instead of replacing the current result list.
+  - Confirms the current query and ORDER BY clause remain unchanged after appending the next page.
+  - Requires the final page to hide the Load more control once all matching issues are visible.

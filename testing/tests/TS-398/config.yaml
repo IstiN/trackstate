@@ -1,0 +1,8 @@
+test_id: TS-398
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the transition surface only exposes valid outgoing targets for an in-progress issue.
+  - Verifies selecting Done reveals a required Resolution field while selecting To Do hides it.
