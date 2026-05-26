@@ -1,0 +1,8 @@
+test_id: TS-1004
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the hosted read-only workspace-sync fixture from TS-716 to drive the production top-bar sync pill into the real attention-needed state.
+  - Verifies the visible text and semantics label on the same sync-pill surface so concise UI copy and screen-reader context cannot drift together.

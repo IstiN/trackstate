@@ -1,13 +1,36 @@
+import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/workspace_profile_service.dart';
+import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart'
+    show LocalRepositoryLoader;
+
+import '../models/issue_search_result_selection_observation.dart';
 
 abstract interface class TrackStateAppComponent {
+  Finder get goldenTarget;
+
   Future<void> pump(TrackStateRepository repository);
 
-  Future<void> pumpLocalGitApp({required String repositoryPath});
+  Future<void> pumpWorkspaceProfileApp({
+    required WorkspaceProfileService workspaceProfileService,
+    LocalRepositoryLoader? openLocalRepository,
+  });
+
+  Future<void> pumpLocalGitApp({
+    required String repositoryPath,
+    Duration initialLoadDelay = Duration.zero,
+  });
 
   void resetView();
 
   Future<void> openSection(String label);
+
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey);
+
+  Future<void> switchToLocalGitInSettings({
+    required String repositoryPath,
+    required String writeBranch,
+  });
 
   Future<String> openCreateIssueFlow();
 
@@ -24,11 +47,37 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> enterJqlSearchQuery(String query);
+
+  Future<void> submitJqlSearch();
+
   Future<void> searchIssues(String query);
+
+  Future<String?> readJqlSearchFieldValue();
+
+  Future<bool> isBlockingSearchLoaderVisible();
 
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
+
+  List<String> visibleIssueSearchResultLabelsSnapshot();
+
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  );
+
+  Future<bool> isIssueSearchResultSelected(String key, String summary);
+
+  Future<IssueSearchResultSelectionObservation>
+  readIssueSearchResultSelectionObservation(
+    String key,
+    String summary, {
+    required bool expectedSelected,
+  });
+  List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({
     required String key,
@@ -38,6 +87,8 @@ abstract interface class TrackStateAppComponent {
   });
 
   Future<void> expectIssueDetailVisible(String key);
+
+  Future<bool> isIssueDetailVisible(String key);
 
   Future<void> expectIssueDetailText(String key, String text);
 
@@ -56,6 +107,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectMessageBannerContains(String text);
 
+  Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text);
+
   Future<bool> dismissMessageBannerContaining(String text);
 
   Future<bool> isMessageBannerVisibleContaining(String text);
@@ -66,6 +119,22 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openRepositoryAccess();
 
+  Future<void> openWorkspaceSwitcher();
+
+  Future<void> closeWorkspaceSwitcher();
+
+  Future<bool> isWorkspaceSwitcherVisible();
+
+  Future<bool> workspaceRowContainsText(String workspaceId, String text);
+
+  Future<bool> workspaceRowContainsTextContaining(
+    String workspaceId,
+    String text,
+  );
+
+  Future<bool> workspaceRowHasControl(String workspaceId, String label);
+
+  Future<bool> tapWorkspaceRowControl(String workspaceId, String label);
   Future<void> closeDialog(String actionLabel);
 
   void expectProfileIdentityVisible({
@@ -95,15 +164,81 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> isSemanticsLabelVisible(String label);
 
+  Future<bool> isTopBarTextVisible(String text);
+
+  Future<bool> isTopBarSemanticsLabelVisible(String label);
+
   Future<bool> tapVisibleControl(String label);
+
+  Future<bool> tapTopBarControl(String label);
+
+  Future<bool> isNavigationControlVisible(String label);
+
+  Future<void> expectNavigationControlEnabled(String label);
+
+  Future<bool> isNavigationChromeVisible();
+
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  });
+
+  Future<bool> isDialogTextVisible(String text);
+
+  List<String> visibleDialogTextsSnapshot();
+
+  Future<bool> tapDialogControl(String label);
+
+  Future<bool> tapDialogControlWithoutSettling(String label);
 
   Future<bool> isTextFieldVisible(String label);
 
+  Future<int> countLabeledTextFields(String label);
+
+  Future<bool> isDropdownFieldVisible(String label);
+
+  Future<int> countDropdownFields(String label);
+
+  Future<List<String>> readDropdownOptions(String label);
+
+  Future<void> selectDropdownOption(String label, {required String optionText});
+
+  Future<String?> readDropdownFieldValue(String label);
+
+  Future<int> countReadOnlyFields(String label);
+
+  Future<String?> readReadOnlyFieldValue(String label);
+
   Future<void> enterLabeledTextField(String label, {required String text});
+
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  });
+
+  Future<String?> readLabeledTextFieldValue(String label);
 
   List<String> visibleTextsSnapshot();
 
   List<String> topBarVisibleTextsSnapshot();
 
   List<String> visibleSemanticsLabelsSnapshot();
+
+  Future<bool> isRepositoryAccessBannerVisible({
+    required String title,
+    required String message,
+  });
+
+  Future<bool> isRepositoryAccessBannerTextVisible({
+    required String title,
+    required String message,
+    required String text,
+  });
+
+  Future<bool> tapRepositoryAccessBannerAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
 }

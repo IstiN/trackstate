@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../fixtures/repositories/ts136_legacy_deleted_index_fixture.dart';
@@ -124,6 +125,35 @@ void main() {
             .toList(),
         [Ts136LegacyDeletedIndexFixture.survivingIssueKey],
         reason: 'Deleting TRACK-777 must not affect other active issues.',
+      );
+    },
+  );
+
+  test(
+    'TS-136 keeps legacy deleted keys reserved in-memory after delete before the next reload',
+    () async {
+      final fixture = await Ts136LegacyDeletedIndexFixture.create();
+      addTearDown(fixture.dispose);
+
+      final repository = LocalTrackStateRepository(
+        repositoryPath: fixture.repositoryPath,
+      );
+      final snapshot = await repository.loadSnapshot();
+      final issue = snapshot.issues.singleWhere(
+        (candidate) =>
+            candidate.key == Ts136LegacyDeletedIndexFixture.deletedIssueKey,
+      );
+
+      await repository.deleteIssue(issue);
+      final created = await repository.createIssue(
+        summary: 'Created after deleting TRACK-777',
+      );
+
+      expect(
+        created.key,
+        'TRACK-778',
+        reason:
+            'The in-memory snapshot after delete must still reserve TRACK-700 from legacy deleted.json and TRACK-777 from the new tombstone.',
       );
     },
   );

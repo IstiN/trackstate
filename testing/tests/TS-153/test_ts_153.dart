@@ -67,7 +67,8 @@ void main() {
         afterArchival.errorType,
         'TrackStateRepositoryException',
         reason:
-            'Archiving a missing issue should surface a repository-domain not-found error instead of ${afterArchival.errorType}.',
+            'Archiving a missing issue should surface a repository-domain not-found error instead of ${afterArchival.errorType}. '
+            'Observed message: ${afterArchival.errorMessage}',
       );
       expect(
         afterArchival.errorType,

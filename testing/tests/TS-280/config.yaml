@@ -1,0 +1,10 @@
+test_id: TS-280
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - AC - Workflow and resolution enforcement
+notes:
+  - Exercises the concrete IssueMutationService.transitionIssue path against a temporary Local Git-backed repository.
+  - Verifies a Done transition without an explicit resolution auto-applies the only configured resolution from config/resolutions.json.
+  - Confirms the persisted main.md frontmatter and reloaded repository snapshot expose the same observable Done plus Fixed outcome.

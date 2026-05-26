@@ -1,0 +1,11 @@
+test_id: TS-807
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token.
+  - Verifies that clicking a non-interactive or blank area inside the desktop workspace switcher does not dismiss the panel.
+  - Verifies the switcher remains visibly open and continues exposing the same workspace content after the inside click.

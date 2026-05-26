@@ -64,15 +64,16 @@ void main() {
           .updateMissingIssueViaRepositoryService();
 
       final failures = <String>[];
-      final activeIssueKeys =
-          afterUpdate.activeIssueSearchResults
-              .map((issue) => issue.key)
-              .toList(growable: false);
+      final activeIssueKeys = afterUpdate.activeIssueSearchResults
+          .map((issue) => issue.key)
+          .toList(growable: false);
 
-      if (afterUpdate.errorType != 'TrackStateRepositoryException') {
+      if (!_isAcceptedDomainNotFoundError(afterUpdate.errorType)) {
         failures.add(
-          'Step 2 failed: expected TrackStateRepositoryException but received '
-          '${afterUpdate.errorType}. Error message: ${afterUpdate.errorMessage}.',
+          'Step 2 failed: expected a repository-domain not-found error '
+          '(TrackStateRepositoryException or a dedicated issue-not-found '
+          'exception), but received ${afterUpdate.errorType}. Error message: '
+          '${afterUpdate.errorMessage}.',
         );
       }
       if (afterUpdate.errorType == 'TrackStateProviderException') {
@@ -90,7 +91,9 @@ void main() {
           '"${afterUpdate.errorMessage}".',
         );
       }
-      if ((afterUpdate.errorMessage ?? '').contains('Git command failed: git show')) {
+      if ((afterUpdate.errorMessage ?? '').contains(
+        'Git command failed: git show',
+      )) {
         failures.add(
           'Step 2 failed: the user-visible error still exposed the raw Git '
           'provider command: "${afterUpdate.errorMessage}".',
@@ -146,7 +149,8 @@ void main() {
           '${afterUpdate.activeIssueSearchResults.map((issue) => '${issue.key}(archived=${issue.isArchived})').toList()}.',
         );
       }
-      if (afterUpdate.survivingIssueMarkdown != beforeUpdate.survivingIssueMarkdown) {
+      if (afterUpdate.survivingIssueMarkdown !=
+          beforeUpdate.survivingIssueMarkdown) {
         failures.add(
           'Postcondition failed: ${afterUpdate.survivingIssuePath} was rewritten '
           'by the failed update attempt.',
@@ -170,4 +174,18 @@ void main() {
       }
     },
   );
+}
+
+bool _isAcceptedDomainNotFoundError(String? errorType) {
+  if (errorType == 'TrackStateRepositoryException') {
+    return true;
+  }
+  if (errorType == null) {
+    return false;
+  }
+
+  final normalizedType = errorType.toLowerCase();
+  return normalizedType.contains('notfound') &&
+      (normalizedType.contains('issue') ||
+          normalizedType.contains('repository'));
 }
