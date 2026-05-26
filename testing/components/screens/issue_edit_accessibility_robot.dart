@@ -76,12 +76,40 @@ class IssueEditAccessibilityRobot {
   );
 
   Finder controlWithinEditIssueSurface(String label) {
+    for (final buttonType in const [
+      TextButton,
+      FilledButton,
+      OutlinedButton,
+      DropdownButtonFormField<String>,
+    ]) {
+      final buttonMatch = find.descendant(
+        of: editIssueSurface.first,
+        matching: find.widgetWithText(buttonType, label),
+      );
+      if (buttonMatch.evaluate().isNotEmpty) {
+        return buttonMatch.first;
+      }
+    }
     final semanticsMatch = find.descendant(
       of: editIssueSurface.first,
       matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
     );
     if (semanticsMatch.evaluate().isNotEmpty) {
-      return semanticsMatch;
+      final interactiveDescendant = find.descendant(
+        of: semanticsMatch.first,
+        matching: find.byWidgetPredicate((widget) {
+          return widget is ButtonStyleButton ||
+              widget is DropdownButtonFormField<String> ||
+              widget is FilterChip ||
+              widget is InputChip ||
+              widget is Focus ||
+              widget is InkWell;
+        }, description: 'interactive control labeled $label'),
+      );
+      if (interactiveDescendant.evaluate().isNotEmpty) {
+        return interactiveDescendant.first;
+      }
+      return semanticsMatch.first;
     }
     return find.descendant(
       of: editIssueSurface.first,
@@ -144,39 +172,6 @@ class IssueEditAccessibilityRobot {
   List<String> visibleSemanticsLabels() {
     expectEditIssueSurfaceVisible();
     return _screenReaderTargets().map((target) => target.label).toList();
-  }
-
-  List<String> accessibilityFeedbackTexts() {
-    expectEditIssueSurfaceVisible();
-    final rootNode = tester.getSemantics(editIssueSurface.first);
-    final values = <String>[];
-
-    void collect(String? value) {
-      final normalized = _normalizedLabel(value);
-      if (normalized.isNotEmpty) {
-        values.add(normalized);
-      }
-    }
-
-    void visit(SemanticsNode node) {
-      if (node.isInvisible) {
-        return;
-      }
-
-      final data = node.getSemanticsData();
-      collect(data.label);
-      collect(data.value);
-      collect(data.hint);
-      collect(data.tooltip);
-      for (final child in node.debugListChildrenInOrder(
-        DebugSemanticsDumpOrder.traversalOrder,
-      )) {
-        visit(child);
-      }
-    }
-
-    visit(rootNode);
-    return _dedupeConsecutive(values).toList(growable: false);
   }
 
   List<String> semanticsTraversal() {
@@ -562,6 +557,9 @@ class IssueEditAccessibilityRobot {
     final widget = tester.widget(candidate.first);
     return switch (widget) {
       final EditableText editable => editable.focusNode.hasFocus,
+      final TextButton button => button.focusNode?.hasFocus ?? false,
+      final FilledButton button => button.focusNode?.hasFocus ?? false,
+      final OutlinedButton button => button.focusNode?.hasFocus ?? false,
       _ => false,
     };
   }

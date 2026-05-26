@@ -110,6 +110,7 @@ class PythonTrackStateCliCompiledLocalFramework:
         effective_env.setdefault("NO_AT_BRIDGE", "1")
         if env:
             effective_env.update(env)
+
         completed = subprocess.run(
             command,
             cwd=cwd,
@@ -169,6 +170,7 @@ class PythonTrackStateCliCompiledLocalFramework:
         effective_env = os.environ.copy()
         if env:
             effective_env.update(env)
+
         completed = subprocess.run(
             ("git", "-C", str(repository_path), *args),
             env=effective_env,

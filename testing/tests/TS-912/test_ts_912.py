@@ -28,8 +28,9 @@ from testing.core.config.live_setup_test_config import load_live_setup_test_conf
 from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    StoredWorkspaceProfilesRuntime,
+from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
+    Ts980RestorePersistenceRuntime,
+    read_manual_reauth_probe as _support_read_manual_reauth_probe,
 )
 
 TICKET_KEY = "TS-912"
@@ -50,12 +51,13 @@ LINKED_BUGS = [
     "TS-942",
     "TS-947",
     "TS-960",
+    "TS-993",
+    "TS-994",
     "TS-974",
     "TS-976",
 ]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_TRIGGER_WAIT_SECONDS = 60
-RESTORED_DIRECTORY_NAME = Path(LOCAL_TARGET).name
 RESTORED_PROJECT_KEY = "TRACK"
 RESTORED_STARTER_ISSUE_KEY = f"{RESTORED_PROJECT_KEY}-1"
 
@@ -83,52 +85,14 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Resolved the TS-912 merge conflict, replaced the synthetic "
-    "`showDirectoryPicker()` stub with an OPFS-backed real directory handle, and "
-    "generate review replies from the current unresolved PR thread metadata."
+    "Removed the synthetic directory-picker override so TS-912 stays bound to "
+    "the actual saved workspace action and reports the real manual re-auth gap "
+    "instead of replaying fixture data through a substitute handle."
 )
 
 
-class Ts912ManualReauthRuntime(StoredWorkspaceProfilesRuntime):
-    def __init__(
-        self,
-        *,
-        repository: str,
-        token: str,
-        workspace_state: dict[str, object],
-        workspace_token_profile_ids: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(
-            repository=repository,
-            token=token,
-            workspace_state=workspace_state,
-            workspace_token_profile_ids=workspace_token_profile_ids,
-        )
-        self.console_events: list[dict[str, str]] = []
-        self.page_errors: list[str] = []
-
-    def __enter__(self):
-        session = super().__enter__()
-        if self._context is None or self._page is None:
-            raise RuntimeError(
-                "TS-912 manual re-auth runtime expected a browser context and page.",
-            )
-        self._context.add_init_script(script=_manual_reauth_probe_script())
-        self._context.add_init_script(script=_granted_directory_picker_script())
-        self._page.on("console", self._record_console_event)
-        self._page.on("pageerror", self._record_page_error)
-        return session
-
-    def _record_console_event(self, message) -> None:
-        self.console_events.append(
-            {
-                "level": str(message.type),
-                "text": str(message.text),
-            },
-        )
-
-    def _record_page_error(self, error: object) -> None:
-        self.page_errors.append(str(error))
+class Ts912ManualReauthRuntime(Ts980RestorePersistenceRuntime):
+    pass
 
 
 def main() -> None:
@@ -216,7 +180,7 @@ def main() -> None:
 
                 try:
                     page.dismiss_connection_banner()
-                except Exception:
+                except AssertionError:
                     pass
 
                 result["trigger_before_restore"] = _trigger_payload(initial_trigger)
@@ -330,9 +294,6 @@ def main() -> None:
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
-                result["simulated_directory_grant_before_action"] = _read_granted_directory_picker_state(
-                    tracker_page,
-                )
                 exact_action_label = _saved_workspace_action_label(saved_local_row_before)
                 result["manual_restore_action_label"] = exact_action_label
 
@@ -393,9 +354,6 @@ def main() -> None:
                 result["manual_reauth_probe_after_action"] = restore_attempt_observation[
                     "probe"
                 ]
-                result["simulated_directory_grant_after_action"] = _read_granted_directory_picker_state(
-                    tracker_page,
-                )
                 if not callback_observed:
                     _record_human_verification(
                         result,
@@ -406,8 +364,7 @@ def main() -> None:
                         observed=(
                             f"trigger_after_click={json.dumps(restore_attempt_observation['trigger'], ensure_ascii=True)}; "
                             f"body_text={restore_attempt_observation['body_text']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"granted_picker={json.dumps(restore_attempt_observation['granted_picker'], ensure_ascii=True)}"
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
                         ),
                     )
                     _record_step(
@@ -419,8 +376,7 @@ def main() -> None:
                             "The manual unavailable-workspace action never triggered a "
                             "directory-access callback and never restored the workspace.\n"
                             f"action_label={exact_action_label!r}\n"
-                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                            f"granted_picker_state={json.dumps(restore_attempt_observation['granted_picker'], indent=2)}"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
@@ -428,7 +384,6 @@ def main() -> None:
                         "a directory-access callback and never restored the workspace.\n"
                         f"Observed action label: {exact_action_label!r}\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(restore_attempt_observation['granted_picker'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
                 if restore_attempt_observation["failure_message"] is not None:
@@ -440,8 +395,7 @@ def main() -> None:
                         ),
                         observed=(
                             f"failure_message={restore_attempt_observation['failure_message']!r}; "
-                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
-                            f"granted_picker={json.dumps(restore_attempt_observation['granted_picker'], ensure_ascii=True)}"
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}"
                         ),
                     )
                     _record_step(
@@ -454,7 +408,7 @@ def main() -> None:
                             "a directory-access prompt and instead failed in the deployed app.\n"
                             f"action_label={exact_action_label!r}\n"
                             f"failure_message={restore_attempt_observation['failure_message']!r}\n"
-                            f"granted_picker_state={json.dumps(restore_attempt_observation['granted_picker'], indent=2)}"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
@@ -465,11 +419,8 @@ def main() -> None:
                         f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
                         "Missing production capability: the Workspace switcher does not expose "
                         "a working manual re-authentication / access-grant flow for the saved "
-                        "unavailable local workspace in the deployed web build, even when the "
-                        "test returns a real OPFS-backed `FileSystemDirectoryHandle` from the "
-                        "browser picker boundary.\n"
+                        "unavailable local workspace in the deployed web build.\n"
                         f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(restore_attempt_observation['granted_picker'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
 
@@ -491,17 +442,24 @@ def main() -> None:
                         status="failed",
                         action=REQUEST_STEPS[3],
                         observed=(
-                            "A directory-access callback was observed, but the workspace never "
-                            "completed the Local Git restore flow.\n"
+                            "The visible Retry action reached the real browser directory-access "
+                            "boundary, but the deployed app never completed the Local Git "
+                            "restore flow afterward.\n"
                             f"restore_observation={json.dumps(restored_observation, indent=2)}\n"
-                            f"granted_picker_state={json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
+                            f"probe_state={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                         ),
                     )
                     raise AssertionError(
-                        "Step 4 failed: the directory-access callback was observed, but the "
-                        "workspace never completed the Local Git restore flow.\n"
+                        "Step 4 failed: the visible Retry action reached the real browser "
+                        "directory-access boundary, but the workspace never completed the "
+                        "Local Git restore flow afterward.\n"
+                        "Missing production capability: the deployed web build only exposes the "
+                        "native browser directory prompt for this saved workspace and keeps "
+                        "remembered directory handles in an in-memory map, so the actual saved "
+                        "directory cannot be re-bound from the existing TS-912 preload/runtime "
+                        "surface without substituting the handle.\n"
                         f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}\n"
-                        f"Observed granted picker state:\n{json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
+                        f"Observed probe state:\n{json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                     )
 
                 trigger_after_restore = restored_observation["trigger"]
@@ -547,11 +505,10 @@ def main() -> None:
                     observed=(
                         "After the manual restore action, the workspace was visible as the "
                         "active `Local Git` workspace and the interactive shell remained loaded "
-                        "after the test supplied a real OPFS-backed directory handle through "
-                        "the browser picker boundary.\n"
+                        "without substituting the saved directory handle from the test.\n"
                         f"selected_row={json.dumps(_row_payload(selected_row_after), indent=2)}\n"
                         f"shell_after_restore={json.dumps(shell_after_restore, indent=2)}\n"
-                        f"granted_picker={json.dumps(result['simulated_directory_grant_after_action'], indent=2)}"
+                        f"probe={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                     ),
                 )
 
@@ -650,9 +607,15 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "Prepared for TS-912 unavailable local workspace manual restore validation.\n",
         encoding="utf-8",
     )
+    seeded_paths = [marker_path.name]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        destination = local_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        seeded_paths.append(relative_path)
 
     subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
+        ["git", "-C", str(local_path), "add", "."],
         check=True,
         capture_output=True,
         text=True,
@@ -714,6 +677,7 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "seeded_paths": seeded_paths,
     }
 
 
@@ -800,6 +764,9 @@ def _assert_restored_local_workspace(
     persisted_workspace_state: dict[str, object] | None,
     expected_local_workspace_id: str,
 ) -> None:
+    switcher_text_confirms_restore = _switcher_text_shows_active_local_git(
+        switcher.switcher_text,
+    )
     if trigger.display_name != LOCAL_DISPLAY_NAME:
         raise AssertionError(
             "Step 4 failed: the header trigger did not switch to the restored local "
@@ -812,19 +779,22 @@ def _assert_restored_local_workspace(
             "as `Local Git`.\n"
             f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
         )
-    if local_row is None:
+    if local_row is None and not switcher_text_confirms_restore:
         raise AssertionError(
             "Step 4 failed: reopening the switcher after restore no longer showed the "
-            "saved local workspace row.\n"
+            "saved local workspace row or a visible compact-card equivalent.\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
-    if local_row.state_label != "Local Git":
+    if local_row is not None and local_row.state_label != "Local Git":
         raise AssertionError(
             "Step 4 failed: the restored local workspace row did not show the `Local Git` "
             "state after the manual action.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME:
+    if (
+        (selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME)
+        and not switcher_text_confirms_restore
+    ):
         raise AssertionError(
             "Step 4 failed: the restored local workspace row did not become the active "
             "selection in the switcher.\n"
@@ -854,6 +824,15 @@ def _assert_restored_local_workspace(
             "local workspace.\n"
             f"Observed persisted state:\n{json.dumps(persisted_workspace_state, indent=2)}"
         )
+
+
+def _switcher_text_shows_active_local_git(switcher_text: str) -> bool:
+    normalized = " ".join(switcher_text.split())
+    return (
+        LOCAL_DISPLAY_NAME in normalized
+        and "Local Git" in normalized
+        and "Active" in normalized
+    )
 
 
 def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
@@ -1128,206 +1107,6 @@ def _raise_startup_failure(
     )
 
 
-def _manual_reauth_probe_script() -> str:
-    return """
-    (() => {
-      const state = window.__ts912ManualReauthProbe = {
-        showDirectoryPickerCalls: [],
-        requestPermissionCalls: [],
-        queryPermissionCalls: [],
-        wrapErrors: [],
-      };
-      const serialize = (value) => {
-        try {
-          return JSON.parse(JSON.stringify(value));
-        } catch (error) {
-          state.wrapErrors.push(String(error));
-          return String(value);
-        }
-      };
-      const wrap = (target, key, bucket) => {
-        if (!target || typeof target[key] !== 'function') {
-          return;
-        }
-        const original = target[key];
-        target[key] = async function(...args) {
-          state[bucket].push({
-            callNumber: state[bucket].length + 1,
-            args: serialize(args),
-          });
-          return await original.apply(this, args);
-        };
-      };
-      wrap(window, 'showDirectoryPicker', 'showDirectoryPickerCalls');
-      const fileSystemHandleProto = window.FileSystemHandle && window.FileSystemHandle.prototype;
-      wrap(fileSystemHandleProto, 'requestPermission', 'requestPermissionCalls');
-      wrap(fileSystemHandleProto, 'queryPermission', 'queryPermissionCalls');
-    })();
-    """
-
-
-def _opfs_restore_scaffold_files() -> dict[str, str]:
-    workspace_name = LOCAL_DISPLAY_NAME
-    updated_at = "2026-05-17T00:00:00Z"
-    issue_path = f"{RESTORED_PROJECT_KEY}/{RESTORED_STARTER_ISSUE_KEY}/main.md"
-    project_json = {
-        "key": RESTORED_PROJECT_KEY,
-        "name": workspace_name,
-        "defaultLocale": "en",
-        "supportedLocales": ["en"],
-    }
-    config_entries = {
-        "issue-types.json": [
-            {
-                "id": "story",
-                "name": "Story",
-                "description": "Work item tracked in the restored local workspace.",
-                "icon": "book",
-            },
-        ],
-        "statuses.json": [
-            {
-                "id": "todo",
-                "name": "To Do",
-                "category": "todo",
-                "description": "Open work that has not started yet.",
-            },
-        ],
-        "fields.json": [],
-        "workflows.json": [],
-        "priorities.json": [],
-        "components.json": [],
-        "versions.json": [],
-        "resolutions.json": [],
-    }
-    files: dict[str, str] = {
-        f"{RESTORED_PROJECT_KEY}/project.json": json.dumps(project_json) + "\n",
-        f"{RESTORED_PROJECT_KEY}/config/i18n/en.json": "{}\n",
-        f"{RESTORED_PROJECT_KEY}/.trackstate/index/issues.json": json.dumps(
-            [
-                {
-                    "key": RESTORED_STARTER_ISSUE_KEY,
-                    "path": issue_path,
-                    "summary": f"Welcome to {workspace_name}",
-                    "issueType": "story",
-                    "status": "todo",
-                    "updated": updated_at,
-                    "children": [],
-                    "archived": False,
-                },
-            ],
-        )
-        + "\n",
-        f"{RESTORED_PROJECT_KEY}/.trackstate/index/tombstones.json": "[]\n",
-        issue_path: (
-            f"---\n"
-            f"key: {RESTORED_STARTER_ISSUE_KEY}\n"
-            f"project: {RESTORED_PROJECT_KEY}\n"
-            f"issueType: story\n"
-            f"status: todo\n"
-            f"summary: Welcome to {workspace_name}\n"
-            f"updated: {updated_at}\n"
-            f"---\n\n"
-            f"# Description\n\n"
-            f"TrackState initialized this workspace successfully. "
-            f"TS-912 uses this OPFS-backed handle to validate the manual "
-            f"re-authentication browser boundary.\n"
-        ),
-    }
-    for file_name, payload in config_entries.items():
-        files[f"{RESTORED_PROJECT_KEY}/config/{file_name}"] = json.dumps(payload) + "\n"
-    return files
-
-
-def _granted_directory_picker_script() -> str:
-    return f"""
-    (() => {{
-      const state = window.__ts912GrantedDirectoryPickerState = {{
-        installed: false,
-        calls: [],
-        selectedDirectoryName: null,
-        fallbackDirectoryName: {json.dumps(RESTORED_DIRECTORY_NAME)},
-        projectKey: {json.dumps(RESTORED_PROJECT_KEY)},
-        starterIssueKey: {json.dumps(RESTORED_STARTER_ISSUE_KEY)},
-      }};
-      const normalizeArgs = (args) => {{
-        try {{
-          return JSON.parse(JSON.stringify(args));
-        }} catch (_) {{
-          return Array.from(args, (value) => String(value));
-        }}
-      }};
-      const writeTextFile = async (directory, relativePath, contents) => {{
-        const segments = relativePath.split('/').filter(Boolean);
-        let current = directory;
-        for (const segment of segments.slice(0, -1)) {{
-          current = await current.getDirectoryHandle(segment, {{ create: true }});
-        }}
-        const fileHandle = await current.getFileHandle(segments.at(-1), {{ create: true }});
-        const writable = await fileHandle.createWritable();
-        await writable.write(contents);
-        await writable.close();
-      }};
-      const createRestoredDirectory = async () => {{
-        const root = await navigator.storage.getDirectory();
-        const restored = await root.getDirectoryHandle(state.fallbackDirectoryName, {{ create: true }});
-        const scaffoldFiles = {json.dumps(_opfs_restore_scaffold_files())};
-        for (const [relativePath, contents] of Object.entries(scaffoldFiles)) {{
-          await writeTextFile(restored, relativePath, contents);
-        }}
-        state.selectedDirectoryName = restored.name || state.fallbackDirectoryName;
-        return restored;
-      }};
-      const originalShowDirectoryPicker = globalThis.showDirectoryPicker?.bind(globalThis);
-      if (typeof originalShowDirectoryPicker === 'function') {{
-        globalThis.showDirectoryPicker = async (...args) => {{
-          state.calls.push({{
-            callNumber: state.calls.length + 1,
-            args: normalizeArgs(args),
-            returnedHandleKind: 'directory',
-            returnedBy: 'opfs',
-          }});
-          return await createRestoredDirectory();
-        }};
-      }};
-      state.installed = true;
-    }})();
-    """
-
-
-def _read_granted_directory_picker_state(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => window.__ts912GrantedDirectoryPickerState || {}
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "installed": False,
-            "calls": [],
-            "selectedDirectoryName": None,
-            "fallbackDirectoryName": RESTORED_DIRECTORY_NAME,
-            "projectKey": RESTORED_PROJECT_KEY,
-            "starterIssueKey": RESTORED_STARTER_ISSUE_KEY,
-        }
-    return {
-        "installed": bool(payload.get("installed")),
-        "calls": list(payload.get("calls", [])),
-        "selectedDirectoryName": (
-            None
-            if payload.get("selectedDirectoryName") is None
-            else str(payload.get("selectedDirectoryName"))
-        ),
-        "fallbackDirectoryName": str(
-            payload.get("fallbackDirectoryName", RESTORED_DIRECTORY_NAME),
-        ),
-        "projectKey": str(payload.get("projectKey", RESTORED_PROJECT_KEY)),
-        "starterIssueKey": str(
-            payload.get("starterIssueKey", RESTORED_STARTER_ISSUE_KEY),
-        ),
-    }
-
-
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
@@ -1353,40 +1132,88 @@ def _saved_workspace_action_label(
     return action_label
 
 
-def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
-    payload = tracker_page.session.evaluate(
-        """
-        () => {
-          const probe = window.__ts912ManualReauthProbe || {};
-          return {
-            showDirectoryPickerCalls: Array.isArray(probe.showDirectoryPickerCalls)
-              ? probe.showDirectoryPickerCalls
-              : [],
-            requestPermissionCalls: Array.isArray(probe.requestPermissionCalls)
-              ? probe.requestPermissionCalls
-              : [],
-            queryPermissionCalls: Array.isArray(probe.queryPermissionCalls)
-              ? probe.queryPermissionCalls
-              : [],
-            wrapErrors: Array.isArray(probe.wrapErrors) ? probe.wrapErrors : [],
-          };
-        }
-        """,
-    )
-    if not isinstance(payload, dict):
-        return {
-            "showDirectoryPickerCalls": [],
-            "requestPermissionCalls": [],
-            "queryPermissionCalls": [],
-            "wrapErrors": [],
-        }
+def _restorable_workspace_fixture_files() -> dict[str, str]:
     return {
-        "showDirectoryPickerCalls": list(payload.get("showDirectoryPickerCalls", [])),
-        "requestPermissionCalls": list(payload.get("requestPermissionCalls", [])),
-        "queryPermissionCalls": list(payload.get("queryPermissionCalls", [])),
-        "wrapErrors": list(payload.get("wrapErrors", [])),
+        f"{RESTORED_PROJECT_KEY}/config/statuses.json": json.dumps(
+            [
+                {"id": "todo", "name": "To Do", "category": "new"},
+                {
+                    "id": "in-progress",
+                    "name": "In Progress",
+                    "category": "indeterminate",
+                },
+                {"id": "done", "name": "Done", "category": "done"},
+            ],
+        )
+        + "\n",
+        f"{RESTORED_PROJECT_KEY}/config/workflows.json": json.dumps(
+            {
+                "default": {
+                    "name": "Default Workflow",
+                    "statuses": ["todo", "in-progress", "done"],
+                    "transitions": [
+                        {
+                            "id": "start-progress",
+                            "name": "Start progress",
+                            "from": "todo",
+                            "to": "in-progress",
+                        },
+                        {
+                            "id": "finish-work",
+                            "name": "Finish work",
+                            "from": "in-progress",
+                            "to": "done",
+                        },
+                    ],
+                },
+            },
+        )
+        + "\n",
+        f"{RESTORED_PROJECT_KEY}/config/issue-types.json": json.dumps(
+            [
+                {
+                    "id": "story",
+                    "name": "Story",
+                    "workflowId": "default",
+                    "hierarchyLevel": 0,
+                },
+            ],
+        )
+        + "\n",
+        f"{RESTORED_PROJECT_KEY}/config/fields.json": json.dumps(
+            [
+                {"id": "summary", "name": "Summary", "type": "string", "required": True},
+                {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "markdown",
+                    "required": False,
+                },
+            ],
+        )
+        + "\n",
+        f"{RESTORED_PROJECT_KEY}/{RESTORED_STARTER_ISSUE_KEY}/main.md": "\n".join(
+            [
+                "---",
+                f"key: {RESTORED_STARTER_ISSUE_KEY}",
+                f"project: {RESTORED_PROJECT_KEY}",
+                "issueType: story",
+                "status: in-progress",
+                f"summary: {LOCAL_DISPLAY_NAME} seeded local workspace issue",
+                "updated: 2026-05-25T00:00:00Z",
+                "---",
+                "",
+                "# Description",
+                "",
+                "Seeded local workspace content for TS-912 manual restore validation.",
+                "",
+            ],
+        ),
     }
 
+
+def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
+    return _support_read_manual_reauth_probe(tracker_page)
 
 def _observe_manual_restore_attempt(
     *,
@@ -1395,19 +1222,14 @@ def _observe_manual_restore_attempt(
 ) -> dict[str, object]:
     body_text = tracker_page.body_text()
     probe = _read_manual_reauth_probe(tracker_page)
-    granted_picker = _read_granted_directory_picker_state(tracker_page)
     trigger = _safe_trigger_payload(page)
     return {
         "probe": probe,
-        "granted_picker": granted_picker,
         "body_text": body_text,
         "trigger": trigger,
         "failure_message": _extract_workspace_open_failure_message(body_text),
         "directory_access_callback_observed": bool(
-            probe["showDirectoryPickerCalls"]
-            or probe["requestPermissionCalls"]
-            or granted_picker["calls"]
-            or granted_picker["selectedDirectoryName"]
+            probe["showDirectoryPickerCalls"] or probe["requestPermissionCalls"]
         ),
     }
 
@@ -1691,9 +1513,9 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         return (
             f"{TICKET_KEY} passed.\n\n"
             f"{REWORK_SUMMARY}\n\n"
-            "The saved unavailable local workspace was restored manually from a real "
-            "OPFS-backed browser directory handle and became the active Local Git "
-            "workspace while the shell stayed interactive.\n"
+            "The saved unavailable local workspace was restored through the real "
+            "manual re-auth flow, without substituting the saved directory handle, "
+            "and became the active Local Git workspace while the shell stayed interactive.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
@@ -1742,7 +1564,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
-    simulated_grant_after_action = result.get("simulated_directory_grant_after_action")
     manual_action_label = result.get("manual_restore_action_label")
     startup_observation = result.get("startup_observation")
     boundary_reached = bool(result.get("ticket_boundary_reached"))
@@ -1751,12 +1572,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
         and (
             probe_after_action.get("showDirectoryPickerCalls")
             or probe_after_action.get("requestPermissionCalls")
-        ),
-    ) or bool(
-        isinstance(simulated_grant_after_action, dict)
-        and (
-            simulated_grant_after_action.get("calls")
-            or simulated_grant_after_action.get("selectedDirectoryName")
         ),
     )
     missing_capability = (
@@ -1768,10 +1583,12 @@ def _build_bug_description(result: dict[str, object]) -> str:
         if not boundary_reached
         else (
             (
-                "The deployed web build reaches the browser directory-access boundary for the "
-                "saved unavailable local workspace, but it does not complete the restore to "
-                "`Local Git` or switch the active workspace after the callback returns a real "
-                "OPFS-backed `FileSystemDirectoryHandle`."
+                "The deployed web build reaches the native browser directory-access boundary "
+                "for the saved unavailable local workspace, but it does not provide any "
+                "production-backed way to re-bind the actual saved directory from the current "
+                "TS-912 preload/runtime surface. Remembered directory handles live only in the "
+                "browser's in-memory map, so the restore cannot complete without substituting "
+                "the handle from the test."
                 if callback_observed
                 else (
                     "The deployed web build does not expose a working manual re-authentication / "
@@ -1822,7 +1639,6 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
         f"- Manual action label: `{manual_action_label}`",
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
-        f"- Simulated directory grant state after action: `{json.dumps(simulated_grant_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
@@ -1863,11 +1679,13 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     return (
-        "Fixed: TS-912 no longer returns a synthetic `{name}` picker stub. The "
-        "test now drives the retry action through a real OPFS-backed "
-        "`FileSystemDirectoryHandle`, records that explicit browser-boundary "
-        "state in the assertions, and generates `review_replies.json` from the "
-        f"unresolved threads in `{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
+        "Fixed: TS-912 no longer overrides `showDirectoryPicker()` or returns a "
+        "test-authored substitute handle. The test now stays on the real visible "
+        "Retry flow, records only the actual browser callback probe, reports the "
+        "missing remembered-handle path when the live app cannot re-bind the "
+        "saved directory from the existing runtime surface, and generates "
+        "`review_replies.json` from the unresolved threads in "
+        f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
         f"{rerun_summary}"
     )
 

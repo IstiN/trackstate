@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from testing.components.pages.live_issue_detail_collaboration_page import (
-    LiveIssueDetailCollaborationPage,
-)
+from testing.components.pages.live_dashboard_page import LiveDashboardObservation, LiveDashboardPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
 
@@ -44,42 +42,43 @@ class DesktopHeaderObservation:
     body_text: str
     theme_label: str
     sync: HeaderControlObservation
-    search: HeaderControlObservation
     create: HeaderControlObservation
-    access: HeaderControlObservation
+    workspace: HeaderControlObservation
+    search: HeaderControlObservation
+    search_input: HeaderControlObservation
     theme: HeaderControlObservation
-    profile: HeaderControlObservation
     active_element: HeaderActiveElementObservation
 
 
 class LiveDesktopHeaderLayoutPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _create_issue_selector = 'flt-semantics[role="button"][aria-label="Create issue"]'
-    _access_state_selector = (
-        'flt-semantics[role="button"][aria-label="Attachments limited"]'
+    _dashboard_nav_selector = (
+        'flt-semantics[flt-semantics-identifier="trackstate-desktop-nav-dashboard"]'
+    )
+    _create_issue_selector = (
+        'flt-semantics[flt-semantics-identifier="trackstate-desktop-create-issue"]'
     )
     _search_input_selector = 'input[aria-label="Search issues"]'
-    def __init__(self, tracker_page: TrackStateTrackerPage, *, user_login: str) -> None:
+
+    def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
-        self._user_login = user_login
-        self._collaboration_page = LiveIssueDetailCollaborationPage(tracker_page)
+        self._dashboard_page = LiveDashboardPage(tracker_page)
 
-    def ensure_connected(
-        self,
-        *,
-        token: str,
-        repository: str,
-        user_login: str,
-    ) -> None:
-        self._collaboration_page.ensure_connected(
-            token=token,
-            repository=repository,
-            user_login=user_login,
+    def open_dashboard(self) -> LiveDashboardObservation:
+        observation = self._dashboard_page.observe()
+        if (
+            observation.active_dashboard_visible
+            and observation.open_issues_visible
+            and observation.team_velocity_visible
+        ):
+            return observation
+        self._session.click(self._dashboard_nav_selector, timeout_ms=30_000)
+        self._session.wait_for_any_text(
+            ["Open Issues", "Team Velocity"],
+            timeout_ms=60_000,
         )
-
-    def dismiss_connection_banner(self) -> None:
-        self._collaboration_page.dismiss_connection_banner()
+        return self._dashboard_page.observe()
 
     def set_viewport(self, *, width: int, height: int, timeout_ms: int = 15_000) -> None:
         self._session.set_viewport_size(width=width, height=height)
@@ -103,7 +102,7 @@ class LiveDesktopHeaderLayoutPage:
     def observe_header(self, *, timeout_ms: int = 30_000) -> DesktopHeaderObservation:
         payload = self._session.wait_for_function(
             """
-            ({ userLogin, createLabel, accessLabel, searchLabel }) => {
+            ({ createLabel, searchLabels, syncLabelFragments }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
               const isVisible = (element) => {
                 if (!element) {
@@ -113,17 +112,26 @@ class LiveDesktopHeaderLayoutPage:
                 const style = window.getComputedStyle(element);
                 return rect.width > 0
                   && rect.height > 0
+                  && rect.y < 120
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
-              const visibleElements = (selector) => Array.from(document.querySelectorAll(selector))
-                .filter((candidate) => isVisible(candidate));
-              const buttonLabel = (element) =>
-                normalize(element.getAttribute('aria-label') || element.innerText || '');
-              const rectPayload = (element, label) => {
+              const area = (element) => {
+                const rect = element.getBoundingClientRect();
+                return rect.width * rect.height;
+              };
+              const smallest = (elements) =>
+                [...elements].sort((left, right) => area(left) - area(right))[0] ?? null;
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute('aria-label')
+                  || element?.innerText
+                  || element?.textContent,
+                );
+              const describe = (element, labelOverride = null) => {
                 const rect = element.getBoundingClientRect();
                 return {
-                  label,
+                  label: labelOverride ?? labelFor(element),
                   left: rect.left,
                   top: rect.top,
                   width: rect.width,
@@ -131,60 +139,74 @@ class LiveDesktopHeaderLayoutPage:
                   centerY: rect.top + (rect.height / 2),
                 };
               };
-              const findButton = (label) => visibleElements('flt-semantics[role="button"]')
-                .find((candidate) => buttonLabel(candidate) === label);
-              const findThemeButton = () => visibleElements('flt-semantics[role="button"]')
-                .find((candidate) => ['Dark theme', 'Light theme'].includes(buttonLabel(candidate)));
-              const findSearchInput = () => visibleElements(`input[aria-label="${searchLabel}"]`)[0] ?? null;
-              const findSync = () => visibleElements('flt-semantics')
-                .find((candidate) => {
-                  const text = normalize(candidate.innerText || '');
-                  const rect = candidate.getBoundingClientRect();
-                  return rect.top < 120
-                    && text.includes('Synced with Git')
-                    && text.length < 80;
-                });
-              const findProfile = () => visibleElements('flt-semantics')
-                .find((candidate) => {
-                  const text = normalize(candidate.innerText || '');
-                  const rect = candidate.getBoundingClientRect();
-                  return rect.top < 120 && text === userLogin;
-                });
-              const bodyText = document.body?.innerText ?? '';
-              const create = findButton(createLabel);
-              const access = findButton(accessLabel);
-              const theme = findThemeButton();
-              const search = findSearchInput();
-              const sync = findSync();
-              const profile = findProfile();
-              if (!create || !access || !theme || !search || !sync || !profile) {
+              const searchInput = Array.from(document.querySelectorAll('input[aria-label]')).find(
+                (element) => isVisible(element) && searchLabels.includes(labelFor(element)),
+              ) ?? null;
+              const searchWrapper = searchInput
+                ? smallest(
+                    Array.from(document.querySelectorAll('flt-semantics')).filter(
+                      (element) => isVisible(element) && element.contains(searchInput),
+                    ),
+                  )
+                : null;
+              const create = smallest(
+                Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
+                  (element) =>
+                    isVisible(element)
+                    && (
+                      element.getAttribute('flt-semantics-identifier') === 'trackstate-desktop-create-issue'
+                      || labelFor(element) === createLabel
+                    ),
+                ),
+              );
+              const workspace = Array.from(
+                document.querySelectorAll(
+                  'button[aria-label], [data-trackstate-browser-focus-id="trackstate-desktop-workspace-switcher-trigger"]',
+                ),
+              ).find(
+                (element) =>
+                  isVisible(element)
+                  && labelFor(element).startsWith('Workspace switcher:'),
+              ) ?? null;
+              const sync = smallest(
+                Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
+                  (element) =>
+                    isVisible(element)
+                    && syncLabelFragments.some((fragment) => labelFor(element).includes(fragment)),
+                ),
+              );
+              const theme = smallest(
+                Array.from(document.querySelectorAll('flt-semantics[role="button"]')).filter(
+                  (element) => isVisible(element) && labelFor(element).toLowerCase().includes('theme'),
+                ),
+              );
+              if (!sync || !create || !workspace || !searchWrapper || !searchInput || !theme) {
                 return null;
               }
               const active = document.activeElement;
               return {
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
-                bodyText,
-                themeLabel: buttonLabel(theme),
-                sync: rectPayload(sync, normalize(sync.innerText || '')),
-                search: rectPayload(search, searchLabel),
-                create: rectPayload(create, createLabel),
-                access: rectPayload(access, accessLabel),
-                theme: rectPayload(theme, buttonLabel(theme)),
-                profile: rectPayload(profile, userLogin),
+                bodyText: document.body?.innerText ?? '',
+                themeLabel: labelFor(theme),
+                sync: describe(sync),
+                create: describe(create),
+                workspace: describe(workspace),
+                search: describe(searchWrapper, labelFor(searchInput)),
+                searchInput: describe(searchInput),
+                theme: describe(theme),
                 activeElement: {
                   tagName: active?.tagName ?? '',
                   accessibleName: active?.getAttribute('aria-label') ?? null,
-                  text: normalize(active?.innerText || ''),
+                  text: normalize(active?.innerText || active?.textContent),
                 },
               };
             }
             """,
             arg={
-                "userLogin": self._user_login,
                 "createLabel": "Create issue",
-                "accessLabel": "Attachments limited",
-                "searchLabel": "Search issues",
+                "searchLabels": ["Search issues", "Search", "JQL Search"],
+                "syncLabelFragments": ["Sync error", "Synced with Git", "Syncing"],
             },
             timeout_ms=timeout_ms,
         )
@@ -200,11 +222,11 @@ class LiveDesktopHeaderLayoutPage:
             body_text=str(payload["bodyText"]),
             theme_label=str(payload["themeLabel"]),
             sync=self._control_from_payload(payload["sync"]),
-            search=self._control_from_payload(payload["search"]),
             create=self._control_from_payload(payload["create"]),
-            access=self._control_from_payload(payload["access"]),
+            workspace=self._control_from_payload(payload["workspace"]),
+            search=self._control_from_payload(payload["search"]),
+            search_input=self._control_from_payload(payload["searchInput"]),
             theme=self._control_from_payload(payload["theme"]),
-            profile=self._control_from_payload(payload["profile"]),
             active_element=HeaderActiveElementObservation(
                 tag_name=str(payload["activeElement"]["tagName"]),
                 accessible_name=(
@@ -223,6 +245,14 @@ class LiveDesktopHeaderLayoutPage:
     def click_create_issue(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(self._create_issue_selector, timeout_ms=timeout_ms)
         self._session.wait_for_selector(self._create_issue_selector, timeout_ms=timeout_ms)
+
+    def dismiss_create_issue_dialog(self, *, timeout_ms: int = 5_000) -> bool:
+        for label in ("Cancel", "Close"):
+            if self._session.count(self._button_selector, has_text=label) == 0:
+                continue
+            self._session.click(self._button_selector, has_text=label, timeout_ms=timeout_ms)
+            return True
+        return False
 
     def observe_button(
         self,
@@ -289,15 +319,51 @@ class LiveDesktopHeaderLayoutPage:
     def focus_search_field(self, *, timeout_ms: int = 30_000) -> None:
         self._session.focus(self._search_input_selector, timeout_ms=timeout_ms)
         active = self._session.active_element()
-        if active.accessible_name != "Search issues":
+        if active.accessible_name not in {"Search issues", "Search", "JQL Search"}:
             raise AssertionError(
                 "Focusing the visible desktop search field did not leave keyboard focus "
-                "in the Search issues input.\n"
+                "in the search input.\n"
                 f"Observed active element: {active}",
             )
 
     def toggle_theme(self, *, timeout_ms: int = 30_000) -> str:
-        return self._collaboration_page.toggle_theme(timeout_ms=timeout_ms)
+        current = self.observe_header(timeout_ms=timeout_ms).theme_label
+        target = "Light theme" if current == "Dark theme" else "Dark theme"
+        self._session.click(
+            self._button_selector,
+            has_text=current,
+            timeout_ms=timeout_ms,
+        )
+        self._session.wait_for_function(
+            """
+            expectedLabel => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && rect.y < 120
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .some(
+                  (candidate) =>
+                    isVisible(candidate)
+                    && normalize(candidate.getAttribute('aria-label') || candidate.innerText) === expectedLabel,
+                )
+                ? expectedLabel
+                : null;
+            }
+            """,
+            arg=target,
+            timeout_ms=timeout_ms,
+        )
+        return target
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)

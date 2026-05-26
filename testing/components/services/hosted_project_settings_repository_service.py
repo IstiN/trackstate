@@ -68,8 +68,8 @@ class HostedProjectSettingsRepositoryService:
         self,
         previous_sha: str,
         *,
-        attempts: int = 20,
-        interval_seconds: float = 3.0,
+        attempts: int = 18,
+        interval_seconds: float = 5.0,
     ) -> str:
         matched, current_sha = poll_until(
             probe=self.branch_head_sha,

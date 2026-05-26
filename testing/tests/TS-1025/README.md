@@ -1,7 +1,8 @@
 # TS-1025
 
 Live Playwright regression for startup diagnostics around the delayed GitHub `/user`
-auth probe fallback.
+auth probe fallback, using the hosted startup path and same-run diagnostic capture
+from the deployed app.
 
 ## Run
 

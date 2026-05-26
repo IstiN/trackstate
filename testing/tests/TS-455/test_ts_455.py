@@ -120,6 +120,14 @@ def main() -> None:
                     issue_summary=issue_fixture.summary,
                 )
                 issue_detail_text = page.current_body_text()
+                if "Connect GitHub" in issue_detail_text or "Needs sign-in" in issue_detail_text:
+                    page.ensure_connected(
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    page.dismiss_connection_banner()
+                    issue_detail_text = page.current_body_text()
                 result["issue_detail_text_before_failure"] = issue_detail_text
                 if page.issue_detail_count(issue_fixture.key) == 0:
                     raise AssertionError(

@@ -11,6 +11,89 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test(
+    'workspace switcher preserves a pending selection while recovery refreshes the active workspace',
+    () {
+      const primaryWorkspace = WorkspaceProfile(
+        id: 'hosted:primary/repo@main',
+        displayName: 'TrackState setup (main)',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'primary/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      const alternateWorkspace = WorkspaceProfile(
+        id: 'hosted:retry-target/repo@main',
+        displayName: 'TrackState setup (retry target)',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'retry-target/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final previousWorkspaces = WorkspaceProfilesState(
+        profiles: [primaryWorkspace, alternateWorkspace],
+        activeWorkspaceId: null,
+        migrationComplete: true,
+      );
+      final nextWorkspaces = WorkspaceProfilesState(
+        profiles: [primaryWorkspace, alternateWorkspace],
+        activeWorkspaceId: primaryWorkspace.id,
+        migrationComplete: true,
+      );
+
+      expect(
+        resolveWorkspaceSwitcherSelectedWorkspaceId(
+          currentSelectedWorkspaceId: alternateWorkspace.id,
+          previousWorkspaces: previousWorkspaces,
+          nextWorkspaces: nextWorkspaces,
+        ),
+        alternateWorkspace.id,
+      );
+    },
+  );
+
+  test(
+    'workspace selection preserves a newer hosted restore when a stale refresh finishes later',
+    () {
+      const localWorkspace = WorkspaceProfile(
+        id: 'local:/tmp/trackstate-demo@main',
+        displayName: 'Active local workspace',
+        targetType: WorkspaceProfileTargetType.local,
+        target: '/tmp/trackstate-demo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      const hostedWorkspace = WorkspaceProfile(
+        id: 'hosted:stable/repo@main',
+        displayName: 'Hosted setup workspace',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'stable/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final startupWorkspaces = WorkspaceProfilesState(
+        profiles: [localWorkspace, hostedWorkspace],
+        activeWorkspaceId: localWorkspace.id,
+        migrationComplete: true,
+      );
+      final staleRefreshWorkspaces = WorkspaceProfilesState(
+        profiles: [localWorkspace, hostedWorkspace],
+        activeWorkspaceId: localWorkspace.id,
+        migrationComplete: true,
+        unavailableLocalWorkspaceIds: {localWorkspace.id},
+      );
+
+      expect(
+        resolveWorkspaceSwitcherSelectedWorkspaceId(
+          currentSelectedWorkspaceId: hostedWorkspace.id,
+          previousWorkspaces: startupWorkspaces,
+          nextWorkspaces: staleRefreshWorkspaces,
+        ),
+        hostedWorkspace.id,
+      );
+    },
+  );
+
   testWidgets(
     'workspace switcher enables Save and switch after selecting a different saved workspace row',
     (tester) async {

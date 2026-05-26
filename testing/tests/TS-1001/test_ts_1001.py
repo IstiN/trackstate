@@ -69,8 +69,8 @@ OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + 10
 POLL_INTERVAL_SECONDS = 0.5
 LINKED_BUGS = ["TS-1022", "TS-1014", "TS-1013", "TS-1012", "TS-996", "TS-992"]
 REVIEW_THREADS = (
-    {"inReplyToId": 3293652659, "threadId": "PRRT_kwDOSU6Gf86EV9tK"},
-    {"inReplyToId": 3293652686, "threadId": "PRRT_kwDOSU6Gf86EV9tZ"},
+    {"inReplyToId": 3306371113, "threadId": "PRRT_kwDOSU6Gf86E57jy"},
+    {"inReplyToId": None, "threadId": None},
 )
 WORKSPACE_PROFILE_STATE_KEYS = (
     "trackstate.workspaceProfiles.state",
@@ -86,11 +86,12 @@ REWORK_SUMMARY_ITEMS = (
     "Started the live scenario from the local workspace so the delayed GitHub `/user` "
     "startup probe is exercised deterministically, then switched into the hosted "
     "workspace after `shell_ready` to inspect the fallback state.",
-    "Removed the synthetic Dart permission probe and now read the hosted workspace "
-    "access mode from the same live browser session that exercised the fallback UI.",
-    "Kept the rerun product-facing: if the live session still does not expose a "
-    "public same-session surface for `canCreateBranch`, the test fails as a real "
-    "product gap instead of proving a fixture-authored capability state.",
+    "Step 4 now checks only same-session public browser surfaces for explicit "
+    "`canWrite=false` and `canCreateBranch=false` evidence while the delayed "
+    "auth probe is still pending.",
+    "If the live app still exposes only indirect evidence like the blocked Create "
+    "issue gate plus `hostedAccessMode=disconnected`, the test fails as a real "
+    "product gap instead of reporting a false-positive pass.",
 )
 
 REQUEST_STEPS = [
@@ -528,30 +529,40 @@ def main() -> None:
                     runtime=runtime,
                     observation=workspace_profile_state,
                 )
+                public_capability_surface = _read_public_capability_surface(tracker_page)
+                result["public_capability_surface"] = public_capability_surface
+                _assert_public_capability_surface(
+                    runtime=runtime,
+                    surface=public_capability_surface,
+                )
                 _record_step(
                     result,
                     step=4,
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        "Opened the user-visible Create issue action after the timeout and "
-                        "confirmed the live app kept write operations blocked instead of "
-                        "showing an editable create form. The same live browser session "
-                        "also persisted the hosted fallback workspace as "
-                        "`hostedAccessMode=disconnected`.\n"
+                        "Opened the user-visible Create issue action after the timeout, "
+                        "confirmed the live app kept write operations blocked, and also "
+                        "found a same-session public capability surface that explicitly "
+                        "kept `canWrite=false` and `canCreateBranch=false` while the "
+                        "delayed auth probe was still pending.\n"
                         f"gate={json.dumps(result['create_issue_gate_observation'], ensure_ascii=True)}\n"
-                        f"workspace_profile_state={json.dumps(workspace_profile_state, ensure_ascii=True)}"
+                        f"workspace_profile_state={json.dumps(workspace_profile_state, ensure_ascii=True)}\n"
+                        f"public_capability_surface={json.dumps(public_capability_surface, ensure_ascii=True)}"
                     ),
                 )
             except Exception as error:
                 step_four_error = (
-                    "Step 4 failed: the live Create issue flow did not expose the "
-                    "expected restricted-capability state while auth remained unresolved.\n"
+                    "Step 4 failed: the live browser session did not expose a same-session "
+                    "public capability surface that proves `canWrite=false` and "
+                    "`canCreateBranch=false` while auth remained unresolved.\n"
                     f"error={error}\n"
                     f"create_issue_gate_observation="
                     f"{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}\n"
                     f"workspace_profile_state="
                     f"{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}\n"
+                    f"public_capability_surface="
+                    f"{json.dumps(result.get('public_capability_surface'), ensure_ascii=True)}\n"
                     f"body_text={tracker_page.body_text()}"
                 )
                 failures.append(step_four_error)
@@ -920,6 +931,141 @@ def _assert_workspace_profile_state(
         )
 
 
+def _read_public_capability_surface(
+    tracker_page: TrackStateTrackerPage,
+) -> dict[str, Any]:
+    payload = tracker_page.session.evaluate(
+        """
+        () => {
+          const bodyText = document.body?.innerText || document.body?.textContent || '';
+          const parseNestedJson = (value) => {
+            let current = value;
+            for (let index = 0; index < 3; index += 1) {
+              if (typeof current !== 'string') {
+                return current;
+              }
+              try {
+                current = JSON.parse(current);
+              } catch (_error) {
+                return current;
+              }
+            }
+            return current;
+          };
+          const collectMatches = (candidate) => {
+            const matches = [];
+            const queue = [{ path: '$', value: candidate }];
+            const visited = new Set();
+            while (queue.length > 0 && matches.length < 20) {
+              const item = queue.shift();
+              if (!item || !item.value || typeof item.value !== 'object') {
+                continue;
+              }
+              if (visited.has(item.value)) {
+                continue;
+              }
+              visited.add(item.value);
+              if (Array.isArray(item.value)) {
+                item.value.forEach((entry, index) => {
+                  queue.push({ path: `${item.path}[${index}]`, value: entry });
+                });
+                continue;
+              }
+              const hasCanWrite = Object.prototype.hasOwnProperty.call(item.value, 'canWrite');
+              const hasCanCreateBranch = Object.prototype.hasOwnProperty.call(
+                item.value,
+                'canCreateBranch',
+              );
+              if (hasCanWrite || hasCanCreateBranch) {
+                matches.push({
+                  path: item.path,
+                  canWrite: hasCanWrite ? item.value.canWrite : null,
+                  canCreateBranch: hasCanCreateBranch ? item.value.canCreateBranch : null,
+                });
+              }
+              Object.entries(item.value).forEach(([key, value]) => {
+                queue.push({ path: `${item.path}.${key}`, value });
+              });
+            }
+            return matches;
+          };
+          const storageMatches = [];
+          for (let index = 0; index < window.localStorage.length; index += 1) {
+            const key = window.localStorage.key(index);
+            if (!key || key.includes('githubToken')) {
+              continue;
+            }
+            const rawValue = window.localStorage.getItem(key);
+            if (typeof rawValue !== 'string' || !/(canWrite|canCreateBranch)/.test(rawValue)) {
+              continue;
+            }
+            storageMatches.push({
+              key,
+              matches: collectMatches(parseNestedJson(rawValue)),
+            });
+          }
+          return {
+            body_flag_values: {
+              canWriteFalse: /\\bcanWrite\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+              canCreateBranchFalse: /\\bcanCreateBranch\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+            },
+            storage_matches: storageMatches,
+            local_storage_key_count: window.localStorage.length,
+          };
+        }
+        """,
+    )
+    if not isinstance(payload, dict):
+        raise AssertionError(
+            f"Expected a structured public capability surface payload, got: {payload!r}",
+        )
+    return {
+        "body_flag_values": dict(payload.get("body_flag_values", {})),
+        "storage_matches": list(payload.get("storage_matches", [])),
+        "local_storage_key_count": int(payload.get("local_storage_key_count", 0) or 0),
+    }
+
+
+def _assert_public_capability_surface(
+    *,
+    runtime: DelayedAuthWorkspaceProfilesRuntime,
+    surface: dict[str, Any],
+) -> None:
+    if not runtime.auth_probe_pending:
+        raise AssertionError(
+            "The delayed auth probe was no longer pending while the same-session public "
+            "capability surface was being inspected.",
+        )
+    body_flag_values = surface.get("body_flag_values")
+    if isinstance(body_flag_values, dict) and body_flag_values.get(
+        "canWriteFalse",
+    ) is True and body_flag_values.get("canCreateBranchFalse") is True:
+        return
+    storage_matches = surface.get("storage_matches", [])
+    if isinstance(storage_matches, list):
+        for entry in storage_matches:
+            if not isinstance(entry, dict):
+                continue
+            matches = entry.get("matches", [])
+            if not isinstance(matches, list):
+                continue
+            for match in matches:
+                if not isinstance(match, dict):
+                    continue
+                if (
+                    match.get("canWrite") is False
+                    and match.get("canCreateBranch") is False
+                ):
+                    return
+    raise AssertionError(
+        "The live browser session exposed only indirect fallback evidence (`Create issue` "
+        "gate plus `hostedAccessMode=disconnected`) and did not expose any same-session "
+        "public surface with explicit `canWrite=false` and `canCreateBranch=false` "
+        "flags.\n"
+        f"surface={json.dumps(surface, ensure_ascii=True)}",
+    )
+
+
 def _sample_payload(observation: dict[str, Any]) -> dict[str, Any]:
     trigger = observation.get("trigger")
     startup = observation.get("startup_observation", {})
@@ -1093,7 +1239,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "## What was automated",
         "- Delayed the live GitHub `/user` startup probe by 30 seconds and exercised it from the local-active startup path before switching into the hosted workspace.",
         "- Waited past the timeout before asserting the visible shell and fallback state.",
-        "- Verified the active hosted workspace state, the blocked Create issue flow, and the same-session hosted workspace access mode persisted in browser storage.",
+        "- Verified the active hosted workspace state and blocked Create issue flow, then searched same-session public browser surfaces for explicit `canWrite` / `canCreateBranch` flags instead of passing on indirect evidence alone.",
         "",
         "## Result",
         f"- {_actual_result_summary(result, passed=passed)}",
@@ -1194,6 +1340,8 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         f"- Switcher observation: `{json.dumps(result.get('switcher_observation'), ensure_ascii=True)}`",
         f"- Create issue gate observation: `{json.dumps(result.get('create_issue_gate_observation'), ensure_ascii=True)}`",
         f"- Workspace profile state: `{json.dumps(result.get('workspace_profile_state'), ensure_ascii=True)}`",
+        f"- Public capability surface: `{json.dumps(result.get('public_capability_surface'), ensure_ascii=True)}`",
+        "- Missing production capability: the live browser session does not currently expose any public same-session metadata surface with explicit `canWrite` / `canCreateBranch` flags for the fallback session.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1204,8 +1352,19 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "After the 11-second startup timeout elapsed with the delayed auth probe "
             "still pending, the deployed app showed the interactive shell, the active "
             "hosted workspace exposed `Needs sign-in`, Create issue stayed blocked "
+            "behind the visible `Open settings` recovery gate, and a same-session "
+            "public capability surface explicitly kept `canWrite=false` and "
+            "`canCreateBranch=false`."
+        )
+    if result.get("public_capability_surface") is not None:
+        return (
+            "After the 11-second startup timeout elapsed with the delayed auth probe "
+            "still pending, the deployed app showed the interactive shell, the active "
+            "hosted workspace exposed `Needs sign-in`, Create issue stayed blocked "
             "behind the visible `Open settings` recovery gate, and the same-session "
-            "workspace profile state persisted `hostedAccessMode=disconnected`."
+            "workspace profile state persisted `hostedAccessMode=disconnected` — but "
+            "the live browser session still exposed no public same-session surface with "
+            "explicit `canWrite=false` and `canCreateBranch=false` flags."
         )
     return str(
         result.get(
@@ -1221,39 +1380,32 @@ def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
 
 
 def _write_review_replies(result: dict[str, Any]) -> None:
-    auth_probe_observed = bool(result.get("auth_probe_observed"))
-    timeout_window = result.get("timeout_window_observation")
-    startup_reply = (
-        "Fixed: Step 2 now proves the live delayed `/user` startup path ran in the same "
-        "browser session. The test waits for the real `/user` request to start, fails if "
-        "it never starts or starts too late, and records the timeout-window snapshot only "
-        "while that delayed request is still pending."
-        if auth_probe_observed
-        else "Fixed in code: Step 2 now waits for the real delayed `/user` startup request "
-        "before making the timeout assertion and fails if the request never starts. The "
-        "latest rerun still failed before the timeout snapshot because the production build "
-        "did not satisfy that delayed-startup precondition."
+    public_surface = result.get("public_capability_surface")
+    step_four_reply = (
+        "Fixed: restored the blocking requirement in Step 4. The test no longer passes on "
+        "the write gate plus `hostedAccessMode=disconnected` alone; it now searches only "
+        "same-session public browser surfaces for explicit `canWrite=false` and "
+        "`canCreateBranch=false` evidence. When that public surface is absent, the rerun "
+        "fails as a real product gap instead of reporting a PASS."
+        if public_surface is not None
+        else "Fixed in code: Step 4 now requires a same-session public browser surface with "
+        "explicit `canWrite=false` and `canCreateBranch=false` evidence instead of passing "
+        "on indirect fallback signals."
     )
-    same_session_reply = (
-        "Fixed: removed the synthetic delayed-auth probe. Step 4 now uses only same-browser-"
-        "session evidence from the live app: the blocked `Create issue` gate plus the hosted "
-        "workspace storage state captured while the delayed `/user` request is still pending. "
-        "If the product still does not expose a public same-session surface for "
-        "`canCreateBranch=false`, the test stays failed as a real product gap."
-        if timeout_window
-        else "Fixed in code: removed the synthetic delayed-auth probe so Step 4 now depends "
-        "only on same-browser-session evidence from the live app. The latest rerun failed "
-        "earlier in the startup flow before that same-session capability check was reached."
+    general_reply = (
+        "Fixed: the rerun still exercises the real delayed `/user` startup path from the "
+        "live browser session, but Step 4 now stays red until the product exposes an "
+        "explicit same-session `canCreateBranch=false` surface."
     )
     payload = {
         "replies": [
             {
                 **REVIEW_THREADS[0],
-                "reply": startup_reply,
+                "reply": step_four_reply,
             },
             {
                 **REVIEW_THREADS[1],
-                "reply": same_session_reply,
+                "reply": general_reply,
             },
         ]
     }

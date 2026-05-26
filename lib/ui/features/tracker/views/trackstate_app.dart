@@ -115,6 +115,30 @@ bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
   return hasSelectionAction;
 }
 
+@visibleForTesting
+String? resolveWorkspaceSwitcherSelectedWorkspaceId({
+  required String? currentSelectedWorkspaceId,
+  required WorkspaceProfilesState previousWorkspaces,
+  required WorkspaceProfilesState nextWorkspaces,
+}) {
+  final selectionStillExists =
+      currentSelectedWorkspaceId != null &&
+      nextWorkspaces.profiles.any(
+        (workspace) => workspace.id == currentSelectedWorkspaceId,
+      );
+  if (!selectionStillExists) {
+    return nextWorkspaces.activeWorkspaceId;
+  }
+  final activeWorkspaceChanged =
+      nextWorkspaces.activeWorkspaceId != previousWorkspaces.activeWorkspaceId;
+  final hasPendingSelection =
+      currentSelectedWorkspaceId != previousWorkspaces.activeWorkspaceId;
+  if (activeWorkspaceChanged && !hasPendingSelection) {
+    return nextWorkspaces.activeWorkspaceId;
+  }
+  return currentSelectedWorkspaceId;
+}
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -192,6 +216,10 @@ class _TrackStateAppState extends State<TrackStateApp>
   Timer? _desktopWorkspaceSwitcherBrowserBlurCheckTimer;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
   bool _isEnsuringCurrentContextWorkspaceMigration = false;
+  String? _pendingStartupLocalFallbackWorkspaceId;
+  String? _startupHostedFallbackWorkspaceId;
+  bool _isSwitchingStartupHostedFallback = false;
+  bool _isPersistingStartupHostedFallbackSelection = false;
 
   @override
   void initState() {
@@ -227,6 +255,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
     _isDesktopWorkspaceSwitcherVisible = false;
+    _pendingStartupLocalFallbackWorkspaceId = null;
+    _startupHostedFallbackWorkspaceId = null;
+    _isSwitchingStartupHostedFallback = false;
+    _isPersistingStartupHostedFallbackSelection = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
     unawaited(_initializeWorkspaceProfiles());
@@ -321,6 +353,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         writeBranch: writeBranch,
       );
     }
+
     return LocalTrackStateRepository(
       repositoryPath: repositoryPath,
       dataRef: defaultBranch,
@@ -429,7 +462,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         activeWorkspace.isHosted &&
         activeWorkspace.id == viewModel.workspaceId) {
       final liveAccessMode = _hostedWorkspaceAccessModeForViewModel(viewModel);
-      if (activeWorkspace.hostedAccessMode != liveAccessMode) {
+      final shouldDeferHostedAccessModePersistence =
+          _isPersistingStartupHostedFallbackSelection &&
+          activeWorkspace.id == _startupHostedFallbackWorkspaceId;
+      if (!shouldDeferHostedAccessModePersistence &&
+          activeWorkspace.hostedAccessMode != liveAccessMode) {
         workspaceState = await widget.workspaceProfileService
             .saveHostedAccessMode(activeWorkspace.id, liveAccessMode);
       }
@@ -437,6 +474,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     final authenticatedWorkspaceIds = <String>{};
     final hostedWorkspaceAccessModes = <String, HostedWorkspaceAccessMode>{};
     final localWorkspaceAvailability = <String, bool>{};
+    WorkspaceProfile? startupUnavailableLocalWorkspace;
     for (final workspace in workspaceState.profiles) {
       if (workspace.isHosted) {
         final token = await widget.authStore.readToken(
@@ -460,6 +498,12 @@ class _TrackStateAppState extends State<TrackStateApp>
             isAvailable: false,
           );
           localWorkspaceAvailability[workspace.id] = false;
+          if (_shouldSwitchStartupUnavailableLocalWorkspace(
+            workspace,
+            workspaceState,
+          )) {
+            startupUnavailableLocalWorkspace = workspace;
+          }
           continue;
         }
         localWorkspaceAvailability[workspace.id] = !workspaceState
@@ -477,8 +521,22 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!mounted) {
       return;
     }
+    final nextActiveWorkspaceId = resolveWorkspaceSwitcherSelectedWorkspaceId(
+      currentSelectedWorkspaceId:
+          _startupHostedFallbackWorkspaceId != null &&
+              workspaceState.profiles.any(
+                (workspace) =>
+                    workspace.id == _startupHostedFallbackWorkspaceId,
+              )
+          ? _startupHostedFallbackWorkspaceId
+          : _workspaceState.activeWorkspaceId,
+      previousWorkspaces: state ?? _workspaceState,
+      nextWorkspaces: workspaceState,
+    );
     setState(() {
-      _workspaceState = workspaceState;
+      _workspaceState = workspaceState.copyWith(
+        activeWorkspaceId: nextActiveWorkspaceId,
+      );
       _authenticatedWorkspaceIds = authenticatedWorkspaceIds;
       _hostedWorkspaceAccessModes = hostedWorkspaceAccessModes;
       _localWorkspaceAvailability = localWorkspaceAvailability;
@@ -488,6 +546,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         ),
       );
     });
+    if (startupUnavailableLocalWorkspace != null) {
+      await _switchStartupUnavailableLocalWorkspaceToHostedFallback(
+        startupUnavailableLocalWorkspace,
+      );
+    }
   }
 
   bool _shouldMarkActiveLocalWorkspaceUnavailableFromSync(
@@ -521,6 +584,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<bool> _restoreWorkspaceFromSavedState(
     WorkspaceProfilesState state, {
     bool allowFallbackFromActive = true,
+    bool deferAccessRestore = false,
+    bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
   }) async {
     final activeWorkspaceId = state.activeWorkspaceId;
     final candidates = <WorkspaceProfile>[
@@ -539,17 +604,16 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
-      final preserveActiveLocalStartupSelectionOnUnsupportedAccess =
-          kIsWeb && workspace.id == activeWorkspaceId && workspace.isLocal;
       final prepared = await _prepareWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
         preserveActiveLocalSelectionOnUnsupportedAccess:
-            preserveActiveLocalStartupSelectionOnUnsupportedAccess,
+            preserveActiveLocalSelectionOnUnsupportedAccess &&
+            workspace.id == activeWorkspaceId,
         preserveActiveLocalSelectionOnStartupFailure:
             workspace.id == activeWorkspaceId && workspace.isLocal,
-        deferAccessRestore: true,
+        deferAccessRestore: deferAccessRestore,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -558,9 +622,81 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
-      final selectedState = await widget.workspaceProfileService.selectProfile(
-        workspace.id,
+      final restoredWorkspaceId = prepared.workspace?.id ?? workspace.id;
+      final shouldCommitHostedFallbackBeforePersistence =
+          deferAccessRestore &&
+          kIsWeb &&
+          workspace.isLocal &&
+          prepared.workspace?.isHosted == true &&
+          restoredWorkspaceId != workspace.id;
+      if (shouldCommitHostedFallbackBeforePersistence) {
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: restoredWorkspaceId,
+          unavailableLocalWorkspaceIds: {
+            ..._workspaceState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        _startupHostedFallbackWorkspaceId = restoredWorkspaceId;
+        _isPersistingStartupHostedFallbackSelection = true;
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        try {
+          await _commitPreparedWorkspaceSwitch(
+            prepared,
+            previousViewModel: previousViewModel,
+            workspaceState: optimisticState,
+          );
+          var selectedState = await widget.workspaceProfileService.selectProfile(
+            restoredWorkspaceId,
+          );
+          selectedState =
+              await _persistPreparedHostedWorkspaceState(
+                prepared,
+                workspaceState: selectedState,
+              ) ??
+              selectedState;
+          if (!mounted) {
+            return true;
+          }
+          setState(() {
+            _workspaceState = selectedState;
+          });
+          await _refreshWorkspaceSwitcherState(selectedState);
+        } finally {
+          _isPersistingStartupHostedFallbackSelection = false;
+          if (viewModel.workspaceId == restoredWorkspaceId) {
+            _startupHostedFallbackWorkspaceId = null;
+          }
+        }
+        return true;
+      }
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        restoredWorkspaceId,
       );
+      selectedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: selectedState,
+          ) ??
+          selectedState;
       _pendingWorkspaceRestoreFailure = null;
       if (lastFailure != null) {
         prepared.viewModel.showMessage(
@@ -589,6 +725,119 @@ class _TrackStateAppState extends State<TrackStateApp>
   ) {
     return workspace.isLocal &&
         state.unavailableLocalWorkspaceIds.contains(workspace.id);
+  }
+
+  bool _shouldDeferAccessRestoreForWorkspace(WorkspaceProfile workspace) {
+    return kIsWeb && workspace.isHosted;
+  }
+
+  Future<WorkspaceProfilesState?> _persistPreparedHostedWorkspaceState(
+    _PreparedWorkspaceSwitch prepared, {
+    WorkspaceProfilesState? workspaceState,
+  }) async {
+    if (widget.repository != null) {
+      return workspaceState;
+    }
+    final workspace = prepared.workspace;
+    if (workspace == null || !workspace.isHosted) {
+      return workspaceState;
+    }
+    var nextState = workspaceState;
+    if (nextState == null || nextState.activeWorkspaceId != workspace.id) {
+      nextState = await widget.workspaceProfileService.selectProfile(
+        workspace.id,
+      );
+    }
+    final activeWorkspace = nextState.activeWorkspace;
+    final accessMode = _hostedWorkspaceAccessModeForViewModel(
+      prepared.viewModel,
+    );
+    if (activeWorkspace?.hostedAccessMode != accessMode) {
+      nextState = await widget.workspaceProfileService.saveHostedAccessMode(
+        workspace.id,
+        accessMode,
+      );
+    }
+    return nextState;
+  }
+
+  Future<WorkspaceProfile?> _resolvePreservedLocalHostedFallbackWorkspace({
+    bool requireAuthenticatedWorkspace = false,
+  }) async {
+    final hostedWorkspaces = _workspaceState.profiles
+        .where((workspace) => workspace.isHosted)
+        .toList(growable: false);
+    if (hostedWorkspaces.isEmpty) {
+      return null;
+    }
+    for (final workspace in hostedWorkspaces) {
+      final token = await widget.authStore.readToken(
+        repository: workspace.target,
+        workspaceId: workspace.id,
+      );
+      if (token != null && token.trim().isNotEmpty) {
+        return workspace;
+      }
+    }
+    if (requireAuthenticatedWorkspace) {
+      return null;
+    }
+    return hostedWorkspaces.first;
+  }
+
+  Future<_PreparedWorkspaceSwitch?> _preparePreservedLocalHostedFallbackSwitch(
+    TrackerViewModel previousViewModel, {
+    required bool deferAccessRestore,
+    bool requireAuthenticatedWorkspace = false,
+  }) async {
+    final fallbackWorkspace =
+        await _resolvePreservedLocalHostedFallbackWorkspace(
+          requireAuthenticatedWorkspace: requireAuthenticatedWorkspace,
+        );
+    if (fallbackWorkspace == null) {
+      return null;
+    }
+    try {
+      final repository = await _openWorkspaceRepository(fallbackWorkspace);
+      final fallbackViewModel = _createViewModel(
+        repository: repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: fallbackWorkspace.id,
+      );
+      final loadFuture = fallbackViewModel.load(
+        deferAccessRestore: deferAccessRestore,
+      );
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(loadFuture);
+        final publishedFallback = await fallbackViewModel
+            .publishHostedStartupFallbackShell();
+        if (!publishedFallback) {
+          await loadFuture;
+        }
+      } else {
+        await loadFuture;
+      }
+      if (fallbackViewModel.snapshot == null) {
+        final reason = _normalizeWorkspaceFailureReason(
+          fallbackViewModel.message,
+        );
+        fallbackViewModel.dispose();
+        _rememberWorkspaceValidationFailure(fallbackWorkspace, reason);
+        return null;
+      }
+      return _PreparedWorkspaceSwitch(
+        viewModel: fallbackViewModel,
+        workspace: fallbackWorkspace,
+        localConfigurationKey: null,
+      );
+    } on Object catch (error) {
+      _rememberWorkspaceValidationFailure(
+        fallbackWorkspace,
+        _normalizeWorkspaceFailureReason(error),
+      );
+      return null;
+    }
   }
 
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
@@ -686,9 +935,28 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
     bool markUnavailable = false,
   }) async {
+    final hostedFallbackSwitch =
+        await _preparePreservedLocalHostedFallbackSwitch(
+          previousViewModel,
+          deferAccessRestore: deferAccessRestore,
+        );
+    if (hostedFallbackSwitch != null) {
+      if (markUnavailable) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+      } else {
+        _workspaceValidationFailures.remove(workspace.id);
+      }
+      return hostedFallbackSwitch;
+    }
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
-      await previousViewModel.load(deferAccessRestore: deferAccessRestore);
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(
+          previousViewModel.load(deferAccessRestore: deferAccessRestore),
+        );
+      } else {
+        await previousViewModel.load(deferAccessRestore: deferAccessRestore);
+      }
     }
     final preservedViewModel = previousViewModel.workspaceId == workspace.id
         ? previousViewModel
@@ -700,7 +968,13 @@ class _TrackStateAppState extends State<TrackStateApp>
           );
     if (!identical(preservedViewModel, previousViewModel) &&
         preservedViewModel.snapshot == null) {
-      await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+      if (deferAccessRestore && kIsWeb) {
+        unawaited(
+          preservedViewModel.load(deferAccessRestore: deferAccessRestore),
+        );
+      } else {
+        await preservedViewModel.load(deferAccessRestore: deferAccessRestore);
+      }
     }
     if (markUnavailable) {
       await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
@@ -712,6 +986,94 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace: workspace,
       localConfigurationKey: null,
     );
+  }
+
+  bool _shouldSwitchStartupUnavailableLocalWorkspace(
+    WorkspaceProfile workspace,
+    WorkspaceProfilesState workspaceState,
+  ) {
+    return kIsWeb &&
+        widget.repository == null &&
+        !_isSwitchingStartupHostedFallback &&
+        _pendingStartupLocalFallbackWorkspaceId == workspace.id &&
+        workspaceState.profiles.any((profile) => profile.isHosted);
+  }
+
+  Future<void> _switchStartupUnavailableLocalWorkspaceToHostedFallback(
+    WorkspaceProfile workspace,
+  ) async {
+    if (_isSwitchingStartupHostedFallback) {
+      return;
+    }
+    _isSwitchingStartupHostedFallback = true;
+    try {
+      final previousViewModel = viewModel;
+      final prepared = await _preparePreservedLocalHostedFallbackSwitch(
+        previousViewModel,
+        deferAccessRestore: true,
+        requireAuthenticatedWorkspace: true,
+      );
+      if (prepared == null || prepared.workspace == null || !mounted) {
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        return;
+      }
+      _startupHostedFallbackWorkspaceId = prepared.workspace!.id;
+      _isPersistingStartupHostedFallbackSelection = true;
+      _pendingStartupLocalFallbackWorkspaceId = null;
+      // Commit the UI immediately with an optimistic workspace state so the
+      // hosted restricted shell is visible before the persistence writes
+      // complete (which may require the /user auth probe to finish).
+      final optimisticHostedAccessMode =
+          _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+      final optimisticState = _workspaceState.copyWith(
+        profiles: [
+          for (final profile in _workspaceState.profiles)
+            if (profile.id == prepared.workspace!.id && profile.isHosted)
+              profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+            else
+              profile,
+        ],
+        activeWorkspaceId: prepared.workspace!.id,
+        unavailableLocalWorkspaceIds: {
+          ..._workspaceState.unavailableLocalWorkspaceIds,
+          workspace.id,
+        },
+      );
+      await _commitPreparedWorkspaceSwitch(
+        prepared,
+        previousViewModel: previousViewModel,
+        workspaceState: optimisticState,
+      );
+      // Persist after the shell is already visible.
+      try {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          prepared.workspace!.id,
+        );
+        selectedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: selectedState,
+            ) ??
+            selectedState;
+        if (mounted) {
+          setState(() {
+            _workspaceState = selectedState;
+          });
+          await _refreshWorkspaceSwitcherState(selectedState);
+        }
+      } finally {
+        _isPersistingStartupHostedFallbackSelection = false;
+        if (viewModel.workspaceId == prepared.workspace!.id) {
+          _startupHostedFallbackWorkspaceId = null;
+        }
+      }
+    } finally {
+      if (_pendingStartupLocalFallbackWorkspaceId == workspace.id &&
+          !viewModel.usesLocalPersistence) {
+        _pendingStartupLocalFallbackWorkspaceId = null;
+      }
+      _isSwitchingStartupHostedFallback = false;
+    }
   }
 
   Future<WorkspaceProfilesState> _saveLocalWorkspaceAvailability(
@@ -819,6 +1181,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!mounted) {
       return;
     }
+    _pendingStartupLocalFallbackWorkspaceId =
+        widget.repository == null &&
+            kIsWeb &&
+            loadedState.selectedWorkspace?.isLocal == true
+        ? loadedState.selectedWorkspace!.id
+        : null;
     setState(() {
       _workspaceState = loadedState;
     });
@@ -831,22 +1199,23 @@ class _TrackStateAppState extends State<TrackStateApp>
       setState(() {
         _workspaceProfilesReady = true;
       });
+      _pendingStartupLocalFallbackWorkspaceId = null;
       await viewModel.load(deferAccessRestore: true);
       return;
     }
     if (loadedState.hasProfiles) {
       if (kIsWeb) {
-        if (loadedState.selectedWorkspace case final activeWorkspace?) {
-          viewModel.updateWorkspaceScope(activeWorkspace.id);
-        }
-        final initialLoad = viewModel.load(deferAccessRestore: true);
-        if (mounted) {
-          setState(() {
-            _workspaceProfilesReady = true;
-          });
-        }
+        final restored = await _restoreWorkspaceFromSavedState(
+          loadedState,
+          allowFallbackFromActive: false,
+          deferAccessRestore: true,
+          preserveActiveLocalSelectionOnUnsupportedAccess: true,
+        );
         _scheduleWebStartupRefresh();
-        unawaited(_finishWebStartupWorkspaceRestore(loadedState, initialLoad));
+        if (restored || !mounted) {
+          return;
+        }
+        await _handleStartupWorkspaceRestoreFailure(loadedState);
         return;
       }
       final restored = await _restoreWorkspaceFromSavedState(
@@ -863,6 +1232,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         _showsWorkspaceOnboarding = true;
         _workspaceProfilesReady = true;
       });
+      _pendingStartupLocalFallbackWorkspaceId = null;
       return;
     }
     await viewModel.load(deferAccessRestore: true);
@@ -879,25 +1249,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
       _workspaceProfilesReady = true;
     });
+    _pendingStartupLocalFallbackWorkspaceId = null;
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
-  }
-
-  Future<void> _finishWebStartupWorkspaceRestore(
-    WorkspaceProfilesState loadedState,
-    Future<void> initialLoad,
-  ) async {
-    await initialLoad;
-    final restored = await _restoreWorkspaceFromSavedState(
-      loadedState,
-      allowFallbackFromActive: false,
-    );
-    _scheduleWebStartupRefresh();
-    if (restored || !mounted) {
-      return;
-    }
-    await _handleStartupWorkspaceRestoreFailure(loadedState);
   }
 
   Future<void> _handleStartupWorkspaceRestoreFailure(
@@ -1181,18 +1536,23 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
       }
     }
-    final prepared = await _prepareWorkspaceSwitch(
-      workspace ??
-          WorkspaceProfile.create(
-            WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.hosted,
-              target: normalizedRepository,
-              defaultBranch: normalizedDefaultBranch,
-              writeBranch: normalizedWriteBranch,
-            ),
+    final targetWorkspace =
+        workspace ??
+        WorkspaceProfile.create(
+          WorkspaceProfileInput(
+            targetType: WorkspaceProfileTargetType.hosted,
+            target: normalizedRepository,
+            defaultBranch: normalizedDefaultBranch,
+            writeBranch: normalizedWriteBranch,
           ),
+        );
+    final prepared = await _prepareWorkspaceSwitch(
+      targetWorkspace,
       previousViewModel: previousViewModel,
       showFailureMessage: true,
+      deferAccessRestore: _shouldDeferAccessRestoreForWorkspace(
+        targetWorkspace,
+      ),
     );
     if (prepared == null) {
       return;
@@ -1202,6 +1562,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       selectedState = await widget.workspaceProfileService.selectProfile(
         workspace.id,
       );
+      selectedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: selectedState,
+          ) ??
+          selectedState;
     }
     await _commitPreparedWorkspaceSwitch(
       prepared,
@@ -1225,6 +1591,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace,
       previousViewModel: previousViewModel,
       showFailureMessage: true,
+      deferAccessRestore: _shouldDeferAccessRestoreForWorkspace(workspace),
     );
     if (prepared == null) {
       return;
@@ -1238,6 +1605,12 @@ class _TrackStateAppState extends State<TrackStateApp>
         isAvailable: true,
       );
     }
+    selectedState =
+        await _persistPreparedHostedWorkspaceState(
+          prepared,
+          workspaceState: selectedState,
+        ) ??
+        selectedState;
     await _commitPreparedWorkspaceSwitch(
       prepared,
       previousViewModel: previousViewModel,
@@ -1258,6 +1631,14 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (!mounted) {
       prepared.viewModel.dispose();
       return;
+    }
+    final preservesStartupHostedFallback =
+        _startupHostedFallbackWorkspaceId != null &&
+        prepared.workspace?.isHosted == true &&
+        prepared.workspace?.id == _startupHostedFallbackWorkspaceId;
+    if (!preservesStartupHostedFallback) {
+      _startupHostedFallbackWorkspaceId = null;
+      _isPersistingStartupHostedFallbackSelection = false;
     }
     setState(() {
       viewModel = prepared.viewModel;
@@ -1282,10 +1663,18 @@ class _TrackStateAppState extends State<TrackStateApp>
         _requestedWorkspaceSwitcherRowFocusId = null;
       }
     });
+    if (prepared.workspace == null || !prepared.workspace!.isLocal) {
+      _pendingStartupLocalFallbackWorkspaceId = null;
+    }
     if (!identical(previousViewModel, prepared.viewModel)) {
       previousViewModel.dispose();
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
+    if (preservesStartupHostedFallback &&
+        !_isPersistingStartupHostedFallbackSelection &&
+        viewModel.workspaceId == _startupHostedFallbackWorkspaceId) {
+      _startupHostedFallbackWorkspaceId = null;
+    }
     if (_isDesktopWorkspaceSwitcherVisible &&
         workspaceSwitcherFocusWorkspaceId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1704,6 +2093,11 @@ class _TrackStateAppState extends State<TrackStateApp>
             );
       }
       _workspaceSwitcherTriggerFocusNode.requestFocus();
+      if (kIsWeb) {
+        _requestDesktopWorkspaceSwitcherBrowserFocus(
+          browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+        );
+      }
     });
   }
 
@@ -2209,9 +2603,30 @@ class _TrackStateAppState extends State<TrackStateApp>
           home: !_workspaceProfilesReady
               ? _WorkspaceInitializationView(viewModel: viewModel)
               : _showsWorkspaceOnboarding
-              ? _workspaceState.hasProfiles
-                    ? _WorkspaceOnboardingScreen(
-                        canCancel: true,
+              ? _pendingWorkspaceRestoreFailure != null &&
+                        _workspaceState.hasProfiles
+                    ? _WorkspaceRestoreLandingView(
+                        viewModel: viewModel,
+                        workspaces: _workspaceState,
+                        authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
+                        hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
+                        localWorkspaceAvailability: _localWorkspaceAvailability,
+                        onSelectWorkspace: _switchToWorkspace,
+                        onRetryUnavailableLocalWorkspace:
+                            _retryUnavailableLocalWorkspace,
+                        onDeleteWorkspace: _deleteWorkspaceProfile,
+                        onAddWorkspace: _addWorkspaceProfile,
+                        onMoveWorkspaceSelection: (step) =>
+                            unawaited(_switchToAdjacentWorkspace(step: step)),
+                        onSelectFirstWorkspace: () => unawaited(
+                          _switchToBoundaryWorkspace(selectFirst: true),
+                        ),
+                        onSelectLastWorkspace: () => unawaited(
+                          _switchToBoundaryWorkspace(selectFirst: false),
+                        ),
+                      )
+                    : _WorkspaceOnboardingScreen(
+                        canCancel: _workspaceState.hasProfiles,
                         canBrowseHostedRepositories:
                             viewModel.canBrowseHostedRepositories,
                         directoryPicker: widget.workspaceDirectoryPicker,
@@ -2222,7 +2637,9 @@ class _TrackStateAppState extends State<TrackStateApp>
                             viewModel.canBrowseHostedRepositories
                             ? viewModel.loadAccessibleHostedRepositories
                             : null,
-                        onCancel: _closeWorkspaceOnboarding,
+                        onCancel: _workspaceState.hasProfiles
+                            ? _closeWorkspaceOnboarding
+                            : null,
                         onOpenLocalWorkspace:
                             ({
                               required String repositoryPath,
@@ -2236,24 +2653,6 @@ class _TrackStateAppState extends State<TrackStateApp>
                               displayName: displayName,
                             ),
                         onOpenHostedWorkspace: _switchToHostedRepository,
-                      )
-                    : _LocalWorkspaceOnboardingScreen(
-                        directoryPicker: widget.workspaceDirectoryPicker,
-                        onboardingService:
-                            widget.localWorkspaceOnboardingService ??
-                            createLocalWorkspaceOnboardingService(),
-                        onComplete:
-                            ({
-                              required String repositoryPath,
-                              required String displayName,
-                              required String defaultBranch,
-                              required String writeBranch,
-                            }) => _switchToLocalRepositoryWithProfile(
-                              repositoryPath: repositoryPath,
-                              defaultBranch: defaultBranch,
-                              writeBranch: writeBranch,
-                              displayName: displayName,
-                            ),
                       )
               : _TrackerHome(
                   viewModel: viewModel,
@@ -2370,16 +2769,6 @@ class _TrackerHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    if (viewModel.snapshot == null && viewModel.isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Semantics(
-            label: l10n.appTitle,
-            child: CircularProgressIndicator(color: colors.primary),
-          ),
-        ),
-      );
-    }
     if (viewModel.snapshot == null) {
       if (viewModel.startupRecovery != null) {
         return Scaffold(
@@ -2388,6 +2777,16 @@ class _TrackerHome extends StatelessWidget {
             child: _StartupRecoveryView(
               viewModel: viewModel,
               onRetryStartupRecovery: onRetryStartupRecovery,
+            ),
+          ),
+        );
+      }
+      if (viewModel.isLoading) {
+        return Scaffold(
+          body: Center(
+            child: Semantics(
+              label: l10n.appTitle,
+              child: CircularProgressIndicator(color: colors.primary),
             ),
           ),
         );
@@ -2593,6 +2992,80 @@ class _WorkspaceInitializationView extends StatelessWidget {
         child: Semantics(
           label: l10n.appTitle,
           child: CircularProgressIndicator(color: colors.primary),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceRestoreLandingView extends StatelessWidget {
+  const _WorkspaceRestoreLandingView({
+    required this.viewModel,
+    required this.workspaces,
+    required this.authenticatedWorkspaceIds,
+    required this.hostedWorkspaceAccessModes,
+    required this.localWorkspaceAvailability,
+    required this.onSelectWorkspace,
+    required this.onRetryUnavailableLocalWorkspace,
+    required this.onDeleteWorkspace,
+    required this.onAddWorkspace,
+    required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
+  });
+
+  final TrackerViewModel viewModel;
+  final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
+  final Map<String, HostedWorkspaceAccessMode> hostedWorkspaceAccessModes;
+  final Map<String, bool> localWorkspaceAvailability;
+  final ValueChanged<WorkspaceProfile> onSelectWorkspace;
+  final ValueChanged<WorkspaceProfile> onRetryUnavailableLocalWorkspace;
+  final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final WorkspaceProfileCreator onAddWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      identifier: browserWorkspaceSwitcherSemanticsIdentifier,
+      label: l10n.workspaceSwitcher,
+      child: Scaffold(
+        backgroundColor: colors.page,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: _WorkspaceSwitcherSheet(
+                  sheetKey: const ValueKey('workspace-switcher-sheet'),
+                  exposeActiveSummarySemantics: true,
+                  viewModel: viewModel,
+                  workspaces: workspaces,
+                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                  hostedWorkspaceAccessModes: hostedWorkspaceAccessModes,
+                  localWorkspaceAvailability: localWorkspaceAvailability,
+                  requestedFocusedWorkspaceId: null,
+                  focusRequestVersion: 0,
+                  onSelectWorkspace: onSelectWorkspace,
+                  onRetryUnavailableLocalWorkspace:
+                      onRetryUnavailableLocalWorkspace,
+                  onDeleteWorkspace: onDeleteWorkspace,
+                  onAddWorkspace: onAddWorkspace,
+                  onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                  onSelectFirstWorkspace: onSelectFirstWorkspace,
+                  onSelectLastWorkspace: onSelectLastWorkspace,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -3680,6 +4153,19 @@ class _WorkspaceOnboardingScreenState
                             label: l10n.branch,
                             controller: _hostedBranchController,
                           ),
+                          const SizedBox(height: 12),
+                          ListenableBuilder(
+                            listenable: Listenable.merge(<Listenable>[
+                              _hostedRepositoryController,
+                              _hostedBranchController,
+                            ]),
+                            builder: (context, _) {
+                              return _HostedWorkspaceIdentityPreview(
+                                repository: _hostedRepositoryController.text,
+                                branch: _hostedBranchController.text,
+                              );
+                            },
+                          ),
                           const SizedBox(height: 16),
                           _HostedRepositorySuggestions(
                             repositories: _hostedRepositories,
@@ -3828,6 +4314,71 @@ class _HostedRepositorySuggestions extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _HostedWorkspaceIdentityPreview extends StatelessWidget {
+  const _HostedWorkspaceIdentityPreview({
+    required this.repository,
+    required this.branch,
+  });
+
+  final String repository;
+  final String branch;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedRepository = repository.trim();
+    if (trimmedRepository.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    final trimmedBranch = branch.trim();
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      container: true,
+      label: trimmedBranch.isEmpty
+          ? trimmedRepository
+          : '$trimmedRepository ${l10n.branch}: $trimmedBranch',
+      child: Container(
+        key: const ValueKey('workspace-onboarding-hosted-identity-preview'),
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              key: const ValueKey(
+                'workspace-onboarding-hosted-identity-preview-repository',
+              ),
+              trimmedRepository,
+              style: textTheme.bodyMedium?.copyWith(
+                fontFamily: 'JetBrains Mono',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (trimmedBranch.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                key: const ValueKey(
+                  'workspace-onboarding-hosted-identity-preview-branch',
+                ),
+                '${l10n.branch}: $trimmedBranch',
+                style: textTheme.bodySmall?.copyWith(color: colors.muted),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -4382,6 +4933,7 @@ class _Sidebar extends StatelessWidget {
                     child: _NavButton(
                       item: item,
                       selected: viewModel.section == item.section,
+                      selectedCanRequestFocus: viewModel.isInitialSearchLoading,
                       semanticsSortOrder: _desktopPrimaryNavigationOrder(
                         item.section,
                       ),
@@ -4499,10 +5051,17 @@ class _TopBar extends StatelessWidget {
             );
           }
 
+          final showHostedConnectAction =
+              !viewModel.usesLocalPersistence &&
+              viewModel.hostedRepositoryAccessMode ==
+                  HostedRepositoryAccessMode.disconnected &&
+              viewModel.isInitialSearchLoading;
           final condensedDesktop =
               !compact &&
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
-          final iconOnlyActions = compact || condensedDesktop;
+          final iconOnlyActions =
+              compact ||
+              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1180 : 1040);
           final actionGap = iconOnlyActions ? 8.0 : 12.0;
           final createIssueOrder = compact ? 2.0 : 1.0;
           final addWorkspaceOrder = compact ? 3.0 : 1.5;
@@ -4510,6 +5069,10 @@ class _TopBar extends StatelessWidget {
           final searchOrder = compact ? 2.0 : 8.0;
           final themeToggleOrder = compact ? null : 9.0;
           final syncPillOrder = compact ? null : 10.0;
+          final openHostedRepositoryAccess =
+              viewModel.isSaving || !showHostedConnectAction
+              ? null
+              : () => _showRepositoryAccessDialog(context, viewModel);
           final desktopWorkspaceSwitcherBindings =
               <ShortcutActivator, VoidCallback>{
                 if (!kIsWeb)
@@ -4803,18 +5366,30 @@ class _TopBar extends StatelessWidget {
 
           return Row(
             children: [
-              orderedControl(
-                syncPillOrder ?? searchOrder + 1,
-                _SyncPill(
-                  label: _workspaceSyncLabel(l10n, viewModel),
-                  semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
-                  tone: _workspaceSyncTone(viewModel),
-                  height: _desktopTopBarControlHeight,
-                  onPressed: () =>
-                      viewModel.selectSection(TrackerSection.settings),
-                  semanticsSortOrder: syncPillOrder,
+              if (showHostedConnectAction)
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SecondaryButton(
+                    label: l10n.connectGitHub,
+                    icon: TrackStateIconGlyph.repository,
+                    onPressed: openHostedRepositoryAccess,
+                    height: _desktopTopBarControlHeight,
+                    semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+                  ),
+                )
+              else
+                orderedControl(
+                  syncPillOrder ?? searchOrder + 1,
+                  _SyncPill(
+                    label: _workspaceSyncLabel(l10n, viewModel),
+                    semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                    tone: _workspaceSyncTone(viewModel),
+                    height: _desktopTopBarControlHeight,
+                    onPressed: () =>
+                        viewModel.selectSection(TrackerSection.settings),
+                    semanticsSortOrder: syncPillOrder,
+                  ),
                 ),
-              ),
               const SizedBox(width: 12),
               buildPrimaryHeaderActions(),
               const SizedBox(width: 8),
@@ -4871,6 +5446,8 @@ class _TopBar extends StatelessWidget {
                                     height: _desktopTopBarControlHeight,
                                   ),
                               hintText: l10n.jqlPlaceholder,
+                              hintStyle: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.muted, height: 1),
                             ),
                           );
                           if (kIsWeb) {
@@ -5024,6 +5601,25 @@ String _hostedWorkspaceAccessModeLabel(
   };
 }
 
+Future<void> _showIssueEditDialog(
+  BuildContext context, {
+  required TrackStateIssue issue,
+  required TrackerViewModel viewModel,
+  required bool workflowOnly,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.12),
+    builder: (dialogContext) {
+      return _IssueEditDialog(
+        issue: issue,
+        viewModel: viewModel,
+        workflowOnly: workflowOnly,
+      );
+    },
+  );
+}
+
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel, {
@@ -5154,89 +5750,149 @@ Future<void> _showRepositoryAccessDialog(
     );
     return;
   }
-  final controller = TextEditingController();
-  var rememberToken = true;
   final accessMode = viewModel.hostedRepositoryAccessMode;
   final dialogTitle = accessMode == HostedRepositoryAccessMode.disconnected
       ? l10n.connectGitHub
       : l10n.manageGitHubAccess;
-  await showDialog<void>(
-    context: context,
-    builder: (context) {
-      final project = viewModel.project;
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(dialogTitle),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${l10n.repository}: '
-                  '${project?.repository ?? l10n.configuredRepositoryFallback}',
-                ),
-                const SizedBox(height: 12),
-                Text(_repositoryAccessMessage(l10n, viewModel)),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: l10n.fineGrainedToken,
-                    helperText: l10n.fineGrainedTokenHelper,
-                  ),
-                  onSubmitted: (_) {
-                    Navigator.of(context).pop();
-                    viewModel.connectGitHub(
-                      controller.text,
-                      remember: rememberToken,
-                    );
-                  },
-                ),
-                const SizedBox(height: 8),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: rememberToken,
-                  title: Text(l10n.rememberOnThisBrowser),
-                  subtitle: Text(l10n.rememberOnThisBrowserHelp),
-                  onChanged: (value) =>
-                      setDialogState(() => rememberToken = value ?? true),
-                ),
-                if (viewModel.isGitHubAppAuthAvailable) ...[
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      viewModel.startGitHubAppLogin();
-                    },
-                    child: Text(l10n.continueWithGitHubApp),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  viewModel.connectGitHub(
-                    controller.text,
-                    remember: rememberToken,
-                  );
-                },
-                child: Text(l10n.connectToken),
-              ),
-            ],
+  final connectionRequest =
+      await showDialog<_HostedRepositoryAccessDialogResult>(
+        context: context,
+        builder: (context) {
+          return _HostedRepositoryAccessDialog(
+            title: dialogTitle,
+            viewModel: viewModel,
           );
         },
       );
-    },
-  );
-  controller.dispose();
+  if (connectionRequest == null) {
+    return;
+  }
+  if (connectionRequest.useGitHubApp) {
+    viewModel.startGitHubAppLogin();
+    return;
+  }
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(
+      viewModel.connectGitHub(
+        connectionRequest.token,
+        remember: connectionRequest.remember,
+      ),
+    );
+  });
+}
+
+class _HostedRepositoryAccessDialogResult {
+  const _HostedRepositoryAccessDialogResult.connect({
+    required this.token,
+    required this.remember,
+  }) : useGitHubApp = false;
+
+  const _HostedRepositoryAccessDialogResult.githubApp()
+    : token = '',
+      remember = false,
+      useGitHubApp = true;
+
+  final String token;
+  final bool remember;
+  final bool useGitHubApp;
+}
+
+class _HostedRepositoryAccessDialog extends StatefulWidget {
+  const _HostedRepositoryAccessDialog({
+    required this.title,
+    required this.viewModel,
+  });
+
+  final String title;
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_HostedRepositoryAccessDialog> createState() =>
+      _HostedRepositoryAccessDialogState();
+}
+
+class _HostedRepositoryAccessDialogState
+    extends State<_HostedRepositoryAccessDialog> {
+  final TextEditingController _controller = TextEditingController();
+  bool _rememberToken = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submitToken() {
+    Navigator.of(context).pop(
+      _HostedRepositoryAccessDialogResult.connect(
+        token: _controller.text,
+        remember: _rememberToken,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${l10n.repository}: '
+              '${project?.repository ?? l10n.configuredRepositoryFallback}',
+            ),
+            const SizedBox(height: 12),
+            Text(_repositoryAccessMessage(l10n, widget.viewModel)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: l10n.fineGrainedToken,
+                helperText: l10n.fineGrainedTokenHelper,
+              ),
+              onSubmitted: (_) => _submitToken(),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _rememberToken,
+              title: Text(l10n.rememberOnThisBrowser),
+              subtitle: Text(l10n.rememberOnThisBrowserHelp),
+              onChanged: (value) {
+                setState(() {
+                  _rememberToken = value ?? true;
+                });
+              },
+            ),
+            if (widget.viewModel.isGitHubAppAuthAvailable) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () {
+                  Navigator.of(
+                    context,
+                  ).pop(const _HostedRepositoryAccessDialogResult.githubApp());
+                },
+                child: Text(l10n.continueWithGitHubApp),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(onPressed: _submitToken, child: Text(l10n.connectToken)),
+      ],
+    );
+  }
 }
 
 String _repositoryAccessLabel(
@@ -5299,7 +5955,7 @@ _SyncPillSemanticLabel _workspaceSyncSemanticLabel(
       _workspaceSyncAttentionNeededSemanticLabel(l10n),
     );
   }
-  return _PrefixedSyncPillSemanticLabel(l10n.workspaceSyncSettings);
+  return const _VisibleSyncPillSemanticLabel();
 }
 
 String _workspaceSyncAttentionNeededVisibleLabel(AppLocalizations l10n) =>
@@ -5662,42 +6318,51 @@ class _MessageBanner extends StatelessWidget {
         ? l10n.trackerDataNotFound
         : _trackerMessageText(l10n, message!);
     final isError = message?.tone == TrackerMessageTone.error;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: isError
-            ? colors.accent.withValues(alpha: .12)
-            : colors.primarySoft.withValues(alpha: .72),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isError ? colors.accent : colors.primary),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TrackStateIcon(
-            isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
-            size: 18,
-            color: isError ? colors.accent : colors.primary,
-            semanticLabel: resolvedMessage,
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Text(resolvedMessage)),
-          if (onDismiss != null) ...[
-            const SizedBox(width: 8),
-            Semantics(
-              button: true,
-              label: l10n.close,
-              child: TextButton(
-                onPressed: onDismiss,
-                style: TextButton.styleFrom(
-                  foregroundColor: isError ? colors.accent : colors.primary,
-                ),
-                child: Text(l10n.close),
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      liveRegion: true,
+      label: resolvedMessage,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isError
+              ? colors.accent.withValues(alpha: .12)
+              : colors.primarySoft.withValues(alpha: .72),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isError ? colors.accent : colors.primary),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: TrackStateIcon(
+                isError
+                    ? TrackStateIconGlyph.issue
+                    : TrackStateIconGlyph.gitBranch,
+                size: 18,
+                color: isError ? colors.accent : colors.primary,
               ),
             ),
+            const SizedBox(width: 10),
+            Expanded(child: ExcludeSemantics(child: Text(resolvedMessage))),
+            if (onDismiss != null) ...[
+              const SizedBox(width: 8),
+              Semantics(
+                button: true,
+                label: l10n.close,
+                child: TextButton(
+                  onPressed: onDismiss,
+                  style: TextButton.styleFrom(
+                    foregroundColor: isError ? colors.accent : colors.primary,
+                  ),
+                  child: Text(l10n.close),
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -5769,12 +6434,20 @@ class _AccessCallout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final theme = Theme.of(context);
     final accentColor = switch (tone) {
       _AccessCalloutTone.warning => colors.accent,
       _AccessCalloutTone.success => colors.success,
     };
+    final usesLightWarningTreatment =
+        tone == _AccessCalloutTone.warning &&
+        theme.brightness == Brightness.light;
+    final contentColor = usesLightWarningTreatment
+        ? Color.lerp(colors.text, Colors.black, .3)!
+        : colors.text;
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
       label: '$semanticLabel $title $message',
@@ -5802,7 +6475,8 @@ class _AccessCallout extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: contentColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -5811,7 +6485,31 @@ class _AccessCallout extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            ExcludeSemantics(child: Text(message)),
+            ExcludeSemantics(
+              child: Text(
+                message,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: contentColor,
+                ),
+              ),
+            ),
+            if (kIsWeb)
+              Opacity(
+                opacity: 0,
+                alwaysIncludeSemantics: true,
+                child: IgnorePointer(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title),
+                      Text(message),
+                      if (primaryActionLabel != null) Text(primaryActionLabel!),
+                      if (secondaryActionLabel != null)
+                        Text(secondaryActionLabel!),
+                    ],
+                  ),
+                ),
+              ),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
@@ -5825,10 +6523,16 @@ class _AccessCallout extends StatelessWidget {
                       order: actionTraversalOrderBase,
                       child: OutlinedButton(
                         onPressed: onPrimaryAction,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: accentColor),
-                        ),
+                        style: usesLightWarningTreatment
+                            ? _warningCalloutPrimaryActionStyle(
+                                accentColor: accentColor,
+                                contentColor: contentColor,
+                                colors: colors,
+                              )
+                            : OutlinedButton.styleFrom(
+                                foregroundColor: colors.text,
+                                side: BorderSide(color: accentColor),
+                              ),
                         child: Text(primaryActionLabel!),
                       ),
                     ),
@@ -5839,6 +6543,9 @@ class _AccessCallout extends StatelessWidget {
                           : actionTraversalOrderBase! + 1,
                       child: FilledButton(
                         onPressed: onSecondaryAction,
+                        style: usesLightWarningTreatment
+                            ? _warningCalloutSecondaryActionStyle(colors)
+                            : null,
                         child: Text(secondaryActionLabel!),
                       ),
                     ),
@@ -5850,6 +6557,47 @@ class _AccessCallout extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _warningCalloutPrimaryActionStyle({
+  required Color accentColor,
+  required Color contentColor,
+  required TrackStateColors colors,
+}) {
+  return ButtonStyle(
+    foregroundColor: WidgetStatePropertyAll<Color>(contentColor),
+    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return Color.lerp(colors.accentSoft, colors.accent, .18);
+      }
+      if (states.contains(WidgetState.hovered) ||
+          states.contains(WidgetState.focused)) {
+        return colors.accentSoft;
+      }
+      return Colors.transparent;
+    }),
+    side: WidgetStatePropertyAll<BorderSide>(BorderSide(color: accentColor)),
+  );
+}
+
+ButtonStyle _warningCalloutSecondaryActionStyle(TrackStateColors colors) {
+  return ButtonStyle(
+    foregroundColor: WidgetStatePropertyAll<Color>(colors.page),
+    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return Color.lerp(colors.primary, colors.text, .26);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return Color.lerp(colors.primary, colors.text, .18);
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return Color.lerp(colors.primary, colors.text, .10);
+      }
+      return colors.primary;
+    }),
+  );
 }
 
 enum _AccessCalloutTone { warning, success }
@@ -5913,7 +6661,7 @@ class _StartupRecoveryView extends StatelessWidget {
                 semanticLabel: l10n.startupRecovery,
                 title: _startupRecoveryTitle(l10n, recovery),
                 message: _startupRecoveryMessage(l10n, viewModel),
-                primaryActionLabel: l10n.retry,
+                primaryActionLabel: l10n.retryStartup,
                 onPrimaryAction: () {
                   unawaited(onRetryStartupRecovery());
                 },
@@ -6141,6 +6889,10 @@ class _Board extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
+            final canEditFromBoard =
+                !compact &&
+                !viewModel.hasBlockedWriteAccess &&
+                !viewModel.isSaving;
             final columns = IssueStatus.values.map((status) {
               final title =
                   project?.statusLabel(status.id, locale: metadataLocale) ??
@@ -6153,6 +6905,14 @@ class _Board extends StatelessWidget {
                   issue,
                   returnSection: TrackerSection.board,
                 ),
+                onEdit: canEditFromBoard
+                    ? (issue) => _showIssueEditDialog(
+                        context,
+                        issue: issue,
+                        viewModel: viewModel,
+                        workflowOnly: false,
+                      )
+                    : null,
                 onMove: viewModel.moveIssue,
               );
             }).toList();
@@ -6768,7 +7528,7 @@ class _SettingsState extends State<_Settings> {
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),
             message: _startupRecoveryMessage(l10n, widget.viewModel),
-            primaryActionLabel: l10n.retry,
+            primaryActionLabel: l10n.retryStartup,
             onPrimaryAction: () {
               unawaited(widget.onRetryStartupRecovery());
             },
@@ -7131,17 +7891,11 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   @override
   void didUpdateWidget(covariant _WorkspaceSwitcherSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final activeWorkspaceChanged =
-        widget.workspaces.activeWorkspaceId !=
-        oldWidget.workspaces.activeWorkspaceId;
-    final selectionStillExists =
-        _selectedWorkspaceId != null &&
-        widget.workspaces.profiles.any(
-          (workspace) => workspace.id == _selectedWorkspaceId,
-        );
-    if (activeWorkspaceChanged || !selectionStillExists) {
-      _selectedWorkspaceId = widget.workspaces.activeWorkspaceId;
-    }
+    _selectedWorkspaceId = resolveWorkspaceSwitcherSelectedWorkspaceId(
+      currentSelectedWorkspaceId: _selectedWorkspaceId,
+      previousWorkspaces: oldWidget.workspaces,
+      nextWorkspaces: widget.workspaces,
+    );
     final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
     if (requestedFocusedWorkspaceId == null ||
         widget.focusRequestVersion == oldWidget.focusRequestVersion) {
@@ -7642,6 +8396,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
           showOpenAction: widget.showOpenAction,
           hasSelectionAction: onSelect != null,
         );
+    final browserSummaryLabel =
+        '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -7711,12 +8467,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     final shouldUseBrowserFocusableSummaryControl = kIsWeb && onSelect != null;
     final summaryControl = shouldUseBrowserFocusableSummaryControl
         ? browser_focusable_control.BrowserFocusableControl(
-            label:
-                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
-            focusTargetId: browserWorkspaceSwitcherRowSemanticsIdentifier(
-              workspace.id,
-            ),
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
             rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
             selectedRow: isActive,
@@ -7737,90 +8489,175 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
             child: ExcludeSemantics(child: summaryButton),
           );
+    final interactiveSummaryControl = onSelect == null
+        ? summaryControl
+        : GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onSelect,
+            child: summaryControl,
+          );
+    final summaryContent = kIsWeb
+        ? Stack(
+            children: [
+              interactiveSummaryControl,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _WorkspaceSwitcherRowBadgeSemanticsOverlay(
+                    typeLabel: typeLabel,
+                    stateLabel: stateLabel,
+                    active: isActive,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : interactiveSummaryControl;
+    final rowContent = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isActive ? colors.primarySoft : colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isActive ? colors.primary : colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          summaryContent,
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (isActive)
+                Text(
+                  l10n.activeWorkspace,
+                  style: Theme.of(context).textTheme.labelMedium,
+                )
+              else if (widget.showOpenAction)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(focusOrderBase),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey('workspace-open-${workspace.id}'),
+                    label: l10n.openWorkspace,
+                    semanticsLabel:
+                        '${l10n.openWorkspace}: ${workspace.displayName}',
+                    onPressed: onOpen,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'open',
+                    ),
+                  ),
+                ),
+              if (primaryActionLabel != null && onPrimaryAction != null)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(
+                    focusOrderBase + (widget.showOpenAction ? 1 : 0),
+                  ),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey(
+                      'workspace-primary-action-${workspace.id}',
+                    ),
+                    label: primaryActionLabel,
+                    semanticsLabel: primaryActionSemanticLabel!,
+                    onPressed: onPrimaryAction,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'primary',
+                    ),
+                  ),
+                ),
+              if (!isActive)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(
+                    focusOrderBase +
+                        (widget.showOpenAction ? 1 : 0) +
+                        ((primaryActionLabel != null &&
+                                onPrimaryAction != null)
+                            ? 1
+                            : 0),
+                  ),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey('workspace-delete-${workspace.id}'),
+                    label: l10n.delete,
+                    semanticsLabel: '${l10n.delete}: ${workspace.displayName}',
+                    onPressed: onDelete,
+                    destructive: true,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'delete',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (kIsWeb)
+            Opacity(
+              opacity: 0,
+              alwaysIncludeSemantics: true,
+              child: IgnorePointer(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(browserSummaryLabel),
+                    if (primaryActionSemanticLabel != null)
+                      Text(primaryActionSemanticLabel),
+                    if (widget.showOpenAction && onOpen != null)
+                      Text('${l10n.openWorkspace}: ${workspace.displayName}'),
+                    if (!isActive) Text('${l10n.delete}: ${workspace.displayName}'),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isActive ? colors.primarySoft : colors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isActive ? colors.primary : colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            summaryControl,
-            const SizedBox(height: 12),
-            Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (isActive)
-                  Text(
-                    l10n.activeWorkspace,
-                    style: Theme.of(context).textTheme.labelMedium,
-                  )
-                else if (widget.showOpenAction)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(focusOrderBase),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey('workspace-open-${workspace.id}'),
-                      label: l10n.openWorkspace,
-                      semanticsLabel:
-                          '${l10n.openWorkspace}: ${workspace.displayName}',
-                      onPressed: onOpen,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'open',
-                      ),
-                    ),
-                  ),
-                if (primaryActionLabel != null && onPrimaryAction != null)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(
-                      focusOrderBase + (widget.showOpenAction ? 1 : 0),
-                    ),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey(
-                        'workspace-primary-action-${workspace.id}',
-                      ),
-                      label: primaryActionLabel,
-                      semanticsLabel: primaryActionSemanticLabel!,
-                      onPressed: onPrimaryAction,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'primary',
-                      ),
-                    ),
-                  ),
-                if (!isActive)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(
-                      focusOrderBase +
-                          (widget.showOpenAction ? 1 : 0) +
-                          ((primaryActionLabel != null &&
-                                  onPrimaryAction != null)
-                              ? 1
-                              : 0),
-                    ),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey('workspace-delete-${workspace.id}'),
-                      label: l10n.delete,
-                      semanticsLabel:
-                          '${l10n.delete}: ${workspace.displayName}',
-                      onPressed: onDelete,
-                      destructive: true,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'delete',
-                      ),
-                    ),
-                  ),
-              ],
+      identifier: kIsWeb
+          ? browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id)
+          : null,
+      selected: isActive,
+      child: onSelect == null
+          ? rowContent
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onSelect,
+              child: rowContent,
             ),
+    );
+  }
+}
+
+class _WorkspaceSwitcherRowBadgeSemanticsOverlay extends StatelessWidget {
+  const _WorkspaceSwitcherRowBadgeSemanticsOverlay({
+    required this.typeLabel,
+    required this.stateLabel,
+    required this.active,
+  });
+
+  final String typeLabel;
+  final String stateLabel;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: 0,
+      alwaysIncludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: [
+            const SizedBox(width: 32),
+            const SizedBox(width: 12),
+            const Expanded(child: SizedBox()),
+            const SizedBox(width: 12),
+            _WorkspaceStateBadge(label: typeLabel, active: active),
+            const SizedBox(width: 8),
+            _WorkspaceStateBadge(label: stateLabel, active: active),
           ],
         ),
       ),
@@ -7951,12 +8788,21 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
             ),
             child: labelText,
           );
-    return browser_focusable_control.BrowserFocusableControl(
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      button: true,
+      enabled: onPressed != null,
       label: semanticsLabel,
-      onPressed: onPressed,
-      focusTargetId: focusTargetId,
-      panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-      child: buttonChild,
+      child: ExcludeSemantics(
+        child: browser_focusable_control.BrowserFocusableControl(
+          label: semanticsLabel,
+          onPressed: onPressed,
+          focusTargetId: focusTargetId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          child: buttonChild,
+        ),
+      ),
     );
   }
 }
@@ -8254,22 +9100,36 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   }
 
   Future<void> _addLocale(AppLocalizations l10n) async {
-    final locale = await _showSettingsEditor<String>(
-      title: l10n.addLocale,
-      child: const _LocaleCodeEditor(),
-    );
-    if (locale == null || _draftSettings == null) {
+    final current = _draftSettings;
+    if (current == null) {
       return;
     }
-    final current = _draftSettings!;
-    final supportedLocales = <String>[
-      ...current.effectiveSupportedLocales,
-      if (!current.effectiveSupportedLocales.contains(locale)) locale,
-    ];
-    _replaceDraft(current.copyWith(supportedLocales: supportedLocales));
-    setState(() {
-      _selectedLocale = locale;
-    });
+    await _showSettingsEditor<String>(
+      title: l10n.addLocale,
+      child: _LocaleCodeEditor(
+        configuredLocales: current.effectiveSupportedLocales,
+        onSaveLocale: (locale) async {
+          final nextSettings = current.copyWith(
+            supportedLocales: [
+              ...current.effectiveSupportedLocales,
+              if (!current.effectiveSupportedLocales.contains(locale)) locale,
+            ],
+          );
+          final saved = await widget.viewModel.saveProjectSettings(
+            nextSettings,
+          );
+          if (!saved || !mounted) {
+            return false;
+          }
+          setState(() {
+            _projectSignature = _projectSettingsSignature(nextSettings);
+            _draftSettings = nextSettings;
+            _selectedLocale = locale;
+          });
+          return true;
+        },
+      ),
+    );
   }
 
   void _removeLocale(String locale) {
@@ -9073,10 +9933,10 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
     final activeTab = ProjectSettingsTab.values[_tabController.index];
-    final canEdit =
+    final canManageCatalogs =
         widget.viewModel.supportsProjectSettingsAdmin &&
-        !widget.viewModel.hasBlockedWriteAccess &&
-        !widget.viewModel.isSaving;
+        !widget.viewModel.hasBlockedWriteAccess;
+    final canSaveSettings = canManageCatalogs && !widget.viewModel.isSaving;
     final tabBar = FocusTraversalOrder(
       order: const NumericFocusOrder(0),
       child: TabBar(
@@ -9096,18 +9956,26 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ),
     );
     final content = switch (activeTab) {
-      ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      ProjectSettingsTab.statuses => _buildStatusTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
       ProjectSettingsTab.issueTypes => _buildIssueTypeTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      ProjectSettingsTab.fields => _buildFieldTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
       ProjectSettingsTab.priorities => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.priorities,
@@ -9115,7 +9983,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editPriority,
         deleteLabel: l10n.deletePriority,
         entries: settings.priorityDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addPriority,
           editTitle: l10n.editPriority,
@@ -9134,7 +10002,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editComponent,
         deleteLabel: l10n.deleteComponent,
         entries: settings.componentDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addComponent,
           editTitle: l10n.editComponent,
@@ -9153,7 +10021,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         editLabel: l10n.editVersion,
         deleteLabel: l10n.deleteVersion,
         entries: settings.versionDefinitions,
-        canEdit: canEdit,
+        canEdit: canManageCatalogs,
         onEdit: (initial) => _editSimpleConfigEntry(
           addTitle: l10n.addVersion,
           editTitle: l10n.editVersion,
@@ -9168,9 +10036,13 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ProjectSettingsTab.attachments => _buildAttachmentsTab(
         l10n,
         settings,
-        canEdit,
+        canManageCatalogs,
       ),
-      ProjectSettingsTab.locales => _buildLocalesTab(l10n, settings, canEdit),
+      ProjectSettingsTab.locales => _buildLocalesTab(
+        l10n,
+        settings,
+        canManageCatalogs,
+      ),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -9204,9 +10076,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       emphasized: false,
                       child: _IssueDetailActionButton(
                         label: l10n.resetSettings,
-                        onPressed: widget.viewModel.isSaving
-                            ? null
-                            : () => _resetDraft(project),
+                        onPressed: canSaveSettings
+                            ? () => _resetDraft(project)
+                            : null,
                       ),
                     ),
                     _orderedSettingsAction(
@@ -9216,7 +10088,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       child: _IssueDetailActionButton(
                         label: l10n.saveSettings,
                         emphasized: true,
-                        onPressed: canEdit ? _saveSettings : null,
+                        onPressed: canSaveSettings ? _saveSettings : null,
                       ),
                     ),
                   ],
@@ -9319,21 +10191,30 @@ class _BasicConfigEntryEditor extends StatefulWidget {
 }
 
 class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
-  late final TextEditingController _idController;
-  late final TextEditingController _nameController;
+  late String _idValue;
+  late String _nameValue;
 
   @override
   void initState() {
     super.initState();
-    _idController = TextEditingController(text: widget.initial?.id ?? '');
-    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _idValue = widget.initial?.id ?? '';
+    _nameValue = widget.initial?.name ?? '';
   }
 
   @override
-  void dispose() {
-    _idController.dispose();
-    _nameController.dispose();
-    super.dispose();
+  void didUpdateWidget(covariant _BasicConfigEntryEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previousId = oldWidget.initial?.id ?? '';
+    final nextId = widget.initial?.id ?? '';
+    if (previousId != nextId) {
+      _idValue = nextId;
+    }
+
+    final previousName = oldWidget.initial?.name ?? '';
+    final nextName = widget.initial?.name ?? '';
+    if (previousName != nextName) {
+      _nameValue = nextName;
+    }
   }
 
   @override
@@ -9342,19 +10223,31 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        _SettingsTextField(
+          fieldKey: ValueKey(
+            'basic-config-entry-id-${widget.initial?.id ?? 'new'}',
+          ),
+          label: l10n.catalogId,
+          autofocus: widget.initial != null,
+          initialValue: _idValue,
+          onChanged: (value) => _idValue = value,
+        ),
         const SizedBox(height: 12),
-        _SettingsTextField(label: l10n.name, controller: _nameController),
+        _SettingsTextField(
+          fieldKey: ValueKey(
+            'basic-config-entry-name-${widget.initial?.id ?? 'new'}',
+          ),
+          label: l10n.name,
+          initialValue: _nameValue,
+          onChanged: (value) => _nameValue = value,
+        ),
         const SizedBox(height: 16),
         _SettingsEditorActions(
           onSave: () {
             Navigator.of(context).pop(
               TrackStateConfigEntry(
-                id: _normalizedEditorId(
-                  _idController.text,
-                  _nameController.text,
-                ),
-                name: _nameController.text.trim(),
+                id: _normalizedEditorId(_idValue, _nameValue),
+                name: _nameValue.trim(),
               ),
             );
           },
@@ -9365,20 +10258,46 @@ class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
 }
 
 class _LocaleCodeEditor extends StatefulWidget {
-  const _LocaleCodeEditor();
+  const _LocaleCodeEditor({
+    required this.configuredLocales,
+    required this.onSaveLocale,
+  });
+
+  final List<String> configuredLocales;
+  final Future<bool> Function(String locale) onSaveLocale;
 
   @override
   State<_LocaleCodeEditor> createState() => _LocaleCodeEditorState();
 }
 
 class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
-  final TextEditingController _controller = TextEditingController(text: 'fr');
+  static final RegExp _supportedLocaleCodePattern = RegExp(
+    r'^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?$',
+  );
+  static const List<String> _preferredLocaleCodes = [
+    'fr',
+    'de',
+    'es',
+    'it',
+    'pt',
+    'nl',
+    'pl',
+    'ja',
+    'ko',
+    'zh-CN',
+    'zh-TW',
+    'ar',
+    'he',
+    'hi',
+    'ru',
+  ];
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  late final List<String> _availableLocaleCodes = _buildAvailableLocaleCodes(
+    configuredLocales: widget.configuredLocales,
+  );
+  late String? _selectedLocaleCode = _availableLocaleCodes.isEmpty
+      ? null
+      : _availableLocaleCodes.first;
 
   @override
   Widget build(BuildContext context) {
@@ -9386,17 +10305,66 @@ class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(
-          label: l10n.localeCode,
-          controller: _controller,
-          helperText: l10n.localeCodeHelper,
+        DropdownButtonFormField<String>(
+          initialValue: _selectedLocaleCode,
+          decoration: InputDecoration(
+            labelText: l10n.localeCode,
+            helperText: l10n.localeCodeHelper,
+          ),
+          items: [
+            for (final localeCode in _availableLocaleCodes)
+              DropdownMenuItem<String>(
+                value: localeCode,
+                child: Text(localeCode),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _selectedLocaleCode = value;
+            });
+          },
         ),
         const SizedBox(height: 16),
         _SettingsEditorActions(
-          onSave: () => Navigator.of(context).pop(_controller.text.trim()),
+          onSave: () async {
+            final selectedLocaleCode = _selectedLocaleCode;
+            if (selectedLocaleCode == null) {
+              return;
+            }
+            final navigator = Navigator.of(context);
+            final normalizedLocaleCode = selectedLocaleCode.trim();
+            final saved = await widget.onSaveLocale(normalizedLocaleCode);
+            if (!mounted || !saved) {
+              return;
+            }
+            navigator.pop(normalizedLocaleCode);
+          },
         ),
       ],
     );
+  }
+
+  List<String> _buildAvailableLocaleCodes({
+    required List<String> configuredLocales,
+  }) {
+    final configured = configuredLocales.map((locale) => locale.trim()).toSet();
+    final available = <String>{};
+    for (final locale in DateFormat.allLocalesWithSymbols()) {
+      final normalized = locale.replaceAll('_', '-').trim();
+      if (normalized.isEmpty ||
+          configured.contains(normalized) ||
+          !_supportedLocaleCodePattern.hasMatch(normalized)) {
+        continue;
+      }
+      available.add(normalized);
+    }
+    final preferred = <String>[
+      for (final locale in _preferredLocaleCodes)
+        if (available.remove(locale)) locale,
+    ];
+    final availableLocaleCodes = available.toList()..sort();
+    availableLocaleCodes.insertAll(0, preferred);
+    return availableLocaleCodes;
   }
 }
 
@@ -9718,7 +10686,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
   late final TextEditingController _idController;
   late final TextEditingController _nameController;
   late final TextEditingController _hierarchyLevelController;
-  late final TextEditingController _iconController;
+  late String _iconId;
   String? _workflowId;
 
   @override
@@ -9729,7 +10697,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _hierarchyLevelController = TextEditingController(
       text: widget.initial?.hierarchyLevel?.toString() ?? '0',
     );
-    _iconController = TextEditingController(text: widget.initial?.icon ?? '');
+    _iconId = _normalizedIssueTypeIconId(widget.initial?.icon);
     _workflowId =
         widget.initial?.workflowId ??
         (widget.workflows.isNotEmpty ? widget.workflows.first.id : null);
@@ -9740,7 +10708,6 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
     _idController.dispose();
     _nameController.dispose();
     _hierarchyLevelController.dispose();
-    _iconController.dispose();
     super.dispose();
   }
 
@@ -9759,9 +10726,21 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
           controller: _hierarchyLevelController,
         ),
         const SizedBox(height: 12),
-        _SettingsTextField(
-          label: l10n.catalogIcon,
-          controller: _iconController,
+        DropdownButtonFormField<String>(
+          initialValue: _iconId,
+          decoration: InputDecoration(labelText: l10n.catalogIcon),
+          items: [
+            for (final option in _supportedIssueTypeIconOptions)
+              DropdownMenuItem<String>(
+                value: option.id,
+                child: Text(option.label),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _iconId = _normalizedIssueTypeIconId(value);
+            });
+          },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -9789,7 +10768,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
                 name: _nameController.text.trim(),
                 hierarchyLevel:
                     int.tryParse(_hierarchyLevelController.text.trim()) ?? 0,
-                icon: _iconController.text.trim(),
+                icon: _iconId,
                 workflowId: _workflowId,
               ),
             );
@@ -9808,6 +10787,35 @@ class _FieldEditor extends StatefulWidget {
 
   @override
   State<_FieldEditor> createState() => _FieldEditorState();
+}
+
+class _IssueTypeIconOption {
+  const _IssueTypeIconOption({required this.id, required this.label});
+
+  final String id;
+  final String label;
+}
+
+const List<_IssueTypeIconOption> _supportedIssueTypeIconOptions = [
+  _IssueTypeIconOption(id: 'epic', label: 'Epic'),
+  _IssueTypeIconOption(id: 'story', label: 'Story'),
+  _IssueTypeIconOption(id: 'subtask', label: 'Sub-task'),
+  _IssueTypeIconOption(id: 'hierarchy', label: 'Hierarchy'),
+  _IssueTypeIconOption(id: 'settings', label: 'Settings'),
+  _IssueTypeIconOption(id: 'issue', label: 'Issue'),
+];
+
+String _normalizedIssueTypeIconId(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return switch (normalized) {
+    'epic' => 'epic',
+    'story' => 'story',
+    'subtask' => 'subtask',
+    'hierarchy' => 'hierarchy',
+    'settings' => 'settings',
+    'task' || 'bug' || 'issue' => 'issue',
+    _ => 'issue',
+  };
 }
 
 class _FieldEditorState extends State<_FieldEditor> {
@@ -9854,29 +10862,43 @@ class _FieldEditorState extends State<_FieldEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        _SettingsTextField(
+          label: l10n.catalogId,
+          controller: _idController,
+          enabled: !_isReserved,
+        ),
         const SizedBox(height: 12),
         _SettingsTextField(label: l10n.name, controller: _nameController),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: _type,
-          decoration: InputDecoration(labelText: l10n.catalogType),
-          items: const [
-            DropdownMenuItem(value: 'string', child: Text('string')),
-            DropdownMenuItem(value: 'markdown', child: Text('markdown')),
-            DropdownMenuItem(value: 'option', child: Text('option')),
-            DropdownMenuItem(value: 'user', child: Text('user')),
-            DropdownMenuItem(value: 'array', child: Text('array')),
-            DropdownMenuItem(value: 'number', child: Text('number')),
-          ],
-          onChanged: _isReserved
-              ? null
-              : (value) {
+        _isReserved
+            ? TextButton(
+                onPressed: null,
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 16,
+                  ),
+                ),
+                child: Text('${l10n.catalogType} $_type'),
+              )
+            : DropdownButtonFormField<String>(
+                initialValue: _type,
+                decoration: InputDecoration(labelText: l10n.catalogType),
+                items: const [
+                  DropdownMenuItem(value: 'string', child: Text('string')),
+                  DropdownMenuItem(value: 'markdown', child: Text('markdown')),
+                  DropdownMenuItem(value: 'option', child: Text('option')),
+                  DropdownMenuItem(value: 'user', child: Text('user')),
+                  DropdownMenuItem(value: 'array', child: Text('array')),
+                  DropdownMenuItem(value: 'number', child: Text('number')),
+                ],
+                onChanged: (value) {
                   setState(() {
                     _type = value ?? 'string';
                   });
                 },
-        ),
+              ),
         const SizedBox(height: 12),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
@@ -10401,6 +11423,11 @@ class _IssueDetail extends StatefulWidget {
 
 class _IssueDetailState extends State<_IssueDetail> {
   late final TextEditingController _commentController;
+  late final List<FocusNode> _collaborationTabFocusNodes =
+      List<FocusNode>.generate(
+        4,
+        (index) => FocusNode(debugLabel: 'issue-detail-tab-$index'),
+      );
   int _selectedCollaborationTab = 0;
   PickedAttachment? _selectedAttachment;
   String? _attachmentUploadNotice;
@@ -10472,23 +11499,43 @@ class _IssueDetailState extends State<_IssueDetail> {
     return widget.viewModel.hasIssueDeferredError(issue.key, section);
   }
 
+  void _selectCollaborationTab(int index) {
+    setState(() {
+      _selectedCollaborationTab = index;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _collaborationTabFocusNodes[index].requestFocus();
+    });
+    switch (index) {
+      case 0:
+        widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+      case 1:
+        widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+      case 2:
+        widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+      case 3:
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+    }
+  }
+
   @override
   void dispose() {
     _commentController.dispose();
+    for (final focusNode in _collaborationTabFocusNodes) {
+      focusNode.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _openEditDialog({required bool workflowOnly}) async {
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.12),
-      builder: (dialogContext) {
-        return _IssueEditDialog(
-          issue: widget.issue,
-          viewModel: widget.viewModel,
-          workflowOnly: workflowOnly,
-        );
-      },
+    await _showIssueEditDialog(
+      context,
+      issue: widget.issue,
+      viewModel: widget.viewModel,
+      workflowOnly: workflowOnly,
     );
   }
 
@@ -10675,6 +11722,10 @@ class _IssueDetailState extends State<_IssueDetail> {
         onPressed: widget.viewModel.isSaving ? null : widget.onCreateChildIssue,
       ),
       _IssueDetailActionButton(
+        label: l10n.comment,
+        onPressed: canUseWriteActions ? () => _selectCollaborationTab(1) : null,
+      ),
+      _IssueDetailActionButton(
         label: l10n.edit,
         onPressed: canUseWriteActions
             ? () => _openEditDialog(workflowOnly: false)
@@ -10683,187 +11734,214 @@ class _IssueDetailState extends State<_IssueDetail> {
     ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: FocusScope(
+        debugLabel: 'issue-detail-${issue.key}',
+        autofocus: true,
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _IssueTypeGlyph(issue.issueType),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  issue.key,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    color: colors.muted,
-                    fontWeight: FontWeight.w600,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _IssueTypeGlyph(issue.issueType),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      issue.key,
+                      style: TextStyle(
+                        fontFamily: 'JetBrains Mono',
+                        color: colors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                ),
+                  Flexible(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.end,
+                      children: actions,
+                    ),
+                  ),
+                ],
               ),
-              Flexible(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.end,
-                  children: actions,
-                ),
+              const SizedBox(height: 12),
+              Text(
+                issue.summary,
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            issue.summary,
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 12),
-          if (hasBlockedWriteAccess) ...[
-            _AccessCallout(
-              semanticLabel: l10n.issueDetail,
-              title: _repositoryAccessTitle(l10n, widget.viewModel),
-              message: _repositoryAccessMessage(l10n, widget.viewModel),
-              primaryActionLabel: l10n.openSettings,
-              onPrimaryAction: () =>
-                  widget.viewModel.selectSection(TrackerSection.settings),
-            ),
-            const SizedBox(height: 12),
-          ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _StatusBadge(
-                status: issue.status,
-                label: _resolvedIssueStatusLabel(
+              const SizedBox(height: 12),
+              if (hasBlockedWriteAccess) ...[
+                _AccessCallout(
+                  semanticLabel: l10n.issueDetail,
+                  title: _repositoryAccessTitle(l10n, widget.viewModel),
+                  message: _repositoryAccessMessage(l10n, widget.viewModel),
+                  primaryActionLabel: l10n.openSettings,
+                  onPrimaryAction: () =>
+                      widget.viewModel.selectSection(TrackerSection.settings),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _StatusBadge(
+                    status: issue.status,
+                    label: _resolvedIssueStatusLabel(
+                      context,
+                      widget.viewModel.project,
+                      issue,
+                    ),
+                  ),
+                  _PriorityBadge(priority: issue.priority),
+                  for (final label in issue.labels) _Chip(label: label),
+                ],
+              ),
+              const SizedBox(height: 18),
+              _IssueDetailTabs(
+                selectedIndex: _selectedCollaborationTab,
+                tabs: [
+                  l10n.detail,
+                  l10n.comments,
+                  l10n.attachments,
+                  l10n.history,
+                ],
+                focusNodes: _collaborationTabFocusNodes,
+                failedTabIndexes: {
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.detail,
+                  ))
+                    0,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.comments,
+                  ))
+                    1,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.attachments,
+                  ))
+                    2,
+                  if (widget.viewModel.hasIssueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.history,
+                  ))
+                    3,
+                },
+                onSelected: _selectCollaborationTab,
+              ),
+              const SizedBox(height: 16),
+              if (_selectedCollaborationTab == 0)
+                _detailTabContent(
                   context,
-                  widget.viewModel.project,
-                  issue,
+                  issue: issue,
+                  l10n: l10n,
+                  colors: colors,
+                )
+              else if (_selectedCollaborationTab == 1)
+                _CommentsTab(
+                  issue: issue,
+                  viewModel: widget.viewModel,
+                  controller: _commentController,
+                  isSaving: widget.viewModel.isSaving,
+                  isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.comments,
+                  ),
+                  writeBlocked: hasBlockedWriteAccess,
+                  onSave: canUseWriteActions ? _saveComment : null,
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueCommentsLoaded(issue),
+                )
+              else if (_selectedCollaborationTab == 2)
+                _AttachmentsTab(
+                  issue: issue,
+                  viewModel: widget.viewModel,
+                  onDownload: widget.viewModel.downloadIssueAttachment,
+                  selectedAttachment: _selectedAttachment,
+                  uploadNotice: _attachmentUploadNotice,
+                  isSaving: widget.viewModel.isSaving,
+                  isLoading: widget.viewModel.isIssueAttachmentsLoading(
+                    issue.key,
+                  ),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.attachments,
+                  ),
+                  onChooseAttachment: _chooseAttachment,
+                  onClearSelection: () {
+                    setState(() {
+                      _selectedAttachment = null;
+                      _attachmentUploadNotice = null;
+                    });
+                  },
+                  onUpload: _uploadAttachment,
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueAttachmentsLoaded(issue),
+                )
+              else
+                _HistoryTab(
+                  entries: widget.viewModel.issueHistoryFor(issue.key),
+                  isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
+                  errorText: widget.viewModel.issueDeferredError(
+                    issue.key,
+                    IssueDeferredSection.history,
+                  ),
+                  onRetry: () =>
+                      widget.viewModel.ensureIssueHistoryLoaded(issue),
                 ),
-              ),
-              _PriorityBadge(priority: issue.priority),
-              for (final label in issue.labels) _Chip(label: label),
             ],
           ),
-          const SizedBox(height: 18),
-          _IssueDetailTabs(
-            selectedIndex: _selectedCollaborationTab,
-            tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
-            failedTabIndexes: {
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.detail,
-              ))
-                0,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.comments,
-              ))
-                1,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.attachments,
-              ))
-                2,
-              if (widget.viewModel.hasIssueDeferredError(
-                issue.key,
-                IssueDeferredSection.history,
-              ))
-                3,
-            },
-            onSelected: (index) {
-              setState(() {
-                _selectedCollaborationTab = index;
-              });
-              switch (index) {
-                case 0:
-                  widget.viewModel.ensureIssueDetailLoaded(issue);
-                case 1:
-                  widget.viewModel.ensureIssueCommentsLoaded(issue);
-                case 2:
-                  widget.viewModel.ensureIssueAttachmentsLoaded(issue);
-                case 3:
-                  widget.viewModel.ensureIssueHistoryLoaded(issue);
-              }
-            },
-          ),
-          const SizedBox(height: 16),
-          if (_selectedCollaborationTab == 0)
-            _detailTabContent(context, issue: issue, l10n: l10n, colors: colors)
-          else if (_selectedCollaborationTab == 1)
-            _CommentsTab(
-              issue: issue,
-              viewModel: widget.viewModel,
-              controller: _commentController,
-              isSaving: widget.viewModel.isSaving,
-              isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.comments,
-              ),
-              writeBlocked: hasBlockedWriteAccess,
-              onSave: canUseWriteActions ? _saveComment : null,
-              onRetry: () => widget.viewModel.ensureIssueCommentsLoaded(issue),
-            )
-          else if (_selectedCollaborationTab == 2)
-            _AttachmentsTab(
-              issue: issue,
-              viewModel: widget.viewModel,
-              onDownload: widget.viewModel.downloadIssueAttachment,
-              selectedAttachment: _selectedAttachment,
-              uploadNotice: _attachmentUploadNotice,
-              isSaving: widget.viewModel.isSaving,
-              isLoading: widget.viewModel.isIssueAttachmentsLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.attachments,
-              ),
-              onChooseAttachment: _chooseAttachment,
-              onClearSelection: () {
-                setState(() {
-                  _selectedAttachment = null;
-                  _attachmentUploadNotice = null;
-                });
-              },
-              onUpload: _uploadAttachment,
-              onRetry: () =>
-                  widget.viewModel.ensureIssueAttachmentsLoaded(issue),
-            )
-          else
-            _HistoryTab(
-              entries: widget.viewModel.issueHistoryFor(issue.key),
-              isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
-              errorText: widget.viewModel.issueDeferredError(
-                issue.key,
-                IssueDeferredSection.history,
-              ),
-              onRetry: () => widget.viewModel.ensureIssueHistoryLoaded(issue),
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _IssueDetailActionButton extends StatelessWidget {
+class _IssueDetailActionButton extends StatefulWidget {
   const _IssueDetailActionButton({
     required this.label,
     required this.onPressed,
     this.emphasized = false,
     this.sortOrder,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool emphasized;
   final double? sortOrder;
+  final FocusNode? focusNode;
+
+  @override
+  State<_IssueDetailActionButton> createState() =>
+      _IssueDetailActionButtonState();
+}
+
+class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
+  late final FocusNode _focusNode = FocusNode(debugLabel: widget.label);
+
+  FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode;
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final child = ExcludeSemantics(child: Text(label));
-    final button = emphasized
+    final child = ExcludeSemantics(child: Text(widget.label));
+    final button = widget.emphasized
         ? FilledButton(
-            onPressed: onPressed,
+            focusNode: _effectiveFocusNode,
+            onPressed: widget.onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
               foregroundColor: colors.page,
@@ -10875,7 +11953,8 @@ class _IssueDetailActionButton extends StatelessWidget {
             child: child,
           )
         : OutlinedButton(
-            onPressed: onPressed,
+            focusNode: _effectiveFocusNode,
+            onPressed: widget.onPressed,
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.text,
               side: BorderSide(color: colors.border),
@@ -10886,17 +11965,25 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    final semanticButton = Semantics(
-      button: true,
-      label: label,
-      sortKey: _semanticsSortKey(sortOrder),
+    final semanticButton = AnimatedBuilder(
+      animation: _effectiveFocusNode,
       child: button,
+      builder: (context, child) => Semantics(
+        button: true,
+        enabled: widget.onPressed != null,
+        focusable: widget.onPressed != null,
+        focused: _effectiveFocusNode.hasFocus,
+        label: widget.label,
+        sortKey: _semanticsSortKey(widget.sortOrder),
+        onTap: widget.onPressed,
+        child: ExcludeSemantics(child: child!),
+      ),
     );
-    if (sortOrder == null) {
+    if (widget.sortOrder == null) {
       return semanticButton;
     }
     return FocusTraversalOrder(
-      order: NumericFocusOrder(sortOrder!),
+      order: NumericFocusOrder(widget.sortOrder!),
       child: semanticButton,
     );
   }
@@ -10941,6 +12028,9 @@ class _IssueList extends StatelessWidget {
                   decoration: InputDecoration(
                     labelText: l10n.searchIssues,
                     hintText: l10n.jqlPlaceholder,
+                    hintStyle: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: colors.muted),
                   ),
                 ),
               ),
@@ -11117,6 +12207,7 @@ class _BoardColumn extends StatelessWidget {
     required this.targetStatus,
     required this.issues,
     required this.onSelect,
+    this.onEdit,
     required this.onMove,
   });
 
@@ -11124,6 +12215,7 @@ class _BoardColumn extends StatelessWidget {
   final IssueStatus targetStatus;
   final List<TrackStateIssue> issues;
   final ValueChanged<TrackStateIssue> onSelect;
+  final ValueChanged<TrackStateIssue>? onEdit;
   final void Function(TrackStateIssue issue, IssueStatus status) onMove;
 
   @override
@@ -11177,6 +12269,9 @@ class _BoardColumn extends StatelessWidget {
                           child: _IssueCard(
                             issue: issue,
                             onTap: () => onSelect(issue),
+                            onEdit: onEdit == null
+                                ? null
+                                : () => onEdit!(issue),
                           ),
                         ),
                       if (issues.isEmpty)
@@ -11205,67 +12300,101 @@ class _BoardColumn extends StatelessWidget {
 }
 
 class _IssueCard extends StatelessWidget {
-  const _IssueCard({required this.issue, required this.onTap});
+  const _IssueCard({required this.issue, required this.onTap, this.onEdit});
 
   final TrackStateIssue issue;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final card = Semantics(
-      button: true,
-      label: 'Open ${issue.key} ${issue.summary}',
-      child: InkWell(
+    final card = Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: ExcludeSemantics(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surface,
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            button: true,
+            label: 'Open ${issue.key} ${issue.summary}',
+            child: InkWell(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _IssueTypeGlyph(issue.issueType),
-                    const SizedBox(width: 8),
-                    Text(
-                      issue.key,
-                      style: TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 12,
-                        color: colors.muted,
+              onTap: onTap,
+              child: ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _IssueTypeGlyph(issue.issueType),
+                          const SizedBox(width: 8),
+                          Text(
+                            issue.key,
+                            style: TextStyle(
+                              fontFamily: 'JetBrains Mono',
+                              fontSize: 12,
+                              color: colors.muted,
+                            ),
+                          ),
+                          const Spacer(),
+                          _Avatar(name: issue.assignee),
+                        ],
                       ),
-                    ),
-                    const Spacer(),
-                    _Avatar(name: issue.assignee),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        issue.summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _Chip(label: issue.issueType.label),
+                          _PriorityBadge(priority: issue.priority),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  issue.summary,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _Chip(label: issue.issueType.label),
-                    _PriorityBadge(priority: issue.priority),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (onEdit != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Semantics(
+                  button: true,
+                  label: l10n.edit,
+                  child: TextButton(
+                    key: ValueKey('board-edit-${issue.key}'),
+                    onPressed: onEdit,
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: ExcludeSemantics(child: Text(l10n.edit)),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
     return Draggable<TrackStateIssue>(
@@ -11488,6 +12617,8 @@ class _LoadingPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final backgroundColor = colors.loadingFeedbackBackground;
+    final foregroundColor = colors.loadingFeedbackForeground;
     return Semantics(
       container: true,
       label: semanticLabel,
@@ -11495,7 +12626,7 @@ class _LoadingPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: colors.surfaceAlt,
+            color: backgroundColor,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: colors.border),
           ),
@@ -11503,7 +12634,7 @@ class _LoadingPill extends StatelessWidget {
             label,
             style: Theme.of(
               context,
-            ).textTheme.labelSmall?.copyWith(color: colors.muted),
+            ).textTheme.labelSmall?.copyWith(color: foregroundColor),
           ),
         ),
       ),
@@ -11523,6 +12654,8 @@ class _SectionLoadingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final backgroundColor = colors.loadingFeedbackBackground;
+    final foregroundColor = colors.loadingFeedbackForeground;
     return Semantics(
       container: true,
       label: semanticLabel,
@@ -11531,7 +12664,7 @@ class _SectionLoadingBanner extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: colors.surfaceAlt,
+            color: backgroundColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: colors.border),
           ),
@@ -11552,7 +12685,7 @@ class _SectionLoadingBanner extends StatelessWidget {
                   label,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
+                  ).textTheme.labelMedium?.copyWith(color: foregroundColor),
                 ),
               ),
             ],
@@ -11971,6 +13104,7 @@ class _SettingsTextField extends StatelessWidget {
     this.controller,
     this.initialValue,
     this.focusNode,
+    this.autofocus = false,
     this.helperText,
     this.onChanged,
     this.enabled = true,
@@ -11981,6 +13115,7 @@ class _SettingsTextField extends StatelessWidget {
   final TextEditingController? controller;
   final String? initialValue;
   final FocusNode? focusNode;
+  final bool autofocus;
   final String? helperText;
   final ValueChanged<String>? onChanged;
   final bool enabled;
@@ -11992,6 +13127,7 @@ class _SettingsTextField extends StatelessWidget {
       controller: controller,
       initialValue: controller == null ? initialValue : null,
       focusNode: focusNode,
+      autofocus: autofocus,
       enabled: enabled,
       onChanged: onChanged,
       decoration: InputDecoration(labelText: label, helperText: helperText),
@@ -12374,36 +13510,65 @@ class _IconButtonSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final enabled = onPressed != null;
+    final controlSize = size ?? 40.0;
     return Semantics(
       button: true,
       enabled: enabled,
+      focusable: enabled,
       identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        excludeFromSemantics: true,
-        onTap: onPressed,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          padding: size == null ? const EdgeInsets.all(11) : null,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.border),
-          ),
-          foregroundDecoration: enabled
-              ? null
-              : BoxDecoration(
-                  color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-          child: TrackStateIcon(
-            glyph,
-            color: enabled ? colors.text : colors.muted,
-            size: size == null ? 18 : _desktopTopBarIconSize,
+      child: ExcludeSemantics(
+        child: SizedBox(
+          width: controlSize,
+          height: controlSize,
+          child: OutlinedButton(
+            onPressed: onPressed,
+            style: ButtonStyle(
+              animationDuration: Duration.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+              minimumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              maximumSize: WidgetStatePropertyAll(Size.square(controlSize)),
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.disabled)) {
+                  return colors.surfaceAlt.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.pressed)) {
+                  return colors.primarySoft.withValues(alpha: .84);
+                }
+                if (states.contains(WidgetState.focused)) {
+                  return colors.primarySoft.withValues(alpha: .72);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return colors.surfaceAlt;
+                }
+                return colors.surface;
+              }),
+              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+              side: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return BorderSide(color: colors.primary, width: 2);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return BorderSide(
+                    color: Color.alphaBlend(
+                      colors.primary.withValues(alpha: .24),
+                      colors.border,
+                    ),
+                  );
+                }
+                return BorderSide(color: colors.border);
+              }),
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            child: TrackStateIcon(
+              glyph,
+              color: enabled ? colors.text : colors.muted,
+              size: size == null ? 18 : _desktopTopBarIconSize,
+            ),
           ),
         ),
       ),
@@ -12459,6 +13624,7 @@ class _DropdownCreateField extends StatelessWidget {
     this.hintText,
     this.helperText,
     this.errorText,
+    this.focusNode,
   });
 
   final String label;
@@ -12469,6 +13635,7 @@ class _DropdownCreateField extends StatelessWidget {
   final String? errorText;
   final List<DropdownMenuItem<String>> items;
   final ValueChanged<String?>? onChanged;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -12476,6 +13643,7 @@ class _DropdownCreateField extends StatelessWidget {
       label: label,
       child: DropdownButtonFormField<String>(
         key: ValueKey('$label-${value ?? 'empty'}'),
+        focusNode: focusNode,
         initialValue: items.any((item) => item.value == value) ? value : null,
         isExpanded: true,
         items: items,
@@ -12523,6 +13691,8 @@ class _SelectableChipField extends StatelessWidget {
     required this.onToggle,
     this.enabled = true,
     this.optionLabelBuilder,
+    this.onEditRequested,
+    this.focusNode,
   });
 
   final String label;
@@ -12531,36 +13701,68 @@ class _SelectableChipField extends StatelessWidget {
   final ValueChanged<String> onToggle;
   final bool enabled;
   final String Function(TrackStateConfigEntry option)? optionLabelBuilder;
+  final VoidCallback? onEditRequested;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: label,
       container: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.labelMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in options)
-                FilterChip(
-                  label: Text(
-                    optionLabelBuilder?.call(option) ?? option.label(),
+      readOnly: true,
+      explicitChildNodes: true,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (onEditRequested == null)
+              Text(label, style: Theme.of(context).textTheme.labelMedium)
+            else
+              Semantics(
+                button: true,
+                enabled: enabled,
+                focusable: enabled,
+                label: label,
+                child: ExcludeSemantics(
+                  child: TextButton(
+                    focusNode: focusNode,
+                    onPressed: enabled ? onEditRequested : null,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: Size.zero,
+                      alignment: Alignment.centerLeft,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
                   ),
-                  selected: selectedValues.any(
-                    (value) =>
-                        _canonicalConfigId(value) ==
-                        _canonicalConfigId(option.id),
-                  ),
-                  onSelected: enabled ? (_) => onToggle(option.id) : null,
                 ),
-            ],
-          ),
-        ],
+              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in options)
+                  FilterChip(
+                    label: Text(
+                      optionLabelBuilder?.call(option) ?? option.label(),
+                    ),
+                    selected: selectedValues.any(
+                      (value) =>
+                          _canonicalConfigId(value) ==
+                          _canonicalConfigId(option.id),
+                    ),
+                    onSelected: enabled ? (_) => onToggle(option.id) : null,
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -12576,6 +13778,7 @@ class _LabelTokenField extends StatelessWidget {
     required this.onChanged,
     required this.onSubmitted,
     required this.onRemove,
+    this.focusNode,
   });
 
   final String label;
@@ -12586,27 +13789,26 @@ class _LabelTokenField extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
   final ValueChanged<String> onRemove;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
+    final textField = TextField(
+      controller: controller,
+      focusNode: focusNode,
+      enabled: enabled,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(labelText: label, helperText: helperText),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Semantics(
+        _wrapCompatibleTextFieldSemantics(
+          controller: controller,
           label: label,
-          textField: true,
           enabled: enabled,
-          value: controller.text,
-          child: TextField(
-            controller: controller,
-            enabled: enabled,
-            onChanged: onChanged,
-            onSubmitted: onSubmitted,
-            decoration: InputDecoration(
-              labelText: label,
-              helperText: helperText,
-            ),
-          ),
+          child: textField,
         ),
         if (labels.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -12625,6 +13827,280 @@ class _LabelTokenField extends StatelessWidget {
       ],
     );
   }
+}
+
+Widget _wrapCompatibleTextFieldSemantics({
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required Widget child,
+}) {
+  if (kIsWeb) {
+    return child;
+  }
+  return Semantics(
+    label: label,
+    textField: true,
+    enabled: enabled,
+    value: controller.text,
+    child: child,
+  );
+}
+
+Widget _buildWebCompatibleTextField({
+  Key? key,
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  String? helperText,
+  String? errorText,
+  int? minLines,
+  int? maxLines = 1,
+  bool alignLabelWithHint = false,
+}) {
+  final textField = TextField(
+    key: key,
+    controller: controller,
+    minLines: minLines,
+    maxLines: maxLines,
+    enabled: enabled,
+    decoration: InputDecoration(
+      labelText: label,
+      helperText: helperText,
+      errorText: errorText,
+      alignLabelWithHint: alignLabelWithHint,
+    ),
+  );
+  return _wrapCompatibleTextFieldSemantics(
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    child: textField,
+  );
+}
+
+class _CollaboratorSuggestionField extends StatefulWidget {
+  const _CollaboratorSuggestionField({
+    this.fieldKey,
+    required this.controller,
+    required this.label,
+    required this.enabled,
+    required this.suggestions,
+  });
+
+  final Key? fieldKey;
+  final TextEditingController controller;
+  final String label;
+  final bool enabled;
+  final List<String> suggestions;
+
+  @override
+  State<_CollaboratorSuggestionField> createState() =>
+      _CollaboratorSuggestionFieldState();
+}
+
+class _CollaboratorSuggestionFieldState
+    extends State<_CollaboratorSuggestionField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedSuggestions = widget.suggestions
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    return RawAutocomplete<String>(
+      textEditingController: widget.controller,
+      focusNode: _focusNode,
+      displayStringForOption: (option) => option,
+      optionsBuilder: (textEditingValue) {
+        if (!widget.enabled) {
+          return const Iterable<String>.empty();
+        }
+        final query = textEditingValue.text.trim().toLowerCase();
+        if (query.isEmpty) {
+          return normalizedSuggestions.take(8);
+        }
+        return normalizedSuggestions.where(
+          (option) => option.toLowerCase().contains(query),
+        );
+      },
+      fieldViewBuilder:
+          (context, textEditingController, fieldFocusNode, onFieldSubmitted) {
+            final textField = TextField(
+              key: widget.fieldKey,
+              controller: textEditingController,
+              focusNode: fieldFocusNode,
+              enabled: widget.enabled,
+              onSubmitted: (_) => onFieldSubmitted(),
+              decoration: InputDecoration(labelText: widget.label),
+            );
+            return _wrapCompatibleTextFieldSemantics(
+              controller: textEditingController,
+              label: widget.label,
+              enabled: widget.enabled,
+              child: textField,
+            );
+          },
+      optionsViewBuilder: (context, onSelected, options) {
+        final entries = options.toList(growable: false);
+        if (entries.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Semantics(
+            label: '${widget.label} suggestions',
+            container: true,
+            explicitChildNodes: true,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: math.min(
+                    560,
+                    MediaQuery.sizeOf(context).width - 48,
+                  ),
+                  maxHeight: 240,
+                ),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) {
+                    return Builder(
+                      builder: (context) {
+                        final option = entries[index];
+                        final isHighlighted =
+                            AutocompleteHighlightedOption.of(context) == index;
+                        return InkWell(
+                          onTap: () => onSelected(option),
+                          child: Container(
+                            color: isHighlighted
+                                ? Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withValues(alpha: 0.08)
+                                : null,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            child: Text(
+                              option,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CreateIssueCollaboratorOptions {
+  const _CreateIssueCollaboratorOptions._(this.values);
+
+  final List<String> values;
+
+  factory _CreateIssueCollaboratorOptions.fromViewModel(
+    TrackerViewModel viewModel,
+  ) {
+    final priority = <String>[];
+    final issueUsers = <String>[];
+    final seen = <String>{};
+
+    void add(List<String> bucket, String? value) {
+      final trimmed = value?.trim() ?? '';
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (!seen.add(normalized)) {
+        return;
+      }
+      bucket.add(trimmed);
+    }
+
+    add(priority, viewModel.connectedUser?.login);
+    add(priority, viewModel.providerSession?.resolvedUserIdentity);
+    for (final issue in viewModel.issues) {
+      add(issueUsers, issue.assignee);
+      add(issueUsers, issue.reporter);
+    }
+    issueUsers.sort(
+      (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+    );
+    return _CreateIssueCollaboratorOptions._([...priority, ...issueUsers]);
+  }
+}
+
+Widget _buildCreateIssueFieldInput({
+  Key? key,
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required List<String> collaboratorSuggestions,
+  required TrackStateFieldDefinition? fieldDefinition,
+  String? helperText,
+  String? errorText,
+  int? minLines,
+  int? maxLines = 1,
+  bool alignLabelWithHint = false,
+}) {
+  if (fieldDefinition?.type == 'user') {
+    return _CollaboratorSuggestionField(
+      fieldKey: key,
+      controller: controller,
+      label: label,
+      enabled: enabled,
+      suggestions: collaboratorSuggestions,
+    );
+  }
+  return _buildWebCompatibleTextField(
+    key: key,
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    helperText: helperText,
+    errorText: errorText,
+    minLines: minLines,
+    maxLines: maxLines,
+    alignLabelWithHint: alignLabelWithHint,
+  );
+}
+
+Widget _buildAssigneeField({
+  required TextEditingController controller,
+  required String label,
+  required bool enabled,
+  required List<String> collaboratorSuggestions,
+}) {
+  return _CollaboratorSuggestionField(
+    controller: controller,
+    label: label,
+    enabled: enabled,
+    suggestions: collaboratorSuggestions,
+  );
 }
 
 class _CreateIssueDialog extends StatefulWidget {
@@ -12806,6 +14282,12 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    if (_summaryController.text.trim().isEmpty) {
+      return;
+    }
+    if (_isSubtaskType && _selectedParentKey == null) {
+      return;
+    }
     final customFields = <String, String>{};
     for (final field in _createIssueFieldDefinitions(
       widget.viewModel.project,
@@ -12896,18 +14378,21 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
         ? null
         : _defaultCreateStatus(project);
     final derivedEpic = _issueByKey(_derivedEpicKey());
+    final collaboratorSuggestions =
+        _CreateIssueCollaboratorOptions.fromViewModel(widget.viewModel).values;
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 980;
-        final horizontalInset = isCompact ? 16.0 : 24.0;
-        final verticalInset = isCompact ? 16.0 : 24.0;
+        final insetPadding = isCompact
+            ? EdgeInsets.zero
+            : const EdgeInsets.only(left: 24, top: 24, right: 0, bottom: 24);
         final availableWidth = math.max(
           0.0,
-          constraints.maxWidth - (horizontalInset * 2),
+          constraints.maxWidth - insetPadding.horizontal,
         );
         final availableHeight = math.max(
           0.0,
-          constraints.maxHeight - (verticalInset * 2),
+          constraints.maxHeight - insetPadding.vertical,
         );
         final surfaceWidth = isCompact
             ? availableWidth
@@ -12915,286 +14400,260 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
 
         return Dialog(
           alignment: isCompact ? Alignment.topCenter : Alignment.centerRight,
-          insetPadding: EdgeInsets.symmetric(
-            horizontal: horizontalInset,
-            vertical: verticalInset,
-          ),
+          insetPadding: insetPadding,
           child: SizedBox(
             width: surfaceWidth,
             height: availableHeight,
             child: ListenableBuilder(
               listenable: widget.viewModel,
               builder: (context, _) {
+                final hasBlockedWriteAccess =
+                    widget.viewModel.hasBlockedWriteAccess;
                 final canEditFields =
-                    !widget.viewModel.hasBlockedWriteAccess &&
-                    !widget.viewModel.isSaving;
+                    !hasBlockedWriteAccess && !widget.viewModel.isSaving;
                 final canSubmit =
-                    !widget.viewModel.hasBlockedWriteAccess &&
-                    !widget.viewModel.isSaving;
-                return _SurfaceCard(
-                  semanticLabel: l10n.createIssue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _SectionTitle(l10n.createIssue),
-                              const SizedBox(height: 12),
-                              if (widget.viewModel.hasBlockedWriteAccess) ...[
-                                _AccessCallout(
-                                  semanticLabel: l10n.createIssue,
-                                  title: _repositoryAccessTitle(
-                                    l10n,
-                                    widget.viewModel,
-                                  ),
-                                  message: _repositoryAccessMessage(
-                                    l10n,
-                                    widget.viewModel,
-                                  ),
-                                  primaryActionLabel: l10n.openSettings,
-                                  onPrimaryAction: () {
-                                    widget.onDismiss();
-                                    widget.viewModel.selectSection(
-                                      TrackerSection.settings,
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              _DropdownCreateField(
-                                label: issueTypeLabel,
-                                value: _selectedIssueTypeId,
-                                enabled: canEditFields,
-                                items: [
-                                  for (final option in issueTypeOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.issueTypeLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                    !hasBlockedWriteAccess && !widget.viewModel.isSaving;
+                final createContent = hasBlockedWriteAccess
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SectionTitle(l10n.createIssue),
+                          const SizedBox(height: 12),
+                          _AccessCallout(
+                            semanticLabel: l10n.createIssue,
+                            title: _repositoryAccessTitle(
+                              l10n,
+                              widget.viewModel,
+                            ),
+                            message: _repositoryAccessMessage(
+                              l10n,
+                              widget.viewModel,
+                            ),
+                            primaryActionLabel: l10n.openSettings,
+                            onPrimaryAction: () {
+                              widget.onDismiss();
+                              widget.viewModel.selectSection(
+                                TrackerSection.settings,
+                              );
+                            },
+                          ),
+                        ],
+                      )
+                    : SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _SectionTitle(l10n.createIssue),
+                            const SizedBox(height: 12),
+                            _DropdownCreateField(
+                              label: issueTypeLabel,
+                              value: _selectedIssueTypeId,
+                              enabled: canEditFields,
+                              items: [
+                                for (final option in issueTypeOptions)
+                                  DropdownMenuItem<String>(
+                                    value: option.id,
+                                    child: Text(
+                                      project?.issueTypeLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                ],
-                                onChanged: _applyIssueType,
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: summaryLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
                                   ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: l10n.description,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 3,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
+                              ],
+                              onChanged: _applyIssueType,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildWebCompatibleTextField(
+                              controller: _summaryController,
+                              label: summaryLabel,
+                              enabled: canEditFields,
+                              errorText:
+                                  _didAttemptSubmit &&
+                                      _summaryController.text.trim().isEmpty
+                                  ? l10n.summaryRequired
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildWebCompatibleTextField(
+                              controller: _descriptionController,
+                              label: l10n.description,
+                              enabled: canEditFields,
+                              minLines: 3,
+                              maxLines: null,
+                              alignLabelWithHint: true,
+                            ),
+                            const SizedBox(height: 12),
+                            _DropdownCreateField(
+                              label: priorityLabel,
+                              value: _selectedPriorityId,
+                              enabled: canEditFields,
+                              items: [
+                                for (final option in priorityOptions)
+                                  DropdownMenuItem<String>(
+                                    value: option.id,
+                                    child: Text(
+                                      project?.priorityLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ),
-                              ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedPriorityId = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            _ReadOnlyCreateField(
+                              label: l10n.initialStatus,
+                              value:
+                                  (defaultStatus == null
+                                      ? null
+                                      : project?.statusLabel(
+                                          defaultStatus.id,
+                                          locale: metadataLocale,
+                                        )) ??
+                                  l10n.toDo,
+                            ),
+                            if (!_isEpicType && !_isSubtaskType) ...[
                               const SizedBox(height: 12),
                               _DropdownCreateField(
-                                label: priorityLabel,
-                                value: _selectedPriorityId,
+                                label: epicLabel,
+                                value: _selectedEpicKey,
                                 enabled: canEditFields,
+                                hintText: l10n.optional,
                                 items: [
-                                  for (final option in priorityOptions)
+                                  for (final option in epicOptions)
                                     DropdownMenuItem<String>(
-                                      value: option.id,
+                                      value: option.key,
                                       child: Text(
-                                        project?.priorityLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
+                                        '${option.key} · ${option.summary}',
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                 ],
                                 onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
                                   setState(() {
-                                    _selectedPriorityId = value;
+                                    _selectedEpicKey = value;
                                   });
                                 },
+                              ),
+                            ],
+                            if (_isSubtaskType) ...[
+                              const SizedBox(height: 12),
+                              _DropdownCreateField(
+                                label: parentLabel,
+                                value: _selectedParentKey,
+                                enabled: canEditFields,
+                                hintText: parentOptions.isEmpty
+                                    ? l10n.noEligibleParents
+                                    : null,
+                                errorText:
+                                    _didAttemptSubmit &&
+                                        _selectedParentKey == null
+                                    ? l10n.subTaskParentRequired
+                                    : null,
+                                items: [
+                                  for (final option in parentOptions)
+                                    DropdownMenuItem<String>(
+                                      value: option.key,
+                                      child: Text(
+                                        '${option.key} · ${option.summary}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: parentOptions.isEmpty
+                                    ? null
+                                    : (value) {
+                                        setState(() {
+                                          _selectedParentKey = value;
+                                        });
+                                      },
                               ),
                               const SizedBox(height: 12),
                               _ReadOnlyCreateField(
-                                label: l10n.initialStatus,
-                                value:
-                                    (defaultStatus == null
-                                        ? null
-                                        : project?.statusLabel(
-                                            defaultStatus.id,
-                                            locale: metadataLocale,
-                                          )) ??
-                                    l10n.toDo,
+                                label: epicLabel,
+                                value: derivedEpic == null
+                                    ? l10n.derivedFromParent
+                                    : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                helperText: l10n.epicDerivedFromParent,
                               ),
-                              if (!_isEpicType && !_isSubtaskType) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: epicLabel,
-                                  value: _selectedEpicKey,
-                                  enabled: canEditFields,
-                                  hintText: l10n.optional,
-                                  items: [
-                                    for (final option in epicOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedEpicKey = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                              if (_isSubtaskType) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: parentLabel,
-                                  value: _selectedParentKey,
-                                  enabled: canEditFields,
-                                  hintText: parentOptions.isEmpty
-                                      ? l10n.noEligibleParents
-                                      : null,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedParentKey == null
-                                      ? l10n.subTaskParentRequired
-                                      : null,
-                                  items: [
-                                    for (final option in parentOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: parentOptions.isEmpty
-                                      ? null
-                                      : (value) {
-                                          setState(() {
-                                            _selectedParentKey = value;
-                                          });
-                                        },
-                                ),
-                                const SizedBox(height: 12),
-                                _ReadOnlyCreateField(
-                                  label: epicLabel,
-                                  value: derivedEpic == null
-                                      ? l10n.derivedFromParent
-                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
-                                  helperText: l10n.epicDerivedFromParent,
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: assigneeLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              _LabelTokenField(
-                                label: labelsLabel,
-                                controller: _labelEntryController,
-                                labels: _labels,
-                                enabled: canEditFields,
-                                helperText: l10n.labelsTokenHelper,
-                                onChanged: (_) => _commitLabels(),
-                                onSubmitted: (_) =>
-                                    _commitLabels(commitRemainder: true),
-                                onRemove: (label) {
-                                  setState(() {
-                                    _labels.remove(label);
-                                  });
-                                },
-                              ),
-                              for (final field in createFields) ...[
-                                const SizedBox(height: 12),
-                                Semantics(
-                                  label: _createIssueFieldLabel(
-                                    project,
-                                    field,
-                                    metadataLocale,
-                                  ),
-                                  textField: true,
-                                  child: TextField(
-                                    key: ValueKey('create-field-${field.id}'),
-                                    controller:
-                                        _customFieldControllers[field.id],
-                                    minLines: field.type == 'markdown' ? 3 : 1,
-                                    maxLines: field.type == 'markdown'
-                                        ? null
-                                        : 1,
-                                    enabled: canEditFields,
-                                    decoration: InputDecoration(
-                                      labelText: _createIssueFieldLabel(
-                                        project,
-                                        field,
-                                        metadataLocale,
-                                      ),
-                                      alignLabelWithHint:
-                                          field.type == 'markdown',
-                                    ),
-                                  ),
-                                ),
-                              ],
                             ],
-                          ),
+                            const SizedBox(height: 12),
+                            _buildAssigneeField(
+                              controller: _assigneeController,
+                              label: assigneeLabel,
+                              enabled: canEditFields,
+                              collaboratorSuggestions: collaboratorSuggestions,
+                            ),
+                            const SizedBox(height: 12),
+                            _LabelTokenField(
+                              label: labelsLabel,
+                              controller: _labelEntryController,
+                              labels: _labels,
+                              enabled: canEditFields,
+                              helperText: l10n.labelsTokenHelper,
+                              onChanged: (_) => _commitLabels(),
+                              onSubmitted: (_) =>
+                                  _commitLabels(commitRemainder: true),
+                              onRemove: (label) {
+                                setState(() {
+                                  _labels.remove(label);
+                                });
+                              },
+                            ),
+                            for (final field in createFields) ...[
+                              const SizedBox(height: 12),
+                              _buildCreateIssueFieldInput(
+                                key: ValueKey('create-field-${field.id}'),
+                                controller: _customFieldControllers[field.id]!,
+                                label: _createIssueFieldLabel(
+                                  project,
+                                  field,
+                                  metadataLocale,
+                                ),
+                                enabled: canEditFields,
+                                collaboratorSuggestions:
+                                    collaboratorSuggestions,
+                                fieldDefinition: field,
+                                minLines: field.type == 'markdown' ? 3 : 1,
+                                maxLines: field.type == 'markdown' ? null : 1,
+                                alignLabelWithHint: field.type == 'markdown',
+                              ),
+                            ],
+                          ],
                         ),
-                      ),
+                      );
+                return _SurfaceCard(
+                  semanticLabel: l10n.createIssue,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: createContent),
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _IssueDetailActionButton(
-                            label: l10n.save,
-                            emphasized: true,
-                            onPressed: canSubmit ? _submitCreateIssue : null,
-                          ),
+                          if (!hasBlockedWriteAccess)
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              onPressed: canSubmit ? _submitCreateIssue : null,
+                            ),
                           _IssueDetailActionButton(
                             label: l10n.cancel,
                             onPressed: widget.viewModel.isSaving
@@ -13235,6 +14694,15 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   late final TextEditingController _descriptionController;
   late final TextEditingController _assigneeController;
   late final TextEditingController _labelEntryController;
+  final GlobalKey _summaryFieldKey = GlobalKey(
+    debugLabel: 'edit-issue-summary',
+  );
+  late final FocusNode _labelsFocusNode;
+  late final FocusNode _summaryFocusNode;
+  late final FocusNode _componentsFocusNode;
+  late final FocusNode _fixVersionsFocusNode;
+  late final FocusNode _hierarchyFocusNode;
+  late final FocusNode _saveFocusNode;
   late String _selectedPriorityId;
   late final List<String> _labels;
   late final List<String> _components;
@@ -13263,6 +14731,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     );
     _assigneeController = TextEditingController(text: widget.issue.assignee);
     _labelEntryController = TextEditingController();
+    _summaryFocusNode = FocusNode(debugLabel: 'edit-issue-summary');
+    _labelsFocusNode = FocusNode(debugLabel: 'edit-issue-labels');
+    _componentsFocusNode = FocusNode(debugLabel: 'edit-issue-components');
+    _fixVersionsFocusNode = FocusNode(debugLabel: 'edit-issue-fix-versions');
+    _hierarchyFocusNode = FocusNode(debugLabel: 'edit-issue-hierarchy');
+    _saveFocusNode = FocusNode(debugLabel: 'edit-issue-save');
     _selectedPriorityId = widget.issue.priorityId;
     _labels = [...widget.issue.labels];
     _components = [...widget.issue.components];
@@ -13279,6 +14753,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     _descriptionController.dispose();
     _assigneeController.dispose();
     _labelEntryController.dispose();
+    _summaryFocusNode.dispose();
+    _labelsFocusNode.dispose();
+    _componentsFocusNode.dispose();
+    _fixVersionsFocusNode.dispose();
+    _hierarchyFocusNode.dispose();
+    _saveFocusNode.dispose();
     super.dispose();
   }
 
@@ -13360,6 +14840,77 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     });
   }
 
+  Future<void> _editConfigSelections({
+    required String label,
+    required List<TrackStateConfigEntry> options,
+    required List<String> values,
+    required String Function(TrackStateConfigEntry option) optionLabelBuilder,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    final selectedIds = {for (final value in values) _canonicalConfigId(value)};
+    final updatedSelection = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) {
+        final draftSelection = {...selectedIds};
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(label),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final option in options)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: draftSelection.contains(
+                          _canonicalConfigId(option.id),
+                        ),
+                        title: Text(optionLabelBuilder(option)),
+                        onChanged: (selected) {
+                          final optionId = _canonicalConfigId(option.id);
+                          setDialogState(() {
+                            if (selected ?? false) {
+                              draftSelection.add(optionId);
+                            } else {
+                              draftSelection.remove(optionId);
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(l10n.cancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(draftSelection),
+                  child: Text(l10n.save),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (!mounted || updatedSelection == null) {
+      return;
+    }
+    setState(() {
+      values
+        ..clear()
+        ..addAll([
+          for (final option in options)
+            if (updatedSelection.contains(_canonicalConfigId(option.id)))
+              option.id,
+        ]);
+    });
+  }
+
   bool _requiresHierarchyConfirmation() {
     if (_selectedParentKey == widget.issue.parentKey &&
         _selectedEpicKey == widget.issue.epicKey) {
@@ -13384,18 +14935,42 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         .length;
   }
 
+  String _issueDisplayLabel(TrackStateIssue issue) =>
+      '${issue.key} · ${issue.summary}';
+
+  String? _hierarchyDestinationLabel() {
+    final destinationIssue = _isSubtaskType
+        ? _issueByKey(_selectedParentKey)
+        : _issueByKey(_selectedEpicKey);
+    if (destinationIssue == null) {
+      return null;
+    }
+    return _issueDisplayLabel(destinationIssue);
+  }
+
   Future<bool> _confirmHierarchyMove(AppLocalizations l10n) async {
     if (!_requiresHierarchyConfirmation()) {
       return true;
     }
     final descendantCount = _descendantCount();
+    final movingIssueLabel = _issueDisplayLabel(widget.issue);
+    final destinationLabel = _hierarchyDestinationLabel();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(l10n.hierarchyChangeConfirmationTitle),
           content: Text(
-            l10n.hierarchyChangeConfirmationMessage(descendantCount),
+            destinationLabel == null
+                ? l10n.hierarchyChangeConfirmationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                  )
+                : l10n.hierarchyChangeConfirmationDestinationMessage(
+                    movingIssueLabel,
+                    descendantCount,
+                    destinationLabel,
+                  ),
           ),
           actions: [
             TextButton(
@@ -13413,18 +14988,40 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     return confirmed ?? false;
   }
 
+  void _announceSummaryValidationError(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      final summaryContext = _summaryFieldKey.currentContext;
+      if (summaryContext != null) {
+        await Scrollable.ensureVisible(
+          summaryContext,
+          duration: Duration.zero,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      _summaryFocusNode.requestFocus();
+      SemanticsService.announce(message, Directionality.of(context));
+    });
+  }
+
   Future<void> _submit() async {
     setState(() {
       _didAttemptSubmit = true;
     });
     _commitLabels(commitRemainder: true);
+    final l10n = AppLocalizations.of(context)!;
     if (_summaryController.text.trim().isEmpty) {
+      _announceSummaryValidationError(l10n.summaryRequired);
       return;
     }
     if (_isSubtaskType && _selectedParentKey == null) {
       return;
     }
-    final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
     final resolutionOptions =
         project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
@@ -13550,6 +15147,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         _selectedTransitionStatusId != null &&
         _canonicalConfigId(_selectedTransitionStatusId) == 'done' &&
         resolutionOptions.length > 1;
+    final nextAfterFixVersionsFocusNode = _isEpicType
+        ? _saveFocusNode
+        : _hierarchyFocusNode;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -13587,331 +15187,473 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                   semanticLabel: widget.workflowOnly
                       ? l10n.transitionIssue
                       : l10n.editIssue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (widget.viewModel.message != null) ...[
-                                _MessageBanner(
-                                  message: widget.viewModel.message!,
-                                  onDismiss: widget.viewModel.dismissMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              if (widget
-                                  .viewModel
-                                  .hasPendingWorkspaceSyncRefresh) ...[
-                                _InlineInfoBanner(
-                                  message: l10n.workspaceSyncPendingMessage,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              _SectionTitle(
-                                widget.workflowOnly
-                                    ? l10n.transitionIssue
-                                    : l10n.editIssue,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${widget.issue.key} · $issueTypeLabel',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 12),
-                              _ReadOnlyCreateField(
-                                label: l10n.currentStatus,
-                                value:
-                                    project?.statusLabel(
-                                      widget.issue.statusId,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    widget.issue.status.label,
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: l10n.status,
-                                value: _selectedTransitionStatusId,
-                                enabled: canEditFields && !_loadingTransitions,
-                                hintText: _transitionOptions.isEmpty
-                                    ? l10n.noTransitionsAvailable
-                                    : l10n.optional,
-                                helperText: l10n.statusTransitionHelper,
-                                items: [
-                                  for (final option in _transitionOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.statusLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                  explicitChildNodes: true,
+                  child: FocusTraversalGroup(
+                    policy: OrderedTraversalPolicy(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (widget.viewModel.message != null) ...[
+                                  _MessageBanner(
+                                    message: widget.viewModel.message!,
+                                    onDismiss: widget.viewModel.dismissMessage,
+                                  ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedTransitionStatusId = value;
-                                    _selectedResolutionId =
-                                        _canonicalConfigId(value) != 'done'
-                                        ? null
-                                        : (resolutionOptions.length == 1
-                                              ? resolutionOptions.single.id
-                                              : _selectedResolutionId);
-                                  });
-                                },
-                              ),
-                              if (showResolution) ...[
-                                const SizedBox(height: 12),
-                                _DropdownCreateField(
-                                  label: resolutionLabel,
-                                  value: _selectedResolutionId,
-                                  enabled: canEditFields,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedResolutionId == null
-                                      ? l10n.resolutionRequired
-                                      : null,
-                                  items: [
-                                    for (final option in resolutionOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.id,
-                                        child: Text(
-                                          project?.resolutionLabel(
-                                                option.id,
-                                                locale: metadataLocale,
-                                              ) ??
-                                              option.name,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedResolutionId = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                              const SizedBox(height: 20),
-                              Semantics(
-                                label: summaryLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _summaryController.text,
-                                child: TextField(
-                                  controller: _summaryController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: summaryLabel,
-                                    errorText:
-                                        _didAttemptSubmit &&
-                                            _summaryController.text
-                                                .trim()
-                                                .isEmpty
-                                        ? l10n.summaryRequired
-                                        : null,
+                                if (widget
+                                    .viewModel
+                                    .hasPendingWorkspaceSyncRefresh) ...[
+                                  _InlineInfoBanner(
+                                    message: l10n.workspaceSyncPendingMessage,
                                   ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: l10n.description,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _descriptionController.text,
-                                child: TextField(
-                                  controller: _descriptionController,
-                                  minLines: 4,
-                                  maxLines: null,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.description,
-                                    alignLabelWithHint: true,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              _DropdownCreateField(
-                                label: priorityLabel,
-                                value: _selectedPriorityId,
-                                enabled: canEditFields,
-                                items: [
-                                  for (final option in priorityOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option.id,
-                                      child: Text(
-                                        project?.priorityLabel(
-                                              option.id,
-                                              locale: metadataLocale,
-                                            ) ??
-                                            option.name,
-                                      ),
-                                    ),
+                                  const SizedBox(height: 12),
                                 ],
-                                onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _selectedPriorityId = value;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              Semantics(
-                                label: assigneeLabel,
-                                textField: true,
-                                enabled: canEditFields,
-                                value: _assigneeController.text,
-                                child: TextField(
-                                  controller: _assigneeController,
-                                  enabled: canEditFields,
-                                  decoration: InputDecoration(
-                                    labelText: assigneeLabel,
-                                    hintText: l10n.unassigned,
-                                  ),
+                                _SectionTitle(
+                                  widget.workflowOnly
+                                      ? l10n.transitionIssue
+                                      : l10n.editIssue,
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              _LabelTokenField(
-                                label: labelsLabel,
-                                controller: _labelEntryController,
-                                labels: _labels,
-                                enabled: canEditFields,
-                                helperText: l10n.labelsTokenHelper,
-                                onChanged: (_) => _commitLabels(),
-                                onSubmitted: (_) =>
-                                    _commitLabels(commitRemainder: true),
-                                onRemove: (label) {
-                                  setState(() {
-                                    _labels.remove(label);
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: componentsLabel,
-                                options: componentOptions,
-                                selectedValues: _components,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.componentLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_components, value),
-                              ),
-                              const SizedBox(height: 16),
-                              _SelectableChipField(
-                                label: fixVersionsLabel,
-                                options: versionOptions,
-                                selectedValues: _fixVersions,
-                                enabled: canEditFields,
-                                optionLabelBuilder: (option) =>
-                                    project?.versionLabel(
-                                      option.id,
-                                      locale: metadataLocale,
-                                    ) ??
-                                    option.name,
-                                onToggle: (value) =>
-                                    _toggleConfigSelection(_fixVersions, value),
-                              ),
-                              if (!_isEpicType && !_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: epicLabel,
-                                  value: _selectedEpicKey ?? '',
-                                  enabled: canEditFields,
-                                  items: [
-                                    DropdownMenuItem<String>(
-                                      value: '',
-                                      child: Text(l10n.noEpic),
-                                    ),
-                                    for (final option in epicOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedEpicKey = _emptyToNull(value);
-                                    });
-                                  },
-                                ),
-                              ],
-                              if (_isSubtaskType) ...[
-                                const SizedBox(height: 16),
-                                _DropdownCreateField(
-                                  label: parentLabel,
-                                  value: _selectedParentKey,
-                                  enabled: canEditFields,
-                                  hintText: parentOptions.isEmpty
-                                      ? l10n.noEligibleParents
-                                      : null,
-                                  errorText:
-                                      _didAttemptSubmit &&
-                                          _selectedParentKey == null
-                                      ? l10n.subTaskParentRequired
-                                      : null,
-                                  items: [
-                                    for (final option in parentOptions)
-                                      DropdownMenuItem<String>(
-                                        value: option.key,
-                                        child: Text(
-                                          '${option.key} · ${option.summary}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: parentOptions.isEmpty
-                                      ? null
-                                      : (value) {
-                                          setState(() {
-                                            _selectedParentKey = value;
-                                          });
-                                        },
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${widget.issue.key} · $issueTypeLabel',
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 const SizedBox(height: 12),
                                 _ReadOnlyCreateField(
-                                  label: epicLabel,
-                                  value: derivedEpic == null
-                                      ? l10n.derivedFromParent
-                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
-                                  helperText: l10n.epicDerivedFromParent,
+                                  label: l10n.currentStatus,
+                                  value:
+                                      project?.statusLabel(
+                                        widget.issue.statusId,
+                                        locale: metadataLocale,
+                                      ) ??
+                                      widget.issue.status.label,
                                 ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 1,
+                                  child: _DropdownCreateField(
+                                    label: l10n.status,
+                                    value: _selectedTransitionStatusId,
+                                    enabled:
+                                        canEditFields && !_loadingTransitions,
+                                    hintText: _transitionOptions.isEmpty
+                                        ? l10n.noTransitionsAvailable
+                                        : l10n.optional,
+                                    helperText: l10n.statusTransitionHelper,
+                                    items: [
+                                      for (final option in _transitionOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.statusLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedTransitionStatusId = value;
+                                        _selectedResolutionId =
+                                            _canonicalConfigId(value) != 'done'
+                                            ? null
+                                            : (resolutionOptions.length == 1
+                                                  ? resolutionOptions.single.id
+                                                  : _selectedResolutionId);
+                                      });
+                                    },
+                                  ),
+                                ),
+                                if (showResolution) ...[
+                                  const SizedBox(height: 12),
+                                  _OrderedFocusAction(
+                                    order: 2,
+                                    child: _DropdownCreateField(
+                                      label: resolutionLabel,
+                                      value: _selectedResolutionId,
+                                      enabled: canEditFields,
+                                      errorText:
+                                          _didAttemptSubmit &&
+                                              _selectedResolutionId == null
+                                          ? l10n.resolutionRequired
+                                          : null,
+                                      items: [
+                                        for (final option in resolutionOptions)
+                                          DropdownMenuItem<String>(
+                                            value: option.id,
+                                            child: Text(
+                                              project?.resolutionLabel(
+                                                    option.id,
+                                                    locale: metadataLocale,
+                                                  ) ??
+                                                  option.name,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _selectedResolutionId = value;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 20),
+                                _OrderedFocusAction(
+                                  order: 3,
+                                  child: Semantics(
+                                    key: _summaryFieldKey,
+                                    label: summaryLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _summaryController.text,
+                                    child: TextField(
+                                      controller: _summaryController,
+                                      focusNode: _summaryFocusNode,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: summaryLabel,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _summaryController.text
+                                                    .trim()
+                                                    .isEmpty
+                                            ? l10n.summaryRequired
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 4,
+                                  child: Semantics(
+                                    label: l10n.description,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _descriptionController.text,
+                                    child: TextField(
+                                      controller: _descriptionController,
+                                      minLines: 4,
+                                      maxLines: null,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: l10n.description,
+                                        alignLabelWithHint: true,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 5,
+                                  child: _DropdownCreateField(
+                                    label: priorityLabel,
+                                    value: _selectedPriorityId,
+                                    enabled: canEditFields,
+                                    items: [
+                                      for (final option in priorityOptions)
+                                        DropdownMenuItem<String>(
+                                          value: option.id,
+                                          child: Text(
+                                            project?.priorityLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value == null) {
+                                        return;
+                                      }
+                                      setState(() {
+                                        _selectedPriorityId = value;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 6,
+                                  child: Semantics(
+                                    label: assigneeLabel,
+                                    textField: true,
+                                    enabled: canEditFields,
+                                    value: _assigneeController.text,
+                                    child: TextField(
+                                      controller: _assigneeController,
+                                      enabled: canEditFields,
+                                      decoration: InputDecoration(
+                                        labelText: assigneeLabel,
+                                        hintText: l10n.unassigned,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _OrderedFocusAction(
+                                  order: 7,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _LabelTokenField(
+                                      label: labelsLabel,
+                                      controller: _labelEntryController,
+                                      labels: _labels,
+                                      enabled: canEditFields,
+                                      helperText: l10n.labelsTokenHelper,
+                                      focusNode: _labelsFocusNode,
+                                      onChanged: (_) => _commitLabels(),
+                                      onSubmitted: (_) =>
+                                          _commitLabels(commitRemainder: true),
+                                      onRemove: (label) {
+                                        setState(() {
+                                          _labels.remove(label);
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 8,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () =>
+                                          _fixVersionsFocusNode.requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _labelsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: componentsLabel,
+                                      options: componentOptions,
+                                      selectedValues: _components,
+                                      enabled: canEditFields,
+                                      focusNode: _componentsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: componentsLabel,
+                                            options: componentOptions,
+                                            values: _components,
+                                            optionLabelBuilder: (option) =>
+                                                project?.componentLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.componentLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _components,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _OrderedFocusAction(
+                                  order: 9,
+                                  child: CallbackShortcuts(
+                                    bindings: <ShortcutActivator, VoidCallback>{
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                      ): () => nextAfterFixVersionsFocusNode
+                                          .requestFocus(),
+                                      const SingleActivator(
+                                        LogicalKeyboardKey.tab,
+                                        shift: true,
+                                      ): () =>
+                                          _componentsFocusNode.requestFocus(),
+                                    },
+                                    child: _SelectableChipField(
+                                      label: fixVersionsLabel,
+                                      options: versionOptions,
+                                      selectedValues: _fixVersions,
+                                      enabled: canEditFields,
+                                      focusNode: _fixVersionsFocusNode,
+                                      onEditRequested: () =>
+                                          _editConfigSelections(
+                                            label: fixVersionsLabel,
+                                            options: versionOptions,
+                                            values: _fixVersions,
+                                            optionLabelBuilder: (option) =>
+                                                project?.versionLabel(
+                                                  option.id,
+                                                  locale: metadataLocale,
+                                                ) ??
+                                                option.name,
+                                          ),
+                                      optionLabelBuilder: (option) =>
+                                          project?.versionLabel(
+                                            option.id,
+                                            locale: metadataLocale,
+                                          ) ??
+                                          option.name,
+                                      onToggle: (value) =>
+                                          _toggleConfigSelection(
+                                            _fixVersions,
+                                            value,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                if (!_isEpicType && !_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: epicLabel,
+                                        value: _selectedEpicKey ?? '',
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        items: [
+                                          DropdownMenuItem<String>(
+                                            value: '',
+                                            child: Text(l10n.noEpic),
+                                          ),
+                                          for (final option in epicOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedEpicKey = _emptyToNull(
+                                              value,
+                                            );
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                if (_isSubtaskType) ...[
+                                  const SizedBox(height: 16),
+                                  _OrderedFocusAction(
+                                    order: 10,
+                                    child: CallbackShortcuts(
+                                      bindings:
+                                          <ShortcutActivator, VoidCallback>{
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                            ): () =>
+                                                _saveFocusNode.requestFocus(),
+                                            const SingleActivator(
+                                              LogicalKeyboardKey.tab,
+                                              shift: true,
+                                            ): () => _fixVersionsFocusNode
+                                                .requestFocus(),
+                                          },
+                                      child: _DropdownCreateField(
+                                        label: parentLabel,
+                                        value: _selectedParentKey,
+                                        enabled: canEditFields,
+                                        focusNode: _hierarchyFocusNode,
+                                        hintText: parentOptions.isEmpty
+                                            ? l10n.noEligibleParents
+                                            : null,
+                                        errorText:
+                                            _didAttemptSubmit &&
+                                                _selectedParentKey == null
+                                            ? l10n.subTaskParentRequired
+                                            : null,
+                                        items: [
+                                          for (final option in parentOptions)
+                                            DropdownMenuItem<String>(
+                                              value: option.key,
+                                              child: Text(
+                                                '${option.key} · ${option.summary}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: parentOptions.isEmpty
+                                            ? null
+                                            : (value) {
+                                                setState(() {
+                                                  _selectedParentKey = value;
+                                                });
+                                              },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _ReadOnlyCreateField(
+                                    label: epicLabel,
+                                    value: derivedEpic == null
+                                        ? l10n.derivedFromParent
+                                        : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                    helperText: l10n.epicDerivedFromParent,
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _IssueDetailActionButton(
-                            label: l10n.save,
-                            emphasized: true,
-                            onPressed: canEditFields ? _submit : null,
-                          ),
-                          _IssueDetailActionButton(
-                            label: l10n.cancel,
-                            onPressed: widget.viewModel.isSaving
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              sortOrder: 20,
+                              focusNode: _saveFocusNode,
+                              onPressed: canEditFields ? _submit : null,
+                            ),
+                            _IssueDetailActionButton(
+                              label: l10n.cancel,
+                              sortOrder: 21,
+                              onPressed: widget.viewModel.isSaving
+                                  ? null
+                                  : () => Navigator.of(context).pop(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -13943,6 +15685,7 @@ class _NavButton extends StatelessWidget {
   const _NavButton({
     required this.item,
     required this.selected,
+    this.selectedCanRequestFocus = false,
     this.semanticsSortOrder,
     this.semanticsIdentifier,
     this.focusNode,
@@ -13952,6 +15695,7 @@ class _NavButton extends StatelessWidget {
 
   final _NavItem item;
   final bool selected;
+  final bool selectedCanRequestFocus;
   final double? semanticsSortOrder;
   final String? semanticsIdentifier;
   final FocusNode? focusNode;
@@ -13961,6 +15705,9 @@ class _NavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final selectedBackground = Theme.of(context).brightness == Brightness.light
+        ? Color.alphaBlend(colors.text.withValues(alpha: .12), colors.secondary)
+        : colors.secondary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Semantics(
@@ -13977,7 +15724,7 @@ class _NavButton extends StatelessWidget {
                 },
           child: InkWell(
             focusNode: focusNode,
-            canRequestFocus: !selected,
+            canRequestFocus: !selected || selectedCanRequestFocus,
             borderRadius: BorderRadius.circular(10),
             excludeFromSemantics: true,
             onTap: onPressed,
@@ -13988,7 +15735,7 @@ class _NavButton extends StatelessWidget {
                   vertical: 11,
                 ),
                 decoration: BoxDecoration(
-                  color: selected ? colors.secondary : Colors.transparent,
+                  color: selected ? selectedBackground : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -14191,13 +15938,11 @@ final class _StaticSyncPillSemanticLabel extends _SyncPillSemanticLabel {
   String resolve(String visibleLabel) => value.value;
 }
 
-final class _PrefixedSyncPillSemanticLabel extends _SyncPillSemanticLabel {
-  const _PrefixedSyncPillSemanticLabel(this.prefix);
-
-  final String prefix;
+final class _VisibleSyncPillSemanticLabel extends _SyncPillSemanticLabel {
+  const _VisibleSyncPillSemanticLabel();
 
   @override
-  String resolve(String visibleLabel) => '$prefix, $visibleLabel';
+  String resolve(String visibleLabel) => visibleLabel;
 }
 
 final class _WorkspaceSyncAttentionNeededSemanticText {
@@ -14374,29 +16119,42 @@ class _IssueDetailTabs extends StatelessWidget {
   const _IssueDetailTabs({
     required this.selectedIndex,
     required this.tabs,
+    required this.focusNodes,
     this.failedTabIndexes = const <int>{},
     required this.onSelected,
   });
 
   final int selectedIndex;
   final List<String> tabs;
+  final List<FocusNode> focusNodes;
   final Set<int> failedTabIndexes;
   final ValueChanged<int> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (var index = 0; index < tabs.length; index++)
-          _IssueDetailTabChip(
-            label: tabs[index],
-            selected: index == selectedIndex,
-            showFailureIndicator: failedTabIndexes.contains(index),
-            onPressed: () => onSelected(index),
-          ),
-      ],
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.arrowRight): NextFocusIntent(),
+          SingleActivator(LogicalKeyboardKey.arrowLeft): PreviousFocusIntent(),
+        },
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var index = 0; index < tabs.length; index++)
+              _IssueDetailTabChip(
+                label: tabs[index],
+                focusNode: focusNodes[index],
+                selected: index == selectedIndex,
+                showFailureIndicator: failedTabIndexes.contains(index),
+                sortOrder: index + 1,
+                onPressed: () => onSelected(index),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -14404,60 +16162,73 @@ class _IssueDetailTabs extends StatelessWidget {
 class _IssueDetailTabChip extends StatelessWidget {
   const _IssueDetailTabChip({
     required this.label,
+    required this.focusNode,
     required this.selected,
     required this.showFailureIndicator,
+    required this.sortOrder,
     required this.onPressed,
   });
 
   final String label;
+  final FocusNode focusNode;
   final bool selected;
   final bool showFailureIndicator;
+  final int sortOrder;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onPressed,
-        child: ExcludeSemantics(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected ? colors.primary : colors.surfaceAlt,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: selected ? colors.primary : colors.border,
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(sortOrder.toDouble()),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        sortKey: OrdinalSortKey(sortOrder.toDouble()),
+        child: InkWell(
+          autofocus: selected,
+          focusNode: focusNode,
+          borderRadius: BorderRadius.circular(999),
+          onTap: onPressed,
+          child: ExcludeSemantics(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: selected ? colors.primary : colors.surfaceAlt,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: selected ? colors.primary : colors.border,
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: selected ? colors.page : colors.text,
-                    ),
-                  ),
-                  if (showFailureIndicator) ...[
-                    const SizedBox(width: 8),
-                    ExcludeSemantics(
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: selected ? colors.page : colors.error,
-                          shape: BoxShape.circle,
-                        ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: selected ? colors.page : colors.text,
                       ),
                     ),
+                    if (showFailureIndicator) ...[
+                      const SizedBox(width: 8),
+                      ExcludeSemantics(
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: selected ? colors.page : colors.error,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -14494,68 +16265,78 @@ class _CommentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (writeBlocked) ...[
-          _AccessCallout(
-            semanticLabel: l10n.comments,
-            title: _repositoryAccessTitle(l10n, viewModel),
-            message: _repositoryAccessMessage(l10n, viewModel),
-            primaryActionLabel: l10n.openSettings,
-            onPrimaryAction: () =>
-                viewModel.selectSection(TrackerSection.settings),
-          ),
-          const SizedBox(height: 12),
-        ],
-        Semantics(
-          label: l10n.comments,
-          textField: true,
-          enabled: !isSaving && !isLoading && !writeBlocked,
-          value: controller.text,
-          child: TextField(
-            controller: controller,
-            minLines: 3,
-            maxLines: null,
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (writeBlocked) ...[
+            _AccessCallout(
+              semanticLabel: l10n.comments,
+              title: _repositoryAccessTitle(l10n, viewModel),
+              message: _repositoryAccessMessage(l10n, viewModel),
+              primaryActionLabel: l10n.openSettings,
+              onPrimaryAction: () =>
+                  viewModel.selectSection(TrackerSection.settings),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Semantics(
+            label: l10n.comments,
+            textField: true,
             enabled: !isSaving && !isLoading && !writeBlocked,
-            decoration: InputDecoration(
-              labelText: l10n.comments,
-              alignLabelWithHint: true,
+            value: controller.text,
+            child: TextField(
+              controller: controller,
+              minLines: 3,
+              maxLines: null,
+              enabled: !isSaving && !isLoading && !writeBlocked,
+              decoration: InputDecoration(
+                labelText: l10n.comments,
+                hintText: l10n.commentPlaceholder,
+                hintStyle: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+                alignLabelWithHint: true,
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: _IssueDetailActionButton(
-            label: l10n.postComment,
-            emphasized: true,
-            onPressed: writeBlocked || isLoading ? null : onSave,
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _IssueDetailActionButton(
+              label: l10n.postComment,
+              emphasized: true,
+              sortOrder: 1,
+              onPressed: writeBlocked || isLoading ? null : onSave,
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (errorText != null)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.comments} error',
-            title: l10n.comments,
-            message: errorText!,
-            tone: _DeferredSectionTone.error,
-            actionLabel: l10n.retry,
-            onAction: onRetry,
-          )
-        else if (isLoading || !issue.hasCommentsLoaded)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.comments} loading',
-            title: l10n.comments,
-            message: l10n.loading,
-            tone: _DeferredSectionTone.loading,
-          )
-        else if (issue.comments.isEmpty)
-          Text(l10n.noResults, style: TextStyle(color: colors.muted))
-        else
-          for (final comment in issue.comments)
-            _CommentBubble(comment: comment),
-      ],
+          const SizedBox(height: 16),
+          if (errorText != null)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.comments} error',
+              title: l10n.comments,
+              message: errorText!,
+              tone: _DeferredSectionTone.error,
+              actionLabel: l10n.retry,
+              actionSortOrder: 2,
+              onAction: onRetry,
+            )
+          else if (isLoading || !issue.hasCommentsLoaded)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.comments} loading',
+              title: l10n.comments,
+              message: l10n.loading,
+              tone: _DeferredSectionTone.loading,
+            )
+          else if (issue.comments.isEmpty)
+            Text(l10n.noResults, style: TextStyle(color: colors.muted))
+          else
+            for (final comment in issue.comments)
+              _CommentBubble(comment: comment),
+        ],
+      ),
     );
   }
 }
@@ -14609,132 +16390,138 @@ class _AttachmentsTab extends StatelessWidget {
         viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (accessMessage.isNotEmpty) ...[
-          _AccessCallout(
-            semanticLabel: l10n.attachments,
-            title: accessTitle,
-            message: accessMessage,
-            primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
-            onPrimaryAction: showSettingsAction
-                ? () => viewModel.openProjectSettings(
-                    tab: ProjectSettingsTab.attachments,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 12),
-        ],
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.attachments,
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 8),
-              if (selectedAttachment == null)
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (accessMessage.isNotEmpty) ...[
+            _AccessCallout(
+              semanticLabel: l10n.attachments,
+              title: accessTitle,
+              message: accessMessage,
+              primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
+              onPrimaryAction: showSettingsAction
+                  ? () => viewModel.openProjectSettings(
+                      tab: ProjectSettingsTab.attachments,
+                    )
+                  : null,
+            ),
+            const SizedBox(height: 12),
+          ],
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  l10n.noAttachmentSelected,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                )
-              else
-                Semantics(
-                  container: true,
-                  label: l10n.selectedAttachmentSummary(
-                    selectedAttachment!.name,
-                    _formatAttachmentFileSize(selectedAttachment!.sizeBytes),
-                  ),
-                  child: ExcludeSemantics(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          selectedAttachment!.name,
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        Text(
-                          _formatAttachmentFileSize(
-                            selectedAttachment!.sizeBytes,
+                  l10n.attachments,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                if (selectedAttachment == null)
+                  Text(
+                    l10n.noAttachmentSelected,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                  )
+                else
+                  Semantics(
+                    container: true,
+                    label: l10n.selectedAttachmentSummary(
+                      selectedAttachment!.name,
+                      _formatAttachmentFileSize(selectedAttachment!.sizeBytes),
+                    ),
+                    child: ExcludeSemantics(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            selectedAttachment!.name,
+                            style: Theme.of(context).textTheme.labelLarge,
                           ),
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                        ),
-                      ],
+                          Text(
+                            _formatAttachmentFileSize(
+                              selectedAttachment!.sizeBytes,
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.muted),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              if ((uploadNotice ?? '').isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _AccessCallout(
-                  semanticLabel: l10n.attachments,
-                  title: l10n.attachments,
-                  message: uploadNotice!,
-                ),
-              ],
-              if (!attachmentDownloadOnly) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _IssueDetailActionButton(
-                      label: l10n.chooseAttachment,
-                      onPressed: canChooseAttachment
-                          ? onChooseAttachment
-                          : null,
-                    ),
-                    _IssueDetailActionButton(
-                      label: l10n.uploadAttachment,
-                      emphasized: true,
-                      onPressed: canUploadAttachment ? onUpload : null,
-                    ),
-                    if (selectedAttachment != null)
+                if ((uploadNotice ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _AccessCallout(
+                    semanticLabel: l10n.attachments,
+                    title: l10n.attachments,
+                    message: uploadNotice!,
+                  ),
+                ],
+                if (!attachmentDownloadOnly) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
                       _IssueDetailActionButton(
-                        label: l10n.clearSelectedAttachment,
-                        onPressed: isSaving ? null : onClearSelection,
+                        label: l10n.chooseAttachment,
+                        sortOrder: 1,
+                        onPressed: canChooseAttachment
+                            ? onChooseAttachment
+                            : null,
                       ),
-                  ],
-                ),
+                      _IssueDetailActionButton(
+                        label: l10n.uploadAttachment,
+                        emphasized: true,
+                        sortOrder: 2,
+                        onPressed: canUploadAttachment ? onUpload : null,
+                      ),
+                      if (selectedAttachment != null)
+                        _IssueDetailActionButton(
+                          label: l10n.clearSelectedAttachment,
+                          sortOrder: 3,
+                          onPressed: isSaving ? null : onClearSelection,
+                        ),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (errorText != null)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.attachments} error',
-            title: l10n.attachments,
-            message: errorText!,
-            tone: _DeferredSectionTone.error,
-            actionLabel: l10n.retry,
-            onAction: onRetry,
-          )
-        else if (isLoading || !issue.hasAttachmentsLoaded)
-          _DeferredSectionStateCard(
-            semanticLabel: '${l10n.attachments} loading',
-            title: l10n.attachments,
-            message: l10n.loading,
-            tone: _DeferredSectionTone.loading,
-          )
-        else if (issue.attachments.isEmpty)
-          Text(l10n.noResults, style: TextStyle(color: colors.muted))
-        else
-          for (final attachment in issue.attachments)
-            _AttachmentRow(attachment: attachment, onDownload: onDownload),
-      ],
+          const SizedBox(height: 16),
+          if (errorText != null)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.attachments} error',
+              title: l10n.attachments,
+              message: errorText!,
+              tone: _DeferredSectionTone.error,
+              actionLabel: l10n.retry,
+              actionSortOrder: 4,
+              onAction: onRetry,
+            )
+          else if (isLoading || !issue.hasAttachmentsLoaded)
+            _DeferredSectionStateCard(
+              semanticLabel: '${l10n.attachments} loading',
+              title: l10n.attachments,
+              message: l10n.loading,
+              tone: _DeferredSectionTone.loading,
+            )
+          else if (issue.attachments.isEmpty)
+            Text(l10n.noResults, style: TextStyle(color: colors.muted))
+          else
+            for (final attachment in issue.attachments)
+              _AttachmentRow(attachment: attachment, onDownload: onDownload),
+        ],
+      ),
     );
   }
 }
@@ -14884,6 +16671,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     required this.message,
     required this.tone,
     this.actionLabel,
+    this.actionSortOrder,
     this.onAction,
   });
 
@@ -14892,6 +16680,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
   final String message;
   final _DeferredSectionTone tone;
   final String? actionLabel;
+  final double? actionSortOrder;
   final VoidCallback? onAction;
 
   @override
@@ -14903,6 +16692,7 @@ class _DeferredSectionStateCard extends StatelessWidget {
     };
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       label: semanticLabel,
       child: Container(
         width: double.infinity,
@@ -14919,19 +16709,41 @@ class _DeferredSectionStateCard extends StatelessWidget {
               const LinearProgressIndicator(minHeight: 2),
               const SizedBox(height: 12),
             ],
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: accentColor),
+            Row(
+              children: [
+                if (tone == _DeferredSectionTone.error) ...[
+                  TrackStateIcon(
+                    TrackStateIconGlyph.issue,
+                    color: accentColor,
+                    semanticLabel: semanticLabel,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: accentColor),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            Text(message),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: tone == _DeferredSectionTone.error
+                    ? colors.muted
+                    : colors.text,
+              ),
+            ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 12),
               _IssueDetailActionButton(
                 label: actionLabel!,
                 onPressed: onAction,
+                sortOrder: actionSortOrder,
               ),
             ],
           ],
@@ -14951,54 +16763,51 @@ class _HistoryRow extends StatelessWidget {
     final colors = context.ts;
     return Semantics(
       container: true,
-      label: '${entry.summary} ${entry.author} ${entry.timestamp}',
-      child: ExcludeSemantics(
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TrackStateIcon(
-                TrackStateIconGlyph.sync,
-                color: colors.text,
-                semanticLabel: entry.summary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.summary,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    Text(
-                      '${entry.author} · ${entry.timestamp}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
-                    ),
-                    if ((entry.before ?? '').isNotEmpty ||
-                        (entry.after ?? '').isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          '${entry.before ?? ''} -> ${entry.after ?? ''}'
-                              .trim(),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+      explicitChildNodes: true,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TrackStateIcon(
+              TrackStateIconGlyph.sync,
+              color: colors.text,
+              semanticLabel: entry.summary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.summary,
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  Text(
+                    '${entry.author} · ${entry.timestamp}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: colors.text),
+                  ),
+                  if ((entry.before ?? '').isNotEmpty ||
+                      (entry.after ?? '').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
