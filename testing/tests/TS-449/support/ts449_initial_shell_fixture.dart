@@ -205,6 +205,7 @@ class Ts449DelayedInitialSearchRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
 
   @override

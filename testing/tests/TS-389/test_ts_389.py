@@ -154,22 +154,33 @@ def main() -> None:
                         observed=attachments_body_text,
                     )
 
-                    choose_button_count = page.visible_button_count(
-                        "Choose attachment",
+                    upload_controls = page.observe_attachment_upload_controls()
+                    result["choose_attachment_button_count"] = (
+                        upload_controls.choose_button_count
                     )
-                    upload_button_count = page.visible_button_count(
-                        "Upload attachment",
+                    result["choose_attachment_button_enabled"] = (
+                        upload_controls.choose_button_enabled
                     )
-                    result["choose_attachment_button_count"] = choose_button_count
-                    result["upload_attachment_button_count"] = upload_button_count
-                    if choose_button_count != 1 or upload_button_count != 1:
+                    result["upload_attachment_button_count"] = (
+                        upload_controls.upload_button_count
+                    )
+                    result["upload_attachment_button_enabled"] = (
+                        upload_controls.upload_button_enabled
+                    )
+                    if (
+                        upload_controls.choose_button_count != 1
+                        or upload_controls.upload_button_count != 1
+                        or not upload_controls.choose_button_enabled
+                    ):
                         raise AssertionError(
                             "Step 2 failed: the live Attachments tab stayed in a limited or "
                             "download-only state and did not expose the visible `Choose "
                             "attachment` and `Upload attachment` controls required for the "
                             "duplicate replacement flow.\n"
-                            f"Observed choose button count: {choose_button_count}\n"
-                            f"Observed upload button count: {upload_button_count}\n"
+                            f"Observed choose button count: {upload_controls.choose_button_count}\n"
+                            f"Observed choose button enabled: {upload_controls.choose_button_enabled}\n"
+                            f"Observed upload button count: {upload_controls.upload_button_count}\n"
+                            f"Observed upload button enabled: {upload_controls.upload_button_enabled}\n"
                             f"Observed body text:\n{attachments_body_text}",
                         )
 
