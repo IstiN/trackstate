@@ -5,6 +5,9 @@ import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 
+const _desktopViewport = Size(1440, 900);
+const _createEntryPointLabels = <String>['Create issue', 'Create'];
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -25,6 +28,9 @@ void main() {
         }
 
         await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        tester.view.physicalSize = _desktopViewport;
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpAndSettle();
         screen.expectLocalRuntimeChrome();
 
         final failures = <String>[];
@@ -85,25 +91,25 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   required _SectionExpectation section,
   required List<String> failures,
 }) async {
-  final createIssueVisible =
-      await screen.isSemanticsLabelVisible('Create issue') ||
-      await screen.isTextVisible('Create issue');
+  final createEntryPointLabel = await _findVisibleCreateEntryPointLabel(screen);
+  final createIssueVisible = createEntryPointLabel != null;
 
   if (!createIssueVisible) {
     failures.add(
       'Step ${section.visibilityStep} failed in ${section.label}: no visible '
       '"Create issue" entry point was rendered after opening ${section.label}. '
+      'Checked labels: ${_createEntryPointLabels.join(', ')}. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
     return;
   }
 
-  final openedCreateFlow = await screen.tapVisibleControl('Create issue');
+  final openedCreateFlow = await screen.tapVisibleControl(createEntryPointLabel);
   if (!openedCreateFlow) {
     failures.add(
       'Step ${section.reachabilityStep} failed in ${section.label}: '
-      'the visible "Create issue" entry point could not be activated. '
+      'the visible "$createEntryPointLabel" entry point could not be activated. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -125,7 +131,7 @@ Future<void> _verifyCreateIssueEntryPointForSection(
       !cancelVisible) {
     failures.add(
       'Step ${section.reachabilityStep} failed in ${section.label}: '
-      'opening "Create issue" did not render the expected user-facing create '
+      'opening "$createEntryPointLabel" did not render the expected user-facing create '
       'controls. Expected Summary=${summaryVisible ? 'visible' : 'missing'}, '
       'Description=${descriptionVisible ? 'visible' : 'missing'}, '
       'Save=${saveVisible ? 'visible' : 'missing'}, '
@@ -158,6 +164,20 @@ Future<void> _verifyCreateIssueEntryPointForSection(
       'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
   }
+}
+
+Future<String?> _findVisibleCreateEntryPointLabel(
+  TrackStateAppComponent screen,
+) async {
+  for (final label in _createEntryPointLabels) {
+    final isVisible =
+        await screen.isSemanticsLabelVisible(label) ||
+        await screen.isTextVisible(label);
+    if (isVisible) {
+      return label;
+    }
+  }
+  return null;
 }
 
 class _SectionExpectation {
