@@ -1,0 +1,54 @@
+test_id: TS-522
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the local attachment download flow against a disposable TrackState repository whose attachment metadata points at GitHub Releases storage.
+  - Removes ambient GitHub credentials from the runtime environment for determinism and fails if the user-visible CLI output is generic instead of explicit release auth/configuration guidance.
+runtime_inputs:
+  ticket_command: trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-522 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_size_bytes: 19
+  attachment_revision_or_oid: "84"
+  attachment_created_at: "2026-05-12T00:00:00Z"
+  attachment_author: tester
+  attachment_tag_prefix: ts522-
+  attachment_release_tag: ts522-TS-123
+  attachment_release_asset_name: manual.pdf
+  remote_origin_url: https://github.com/IstiN/trackstate.git
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  expected_release_fragments:
+    - github releases
+    - github-releases
+    - release-backed
+  expected_auth_fragments:
+    - github access
+    - github authentication
+    - auth
+    - authentication
+    - token
+    - credential
+    - configuration
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider
