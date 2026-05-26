@@ -277,7 +277,6 @@ class CreateIssueAccessibilityRobot {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
   }
-
   CreateIssueTextContrastObservation observeTextContrast(String text) {
     final foreground = _renderedTextColor(text);
     final background = _surfaceBackgroundColor();
