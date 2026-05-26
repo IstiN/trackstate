@@ -165,10 +165,10 @@ class TS706OutputRegressionTest(unittest.TestCase):
             stable_result["stable_runner_mismatch"] = True
             ts_706._collect_precondition_run_evidence(stable_result, config)
 
-            self.assertFalse(stable_result["precondition_failure"])
-            self.assertTrue(stable_result["product_failure"])
-            self.assertIn("Step 4 failed", stable_result["error"])
-            self.assertEqual(stable_result["steps"][-1]["status"], "failed")
+            self.assertTrue(stable_result["precondition_failure"])
+            self.assertFalse(stable_result["product_failure"])
+            self.assertIn("Precondition failed:", stable_result["error"])
+            self.assertEqual(stable_result["steps"][-1]["status"], "blocked")
         finally:
             ts_706._open_actions_page = original_open_actions_page
 

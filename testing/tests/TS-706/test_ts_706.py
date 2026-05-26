@@ -944,6 +944,14 @@ def _review_reply_text(
             "a matching macOS runner could be online but busy, so the test no longer turns "
             f"it into a product failure without a stable public discriminator. {rerun_summary}"
         )
+    if root_comment_id == 3301864871:
+        return (
+            "Fixed: updated the regression coverage so the settled "
+            "`preflight succeeded + downstream still queued/waiting` path asserts the "
+            "preserved `PRECONDITION NOT MET` outcome (`precondition_failure=True`, "
+            "`product_failure=False`, Step 4 `blocked`) instead of expecting a false "
+            f"ticket-facing product failure. {rerun_summary}"
+        )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "
         "contract values from the assertions, and threaded the config-backed UI timeout "
