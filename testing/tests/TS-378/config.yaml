@@ -1,0 +1,9 @@
+test_id: TS-378
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies the exact ticket command `trackstate read account-by-email user@example.com` returns the documented unsupported CLI error contract.
+  - Executes `trackstate read account-by-email user@example.com` when the binary is available on PATH, otherwise falls back to `dart run trackstate read account-by-email user@example.com`.

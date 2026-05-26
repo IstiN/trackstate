@@ -1,0 +1,12 @@
+test_id: TS-1008
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState app with preloaded hosted workspace profiles in a pristine state.
+  - Uses the desktop viewport from the ticket: 1440x900.
+  - Clicks the disabled Save and switch footer control with a real pointer click.
+  - Verifies the workspace switcher remains visibly open without a hide/reopen transition.

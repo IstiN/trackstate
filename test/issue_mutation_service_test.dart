@@ -18,7 +18,7 @@ void main() {
     'service creates a nested issue under the canonical epic path',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -52,7 +52,7 @@ void main() {
 
   test('service rejects sub-task creation without a parent issue', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -76,7 +76,7 @@ void main() {
     'service updates fields and acceptance criteria in one mutation',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -115,7 +115,7 @@ void main() {
     'service rejects direct issue type edits in generic field mutations',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -143,7 +143,7 @@ void main() {
     'service enforces workflow transitions and auto-defaults done resolution',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -169,7 +169,7 @@ void main() {
 
   test('service lists only valid outgoing workflow transitions', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -188,7 +188,7 @@ void main() {
     'service rejects workflow transitions that are not configured',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -212,7 +212,7 @@ void main() {
     'service reassigns an issue by moving its subtree to the new epic path',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -250,7 +250,7 @@ void main() {
     'service normalizes inverse link labels to one stored canonical link',
     () async {
       final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
 
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       await repository.loadSnapshot();
@@ -266,23 +266,140 @@ void main() {
       );
 
       expect(result.isSuccess, isTrue);
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
       final links =
           jsonDecode(
-                File(
-                  '${repo.path}/DEMO/DEMO-1/DEMO-2/links.json',
-                ).readAsStringSync(),
+                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
               )
               as List<dynamic>;
       expect(links, hasLength(1));
       expect(links.single['type'], 'blocks');
-      expect(links.single['direction'], 'inward');
-      expect(links.single['target'], 'DEMO-10');
+      expect(links.single['direction'], 'outward');
+      expect(links.single['target'], 'DEMO-2');
+    },
+  );
+
+  test(
+    'service writes repository-root links.json without leaking hierarchy relationships',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final childResult = await service.createIssue(
+        summary: 'Nested sub-task',
+        issueTypeId: 'sub-task',
+        parentKey: 'DEMO-2',
+      );
+      expect(childResult.isSuccess, isTrue);
+      final commitCountBefore = int.parse(
+        await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD']),
+      );
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+
+      expect(linkResult.isSuccess, isTrue);
+      expect(
+        int.parse(await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD'])),
+        commitCountBefore + 1,
+      );
+
+      final rootLinksContent = File(
+        '${repo.path}/links.json',
+      ).readAsStringSync();
+      final rootLinks = jsonDecode(rootLinksContent) as List<dynamic>;
+      expect(rootLinks, [
+        {'type': 'blocks', 'target': 'DEMO-10', 'direction': 'outward'},
+      ]);
+      expect(rootLinksContent, isNot(contains('DEMO-11')));
+      expect(rootLinksContent, isNot(contains('parent')));
+      expect(
+        File(
+          '${repo.path}/DEMO/DEMO-1/DEMO-2/DEMO-11/main.md',
+        ).readAsStringSync(),
+        contains('parent: DEMO-2'),
+      );
+    },
+  );
+
+  test(
+    'service rejects self-referencing links without writing metadata',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-2',
+        type: 'relates to',
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure?.category, IssueMutationErrorCategory.validation);
+      expect(result.failure?.message, contains('DEMO-2'));
+      expect(result.failure?.message, contains('itself'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'service rejects mixed-case self-referencing links without writing metadata',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'demo-2',
+        type: 'relates to',
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure?.category, IssueMutationErrorCategory.validation);
+      expect(result.failure?.message, contains('DEMO-2'));
+      expect(result.failure?.message, contains('demo-2'));
+      expect(result.failure?.message, contains('itself'));
+      expect(result.failure?.details, containsPair('targetKey', 'demo-2'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
     },
   );
 
   test('service adds comments through the shared typed contract', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -310,7 +427,7 @@ void main() {
 
   test('service archives issues through the shared typed contract', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -324,16 +441,18 @@ void main() {
     expect(result.isSuccess, isTrue);
     expect(result.value!.isArchived, isTrue);
     expect(
-      File(
-        '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
-      ).existsSync(),
+      File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(),
       isTrue,
+    );
+    expect(
+      File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
+      contains('archived: true'),
     );
   });
 
   test('service blocks delete when child issues would be orphaned', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -351,7 +470,7 @@ void main() {
 
   test('service returns a typed dirty-worktree failure', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -377,7 +496,7 @@ void main() {
 
   test('service rejects non-epic explicit epic targets', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -398,7 +517,7 @@ void main() {
 
   test('service rejects assigning epics into another hierarchy', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     await repository.loadSnapshot();
@@ -454,16 +573,108 @@ void main() {
     },
   );
 
+  test(
+    'service preserves attachment backend metadata when moving issue hierarchies',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/DEMO-2/attachments.json',
+        '${jsonEncode([
+          {'id': 'DEMO/DEMO-1/DEMO-2/attachments/design.png', 'name': 'design.png', 'mediaType': 'image/png', 'sizeBytes': 42, 'author': 'demo-user', 'createdAt': '2026-05-05T00:10:00Z', 'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/design.png', 'revisionOrOid': 'release-asset-42', 'storageBackend': 'github-releases', 'githubReleaseTag': 'trackstate-attachments-DEMO-2', 'githubReleaseAssetName': 'design.png'},
+          {'id': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt', 'name': 'spec.txt', 'mediaType': 'text/plain', 'sizeBytes': 9, 'author': 'demo-user', 'createdAt': '2026-05-05T00:11:00Z', 'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt', 'revisionOrOid': 'repo-revision', 'storageBackend': 'repository-path', 'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt'},
+        ])}\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/DEMO-2/attachments/spec.txt',
+        'spec-data',
+      );
+      await _git(repo.path, ['add', '.']);
+      await _git(repo.path, ['commit', '-m', 'Add issue attachment metadata']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.firstWhere((candidate) => candidate.key == 'DEMO-2'),
+        scopes: const {IssueHydrationScope.attachments},
+      );
+      final moved = await IssueMutationService(
+        repository: repository,
+      ).reassignIssue(issueKey: issue.key, epicKey: 'DEMO-10');
+
+      expect(moved.isSuccess, isTrue);
+      final movedReleaseAttachment = moved.value!.attachments.firstWhere(
+        (attachment) => attachment.name == 'design.png',
+      );
+      expect(
+        movedReleaseAttachment.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        movedReleaseAttachment.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(movedReleaseAttachment.githubReleaseAssetName, 'design.png');
+      expect(
+        movedReleaseAttachment.storagePath,
+        'DEMO/DEMO-10/DEMO-2/attachments/design.png',
+      );
+
+      final movedRepositoryAttachment = moved.value!.attachments.firstWhere(
+        (attachment) => attachment.name == 'spec.txt',
+      );
+      expect(
+        movedRepositoryAttachment.repositoryPath,
+        'DEMO/DEMO-10/DEMO-2/attachments/spec.txt',
+      );
+
+      final reloadedSnapshot = await repository.loadSnapshot();
+      final reloadedIssue = await repository.hydrateIssue(
+        reloadedSnapshot.issues.firstWhere(
+          (candidate) => candidate.key == 'DEMO-2',
+        ),
+        scopes: const {IssueHydrationScope.attachments},
+      );
+      final reloadedReleaseAttachment = reloadedIssue.attachments.firstWhere(
+        (attachment) => attachment.name == 'design.png',
+      );
+      expect(
+        reloadedReleaseAttachment.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        reloadedReleaseAttachment.storagePath,
+        'DEMO/DEMO-10/DEMO-2/attachments/design.png',
+      );
+      expect(
+        reloadedReleaseAttachment.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(reloadedReleaseAttachment.githubReleaseAssetName, 'design.png');
+      expect(
+        reloadedIssue.attachments
+            .firstWhere((attachment) => attachment.name == 'spec.txt')
+            .repositoryPath,
+        'DEMO/DEMO-10/DEMO-2/attachments/spec.txt',
+      );
+    },
+  );
+
   test('service archives issues through the hosted GitHub provider', () async {
     final harness = await _createHostedMutationHarness();
     final result = await harness.service.archiveIssue('DEMO-10');
 
     expect(result.isSuccess, isTrue);
+    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isTrue);
     expect(
-      harness.backend.exists('DEMO/.trackstate/archive/DEMO-10/main.md'),
-      isTrue,
+      harness.backend.readText('DEMO/DEMO-10/main.md'),
+      contains('archived: true'),
     );
-    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isFalse);
   });
 
   test('service deletes issues through the hosted GitHub provider', () async {
@@ -484,7 +695,7 @@ void main() {
 
   test('repository rejects stale local deletes with a conflict', () async {
     final repo = await _createMutationRepository();
-    addTearDown(() => repo.delete(recursive: true));
+    addTearDown(() => _deleteDirectoryIfPresent(repo));
 
     final repository = LocalTrackStateRepository(repositoryPath: repo.path);
     final snapshot = await repository.loadSnapshot();
@@ -613,6 +824,29 @@ Future<Directory> _createMutationRepository() async {
   await _git(directory.path, ['add', '.']);
   await _git(directory.path, ['commit', '-m', 'Initial mutation fixture']);
   return directory;
+}
+
+Future<void> _deleteDirectoryIfPresent(Directory directory) async {
+  if (!directory.existsSync()) {
+    return;
+  }
+  for (var attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await directory.delete(recursive: true);
+      return;
+    } on PathNotFoundException {
+      // Another cleanup path may have already removed the temp fixture directory.
+      return;
+    } on FileSystemException catch (error) {
+      final isDirectoryNotEmpty =
+          error.osError?.errorCode == 39 ||
+          error.message.contains('Directory not empty');
+      if (!isDirectoryNotEmpty || attempt == 2) {
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
 }
 
 Map<String, String> _mutationFixtureFiles() {
@@ -858,10 +1092,15 @@ Future<void> _writeFile(
 }
 
 Future<void> _git(String repositoryPath, List<String> args) async {
+  await _gitOutput(repositoryPath, args);
+}
+
+Future<String> _gitOutput(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
   }
+  return result.stdout.toString().trim();
 }
 
 class _HostedMutationHarness {
