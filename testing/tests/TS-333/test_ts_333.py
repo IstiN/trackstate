@@ -33,10 +33,13 @@ TEST_AUTOMATION_RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 LIGHT_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_comments_light.png"
 DARK_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_comments_dark.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts333_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
+RUN_COMMAND = "python3 testing/tests/TS-333/test_ts_333.py"
 
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 COMMENT_AUTHOR = "demo-admin"
@@ -66,7 +69,6 @@ def main() -> None:
             "TS-333 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
         )
 
-    user = repository_service.fetch_authenticated_user()
     issue_fixture = repository_service.fetch_issue_fixture(ISSUE_PATH)
     probe = LiveCommentMetadataContrastProbe()
 
@@ -82,7 +84,6 @@ def main() -> None:
         "observations": [],
     }
     failures: list[str] = []
-    product_failure = False
 
     try:
         with create_live_tracker_app_with_stored_token(
@@ -102,41 +103,37 @@ def main() -> None:
                     )
                 _record_step(
                     result,
-                    step=1,
+                    step=0,
                     status="passed",
                     action="Open the live app and reach the tracker shell.",
                     observed=runtime.body_text,
                 )
-
-                live_issue_page.ensure_connected(
-                    token=token,
-                    repository=repository_service.repository,
-                    user_login=user.login,
-                )
+                result["auth_state"] = _detect_auth_state(runtime.body_text)
                 live_issue_page.open_issue(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
                 )
-                issue_text = live_issue_page.current_body_text()
-                result["issue_body_text"] = issue_text
+                live_issue_page.open_collaboration_tab("Comments")
+                live_issue_page.wait_for_text(COMMENT_BODY, timeout_ms=60_000)
+                comments_text = live_issue_page.current_body_text()
+                result["issue_body_text"] = comments_text
+                result["comments_body_text_initial"] = comments_text
                 if live_issue_page.issue_detail_count(issue_fixture.key) == 0:
                     raise AssertionError(
                         "Step 1 failed: the live app did not open the requested issue "
                         f"detail for {issue_fixture.key}.\n"
-                        f"Observed body text:\n{issue_text}",
+                        f"Observed body text:\n{comments_text}",
                     )
                 _record_step(
                     result,
-                    step=2,
+                    step=1,
                     status="passed",
-                    action="Open the seeded issue detail that contains collaboration metadata.",
-                    observed=issue_text,
+                    action=(
+                        "Open the seeded issue detail and navigate to the Comments "
+                        "collaboration tab."
+                    ),
+                    observed=comments_text,
                 )
-
-                live_issue_page.open_collaboration_tab("Comments")
-                live_issue_page.wait_for_text(COMMENT_BODY, timeout_ms=60_000)
-                comments_text = live_issue_page.current_body_text()
-                result["comments_body_text_initial"] = comments_text
                 for visible_text in (
                     "Comments",
                     COMMENT_AUTHOR,
@@ -145,7 +142,7 @@ def main() -> None:
                 ):
                     if visible_text not in comments_text:
                         failures.append(
-                            "Step 3 failed: the Comments tab did not keep the expected "
+                            "Step 1 failed: the Comments tab did not keep the expected "
                             f"user-visible text {visible_text!r} on screen.\n"
                             f"Observed body text:\n{comments_text}",
                         )
@@ -167,7 +164,7 @@ def main() -> None:
                 result[f"comments_body_text_{initial_theme_name}"] = comments_text
                 _record_step(
                     result,
-                    step=3,
+                    step=2,
                     status="passed",
                     action=(
                         "Inspect the visible Comments metadata row in the current "
@@ -177,7 +174,7 @@ def main() -> None:
                 )
                 if initial_observation.contrast_ratio < 4.5:
                     failures.append(
-                        f"Step 3 failed: the visible Comments metadata in the current {initial_theme_name} "
+                        f"Step 2 failed: the visible Comments metadata in the current {initial_theme_name} "
                         "theme did not meet the required WCAG AA 4.5:1 contrast ratio.\n"
                         f"Observed {initial_observation.describe()}\n"
                         f"Visible body text:\n{comments_text}",
@@ -189,11 +186,22 @@ def main() -> None:
                 result["toggled_theme_name"] = toggled_theme_name
                 if toggled_theme_name == initial_theme_name:
                     failures.append(
-                        "Step 4 failed: toggling the theme did not switch the UI to the opposite theme.\n"
+                        "Step 3 failed: toggling the theme did not switch the UI to the opposite theme.\n"
                         f"Initial toggle label: {initial_toggle_label}\n"
                         f"Toggle label after click: {toggled_label}\n"
                         f"Observed body text:\n{live_issue_page.current_body_text()}",
                     )
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action="Switch the application theme to the opposite validated theme.",
+                    observed=(
+                        f"initial_toggle_label={initial_toggle_label}; "
+                        f"toggled_toggle_label={toggled_label}; "
+                        f"theme={toggled_theme_name}"
+                    ),
+                )
                 live_issue_page.wait_for_text(COMMENT_BODY, timeout_ms=60_000)
                 comments_text_toggled = live_issue_page.current_body_text()
                 result[f"comments_body_text_{toggled_theme_name}"] = comments_text_toggled
@@ -244,18 +252,20 @@ def main() -> None:
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
+        result["product_failure"] = _looks_like_product_failure(result)
         _write_result(result)
         _write_artifacts(
             result,
             status="failed",
             error_message=str(error),
-            product_failure=_looks_like_product_failure(result),
+            product_failure=bool(result["product_failure"]),
         )
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
+        result["product_failure"] = False
         _write_result(result)
         _write_artifacts(
             result,
@@ -273,13 +283,13 @@ def main() -> None:
                 "Observed visible comment metadata in both themes, but at least one "
                 "theme missed the required WCAG AA contrast threshold."
             )
+            result["product_failure"] = True
             _write_result(result)
-            product_failure = True
             _write_artifacts(
                 result,
                 status="failed",
                 error_message=error_message,
-                product_failure=product_failure,
+                product_failure=True,
             )
             print(json.dumps(result, indent=2))
             raise AssertionError(error_message)
@@ -289,6 +299,7 @@ def main() -> None:
             "Verified in the live hosted tracker that the visible Comments metadata "
             "row stayed readable and met WCAG AA contrast in both light and dark themes."
         )
+        result["product_failure"] = False
         _write_result(result)
         _write_artifacts(result, status="passed")
         print(json.dumps(result, indent=2))
@@ -377,6 +388,10 @@ def _write_artifacts(
         encoding="utf-8",
     )
     RESPONSE_PATH.write_text(_build_response(payload, status=status), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(payload, status=status),
+        encoding="utf-8",
+    )
     if product_failure and status == "failed":
         BUG_DESCRIPTION_PATH.write_text(
             _build_bug_description(payload),
@@ -627,6 +642,14 @@ def _step_status_map(payload: dict[str, object]) -> dict[int, str]:
 
 
 def _step_annotation(step: int, payload: dict[str, object]) -> str:
+    if step == 0:
+        auth_state = payload.get("auth_state")
+        if auth_state:
+            return (
+                "Reached the hosted tracker shell before exercising the collaboration "
+                f"surface (auth_state={auth_state})."
+            )
+        return "Reached the hosted tracker shell before exercising the collaboration surface."
     if step == 1:
         return (
             f"Opened {payload.get('issue_key', 'DEMO-2')} and rendered the Comments surface "
@@ -723,9 +746,71 @@ def _looks_like_product_failure(payload: dict[str, object]) -> bool:
         return False
     if "Precondition failed" in error_text:
         return False
-    if "Step " not in error_text:
+    auth_markers = (
+        "Needs sign-in",
+        "Connect GitHub",
+        "authentication precondition",
+        "GitHub connection failed",
+        "token connect flow",
+        "auth gate",
+    )
+    if any(marker in error_text for marker in auth_markers):
         return False
-    return bool(payload.get("steps"))
+    return any(prefix in error_text for prefix in ("Step 1", "Step 2", "Step 3", "Step 4"))
+
+
+def _detect_auth_state(body_text: str) -> str:
+    if "Needs sign-in" in body_text or "GitHub write access is not connected" in body_text:
+        return "read-only"
+    if "Connected as " in body_text:
+        return "connected"
+    return "unknown"
+
+
+def _build_review_replies(payload: dict[str, object], *, status: str) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(payload, status=status),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw_payload = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw_payload.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if (
+            isinstance(thread, dict)
+            and thread.get("resolved") is False
+            and thread.get("rootCommentId") is not None
+            and thread.get("threadId") is not None
+        ):
+            normalized_threads.append(thread)
+    return normalized_threads
+
+
+def _review_reply_text(payload: dict[str, object], *, status: str) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if status == "passed"
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{str(payload.get('error', '')).strip()}`."
+    )
+    return (
+        "Fixed: TS-333 no longer hard-stops on repository auth before the ticket behavior. "
+        "The test now opens the issue and Comments surface in read-only hosted mode when "
+        "available, and product-defect classification now excludes auth/connectivity gates "
+        "such as `Needs sign-in` / `Connect GitHub` while still treating real collaboration "
+        f"surface and contrast failures as product results. {rerun_summary}"
+    )
 
 
 def _markdown_list(items: list[str]) -> list[str]:
@@ -734,7 +819,5 @@ def _markdown_list(items: list[str]) -> list[str]:
 
 def _jira_list(items: list[str]) -> list[str]:
     return [f"* {item}" for item in items]
-
-
 if __name__ == "__main__":
     main()

@@ -7,7 +7,12 @@ import '../components/screens/create_issue_accessibility_screen.dart';
 import '../core/interfaces/create_issue_accessibility_screen.dart';
 
 Future<CreateIssueAccessibilityScreenHandle>
-launchCreateIssueAccessibilityFixture(WidgetTester tester) async {
+launchCreateIssueAccessibilityFixture(
+  WidgetTester tester, {
+  double? initialViewportWidth,
+  double? initialViewportHeight,
+  bool startInDarkTheme = false,
+}) async {
   SharedPreferences.setMockInitialValues({});
 
   final screen = CreateIssueAccessibilityScreen(
@@ -15,6 +20,10 @@ launchCreateIssueAccessibilityFixture(WidgetTester tester) async {
     app: defaultTestingDependencies.createTrackStateAppScreen(tester),
     robot: CreateIssueAccessibilityRobot(tester),
   );
-  await screen.launch();
+  await screen.launch(
+    initialViewportWidth: initialViewportWidth,
+    initialViewportHeight: initialViewportHeight,
+    startInDarkTheme: startInDarkTheme,
+  );
   return screen;
 }

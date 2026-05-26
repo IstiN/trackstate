@@ -275,9 +275,10 @@ class JiraCompatibleCliSearchResponseShapeTest(unittest.TestCase):
         )
         self.assertIs(
             data.get("isLastPage"),
-            True,
-            "Expected result failed: `data.isLastPage` did not report that the first "
-            "page already contains the last search results.\n"
+            self.config.expected_is_last_page,
+            "Expected result failed: `data.isLastPage` did not report the expected "
+            "pagination boundary.\n"
+            f"Expected: {self.config.expected_is_last_page}\n"
             f"Observed data: {data}",
         )
 

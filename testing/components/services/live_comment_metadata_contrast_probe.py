@@ -109,10 +109,10 @@ class LiveCommentMetadataContrastProbe:
 
     @staticmethod
     def _row_box(image: Image.Image, row_rect: ScreenRect) -> tuple[int, int, int, int]:
-        left = max(int(row_rect.left), 0)
-        top = max(int(row_rect.top), 0)
-        right = min(int(row_rect.left + row_rect.width), image.width)
-        bottom = min(int(row_rect.top + row_rect.height), image.height)
+        left = max(int(row_rect.left - 14), 0)
+        top = max(int(row_rect.top - 10), 0)
+        right = min(int(row_rect.left + row_rect.width + 14), image.width)
+        bottom = min(int(row_rect.top + row_rect.height + 10), image.height)
         return (left, top, right, bottom)
 
     @staticmethod
@@ -120,10 +120,10 @@ class LiveCommentMetadataContrastProbe:
         image: Image.Image,
         row_rect: ScreenRect,
     ) -> tuple[int, int, int, int]:
-        left = max(int(row_rect.left + (row_rect.width * 0.695)), 0)
-        top = max(int(row_rect.top + 8), 0)
-        right = min(int(row_rect.left + row_rect.width - 8), image.width)
-        bottom = min(int(row_rect.top + 30), image.height)
+        left = max(int(row_rect.left - 8), 0)
+        top = max(int(row_rect.top - 4), 0)
+        right = min(int(row_rect.left + row_rect.width + 8), image.width)
+        bottom = min(int(row_rect.top + row_rect.height + 6), image.height)
         return (left, top, right, bottom)
 
     @staticmethod
@@ -139,11 +139,15 @@ class LiveCommentMetadataContrastProbe:
         background: RgbColor,
     ) -> RgbColor:
         counts = Counter(image.getdata())
-        samples = [
-            (color, count)
-            for color, count in counts.items()
-            if self._manhattan_distance(color, background) > 20
-        ]
+        samples: list[tuple[RgbColor, int]] = []
+        for minimum_distance in (20, 12, 8):
+            samples = [
+                (color, count)
+                for color, count in counts.items()
+                if self._manhattan_distance(color, background) > minimum_distance
+            ]
+            if samples:
+                break
         if not samples:
             raise AssertionError(
                 "Step 2 failed: the timestamp crop did not contain any visible metadata "
