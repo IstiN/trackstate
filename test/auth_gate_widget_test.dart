@@ -37,6 +37,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('GitHub write access is not connected'), findsWidgets);
+        expect(
+          find.text('Current session flags: canWrite=false, canCreateBranch=false.'),
+          findsWidgets,
+        );
         expect(find.text('Summary'), findsNothing);
         expect(find.text('Description'), findsNothing);
         expect(
