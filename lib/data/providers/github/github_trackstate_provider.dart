@@ -383,6 +383,7 @@ class GitHubTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: headCommitSha,
+        createdCommit: false,
       );
     }
 
@@ -440,6 +441,7 @@ class GitHubTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: headCommitSha,
+        createdCommit: false,
       );
     }
 
