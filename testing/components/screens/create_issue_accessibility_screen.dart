@@ -29,6 +29,7 @@ class CreateIssueAccessibilityScreen
   Future<void> launch({
     double? initialViewportWidth,
     double? initialViewportHeight,
+    bool startInDarkTheme = false,
   }) async {
     _fixture = await tester.runAsync(LocalTrackStateFixture.create);
     if (_fixture == null) {
@@ -37,6 +38,16 @@ class CreateIssueAccessibilityScreen
 
     await _app.pumpLocalGitApp(repositoryPath: _fixture!.repositoryPath);
     _app.expectLocalRuntimeChrome();
+    if (startInDarkTheme) {
+      final enabled = await _app.tapTopBarControl('Dark theme');
+      if (!enabled ||
+          !await _app.isTopBarSemanticsLabelVisible('Light theme')) {
+        throw StateError(
+          'Expected the top bar theme toggle to switch the app into dark mode '
+          'before opening the Create issue flow.',
+        );
+      }
+    }
     if (initialViewportWidth != null || initialViewportHeight != null) {
       if (initialViewportWidth == null || initialViewportHeight == null) {
         throw ArgumentError(

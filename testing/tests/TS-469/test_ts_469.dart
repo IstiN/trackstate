@@ -8,7 +8,6 @@ import 'support/ts469_locales_fixture.dart';
 
 void main() {
   const defaultDesktopViewport = Size(1440, 900);
-
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -78,21 +77,28 @@ void main() {
           }
         }
 
-        const translationTargets = <({String label, String id})>[
-          (label: 'Status To Do', id: 'todo'),
-          (label: 'Issue type Story', id: 'story'),
-          (label: 'Field Summary', id: 'summary'),
-          (label: 'Field Description', id: 'description'),
-          (label: 'Priority High', id: 'high'),
-          (label: 'Component Tracker Core', id: 'tracker-core'),
-          (label: 'Version MVP', id: 'mvp'),
-          (label: 'Resolution Done', id: 'done'),
-        ];
+        const translationTargets =
+            <({String label, String section, String id})>[
+              (label: 'Status To Do', section: 'status', id: 'todo'),
+              (label: 'Status Done', section: 'status', id: 'done'),
+              (label: 'Issue type Story', section: 'issueType', id: 'story'),
+              (label: 'Field Summary', section: 'field', id: 'summary'),
+              (label: 'Field Description', section: 'field', id: 'description'),
+              (label: 'Priority High', section: 'priority', id: 'high'),
+              (
+                label: 'Component Tracker Core',
+                section: 'component',
+                id: 'tracker-core',
+              ),
+              (label: 'Version MVP', section: 'version', id: 'mvp'),
+              (label: 'Resolution Done', section: 'resolution', id: 'done'),
+            ];
 
         for (final target in translationTargets) {
           final semanticsLabel = robot.localeTranslationFieldSemanticsLabel(
             locale: locale,
             id: target.id,
+            section: target.section,
           );
           if (semanticsLabel.trim().isEmpty) {
             failures.add(
@@ -198,6 +204,7 @@ void main() {
         final placeholderColor = robot.localeTranslationFieldPlaceholderColor(
           locale: locale,
           id: 'description',
+          section: 'field',
         );
         final placeholderContrast = contrastRatio(
           placeholderColor,
@@ -215,10 +222,15 @@ void main() {
             target.label: robot.localeEntryFieldScope(
               locale: locale,
               id: target.id,
+              section: target.section,
             ),
         };
         await robot.clearFocus();
-        await robot.focusLocaleTranslationField(locale: locale, id: 'todo');
+        await robot.focusLocaleTranslationField(
+          locale: locale,
+          id: 'todo',
+          section: 'status',
+        );
         final focusedOrder = <String>[];
         final firstFocused = robot.focusedLabel(focusCandidates);
         if (firstFocused == null) {
@@ -229,10 +241,7 @@ void main() {
           focusedOrder.add(firstFocused);
         }
         focusedOrder.addAll(
-          await robot.collectFocusOrder(
-            candidates: focusCandidates,
-            tabs: translationTargets.length - 1,
-          ),
+          await robot.collectFocusOrder(candidates: focusCandidates, tabs: 24),
         );
         final focusFailure = _orderedSubsequenceFailure(
           focusedOrder,
