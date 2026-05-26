@@ -46,14 +46,15 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1137/te
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 SAVE_OUTCOME_WAIT_SECONDS = 15.0
 SAVE_OUTCOME_POLL_SECONDS = 1.0
-LINKED_BUGS = ["TS-1094", "TS-1090"]
+LINKED_BUGS = ["TS-1148", "TS-1094", "TS-1090"]
 LINKED_BUG_NOTES = (
-    "Reviewed input/TS-1137/linked_bugs.md before writing the test. TS-1094 is "
-    "Done and establishes that Settings writes must be atomic, while TS-1090 "
-    "confirms the shipped Settings flow already surfaces save failures for invalid "
-    "catalog writes. This regression therefore drives the live Settings UI with a "
-    "zero-delta save and waits for the post-click state instead of asserting "
-    "immediately."
+   "Reviewed input/TS-1137/linked_bugs.md before writing the test. TS-1148 is "
+   "Done and establishes that a zero-delta Settings save must surface a no-commit "
+   "failure instead of a false success or unrelated Git error. TS-1094 confirms "
+   "Settings writes must stay atomic, while TS-1090 confirms the shipped Settings "
+   "flow already surfaces save failures for invalid catalog writes. This "
+   "regression therefore drives the public zero-delta Save settings action and "
+   "waits for the post-click state instead of asserting immediately."
 )
 REQUEST_STEPS = [
     "Navigate to the Settings Admin Workspace.",
@@ -72,9 +73,20 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1137_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1137_failure.png"
+REVIEW_THREAD_REPLIES = (
+    {
+        "inReplyToId": 3306812201,
+        "threadId": "PRRT_kwDOSU6Gf86E7LAe",
+    },
+    {
+        "inReplyToId": None,
+        "threadId": None,
+    },
+)
 
 
 def main() -> None:
@@ -219,7 +231,24 @@ def main() -> None:
                 )
                 record_not_reached_steps(result, starting_step=3, request_steps=REQUEST_STEPS)
                 raise AssertionError(message)
-
+            if not pre_save_state.save_button_enabled:
+                message = (
+                    "Step 2 failed: the untouched zero-delta Settings surface did not expose "
+                    "an enabled Save settings action, so the test could not prove that a real "
+                    "save request would be sent to the server-side no-commit guard.\n"
+                    f"Baseline head: {baseline_head_sha}\n"
+                    f"Observed body text:\n{pre_save_state.body_text}"
+                )
+                result["is_product_failure"] = True
+                record_step(
+                    result,
+                    step=2,
+                    status="failed",
+                    action=REQUEST_STEPS[1],
+                    observed=message,
+                )
+                record_not_reached_steps(result, starting_step=3, request_steps=REQUEST_STEPS)
+                raise AssertionError(message)
             record_step(
                 result,
                 step=2,
@@ -227,10 +256,23 @@ def main() -> None:
                 action=REQUEST_STEPS[1],
                 observed=(
                     "Kept the live Settings draft unchanged on the default Statuses view, so "
-                    "clicking Save settings exercised a zero-delta persistence attempt. "
+                    "clicking Save settings exercised a zero-delta persistence attempt "
+                    "through the public UI. "
                     f"baseline_head_sha={baseline_head_sha}; "
                     f"save_button_enabled={pre_save_state.save_button_enabled!r}; "
                     f"visible_body_text={snippet(pre_save_state.body_text)!r}"
+                ),
+            )
+            record_human_verification(
+                result,
+                check=(
+                    "Watched the untouched live Settings screen before saving to confirm "
+                    "the default Statuses view still exposed an enabled Save settings "
+                    "control for the zero-delta request."
+                ),
+                observed=(
+                    f"save_button_enabled={pre_save_state.save_button_enabled!r}; "
+                    f"body_text={snippet(pre_save_state.body_text)!r}"
                 ),
             )
 
@@ -424,6 +466,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -436,6 +479,10 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _build_review_replies(result, passed=False),
+        encoding="utf-8",
+    )
 
 
 def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
@@ -571,6 +618,36 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         "```",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _build_review_replies(result: dict[str, Any], *, passed: bool) -> str:
+    if passed:
+        reply = (
+            "Fixed: resolved the TS-1137 merge conflicts, kept the public zero-delta "
+            "Save settings path, and now fail the scenario before Step 3 unless the "
+            "visible Save settings control is enabled so the run only proceeds when a "
+            "real save request can be sent. Reran the automation with the updated flow."
+        )
+    else:
+        reply = (
+            "Fixed: resolved the TS-1137 merge conflicts, kept the public zero-delta "
+            "Save settings path, and now fail the scenario before Step 3 unless the "
+            "visible Save settings control is enabled so the run only proceeds when a "
+            "real save request can be sent. Reran the automation; the remaining failure "
+            f"is product-visible: {result.get('error', 'see attached failure output')}."
+        )
+    return json.dumps(
+        {
+            "replies": [
+                {
+                    "inReplyToId": thread["inReplyToId"],
+                    "threadId": thread["threadId"],
+                    "reply": reply,
+                }
+                for thread in REVIEW_THREAD_REPLIES
+            ],
+        }
+    ) + "\n"
 
 
 if __name__ == "__main__":
