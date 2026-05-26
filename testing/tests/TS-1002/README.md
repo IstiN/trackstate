@@ -16,9 +16,13 @@ secondary critical-path probe.
 The automation also reflects the current linked startup bug chain for this
 ticket: the live app must still exercise the GitHub `/user` probe promptly, and
 the global 11-second fallback must make the shell interactive even while
-`DEMO/project.json` remains delayed. If the `/user` probe is not observed and
-released within the early 5-second window, the test fails before evaluating the
-secondary-probe timeout assertion.
+`DEMO/project.json` remains delayed. The linked bug set now includes TS-1145,
+TS-1046, TS-1045, TS-1014, TS-1013, TS-1012, TS-996, and TS-992 for the shared
+startup-timeout path, plus TS-1149 for the related fallback-session capability
+surface. This test remains scoped to the visible shell behavior required by
+TS-1002. If the `/user` probe is not observed and released within the early
+5-second window, the test fails before evaluating the secondary-probe timeout
+assertion.
 ## Install dependencies
 
 ```bash
