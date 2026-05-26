@@ -243,11 +243,11 @@ void main() {
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
         expect(
-          await screen.isSemanticsLabelVisible('Parent'),
-          isTrue,
+          await screen.countDropdownFields('Parent'),
+          1,
           reason:
               'Step 5 failed: after the parent-required validation appears, the '
-              'visible Parent field should remain available for correction. '
+              'visible Parent dropdown should remain available for correction. '
               'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
               'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
