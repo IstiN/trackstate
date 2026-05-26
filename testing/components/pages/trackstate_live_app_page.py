@@ -70,21 +70,24 @@ class TrackStateLiveAppPage:
 
     def open_connect_dialog(self) -> None:
         connect_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
-        if self.session.count(connect_selector) > 0:
-            self.session.click(connect_selector, timeout_ms=30_000)
-        elif (
-            self.session.count(
-                self.VISIBLE_CONNECT_BUTTON_SELECTOR,
-                has_text=self.CONNECT_READY_TEXT,
-            )
-            > 0
-        ):
-            self.session.click(
-                self.VISIBLE_CONNECT_BUTTON_SELECTOR,
-                has_text=self.CONNECT_READY_TEXT,
-                timeout_ms=30_000,
-            )
-        else:
+        try:
+            if self.session.count(connect_selector) > 0:
+                self.session.click(connect_selector, timeout_ms=30_000)
+            elif (
+                self.session.count(
+                    self.VISIBLE_CONNECT_BUTTON_SELECTOR,
+                    has_text=self.CONNECT_READY_TEXT,
+                )
+                > 0
+            ):
+                self.session.click(
+                    self.VISIBLE_CONNECT_BUTTON_SELECTOR,
+                    has_text=self.CONNECT_READY_TEXT,
+                    timeout_ms=30_000,
+                )
+            else:
+                raise WebAppTimeoutError("Connect GitHub button requires fallback click.")
+        except WebAppTimeoutError:
             payload = self.session.evaluate(
                 """
                 (expectedText) => {

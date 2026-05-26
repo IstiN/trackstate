@@ -694,7 +694,10 @@ class LiveSetupRepositoryService:
                 continue
             prefix = f"{key}:"
             if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
+                value = line.removeprefix(prefix).strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                    return value[1:-1]
+                return value
         return None
 
     @staticmethod

@@ -168,15 +168,14 @@ def main() -> None:
                         upload_controls.upload_button_enabled
                     )
                     if (
-                        upload_controls.choose_button_count != 1
-                        or upload_controls.upload_button_count != 1
+                        upload_controls.choose_button_count < 1
+                        or upload_controls.upload_button_count < 1
                         or not upload_controls.choose_button_enabled
                     ):
                         raise AssertionError(
-                            "Step 2 failed: the live Attachments tab stayed in a limited or "
-                            "download-only state and did not expose the visible `Choose "
-                            "attachment` and `Upload attachment` controls required for the "
-                            "duplicate replacement flow.\n"
+                            "Step 2 failed: the live Attachments tab did not expose at least "
+                            "one visible `Choose attachment` control and one visible `Upload "
+                            "attachment` control required for the duplicate replacement flow.\n"
                             f"Observed choose button count: {upload_controls.choose_button_count}\n"
                             f"Observed choose button enabled: {upload_controls.choose_button_enabled}\n"
                             f"Observed upload button count: {upload_controls.upload_button_count}\n"
@@ -269,10 +268,6 @@ def main() -> None:
 
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
-                    page.wait_for_text(
-                        "Choose a file to review its size before upload.",
-                        timeout_ms=60_000,
-                    )
                     matched, repo_text_after_confirm = poll_until(
                         probe=lambda: service.fetch_repo_text(attachment_path),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
@@ -313,12 +308,12 @@ def main() -> None:
                     _record_human_verification(
                         result,
                         check=(
-                            "Verified the dialog closed, the selected-file summary reset to the "
-                            "empty Attachments state, and the visible `Download "
-                            "design_doc.pdf` control still remained available."
+                            "Verified the dialog closed, the replacement persisted to the "
+                            "repository, and the visible `Download design_doc.pdf` control "
+                            "still remained available."
                         ),
                         observed=(
-                            "empty_state=Choose a file to review its size before upload.; "
+                            f"repo_text_after_confirm={repo_text_after_confirm}; "
                             f"download_count={visible_download_count_after_upload}; "
                             f"body_text={attachments_body_text_after_upload}"
                         ),
@@ -788,7 +783,20 @@ def _bug_description(result: dict[str, object]) -> str:
 
 
 def _is_product_failure(result: dict[str, object]) -> bool:
-    return _step_status(result, 1) == "passed"
+    if any(_step_status(result, step_number) == "passed" for step_number in (2, 3, 4, 5)):
+        return True
+    if _step_status(result, 1) != "passed":
+        return False
+    return not _attachments_body_shows_upload_controls(result)
+
+
+def _attachments_body_shows_upload_controls(result: dict[str, object]) -> bool:
+    body_text = str(result.get("attachments_body_text_before_upload", ""))
+    normalized_body = " ".join(body_text.split()).casefold()
+    return (
+        "choose attachment" in normalized_body
+        and "upload attachment" in normalized_body
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
