@@ -34,6 +34,10 @@ class CommentCardObservation:
     body_fragment: str
     visible_text: str
     accessible_label: str
+    left: float
+    top: float
+    width: float
+    height: float
 
 
 @dataclass(frozen=True)
@@ -104,8 +108,8 @@ class LiveIssueDetailCollaborationPage:
         user_login: str,
     ) -> None:
         connected_banners = TrackStateTrackerPage.connected_banner_variants(
-            repository=repository,
             user_login=user_login,
+            repository=repository,
         )
         if not self._is_connected(user_login=user_login, repository=repository):
             try:
@@ -308,6 +312,7 @@ class LiveIssueDetailCollaborationPage:
             rect.left + (rect.width / 2),
             rect.top + (rect.height / 2),
         )
+
     def wait_for_text_fragment(
         self,
         fragment: str,
@@ -341,6 +346,77 @@ class LiveIssueDetailCollaborationPage:
         if labeled_button_count > 0:
             return labeled_button_count
         return self._session.count(self._button_selector, has_text=fragment)
+
+    def visible_button_label_fragment_count(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            (fragment) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .filter((element) => {
+                const label = element.getAttribute("aria-label") ?? "";
+                const text = (element.innerText ?? element.textContent ?? "").trim();
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                const isVisible = rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== "hidden" &&
+                  style.display !== "none";
+                return isVisible && (label.includes(fragment) || text.includes(fragment));
+              }).length
+            """,
+            arg=fragment,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid visible "
+                f"button count for {fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def button_label_fragment_disabled_count(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            (fragment) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .filter((element) => {
+                const label = element.getAttribute("aria-label") ?? "";
+                const text = (element.innerText ?? element.textContent ?? "").trim();
+                const isVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
+                return isVisible &&
+                  (label.includes(fragment) || text.includes(fragment)) &&
+                  element.getAttribute("aria-disabled") === "true";
+              }).length
+            """,
+            arg=fragment,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid disabled "
+                f"button count for {fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def visible_file_input_count(self) -> int:
+        payload = self._session.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('input[type="file"]'))
+              .filter((element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== "hidden" &&
+                  style.display !== "none";
+              }).length
+            """,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid visible "
+                "file-input count.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
 
     def theme_toggle_label(self) -> str:
         for label in ("Dark theme", "Light theme"):
@@ -530,6 +606,8 @@ class LiveIssueDetailCollaborationPage:
                   label,
                   text,
                   combined: [text, label].filter((value) => value.length > 0).join("\\n"),
+                  left: rect.left,
+                  top: rect.top,
                   width: rect.width,
                   height: rect.height,
                   area: rect.width * rect.height,
@@ -613,6 +691,10 @@ class LiveIssueDetailCollaborationPage:
             body_fragment=body_fragment,
             visible_text=visible_text,
             accessible_label=accessible_label,
+            left=float(payload.get("left", 0.0)),
+            top=float(payload.get("top", 0.0)),
+            width=float(payload.get("width", 0.0)),
+            height=float(payload.get("height", 0.0)),
         )
     def issue_detail_accessible_label(
         self,
@@ -1728,6 +1810,10 @@ class LiveIssueDetailCollaborationPage:
         }
 
     @staticmethod
+    def _connected_message(*, user_login: str, repository: str) -> str:
+        return f"Connected as {user_login} to {repository}."
+
+    @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
         escaped_key = LiveIssueDetailCollaborationPage._escape(issue_key)
         selectors = [
@@ -1751,6 +1837,33 @@ class LiveIssueDetailCollaborationPage:
                     f'{LiveIssueDetailCollaborationPage._escape(unquoted_summary)}"]',
                 )
         return ", ".join(selectors)
+
+    @staticmethod
+    def _candidate_open_issue_selectors(
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> tuple[str, ...]:
+        normalized_summary = issue_summary.strip().strip('"')
+        selectors = [
+            LiveIssueDetailCollaborationPage._open_issue_selector(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            ),
+            (
+                'flt-semantics[role="button"]'
+                f'[aria-label*="Open {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+            ),
+        ]
+        if normalized_summary and normalized_summary != issue_summary:
+            selectors.insert(
+                1,
+                LiveIssueDetailCollaborationPage._open_issue_selector(
+                    issue_key=issue_key,
+                    issue_summary=normalized_summary,
+                ),
+            )
+        return tuple(dict.fromkeys(selectors))
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
