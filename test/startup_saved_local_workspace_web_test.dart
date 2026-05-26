@@ -790,6 +790,10 @@ void main() {
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
+      browserHarness.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      _expectHostedFallbackTrigger();
     },
   );
 }
@@ -1104,6 +1108,10 @@ class _RealHostedBrowserFetchHarness {
     }).toJS;
   }
 
+  void completeUserProbe() {
+    _delegate.completeUserProbe();
+  }
+
   void dispose() {
     if (!_installed) {
       return;
@@ -1159,6 +1167,12 @@ void _expectHostedFallbackTrigger() {
       RegExp(r'Workspace switcher: Hosted setup workspace, .*Needs sign-in'),
     ),
     findsWidgets,
+  );
+  expect(
+    find.bySemanticsLabel(
+      RegExp(r'Workspace switcher: Active local workspace, .*Unavailable'),
+    ),
+    findsNothing,
   );
 }
 
@@ -1259,7 +1273,7 @@ class _SlowBrowserStartupAuthProbeRepository
   }) : _snapshotOverride = snapshot,
        super(
          provider: provider,
-         hostedStartupProbeTimeout: const Duration(minutes: 1),
+         hostedStartupProbeTimeout: const Duration(seconds: 11),
        );
 
   final TrackerSnapshot _snapshotOverride;

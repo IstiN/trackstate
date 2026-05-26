@@ -217,6 +217,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
   bool _isEnsuringCurrentContextWorkspaceMigration = false;
   String? _pendingStartupLocalFallbackWorkspaceId;
+  String? _startupHostedFallbackWorkspaceId;
   bool _isSwitchingStartupHostedFallback = false;
 
   @override
@@ -254,6 +255,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
     _isDesktopWorkspaceSwitcherVisible = false;
     _pendingStartupLocalFallbackWorkspaceId = null;
+    _startupHostedFallbackWorkspaceId = null;
     _isSwitchingStartupHostedFallback = false;
     _requestedWorkspaceSwitcherRowFocusId = null;
     _workspaceSwitcherRowFocusRequestVersion = 0;
@@ -514,7 +516,14 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     final nextActiveWorkspaceId = resolveWorkspaceSwitcherSelectedWorkspaceId(
-      currentSelectedWorkspaceId: _workspaceState.activeWorkspaceId,
+      currentSelectedWorkspaceId:
+          _startupHostedFallbackWorkspaceId != null &&
+              workspaceState.profiles.any(
+                (workspace) =>
+                    workspace.id == _startupHostedFallbackWorkspaceId,
+              )
+          ? _startupHostedFallbackWorkspaceId
+          : _workspaceState.activeWorkspaceId,
       previousWorkspaces: state ?? _workspaceState,
       nextWorkspaces: workspaceState,
     );
@@ -631,6 +640,8 @@ class _TrackStateAppState extends State<TrackStateApp>
             workspace.id,
           },
         );
+        _startupHostedFallbackWorkspaceId = restoredWorkspaceId;
+        _pendingStartupLocalFallbackWorkspaceId = null;
         _pendingWorkspaceRestoreFailure = null;
         if (lastFailure != null) {
           prepared.viewModel.showMessage(
@@ -992,6 +1003,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         _pendingStartupLocalFallbackWorkspaceId = null;
         return;
       }
+      _startupHostedFallbackWorkspaceId = prepared.workspace!.id;
+      _pendingStartupLocalFallbackWorkspaceId = null;
       var selectedState = await widget.workspaceProfileService.selectProfile(
         prepared.workspace!.id,
       );
@@ -1571,6 +1584,13 @@ class _TrackStateAppState extends State<TrackStateApp>
       prepared.viewModel.dispose();
       return;
     }
+    final preservesStartupHostedFallback =
+        _startupHostedFallbackWorkspaceId != null &&
+        prepared.workspace?.isHosted == true &&
+        prepared.workspace?.id == _startupHostedFallbackWorkspaceId;
+    if (!preservesStartupHostedFallback) {
+      _startupHostedFallbackWorkspaceId = null;
+    }
     setState(() {
       viewModel = prepared.viewModel;
       _activeLocalGitConfigurationKey = prepared.localConfigurationKey;
@@ -1601,6 +1621,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       previousViewModel.dispose();
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
+    if (preservesStartupHostedFallback &&
+        viewModel.workspaceId == _startupHostedFallbackWorkspaceId) {
+      _startupHostedFallbackWorkspaceId = null;
+    }
     if (_isDesktopWorkspaceSwitcherVisible &&
         workspaceSwitcherFocusWorkspaceId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
