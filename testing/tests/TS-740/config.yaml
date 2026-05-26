@@ -1,0 +1,8 @@
+test_id: TS-740
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the TS-734 mutable hosted repository fixture to drive the production sync orchestration path.
+  - Verifies a comments-only Issue-C refresh updates visible comment content while load_snapshot_delta remains unchanged.

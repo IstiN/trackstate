@@ -44,6 +44,16 @@ class AccountByEmailUnsupportedCliContractTest(unittest.TestCase):
                 f"Observed command: {observation.requested_command_text}"
             )
 
+        if Path(observation.repository_path) == self.repository_root:
+            failures.append(
+                "Precondition failed: TS-378 ran from the checkout root instead of a "
+                "seeded Local Git repository.\n"
+                f"Checkout root: {self.repository_root}\n"
+                f"Observed repository path: {observation.repository_path}\n"
+                f"Executed command: {observation.executed_command_text}\n"
+                f"Fallback reason: {observation.fallback_reason}"
+            )
+
         if payload_dict is None:
             failures.append(
                 "Step 2 failed: the CLI did not return a machine-readable JSON "
@@ -51,6 +61,7 @@ class AccountByEmailUnsupportedCliContractTest(unittest.TestCase):
                 f"Requested command: {observation.requested_command_text}\n"
                 f"Executed command: {observation.executed_command_text}\n"
                 f"Fallback reason: {observation.fallback_reason}\n"
+                f"Repository path: {observation.repository_path}\n"
                 f"Exit code: {observation.result.exit_code}\n"
                 f"stdout:\n{observation.result.stdout}\n"
                 f"stderr:\n{observation.result.stderr}"
@@ -63,6 +74,7 @@ class AccountByEmailUnsupportedCliContractTest(unittest.TestCase):
                     f"Requested command: {observation.requested_command_text}\n"
                     f"Executed command: {observation.executed_command_text}\n"
                     f"Fallback reason: {observation.fallback_reason}\n"
+                    f"Repository path: {observation.repository_path}\n"
                     f"Expected exit code: {self.config.expected_exit_code}\n"
                     f"Observed exit code: {observation.result.exit_code}\n"
                     f"Observed payload: {payload_dict}\n"
@@ -140,7 +152,6 @@ class AccountByEmailUnsupportedCliContractTest(unittest.TestCase):
                     )
 
         self.assertFalse(failures, "\n\n".join(failures))
-
 
 if __name__ == "__main__":
     unittest.main()
