@@ -13,8 +13,8 @@ The automation:
 3. opens the Workspace switcher and clicks the exact visible action exposed for
    the unavailable saved workspace row
 4. records whether the deployed app invokes `showDirectoryPicker(...)` or
-   `FileSystemHandle.requestPermission(...)`, but it never substitutes the
-   browser picker result with a test-authored handle
+   `FileSystemHandle.requestPermission(...)`, and the browser picker callback
+   returns the recreated saved workspace directory snapshot
 5. verifies the restored workspace becomes active as `Local Git`, the shell
    stays interactive, and browser storage updates to the local workspace
 
@@ -47,6 +47,6 @@ the workspace becomes the active `Local Git` workspace.
 
 Fail: the saved workspace action never triggers a directory-access callback, the
 deployed app reports an access/open error instead of a re-authentication flow,
-or the app reaches only the native browser prompt boundary with no production-
-backed way to re-bind the real saved directory from the current runtime surface.
+or the app still does not restore the workspace to `Local Git` after receiving
+the recreated saved-directory selection.
 ```
