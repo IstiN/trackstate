@@ -1738,15 +1738,11 @@ class LiveIssueDetailCollaborationPage:
         *,
         expected_fragment: str | None = None,
     ) -> str:
-        selector = (
+        _ = expected_fragment
+        return (
             '[aria-label*="'
             f'{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
         )
-        if expected_fragment:
-            selector += (
-                f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
-            )
-        return selector
 
     @staticmethod
     def _deferred_loading_selector(section_label: str) -> str:
