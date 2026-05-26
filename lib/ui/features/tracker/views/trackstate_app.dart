@@ -6086,6 +6086,25 @@ String _repositoryAccessMessage(
   };
 }
 
+String? _repositoryAccessCapabilitySummary(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  if (!viewModel.exposesHostedAccessGates) {
+    return null;
+  }
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected ||
+    HostedRepositoryAccessMode.readOnly =>
+      l10n.repositoryAccessCapabilitySummary(
+        'false',
+        'false',
+      ),
+    HostedRepositoryAccessMode.writable ||
+    HostedRepositoryAccessMode.attachmentRestricted => null,
+  };
+}
+
 String _attachmentsAccessMessage(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
@@ -6392,6 +6411,7 @@ class _RepositoryAccessBanner extends StatelessWidget {
         semanticLabel: _repositoryAccessTitle(l10n, viewModel),
         title: _repositoryAccessTitle(l10n, viewModel),
         message: _repositoryAccessMessage(l10n, viewModel),
+        detailMessage: _repositoryAccessCapabilitySummary(l10n, viewModel),
         primaryActionLabel: opensAttachmentSettings
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
@@ -6411,6 +6431,7 @@ class _AccessCallout extends StatelessWidget {
     required this.semanticLabel,
     required this.title,
     required this.message,
+    this.detailMessage,
     this.tone = _AccessCalloutTone.warning,
     this.sortOrder,
     this.primaryActionLabel,
@@ -6423,6 +6444,7 @@ class _AccessCallout extends StatelessWidget {
   final String semanticLabel;
   final String title;
   final String message;
+  final String? detailMessage;
   final _AccessCalloutTone tone;
   final double? sortOrder;
   final String? primaryActionLabel;
@@ -6450,7 +6472,13 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label: '$semanticLabel $title $message',
+      label:
+          [
+            semanticLabel,
+            title,
+            message,
+            if (detailMessage != null) detailMessage!,
+          ].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -6493,6 +6521,18 @@ class _AccessCallout extends StatelessWidget {
                 ),
               ),
             ),
+            if (detailMessage != null) ...[
+              const SizedBox(height: 8),
+              ExcludeSemantics(
+                child: Text(
+                  detailMessage!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: contentColor,
+                    fontFamily: 'JetBrains Mono',
+                  ),
+                ),
+              ),
+            ],
             if (kIsWeb)
               Opacity(
                 opacity: 0,
@@ -6503,6 +6543,7 @@ class _AccessCallout extends StatelessWidget {
                     children: [
                       Text(title),
                       Text(message),
+                      if (detailMessage != null) Text(detailMessage!),
                       if (primaryActionLabel != null) Text(primaryActionLabel!),
                       if (secondaryActionLabel != null)
                         Text(secondaryActionLabel!),
@@ -11778,6 +11819,10 @@ class _IssueDetailState extends State<_IssueDetail> {
                   semanticLabel: l10n.issueDetail,
                   title: _repositoryAccessTitle(l10n, widget.viewModel),
                   message: _repositoryAccessMessage(l10n, widget.viewModel),
+                  detailMessage: _repositoryAccessCapabilitySummary(
+                    l10n,
+                    widget.viewModel,
+                  ),
                   primaryActionLabel: l10n.openSettings,
                   onPrimaryAction: () =>
                       widget.viewModel.selectSection(TrackerSection.settings),
@@ -12917,6 +12962,7 @@ class _HostedProviderConfigurationState
             message:
                 '${_repositoryAccessMessage(l10n, viewModel)} '
                 '${l10n.repositoryAccessSettingsHint}',
+            detailMessage: _repositoryAccessCapabilitySummary(l10n, viewModel),
             tone: _repositoryAccessCalloutTone(viewModel),
             sortOrder: 1,
           ),
@@ -14427,6 +14473,10 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               widget.viewModel,
                             ),
                             message: _repositoryAccessMessage(
+                              l10n,
+                              widget.viewModel,
+                            ),
+                            detailMessage: _repositoryAccessCapabilitySummary(
                               l10n,
                               widget.viewModel,
                             ),
@@ -16275,6 +16325,10 @@ class _CommentsTab extends StatelessWidget {
               semanticLabel: l10n.comments,
               title: _repositoryAccessTitle(l10n, viewModel),
               message: _repositoryAccessMessage(l10n, viewModel),
+              detailMessage: _repositoryAccessCapabilitySummary(
+                l10n,
+                viewModel,
+              ),
               primaryActionLabel: l10n.openSettings,
               onPrimaryAction: () =>
                   viewModel.selectSection(TrackerSection.settings),
