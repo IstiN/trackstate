@@ -1573,6 +1573,12 @@ abstract class AppLocalizations {
   /// **'Read-only'**
   String get workspaceStateReadOnly;
 
+  /// No description provided for @workspaceStateSyncIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync issue'**
+  String get workspaceStateSyncIssue;
+
   /// No description provided for @workspaceStateNeedsSignIn.
   ///
   /// In en, this message translates to:

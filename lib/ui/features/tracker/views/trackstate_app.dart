@@ -664,9 +664,8 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel: previousViewModel,
             workspaceState: optimisticState,
           );
-          var selectedState = await widget.workspaceProfileService.selectProfile(
-            restoredWorkspaceId,
-          );
+          var selectedState = await widget.workspaceProfileService
+              .selectProfile(restoredWorkspaceId);
           selectedState =
               await _persistPreparedHostedWorkspaceState(
                 prepared,
@@ -1023,8 +1022,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       // Commit the UI immediately with an optimistic workspace state so the
       // hosted restricted shell is visible before the persistence writes
       // complete (which may require the /user auth probe to finish).
-      final optimisticHostedAccessMode =
-          _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+      final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
+        prepared.viewModel,
+      );
       final optimisticState = _workspaceState.copyWith(
         profiles: [
           for (final profile in _workspaceState.profiles)
@@ -5566,6 +5566,12 @@ String _activeWorkspaceStateLabel(
     }
     return l10n.workspaceStateLocalGit;
   }
+  if (_shouldShowHostedWorkspaceSyncIssue(
+    viewModel,
+    activeWorkspace: activeWorkspace,
+  )) {
+    return l10n.workspaceStateSyncIssue;
+  }
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected => l10n.workspaceStateNeedsSignIn,
     HostedRepositoryAccessMode.readOnly => l10n.workspaceStateReadOnly,
@@ -5573,6 +5579,20 @@ String _activeWorkspaceStateLabel(
     HostedRepositoryAccessMode.attachmentRestricted =>
       l10n.repositoryAccessAttachmentsRestricted,
   };
+}
+
+bool _shouldShowHostedWorkspaceSyncIssue(
+  TrackerViewModel viewModel, {
+  WorkspaceProfile? activeWorkspace,
+}) {
+  final isHostedWorkspace =
+      !(activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence);
+  if (!isHostedWorkspace) {
+    return false;
+  }
+  final status = viewModel.workspaceSyncStatus;
+  return status.health == WorkspaceSyncHealth.attentionNeeded &&
+      !status.hasPendingRefresh;
 }
 
 HostedWorkspaceAccessMode _hostedWorkspaceAccessModeForViewModel(
@@ -6096,10 +6116,7 @@ String? _repositoryAccessCapabilitySummary(
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected ||
     HostedRepositoryAccessMode.readOnly =>
-      l10n.repositoryAccessCapabilitySummary(
-        'false',
-        'false',
-      ),
+      l10n.repositoryAccessCapabilitySummary('false', 'false'),
     HostedRepositoryAccessMode.writable ||
     HostedRepositoryAccessMode.attachmentRestricted => null,
   };
@@ -6472,13 +6489,12 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label:
-          [
-            semanticLabel,
-            title,
-            message,
-            if (detailMessage != null) detailMessage!,
-          ].join(' '),
+      label: [
+        semanticLabel,
+        title,
+        message,
+        if (detailMessage != null) detailMessage!,
+      ].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -8614,8 +8630,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                   order: NumericFocusOrder(
                     focusOrderBase +
                         (widget.showOpenAction ? 1 : 0) +
-                        ((primaryActionLabel != null &&
-                                onPrimaryAction != null)
+                        ((primaryActionLabel != null && onPrimaryAction != null)
                             ? 1
                             : 0),
                   ),
@@ -8646,7 +8661,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       Text(primaryActionSemanticLabel),
                     if (widget.showOpenAction && onOpen != null)
                       Text('${l10n.openWorkspace}: ${workspace.displayName}'),
-                    if (!isActive) Text('${l10n.delete}: ${workspace.displayName}'),
+                    if (!isActive)
+                      Text('${l10n.delete}: ${workspace.displayName}'),
                   ],
                 ),
               ),
