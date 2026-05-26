@@ -1,0 +1,11 @@
+test_id: TS-751
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Reuses a hosted workspace-sync fixture to clear the previous JQL selection first, so the test can verify manual search submission still auto-selects the first matching result after the TS-749 fix.
+runtime_inputs:
+  query: priority = High ORDER BY key ASC
+  run_command: flutter test testing/tests/TS-751/test_ts_751.dart --reporter expanded

@@ -1,0 +1,12 @@
+test_id: TS-831
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token.
+  - Reaches the desktop workspace switcher trigger via real keyboard Tab navigation.
+  - Presses Space on the focused trigger and confirms the panel opens immediately.
+  - Uses subsequent keyboard Tab navigation after the Space-opened panel appears and confirms focus reaches a visible control inside the panel.

@@ -1,0 +1,9 @@
+test_id: TS-410
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Opens the editable Project settings administration workspace with a local widget fixture that implements ProjectSettingsRepository.
+  - Verifies the visible admin tabs, exact semantics labels, keyboard Tab traversal through the Fields edit actions, and the user-facing labels inside the field editor drawer.
+  - Opens the status editor and requires the visible Category options (New, In progress, Done) to remain readable at WCAG AA contrast against the rendered menu surface.
