@@ -34,11 +34,15 @@ const List<String> _ticketVisibleTexts = <String>[
 ];
 
 const List<String> _currentInteractiveLabels = <String>[
+  'Local folder',
+  'Hosted repository',
   'Open existing folder',
   'Initialize folder',
 ];
 
 const List<String> _currentFocusOrder = <String>[
+  'Local folder',
+  'Hosted repository',
   'Open existing folder',
   'Initialize folder',
 ];
