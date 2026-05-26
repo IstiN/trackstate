@@ -8462,6 +8462,107 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             ],
           )
         : interactiveSummaryControl;
+    final rowContent = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isActive ? colors.primarySoft : colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isActive ? colors.primary : colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          summaryContent,
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (isActive)
+                Text(
+                  l10n.activeWorkspace,
+                  style: Theme.of(context).textTheme.labelMedium,
+                )
+              else if (widget.showOpenAction)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(focusOrderBase),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey('workspace-open-${workspace.id}'),
+                    label: l10n.openWorkspace,
+                    semanticsLabel:
+                        '${l10n.openWorkspace}: ${workspace.displayName}',
+                    onPressed: onOpen,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'open',
+                    ),
+                  ),
+                ),
+              if (primaryActionLabel != null && onPrimaryAction != null)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(
+                    focusOrderBase + (widget.showOpenAction ? 1 : 0),
+                  ),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey(
+                      'workspace-primary-action-${workspace.id}',
+                    ),
+                    label: primaryActionLabel,
+                    semanticsLabel: primaryActionSemanticLabel!,
+                    onPressed: onPrimaryAction,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'primary',
+                    ),
+                  ),
+                ),
+              if (!isActive)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(
+                    focusOrderBase +
+                        (widget.showOpenAction ? 1 : 0) +
+                        ((primaryActionLabel != null &&
+                                onPrimaryAction != null)
+                            ? 1
+                            : 0),
+                  ),
+                  child: _WorkspaceSwitcherActionButton(
+                    buttonKey: ValueKey('workspace-delete-${workspace.id}'),
+                    label: l10n.delete,
+                    semanticsLabel: '${l10n.delete}: ${workspace.displayName}',
+                    onPressed: onDelete,
+                    destructive: true,
+                    focusTargetId: _workspaceSwitcherActionFocusId(
+                      workspace.id,
+                      'delete',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (kIsWeb)
+            Opacity(
+              opacity: 0,
+              alwaysIncludeSemantics: true,
+              child: IgnorePointer(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(browserSummaryLabel),
+                    if (primaryActionSemanticLabel != null)
+                      Text(primaryActionSemanticLabel),
+                    if (widget.showOpenAction && onOpen != null)
+                      Text('${l10n.openWorkspace}: ${workspace.displayName}'),
+                    if (!isActive) Text('${l10n.delete}: ${workspace.displayName}'),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
     return Semantics(
       container: true,
       explicitChildNodes: true,
@@ -8469,109 +8570,13 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
           ? browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id)
           : null,
       selected: isActive,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isActive ? colors.primarySoft : colors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isActive ? colors.primary : colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            summaryContent,
-            const SizedBox(height: 12),
-            Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (isActive)
-                  Text(
-                    l10n.activeWorkspace,
-                    style: Theme.of(context).textTheme.labelMedium,
-                  )
-                else if (widget.showOpenAction)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(focusOrderBase),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey('workspace-open-${workspace.id}'),
-                      label: l10n.openWorkspace,
-                      semanticsLabel:
-                          '${l10n.openWorkspace}: ${workspace.displayName}',
-                      onPressed: onOpen,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'open',
-                      ),
-                    ),
-                  ),
-                if (primaryActionLabel != null && onPrimaryAction != null)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(
-                      focusOrderBase + (widget.showOpenAction ? 1 : 0),
-                    ),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey(
-                        'workspace-primary-action-${workspace.id}',
-                      ),
-                      label: primaryActionLabel,
-                      semanticsLabel: primaryActionSemanticLabel!,
-                      onPressed: onPrimaryAction,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'primary',
-                      ),
-                    ),
-                  ),
-                if (!isActive)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(
-                      focusOrderBase +
-                          (widget.showOpenAction ? 1 : 0) +
-                          ((primaryActionLabel != null &&
-                                  onPrimaryAction != null)
-                              ? 1
-                              : 0),
-                    ),
-                    child: _WorkspaceSwitcherActionButton(
-                      buttonKey: ValueKey('workspace-delete-${workspace.id}'),
-                      label: l10n.delete,
-                      semanticsLabel:
-                          '${l10n.delete}: ${workspace.displayName}',
-                      onPressed: onDelete,
-                      destructive: true,
-                      focusTargetId: _workspaceSwitcherActionFocusId(
-                        workspace.id,
-                        'delete',
-                      ),
-                    ),
-                  ),
-              ],
+      child: onSelect == null
+          ? rowContent
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onSelect,
+              child: rowContent,
             ),
-            if (kIsWeb)
-              Opacity(
-                opacity: 0,
-                alwaysIncludeSemantics: true,
-                child: IgnorePointer(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(browserSummaryLabel),
-                      if (primaryActionSemanticLabel != null)
-                        Text(primaryActionSemanticLabel),
-                      if (widget.showOpenAction && onOpen != null)
-                        Text('${l10n.openWorkspace}: ${workspace.displayName}'),
-                      if (!isActive)
-                        Text('${l10n.delete}: ${workspace.displayName}'),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 }

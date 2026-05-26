@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -33,10 +34,20 @@ external JSFunction get _consoleInfo;
 external set _consoleInfo(JSFunction value);
 
 const String _hostedWorkspaceId = 'hosted:stable/repo@main';
+final List<String> _startupDiagnosticMessages = <String>[];
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    _startupDiagnosticMessages.clear();
+    final previousDiagnostics = startupAuthProbeDiagnostics;
+    startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
+      logger: _startupDiagnosticMessages.add,
+    );
+    addTearDown(() {
+      startupAuthProbeDiagnostics = previousDiagnostics;
+      _startupDiagnosticMessages.clear();
+    });
   });
 
   testWidgets(
@@ -99,7 +110,10 @@ void main() {
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
@@ -168,7 +182,10 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
@@ -263,7 +280,10 @@ void main() {
 
       expect(workspaceProfiles.selectProfilePending, isTrue);
       expect(delayedRepository.userProbePending, isTrue);
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       await _expectBlockedCreateIssueGate(tester);
@@ -344,7 +364,10 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       delayedRepository.completeUserProbe();
@@ -426,7 +449,10 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
@@ -518,7 +544,10 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       await _expectBlockedCreateIssueGate(tester);
@@ -591,6 +620,7 @@ void main() {
       _expectRestrictedFallbackShell(
         delayedRepository,
         consoleMessages: browserHarness.consoleMessages,
+        expectStartupDiagnostic: true,
       );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -716,11 +746,17 @@ void main() {
       await tester.pump();
 
       expect(delayedRepository.userProbePending, isTrue);
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       _expectHostedFallbackTrigger();
       final savedStateAfterSwitch = await workspaceProfiles.loadState();
       _expectHostedFallbackWorkspaceState(savedStateAfterSwitch);
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        expectStartupDiagnostic: true,
+      );
       await _expectBlockedCreateIssueGate(tester);
       delayedRepository.completeUserProbe();
       await tester.pump();
@@ -1181,8 +1217,12 @@ class _ConsoleInfoCapture {
 void _expectRestrictedFallbackShell(
   ProviderBackedTrackStateRepository repository, {
   Iterable<String>? consoleMessages,
+  bool expectStartupDiagnostic = false,
 }) {
-  _expectBrowserObservedShellReady(consoleMessages: consoleMessages);
+  _expectBrowserObservedShellReady(
+    consoleMessages: consoleMessages,
+    expectStartupDiagnostic: expectStartupDiagnostic,
+  );
   expect(find.byType(CircularProgressIndicator), findsNothing);
   expect(find.text('Connect GitHub'), findsWidgets);
   expect(repository.session, isNotNull);
@@ -1209,17 +1249,32 @@ void _expectHostedFallbackTrigger() {
   );
 }
 
-void _expectBrowserObservedShellReady({Iterable<String>? consoleMessages}) {
-  if (consoleMessages != null) {
+void _expectBrowserObservedShellReady({
+  Iterable<String>? consoleMessages,
+  bool expectStartupDiagnostic = false,
+}) {
+  if (expectStartupDiagnostic) {
+    final shellReadyObserved =
+        _startupDiagnosticMessages.any(
+          (message) =>
+              message.startsWith('TrackState startup fallback diagnostic:') &&
+              message.contains('shell_ready transition after timeout fallback'),
+        ) ||
+        (consoleMessages?.any(
+              (message) =>
+                  message.startsWith(
+                    'TrackState startup fallback diagnostic:',
+                  ) &&
+                  message.contains(
+                    'shell_ready transition after timeout fallback',
+                  ),
+            ) ??
+            false);
     expect(
-      consoleMessages.any(
-        (message) =>
-            message.startsWith('TrackState startup fallback diagnostic:') &&
-            message.contains('shell_ready transition after timeout fallback'),
-      ),
+      shellReadyObserved,
       isTrue,
       reason:
-          'Expected the browser startup flow to emit the fallback shell_ready diagnostic before auth finished.',
+          'Expected the startup flow to emit the fallback shell_ready diagnostic before auth finished.',
     );
   }
   expect(
