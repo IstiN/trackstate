@@ -105,7 +105,10 @@ void main() {
         ),
         findsNothing,
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -224,10 +227,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final savedState = await service.loadState();
-      expect(
-        savedState.activeWorkspaceId,
-        isNull,
-      );
+      expect(savedState.activeWorkspaceId, isNull);
       expect(
         savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -313,7 +313,10 @@ void main() {
         service.state.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -574,7 +577,10 @@ void main() {
         service.state.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -662,7 +668,10 @@ void main() {
         service.state.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -750,7 +759,10 @@ void main() {
         service.state.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -1298,7 +1310,10 @@ void main() {
         service.state.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
-      expect(find.byKey(const ValueKey('workspace-switcher-trigger')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
@@ -2092,9 +2107,19 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => ReactiveIssueDetailTrackStateRepository(
-                permission: attachmentRestrictedPermission,
-              ),
+              }) async {
+                final hostedRepository = ReactiveIssueDetailTrackStateRepository(
+                  permission: attachmentRestrictedPermission,
+                );
+                await hostedRepository.connect(
+                  const RepositoryConnection(
+                    repository: 'alpha/repo',
+                    branch: 'main',
+                    token: 'alpha-token',
+                  ),
+                );
+                return hostedRepository;
+              },
         ),
       );
       await tester.pumpAndSettle();
@@ -2104,7 +2129,9 @@ void main() {
       expect(
         find.descendant(
           of: trigger,
-          matching: find.text('alpha/repo · Hosted · Attachments limited'),
+          matching: find.bySemanticsLabel(
+            'Workspace switcher: alpha/repo, Hosted, Attachments limited',
+          ),
         ),
         findsOneWidget,
       );
@@ -4456,9 +4483,7 @@ String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
     (node) => node.getSemanticsData().flagsCollection.isFocused,
     describeMatch: (_) => 'focused semantics node',
   );
-  if (focusedSemantics.evaluate().isEmpty) {
-    return null;
-  }
+  final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;
 
   for (final entry in candidates.entries) {
     final matches = entry.value.evaluate().length;
@@ -4470,17 +4495,19 @@ String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
       if (_focusWithinFinder(tester, candidateFinder)) {
         return entry.key;
       }
-      final candidateSemantics = _semanticsFinderFor(
-        tester: tester,
-        finder: candidateFinder,
-      );
-      final ownsFocusedNode = find.semantics.descendant(
-        of: candidateSemantics,
-        matching: focusedSemantics,
-        matchRoot: true,
-      );
-      if (ownsFocusedNode.evaluate().isNotEmpty) {
-        return entry.key;
+      if (hasFocusedSemantics) {
+        final candidateSemantics = _semanticsFinderFor(
+          tester: tester,
+          finder: candidateFinder,
+        );
+        final ownsFocusedNode = find.semantics.descendant(
+          of: candidateSemantics,
+          matching: focusedSemantics,
+          matchRoot: true,
+        );
+        if (ownsFocusedNode.evaluate().isNotEmpty) {
+          return entry.key;
+        }
       }
     }
   }
@@ -4696,6 +4723,7 @@ class _QueuedLoadTrackStateRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

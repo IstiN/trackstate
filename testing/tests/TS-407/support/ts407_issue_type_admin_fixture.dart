@@ -26,6 +26,20 @@ class Ts407IssueTypeAdminFixture {
 
   Future<void> dispose() => _repositoryFixture.dispose();
 
+  Future<String> headRevision() => _gitOutput(['rev-parse', 'HEAD']);
+
+  Future<List<String>> worktreeStatusLines() async {
+    final output = await _gitOutput(['status', '--short']);
+    return output
+        .split('\n')
+        .map((line) => line.trimRight())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<String> readRepositoryFile(String relativePath) =>
+      File('$repositoryPath/$relativePath').readAsString();
+
   Future<List<Map<String, Object?>>> readIssueTypeEntries() async {
     final file = File(
       '${_repositoryFixture.directory.path}/$projectKey/config/issue-types.json',
@@ -53,18 +67,8 @@ class Ts407IssueTypeAdminFixture {
           'name': 'Delivery workflow',
           'statuses': ['To Do', 'In Progress', 'Done'],
           'transitions': [
-            {
-              'id': 'start',
-              'name': 'Start work',
-              'from': 'To Do',
-              'to': 'In Progress',
-            },
-            {
-              'id': 'complete',
-              'name': 'Complete',
-              'from': 'In Progress',
-              'to': 'Done',
-            },
+            {'id': 'start', 'name': 'Start work', 'from': 'To Do', 'to': 'In Progress'},
+            {'id': 'complete', 'name': 'Complete', 'from': 'In Progress', 'to': 'Done'},
           ],
         },
       })}\n',
@@ -72,44 +76,30 @@ class Ts407IssueTypeAdminFixture {
     await _repositoryFixture.writeFile(
       '$projectKey/config/issue-types.json',
       '${jsonEncode([
-        {
-          'id': 'epic',
-          'name': 'Epic',
-          'hierarchyLevel': 1,
-          'icon': 'epic',
-          'workflow': 'delivery-workflow',
-        },
-        {
-          'id': storyId,
-          'name': storyName,
-          'hierarchyLevel': 0,
-          'icon': 'story',
-          'workflow': 'delivery-workflow',
-        },
-        {
-          'id': 'subtask',
-          'name': 'Sub-task',
-          'hierarchyLevel': -1,
-          'icon': 'subtask',
-          'workflow': 'delivery-workflow',
-        },
+        {'id': 'epic', 'name': 'Epic', 'hierarchyLevel': 1, 'icon': 'epic', 'workflow': 'delivery-workflow'},
+        {'id': storyId, 'name': storyName, 'hierarchyLevel': 0, 'icon': 'story', 'workflow': 'delivery-workflow'},
+        {'id': 'subtask', 'name': 'Sub-task', 'hierarchyLevel': -1, 'icon': 'subtask', 'workflow': 'delivery-workflow'},
       ])}\n',
     );
     await _repositoryFixture.writeFile(
       '$projectKey/config/fields.json',
       '${jsonEncode([
+        {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+        {'id': 'description', 'name': 'Description', 'type': 'markdown', 'required': false},
+        {'id': 'acceptanceCriteria', 'name': 'Acceptance Criteria', 'type': 'markdown', 'required': false},
         {
-          'id': 'summary',
-          'name': 'Summary',
-          'type': 'string',
-          'required': true,
-        },
-        {
-          'id': 'description',
-          'name': 'Description',
-          'type': 'markdown',
+          'id': 'priority',
+          'name': 'Priority',
+          'type': 'option',
           'required': false,
+          'options': [
+            {'id': 'high', 'name': 'High'},
+            {'id': 'medium', 'name': 'Medium'},
+          ],
         },
+        {'id': 'assignee', 'name': 'Assignee', 'type': 'user', 'required': false},
+        {'id': 'labels', 'name': 'Labels', 'type': 'array', 'required': false},
+        {'id': 'storyPoints', 'name': 'Story Points', 'type': 'number', 'required': false},
       ])}\n',
     );
     await _repositoryFixture.writeFile(
@@ -121,5 +111,13 @@ class Ts407IssueTypeAdminFixture {
     );
     await _repositoryFixture.stageAll();
     await _repositoryFixture.commit('Seed TS-407 issue type admin fixture');
+  }
+
+  Future<String> _gitOutput(List<String> args) async {
+    final result = await Process.run('git', ['-C', repositoryPath, ...args]);
+    if (result.exitCode != 0) {
+      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
+    }
+    return result.stdout.toString().trim();
   }
 }

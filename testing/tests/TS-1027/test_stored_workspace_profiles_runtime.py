@@ -6,19 +6,27 @@ from unittest.mock import patch
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
     DelayedAuthWorkspaceProfilesRuntime,
 )
+from testing.tests.support.live_tracker_app_factory import (
+    create_live_tracker_app_with_stored_token,
+)
 from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
     WorkspaceProfilesRuntime,
     _build_preload_script,
 )
+from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 
 
 class _FakeScriptTarget:
     def __init__(self) -> None:
         self.scripts: list[str] = []
+        self.events: list[tuple[str, object]] = []
 
     def add_init_script(self, *, script: str) -> None:
         self.scripts.append(script)
+
+    def on(self, event: str, callback: object) -> None:
+        self.events.append((event, callback))
 
 
 class _FakeRuntimeSession:
@@ -37,6 +45,46 @@ class _FakePollingPage:
 
 
 class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
+    def test_live_tracker_factory_bootstraps_workspace_aware_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(config, token="token")
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(
+            runtime,
+            StoredWorkspaceProfilesRuntime,
+            "Live stored-token flows must preload hosted workspace state so the app "
+            "restores the correct repository session on first load.",
+        )
+        self.assertEqual(
+            runtime._workspace_token_profile_ids,
+            ("hosted:istin/trackstate-setup@main",),
+        )
+        self.assertEqual(
+            runtime._workspace_state,
+            {
+                "activeWorkspaceId": "hosted:istin/trackstate-setup@main",
+                "migrationComplete": True,
+                "profiles": [
+                    {
+                        "id": "hosted:istin/trackstate-setup@main",
+                        "displayName": "",
+                        "targetType": "hosted",
+                        "target": "IstiN/trackstate-setup",
+                        "defaultBranch": "main",
+                        "writeBranch": "main",
+                    },
+                ],
+            },
+        )
+
     def test_workspace_profiles_runtime_applies_preload_script_to_existing_page(self) -> None:
         runtime = WorkspaceProfilesRuntime(
             workspace_state={"activeWorkspaceId": "hosted:repo@main", "profiles": []},
@@ -117,6 +165,38 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
         self.assertTrue(started)
         self.assertGreaterEqual(len(runtime._page.wait_calls), 1)
         self.assertTrue(runtime._auth_request_started.is_set())
+
+    def test_delayed_auth_runtime_applies_fetch_delay_script_to_existing_page(self) -> None:
+        runtime = DelayedAuthWorkspaceProfilesRuntime(
+            repository="IstiN/trackstate-setup",
+            token="token",
+            workspace_state={"activeWorkspaceId": None, "profiles": []},
+            auth_delay_seconds=5,
+            delayed_paths=("/user", "/viewer"),
+        )
+        runtime._context = _FakeScriptTarget()
+        runtime._page = _FakeScriptTarget()
+
+        with patch(
+            "testing.tests.support.delayed_auth_workspace_profiles_runtime.StoredWorkspaceProfilesRuntime.__enter__",
+            return_value=_FakeRuntimeSession(),
+        ):
+            session = runtime.__enter__()
+
+        self.assertIsInstance(session, _FakeRuntimeSession)
+        self.assertEqual(len(runtime._context.scripts), 1)
+        self.assertEqual(runtime._context.scripts, runtime._page.scripts)
+        delayed_script = runtime._context.scripts[0]
+        self.assertIn("__trackstateDelayedAuthStart__", delayed_script)
+        self.assertIn("__trackstateDelayedAuthRelease__", delayed_script)
+        self.assertIn("/user", delayed_script)
+        self.assertIn("/viewer", delayed_script)
+        self.assertEqual(
+            runtime._page.events,
+            [("console", runtime._handle_console_message)],
+            "The delayed auth runtime must subscribe the live page to console "
+            "events so delayed fetch start/release signals update the runtime state.",
+        )
 
 
 if __name__ == "__main__":

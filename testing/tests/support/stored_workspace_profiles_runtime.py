@@ -3,11 +3,31 @@ from __future__ import annotations
 import json
 from urllib.parse import quote
 
-from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightWebAppRuntime,
-    PlaywrightStoredTokenWebAppRuntime,
-    PlaywrightWebAppSession,
-)
+try:
+    from testing.frameworks.python.playwright_web_app_session import (
+        PlaywrightWebAppRuntime,
+        PlaywrightStoredTokenWebAppRuntime,
+        PlaywrightWebAppSession,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    class PlaywrightWebAppSession:  # type: ignore[no-redef]
+        pass
+
+    class PlaywrightWebAppRuntime:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self._context = None
+            self._page = None
+
+        def __enter__(self):
+            raise ModuleNotFoundError("playwright")
+
+    class PlaywrightStoredTokenWebAppRuntime(  # type: ignore[no-redef]
+        PlaywrightWebAppRuntime,
+    ):
+        def __init__(self, *, repository: str, token: str) -> None:
+            super().__init__()
+            self._repository = repository
+            self._token = token
 
 
 class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):

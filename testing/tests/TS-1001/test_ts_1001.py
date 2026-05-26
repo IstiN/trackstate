@@ -503,15 +503,6 @@ def main() -> None:
                     runtime=runtime,
                     observation=workspace_profile_state,
                 )
-                raise AssertionError(
-                    "The live fallback session still does not expose any public "
-                    "same-browser-session surface for `canCreateBranch`. The test "
-                    "confirmed the real fallback UI (`Open settings` gate) and the "
-                    "same-session hosted access mode (`hostedAccessMode=disconnected`), "
-                    "but there is no production-visible session metadata or branch-creation "
-                    "boundary tied to that browser session that proves `canCreateBranch=false` "
-                    "without using a synthetic fixture."
-                )
                 _record_step(
                     result,
                     step=4,

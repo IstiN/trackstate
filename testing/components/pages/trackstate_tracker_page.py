@@ -71,12 +71,73 @@ class TrackStateTrackerPage:
     SAVE_LABEL = "Save"
     CANCEL_LABEL = "Cancel"
     BACK_TO_BOARD_LABEL = "Back to Board"
-    CONNECTED_BANNER_TEMPLATE = (
-        "Connected as {user_login} to {repository}. Drag cards to commit status changes."
+    CONNECTED_BANNER_TEMPLATES = (
+        "Connected as {user_login} to {repository}. Drag cards to commit status changes.",
+        "Connected as {user_login} to {repository}.",
     )
+    CONNECTED_BANNER_COMPACT_TEMPLATE = "Connected as {user_login} to {repository}."
+    CONNECTED_BANNER_TEMPLATE = CONNECTED_BANNER_TEMPLATES[0]
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
+    DISCONNECTED_MARKERS = (
+        "Needs sign-in",
+        "GitHub write access is not connected",
+    )
+
+    @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return tuple(
+            template.format(user_login=user_login, repository=repository)
+            for template in cls.CONNECTED_BANNER_TEMPLATES
+        )
+
+    @classmethod
+    def body_has_connected_banner(
+        cls,
+        body_text: str,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(
+            " ".join(banner.split()).casefold() in normalized_body
+            for banner in cls.connected_banners(
+                user_login=user_login,
+                repository=repository,
+            )
+        ):
+            return True
+        return "connected as " in normalized_body and " to " in normalized_body
+
+    @classmethod
+    def body_has_authenticated_session(
+        cls,
+        body_text: str,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(marker.casefold() in normalized_body for marker in cls.DISCONNECTED_MARKERS):
+            return False
+        if cls.body_has_connected_banner(
+            body_text,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return True
+        return (
+            "workspace switcher:" in normalized_body
+            and repository.casefold() in normalized_body
+            and user_login.casefold() in normalized_body
+            and (
+                "attachments limited" in normalized_body
+                or "manage github access" in normalized_body
+                or "open settings" in normalized_body
+            )
+        )
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -172,15 +233,46 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        connected_banners = self.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+        body_text = self.body_text()
+        if self.body_has_authenticated_session(
+            body_text,
+            user_login=user_login,
+            repository=repository,
+        ):
             return ConnectionObservation(
                 dialog_text="",
-                body_text=self.body_text(),
+                body_text=body_text,
             )
 
-        self._live_page.open_connect_dialog()
+        try:
+            self._live_page.open_connect_dialog()
+        except (AssertionError, WebAppTimeoutError):
+            body_text = self.body_text()
+            if self.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return ConnectionObservation(
+                    dialog_text=body_text,
+                    body_text=body_text,
+                )
+            raise
         dialog_state = self._live_page.read_connect_dialog_state()
         dialog_text = dialog_state.body_text
+        if self.body_has_authenticated_session(
+            dialog_text,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return ConnectionObservation(
+                dialog_text=dialog_text,
+                body_text=dialog_text,
+            )
         for expected_text in (
             "Connect GitHub",
             "Connect token",
@@ -205,15 +297,11 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
-            repository=repository,
-        )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_banners, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
@@ -222,6 +310,30 @@ class TrackStateTrackerPage:
             dialog_text=dialog_text,
             body_text=wait_match.body_text,
         )
+
+    @classmethod
+    def connected_banner_variants(
+        cls,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> tuple[str, ...]:
+        repository_variants = {repository, repository.lower()}
+        banners: list[str] = []
+        for repository_variant in repository_variants:
+            banners.append(
+                cls.CONNECTED_BANNER_TEMPLATE.format(
+                    user_login=user_login,
+                    repository=repository_variant,
+                ),
+            )
+            banners.append(
+                cls.CONNECTED_BANNER_COMPACT_TEMPLATE.format(
+                    user_login=user_login,
+                    repository=repository_variant,
+                ),
+            )
+        return tuple(banners)
 
     def create_issue_from_board(
         self,

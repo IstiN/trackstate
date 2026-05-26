@@ -5,7 +5,9 @@ repository and verifies that repeating the exact same comment command:
 
 1. creates two separate markdown files under `TS/TS-1/comments/`,
 2. returns the created comment metadata for each call, and
-3. exposes a non-empty repository revision in each success envelope.
+3. advances the repository HEAD on each write, and
+4. exposes that created repository revision in each success envelope and in the
+   visible CLI JSON output.
 
 ## Run this test
 
