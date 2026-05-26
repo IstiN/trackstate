@@ -86,6 +86,20 @@ class Ts407IssueTypeAdminFixture {
       '${jsonEncode([
         {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
         {'id': 'description', 'name': 'Description', 'type': 'markdown', 'required': false},
+        {'id': 'acceptanceCriteria', 'name': 'Acceptance Criteria', 'type': 'markdown', 'required': false},
+        {
+          'id': 'priority',
+          'name': 'Priority',
+          'type': 'option',
+          'required': false,
+          'options': [
+            {'id': 'high', 'name': 'High'},
+            {'id': 'medium', 'name': 'Medium'},
+          ],
+        },
+        {'id': 'assignee', 'name': 'Assignee', 'type': 'user', 'required': false},
+        {'id': 'labels', 'name': 'Labels', 'type': 'array', 'required': false},
+        {'id': 'storyPoints', 'name': 'Story Points', 'type': 'number', 'required': false},
       ])}\n',
     );
     await _repositoryFixture.writeFile(

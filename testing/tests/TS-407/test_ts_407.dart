@@ -233,7 +233,7 @@ void main() {
             }
           }
 
-          final forbiddenUploadTexts = <String>[
+          const forbiddenUploadTexts = <String>[
             'Upload',
             'Upload attachment',
             'Choose a file',

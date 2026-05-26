@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -12,6 +13,35 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/components/factories/testing_dependencies.dart';
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+
+const String _hostedReleaseProjectJson = '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "widget-test-assets-"
+    }
+  }
+}
+''';
+
+const RepositoryPermission _hostedReleaseUploadPermission =
+    RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      attachmentUploadMode: AttachmentUploadMode.full,
+      supportsReleaseAttachmentWrites: true,
+      canCheckCollaborators: false,
+    );
 
 void main() {
   setUp(() {
@@ -32,7 +62,10 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp('TrackState\\.AI')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsWidgets);
+      expect(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')),
+        findsWidgets,
+      );
       expect(find.bySemanticsLabel(RegExp('Synced with Git')), findsWidgets);
       expect(find.textContaining('Platform Foundation'), findsWidgets);
     } finally {
@@ -74,6 +107,60 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets(
+    'board issue cards expose an Edit action that opens the shared editor with preloaded data',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      const targetKey = 'TRACK-12';
+      const targetSummary = 'Implement Git sync service';
+      try {
+        final snapshot = await const _EditIssueFieldsLocalRuntimeRepository()
+            .loadSnapshot();
+        final issue = snapshot.issues.firstWhere(
+          (candidate) => candidate.key == targetKey,
+        );
+
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+        await screen.openSection('Board');
+        await screen.expectTextVisible(targetSummary);
+
+        final editButton = find.byKey(const ValueKey('board-edit-$targetKey'));
+
+        expect(
+          editButton,
+          findsOneWidget,
+          reason:
+              'Expected the Board card for $targetKey to expose a visible Edit '
+              'affordance without first navigating through issue detail.',
+        );
+
+        await tester.ensureVisible(editButton);
+        await tester.tap(editButton, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Edit issue'), findsOneWidget);
+        expect(
+          await screen.readLabeledTextFieldValue('Summary'),
+          issue.summary,
+        );
+        expect(
+          await screen.readLabeledTextFieldValue('Description'),
+          issue.description,
+        );
+        expect(
+          await screen.readDropdownFieldValue('Priority'),
+          issue.priority.label,
+        );
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
 
   testWidgets('dragging a board card moves it to another status', (
     tester,
@@ -155,6 +242,44 @@ void main() {
       await tester.tap(find.bySemanticsLabel('Load more issues'));
       await tester.pumpAndSettle();
 
+      expect(find.text('Paged issue 8'), findsOneWidget);
+      expect(find.bySemanticsLabel('Load more issues'), findsNothing);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('empty JQL query shows every issue without needing load more', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Showing 6 of 8 issues'), findsOneWidget);
+      expect(find.text('Paged issue 8'), findsNothing);
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, '');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('8 issues'), findsOneWidget);
+      expect(find.text('Showing 6 of 8 issues'), findsNothing);
       expect(find.text('Paged issue 8'), findsOneWidget);
       expect(find.bySemanticsLabel('Load more issues'), findsNothing);
     } finally {
@@ -522,11 +647,8 @@ void main() {
       await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
       await tester.pumpAndSettle();
 
-      expect(find.text('Local Git runtime'), findsOneWidget);
-      expect(
-        find.textContaining('GitHub tokens are not used in this runtime'),
-        findsOneWidget,
-      );
+      expect(find.text('Workspace switcher'), findsOneWidget);
+      expect(find.text('No saved workspaces yet.'), findsNothing);
     } finally {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -607,6 +729,63 @@ void main() {
   );
 
   testWidgets(
+    'hosted default attachment storage keeps standard upload controls visible',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'default-upload-token',
+      });
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Attachments stay download-only in the browser'),
+          findsNothing,
+        );
+        expect(
+          find.widgetWithText(OutlinedButton, 'Open settings'),
+          findsNothing,
+        );
+        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
+        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, 'Choose attachment'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'attachments tab lets users choose and upload files from issue detail',
     (tester) async {
       SharedPreferences.setMockInitialValues({
@@ -624,7 +803,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );
@@ -643,19 +827,48 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
         await tester.pumpAndSettle();
 
-        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
-        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        final chooseAttachmentSemantics = find.bySemanticsLabel(
+          'Choose attachment',
+        );
+        final uploadAttachmentSemantics = find.bySemanticsLabel(
+          'Upload attachment',
+        );
+        final chooseAttachmentButton = find.widgetWithText(
+          OutlinedButton,
+          'Choose attachment',
+        );
+        final uploadAttachmentButton = find.widgetWithText(
+          FilledButton,
+          'Upload attachment',
+        );
 
-        await tester.tap(find.bySemanticsLabel('Choose attachment'));
+        expect(chooseAttachmentSemantics, findsOneWidget);
+        expect(uploadAttachmentSemantics, findsOneWidget);
+        expect(chooseAttachmentButton, findsOneWidget);
+        expect(uploadAttachmentButton, findsOneWidget);
+        expect(
+          tester.widget<OutlinedButton>(chooseAttachmentButton).onPressed,
+          isNotNull,
+        );
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNull,
+        );
+
+        await tester.tap(chooseAttachmentSemantics);
         await tester.pumpAndSettle();
 
         expect(find.text('release notes.pdf'), findsOneWidget);
         expect(find.text('4 B'), findsOneWidget);
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNotNull,
+        );
 
-        await tester.tap(find.bySemanticsLabel('Upload attachment'));
+        await tester.tap(uploadAttachmentSemantics);
         await tester.pumpAndSettle();
 
-        expect(find.text('release-notes.pdf'), findsOneWidget);
+        expect(find.text('release notes.pdf'), findsOneWidget);
         expect(
           find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
@@ -686,7 +899,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );
@@ -720,7 +938,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Replace attachment?'), findsNothing);
-        expect(find.text('sync-sequence.svg'), findsOneWidget);
+        expect(find.text('sync sequence.svg'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -993,6 +1211,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -1102,6 +1321,7 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
@@ -1264,6 +1484,7 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 

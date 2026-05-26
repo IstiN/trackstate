@@ -1,0 +1,10 @@
+test_id: TS-907
+type: cli
+framework: python
+platform: flutter-analyze
+dependencies:
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or via TS907_FLUTTER_BIN / TRACKSTATE_FLUTTER_BIN
+notes:
+  - Exports the current `origin/main` snapshot to a disposable temp workspace so the production checkout and stale automation branches stay unchanged.
+  - Replaces `_workspaceSyncAttentionNeededSemanticLabel(l10n)` with `_workspaceSyncAttentionNeededVisibleLabel(l10n)` at the live sync-pill semantic-label call site in the temp copy.
+  - Runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` and only passes when the local analysis command blocks the weakened semantic label instead of returning a clean `No issues found!` result.

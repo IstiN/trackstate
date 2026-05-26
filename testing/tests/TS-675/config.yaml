@@ -1,0 +1,12 @@
+test_id: TS-675
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Seeds a disposable local-git repository and creates Issue A, Issue B, and Issue C.
+  - Creates an inward symmetric `relates to` link from TS-1 to TS-2 and an outward `blocks` link from TS-2 to TS-3 against the live local CLI implementation.
+  - Executes the exact ticket step `trackstate read ticket --key TS-2` from the seeded repository working directory.
+  - Verifies the top-level `links` array contains exactly the inward `relates to` entry for TS-1 and the outward `blocks` entry for TS-3.

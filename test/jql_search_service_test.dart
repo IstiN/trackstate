@@ -151,6 +151,31 @@ void main() {
   });
 
   test(
+    'treats project-plus-issue-key compatibility lookups as exact key matches',
+    () {
+      final noisyIssues = [
+        ...issues,
+        _issue(
+          key: 'TRACK-12',
+          summary: 'Reference another ticket',
+          description: 'Mentions TRACK-10 in the description only.',
+          acceptanceCriteria: const [],
+          priority: IssuePriority.medium,
+          priorityId: 'medium',
+        ),
+      ];
+      final page = service.search(
+        issues: noisyIssues,
+        project: project,
+        jql: 'project = TRACK TRACK-10',
+      );
+
+      expect(page.issues.map((issue) => issue.key), ['TRACK-10']);
+      expect(service.requiresIssueDetails('project = TRACK TRACK-10'), isFalse);
+    },
+  );
+
+  test(
     'flags project-plus-free-text compatibility clauses for detail hydration',
     () {
       expect(
