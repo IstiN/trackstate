@@ -82,6 +82,12 @@ class Client {
     Object? body,
   }) async => Response('', 500);
 
+  Future<Response> patch(
+    Object? url, {
+    Map<String, String>? headers,
+    Object? body,
+  }) async => Response('', 500);
+
   Future<Response> delete(
     Object? url, {
     Map<String, String>? headers,

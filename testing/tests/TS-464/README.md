@@ -30,9 +30,16 @@ flutter test testing/tests/TS-464/test_ts_464.dart --reporter expanded
 - Flutter SDK available on `PATH`
 - No extra environment variables are required
 
-## Expected failure behavior
+## Expected behavior
 
-At the moment this test is expected to fail on the ticket-required Step 3 if the
-production Add locale flow exposes only a free-text `Locale code` field instead
-of a validated locale-code selector. Once that selector exists, the same test
-continues to the repository scaffolding assertions.
+This test should pass only when the production Add locale flow:
+1. exposes a validated `Locale code` selector,
+2. allows selecting `fr`,
+3. makes `fr` available for translation editing immediately, and
+4. scaffolds `DEMO/config/i18n/fr.json` plus `DEMO/project.json.supportedLocales`
+   immediately after confirmation.
+
+If the production-visible dialog still exposes only a free-text `Locale code`
+field, the automation records that product defect and still continues through
+the visible dialog where possible so the failure output captures whether the UI
+and repository updates happened after confirmation.
