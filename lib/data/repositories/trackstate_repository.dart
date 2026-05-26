@@ -54,6 +54,9 @@ abstract interface class ProjectSettingsRepository {
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
 }
 
+const String projectSettingsNoCommitProducedMessage =
+    'No Git commit was produced for the project settings save.';
+
 class ProjectMetadataRefresh {
   const ProjectMetadataRefresh({
     required this.project,
@@ -715,13 +718,18 @@ class ProviderBackedTrackStateRepository
         }
       }
     } else {
-      await mutator.applyFileChanges(
+      final commitResult = await mutator.applyFileChanges(
         RepositoryFileChangeRequest(
           branch: writeBranch,
           message: 'Update project settings',
           changes: changes,
         ),
       );
+      if (!commitResult.createdCommit) {
+        throw const TrackStateRepositoryException(
+          projectSettingsNoCommitProducedMessage,
+        );
+      }
     }
     final currentSnapshot = _snapshot;
     if (currentSnapshot == null) {
