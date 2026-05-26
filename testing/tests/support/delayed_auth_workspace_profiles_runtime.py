@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
-
-from playwright.sync_api import ConsoleMessage
-from playwright.sync_api import Route
 
 from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
 )
+
+if TYPE_CHECKING:
+    from playwright.sync_api import ConsoleMessage
+    from playwright.sync_api import Route
+else:
+    ConsoleMessage = Any
+    Route = Any
 
 
 class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):

@@ -970,8 +970,6 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     if (loadedState.hasProfiles) {
       if (kIsWeb) {
-        unawaited(_awaitActiveLocalWorkspaceRevalidation(loadedState));
-        unawaited(_refreshWorkspaceSwitcherState(loadedState));
         final restored = await _restoreWorkspaceFromSavedState(
           loadedState,
           allowFallbackFromActive: false,

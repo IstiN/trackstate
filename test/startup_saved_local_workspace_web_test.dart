@@ -535,6 +535,91 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets(
+    'web startup keeps the real hosted repository path on the hosted fallback workspace while /user remains pending',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final harness = _RealHostedStartupDelayedAuthHarness();
+      SetupTrackStateRepository? hostedRepository;
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      addTearDown(() async {
+        harness.completeUserProbe();
+        await tester.pump();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => hostedRepository = SetupTrackStateRepository(
+                client: MockClient(harness.handle),
+                repositoryName: repository,
+                dataRef: defaultBranch,
+                sourceRef: writeBranch,
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(harness.userProbeRequestCount, 1);
+      expect(harness.userProbePending, isTrue);
+      expect(harness.requestedPaths, contains('/user'));
+      expect(hostedRepository, isNotNull);
+      expect(hostedRepository?.session, isNotNull);
+      expect(
+        hostedRepository?.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(hostedRepository?.session?.canWrite, isFalse);
+      expect(hostedRepository?.session?.canCreateBranch, isFalse);
+      _expectHostedFallbackTrigger();
+      await _expectHostedFallbackWorkspaceRow(tester);
+      await _expectBlockedCreateIssueGate(tester);
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
 }
 
 Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
@@ -870,6 +955,139 @@ class _SlowBrowserStartupAuthProbeRepository
     await _loadSnapshotCompleter.future;
     replaceCachedState(snapshot: _snapshotOverride);
     return _snapshotOverride;
+  }
+}
+
+class _RealHostedStartupDelayedAuthHarness {
+  final Completer<http.Response> _userProbeCompleter = Completer<http.Response>();
+  final List<String> requestedPaths = <String>[];
+
+  int get userProbeRequestCount =>
+      requestedPaths.where((path) => path == '/user').length;
+  bool get userProbePending =>
+      userProbeRequestCount > 0 && !_userProbeCompleter.isCompleted;
+
+  void completeUserProbe() {
+    if (_userProbeCompleter.isCompleted) {
+      return;
+    }
+    _userProbeCompleter.complete(
+      http.Response(
+        jsonEncode({
+          'login': 'demo-user',
+          'name': 'Demo User',
+          'id': 1,
+          'email': 'demo@example.com',
+        }),
+        200,
+      ),
+    );
+  }
+
+  Future<http.Response> handle(http.Request request) async {
+    final path = request.url.path;
+    final ref = request.url.queryParameters['ref'] ?? '';
+    requestedPaths.add(path);
+    switch (path) {
+      case '/repos/stable/repo':
+        return http.Response(
+          jsonEncode({
+            'full_name': 'stable/repo',
+            'permissions': <String, Object?>{
+              'pull': true,
+              'push': true,
+              'admin': false,
+            },
+          }),
+          200,
+        );
+      case '/user':
+        return _userProbeCompleter.future;
+      case '/repos/stable/repo/branches/main':
+        return http.Response(
+          jsonEncode({
+            'name': 'main',
+            'commit': <String, Object?>{'sha': 'mock-revision'},
+          }),
+          200,
+        );
+      case '/repos/stable/repo/git/trees/main':
+        return http.Response(
+          jsonEncode({
+            'tree': [
+              {'path': 'DEMO/project.json', 'type': 'blob'},
+              {'path': 'DEMO/config/statuses.json', 'type': 'blob'},
+              {'path': 'DEMO/config/issue-types.json', 'type': 'blob'},
+              {'path': 'DEMO/config/fields.json', 'type': 'blob'},
+              {'path': 'DEMO/.trackstate/index/issues.json', 'type': 'blob'},
+              {'path': 'DEMO/DEMO-1/main.md', 'type': 'blob'},
+            ],
+          }),
+          200,
+        );
+      case '/repos/stable/repo/contents/DEMO/project.json':
+        expect(ref, 'main');
+        return _contentResponse(
+          jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+        );
+      case '/repos/stable/repo/contents/DEMO/config/statuses.json':
+        return _contentResponse(
+          jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+        );
+      case '/repos/stable/repo/contents/DEMO/config/issue-types.json':
+        return _contentResponse(
+          jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+        );
+      case '/repos/stable/repo/contents/DEMO/config/fields.json':
+        return _contentResponse(
+          jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+        );
+      case '/repos/stable/repo/contents/DEMO/.trackstate/index/issues.json':
+        return _contentResponse(
+          jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Indexed markdown issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+        );
+    }
+    throw StateError('Unexpected request: ${request.method} ${request.url}');
+  }
+
+  http.Response _contentResponse(String content) {
+    return http.Response(
+      jsonEncode({
+        'content': base64Encode(utf8.encode(content)),
+        'encoding': 'base64',
+        'sha': 'mock-revision',
+      }),
+      200,
+    );
   }
 }
 
