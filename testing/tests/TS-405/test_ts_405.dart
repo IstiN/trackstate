@@ -107,6 +107,8 @@ void main() {
               'Step 4 failed: saving the Add status dialog should close the editor overlay before repository validation runs.',
         );
 
+        final failures = <String>[];
+
         await robot.tapSaveSettingsButton();
         final duplicateAttemptHead =
             await tester.runAsync(fixture.headRevision) ?? '';
@@ -118,7 +120,7 @@ void main() {
             ) ??
             '';
         if (!robot.isVisibleText(duplicateError)) {
-          fail(
+          failures.add(
             'Step 4 failed: saving Settings after adding the duplicate status '
             'ID "$duplicateId" did not render the expected validation message '
             '"$duplicateError". The unsaved "$duplicateName" draft remained '
@@ -141,7 +143,7 @@ void main() {
               'the duplicate-ID validation attempt should not write project settings',
         );
 
-        await robot.tapActionButton('Reset');
+        await robot.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
         await robot.openProjectStatuses();
 
         await robot.tapActionButton('Add status');
@@ -164,13 +166,13 @@ void main() {
         await robot.tapActionButton('Save');
         await robot.tapSaveSettingsButton();
 
-        expect(
-          robot.isVisibleText(missingNameError),
-          isTrue,
-          reason:
-              'Step 5 failed: saving Settings after leaving Name blank should show "$missingNameError". '
-              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}.',
-        );
+        if (!robot.isVisibleText(missingNameError)) {
+          failures.add(
+            'Step 5 failed: saving Settings after leaving Name blank did not '
+            'show "$missingNameError". Visible texts: '
+            '${_formatSnapshot(robot.visibleTexts(), limit: 60)}.',
+          );
+        }
 
         await _expectRepositoryUnchanged(
           tester,
@@ -181,6 +183,9 @@ void main() {
           context:
               'the missing-name validation attempt should not write project settings',
         );
+        if (failures.isNotEmpty) {
+          fail(failures.join('\n'));
+        }
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
