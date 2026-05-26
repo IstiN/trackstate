@@ -44,6 +44,12 @@ typedef BrowserLocalRepositoryLoader =
       required String defaultBranch,
       required String writeBranch,
     });
+typedef BrowserLocalRepositoryAccessRequester =
+    Future<TrackStateRepository?> Function({
+      required String repositoryPath,
+      required String defaultBranch,
+      required String writeBranch,
+    });
 typedef HostedRepositoryLoader =
     Future<TrackStateRepository> Function({
       required String repository,
@@ -146,6 +152,8 @@ class TrackStateApp extends StatefulWidget {
     this.repositoryFactory,
     this.openLocalRepository,
     this.openBrowserLocalRepository = openBrowserLocalWorkspaceRepository,
+    this.requestBrowserLocalRepositoryAccess =
+        requestBrowserLocalWorkspaceRepositoryAccess,
     this.openHostedRepository,
     this.workspaceProfileService =
         const SharedPreferencesWorkspaceProfileService(),
@@ -159,6 +167,8 @@ class TrackStateApp extends StatefulWidget {
   final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
   final BrowserLocalRepositoryLoader openBrowserLocalRepository;
+  final BrowserLocalRepositoryAccessRequester
+  requestBrowserLocalRepositoryAccess;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
   final TrackStateAuthStore authStore;
@@ -395,8 +405,20 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
   }) async {
+    return _prepareBrowserLocalWorkspaceSwitchWithLoader(
+      workspace,
+      previousViewModel: previousViewModel,
+      repositoryLoader: widget.openBrowserLocalRepository,
+    );
+  }
+
+  Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitchWithLoader(
+    WorkspaceProfile workspace, {
+    required TrackerViewModel previousViewModel,
+    required BrowserLocalRepositoryLoader repositoryLoader,
+  }) async {
     try {
-      final repository = await widget.openBrowserLocalRepository(
+      final repository = await repositoryLoader(
         repositoryPath: workspace.target,
         defaultBranch: workspace.defaultBranch,
         writeBranch: workspace.writeBranch,
@@ -1904,6 +1926,27 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       await _commitPreparedWorkspaceSwitch(
         browserPrepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+      return;
+    }
+
+    final browserReauthenticated = await _prepareBrowserLocalWorkspaceSwitchWithLoader(
+      nextWorkspace,
+      previousViewModel: previousViewModel,
+      repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
+    );
+    if (browserReauthenticated != null) {
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
+      );
+      await _commitPreparedWorkspaceSwitch(
+        browserReauthenticated,
         previousViewModel: previousViewModel,
         workspaceState: selectedState,
       );
