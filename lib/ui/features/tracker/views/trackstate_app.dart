@@ -607,8 +607,64 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
+      final restoredWorkspaceId = prepared.workspace?.id ?? workspace.id;
+      final shouldCommitHostedFallbackBeforePersistence =
+          deferAccessRestore &&
+          kIsWeb &&
+          workspace.isLocal &&
+          prepared.workspace?.isHosted == true &&
+          restoredWorkspaceId != workspace.id;
+      if (shouldCommitHostedFallbackBeforePersistence) {
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: restoredWorkspaceId,
+          unavailableLocalWorkspaceIds: {
+            ..._workspaceState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: optimisticState,
+        );
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          restoredWorkspaceId,
+        );
+        selectedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: selectedState,
+            ) ??
+            selectedState;
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _workspaceState = selectedState;
+        });
+        await _refreshWorkspaceSwitcherState(selectedState);
+        return true;
+      }
       var selectedState = await widget.workspaceProfileService.selectProfile(
-        prepared.workspace?.id ?? workspace.id,
+        restoredWorkspaceId,
       );
       selectedState =
           await _persistPreparedHostedWorkspaceState(

@@ -184,6 +184,110 @@ void main() {
   );
 
   testWidgets(
+    'web startup commits the hosted fallback shell before workspace persistence finishes for preserved local restore',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final persistedProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      final workspaceProfiles = _DelayedSelectWorkspaceProfileService(
+        persistedProfiles,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+      for (
+        var index = 0;
+        index < 20 &&
+            find
+                .bySemanticsLabel(
+                  RegExp(
+                    r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+                  ),
+                )
+                .evaluate()
+                .isEmpty;
+        index += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(workspaceProfiles.selectProfilePending, isTrue);
+      expect(delayedRepository.userProbePending, isTrue);
+      _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
+      await _expectHostedFallbackWorkspaceRow(tester);
+      await _expectBlockedCreateIssueGate(tester);
+
+      final persistedStateBeforeSelection = await persistedProfiles.loadState();
+      expect(
+        persistedStateBeforeSelection.activeWorkspaceId,
+        activeLocalWorkspaceId,
+      );
+
+      workspaceProfiles.completeSelectProfile();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final persistedStateAfterSelection = await persistedProfiles.loadState();
+      _expectHostedFallbackWorkspaceState(persistedStateAfterSelection);
+      expect(
+        persistedStateAfterSelection.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
+    },
+  );
+
+  testWidgets(
     'web startup completes the delayed /user probe after opening the shell fallback for a missing browser handle',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -622,7 +726,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup keeps the real hosted repository path on the hosted fallback workspace while /user remains pending',
+    'web startup reaches the browser shell-ready contract on the default hosted loader while /user remains pending',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -648,52 +752,35 @@ void main() {
       );
       await authStore.saveToken('github-token', repository: 'stable/repo');
 
-      final harness = _RealHostedStartupDelayedAuthHarness();
-      SetupTrackStateRepository? hostedRepository;
+      final browserHarness = _RealHostedBrowserFetchHarness()..install();
 
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(() {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-      });
-      addTearDown(() async {
-        harness.completeUserProbe();
-        await tester.pump();
+        browserHarness.dispose();
       });
 
       await tester.pumpWidget(
         TrackStateApp(
           workspaceProfileService: workspaceProfiles,
           authStore: authStore,
-          openHostedRepository:
-              ({
-                required String repository,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => hostedRepository = SetupTrackStateRepository(
-                client: MockClient(harness.handle),
-                repositoryName: repository,
-                dataRef: defaultBranch,
-                sourceRef: writeBranch,
-              ),
         ),
       );
       await tester.pump();
       await tester.pump(const Duration(seconds: 11));
       await tester.pump();
 
-      expect(harness.userProbeRequestCount, 1);
-      expect(harness.userProbePending, isTrue);
-      expect(harness.requestedPaths, contains('/user'));
-      expect(hostedRepository, isNotNull);
-      expect(hostedRepository?.session, isNotNull);
+      expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.userProbePending, isTrue);
+      expect(browserHarness.requestedPaths, contains('/user'));
       expect(
-        hostedRepository?.session?.connectionState,
-        isNot(ProviderConnectionState.connected),
+        browserHarness.requestedPaths,
+        contains('/repos/stable/repo/git/trees/main'),
       );
-      expect(hostedRepository?.session?.canWrite, isFalse);
-      expect(hostedRepository?.session?.canCreateBranch, isFalse);
+      _expectBrowserObservedShellReady();
+      expect(find.text('Connect GitHub'), findsWidgets);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       await _expectBlockedCreateIssueGate(tester);
@@ -978,10 +1065,83 @@ class _BrowserStartupAuthProbeHarness {
   }
 }
 
+extension type _FetchRequestUrlAccessor._(JSObject _value) implements JSObject {
+  external JSString get url;
+}
+
+class _RealHostedBrowserFetchHarness {
+  _RealHostedBrowserFetchHarness();
+
+  final _RealHostedStartupDelayedAuthHarness _delegate =
+      _RealHostedStartupDelayedAuthHarness();
+  bool _installed = false;
+  late final JSFunction _previousFetch = _windowFetch;
+
+  List<String> get requestedPaths => _delegate.requestedPaths;
+  int get userProbeRequestCount => _delegate.userProbeRequestCount;
+  bool get userProbePending => _delegate.userProbePending;
+
+  void install() {
+    if (_installed) {
+      return;
+    }
+    _installed = true;
+    _windowFetch = ((JSAny? input, JSAny? init) {
+      final requestUrl = _requestUrl(input);
+      if (requestUrl.isEmpty) {
+        return Future<web.Response>.value(
+          _jsonResponse('{}', status: 404),
+        ).toJS;
+      }
+      final uri = Uri.parse(requestUrl);
+      return _delegate
+          .handle(http.Request('GET', uri))
+          .then(
+            (response) =>
+                _jsonResponse(response.body, status: response.statusCode),
+          )
+          .toJS;
+    }).toJS;
+  }
+
+  void dispose() {
+    if (!_installed) {
+      return;
+    }
+    _windowFetch = _previousFetch;
+    _delegate.completeUserProbe();
+  }
+
+  String _requestUrl(JSAny? input) {
+    if (input == null) {
+      return '';
+    }
+    try {
+      return (input as JSString).toDart;
+    } on Object {
+      try {
+        return _FetchRequestUrlAccessor._(input as JSObject).url.toDart;
+      } on Object {
+        return '';
+      }
+    }
+  }
+
+  web.Response _jsonResponse(String body, {int status = 200}) {
+    return web.Response(
+      body.toJS,
+      web.ResponseInit(
+        status: status,
+        headers: web.Headers()..set('content-type', 'application/json'),
+      ),
+    );
+  }
+}
+
 void _expectRestrictedFallbackShell(
   ProviderBackedTrackStateRepository repository,
 ) {
-  _expectShellReadySurface();
+  _expectBrowserObservedShellReady();
   expect(find.byType(CircularProgressIndicator), findsNothing);
   expect(find.text('Connect GitHub'), findsWidgets);
   expect(repository.session, isNotNull);
@@ -1002,7 +1162,7 @@ void _expectHostedFallbackTrigger() {
   );
 }
 
-void _expectShellReadySurface() {
+void _expectBrowserObservedShellReady() {
   expect(
     find.byKey(const ValueKey('workspace-switcher-trigger')),
     findsOneWidget,
@@ -1017,6 +1177,75 @@ void _expectShellReadySurface() {
   ]) {
     expect(find.text(label), findsWidgets);
   }
+}
+
+class _DelayedSelectWorkspaceProfileService implements WorkspaceProfileService {
+  _DelayedSelectWorkspaceProfileService(this._delegate);
+
+  final WorkspaceProfileService _delegate;
+  final Completer<void> _selectProfileCompleter = Completer<void>();
+  bool _selectProfileStarted = false;
+
+  bool get selectProfilePending =>
+      _selectProfileStarted && !_selectProfileCompleter.isCompleted;
+
+  void completeSelectProfile() {
+    if (_selectProfileCompleter.isCompleted) {
+      return;
+    }
+    _selectProfileCompleter.complete();
+  }
+
+  @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() =>
+      _delegate.clearActiveWorkspaceSelection();
+
+  @override
+  Future<WorkspaceProfile> createProfile(
+    WorkspaceProfileInput input, {
+    bool select = true,
+  }) => _delegate.createProfile(input, select: select);
+
+  @override
+  Future<WorkspaceProfilesState> deleteProfile(String workspaceId) =>
+      _delegate.deleteProfile(workspaceId);
+
+  @override
+  Future<WorkspaceProfile?> ensureLegacyContextMigrated(
+    WorkspaceProfileInput? input,
+  ) => _delegate.ensureLegacyContextMigrated(input);
+
+  @override
+  Future<WorkspaceProfilesState> loadState() => _delegate.loadState();
+
+  @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) => _delegate.saveHostedAccessMode(workspaceId, accessMode);
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) => _delegate.saveLocalWorkspaceAvailability(
+    workspaceId,
+    isAvailable: isAvailable,
+  );
+
+  @override
+  Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
+    _selectProfileStarted = true;
+    await _selectProfileCompleter.future;
+    return _delegate.selectProfile(workspaceId);
+  }
+
+  @override
+  Future<WorkspaceProfile> updateProfile(
+    String workspaceId,
+    WorkspaceProfileInput input, {
+    bool select = true,
+  }) => _delegate.updateProfile(workspaceId, input, select: select);
 }
 
 class _SlowBrowserStartupAuthProbeRepository
