@@ -15,6 +15,18 @@ Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   );
 }
 
+Future<TrackStateRepository?> requestBrowserLocalWorkspaceRepositoryAccess({
+  required String repositoryPath,
+  required String defaultBranch,
+  required String writeBranch,
+}) {
+  return platform.requestBrowserLocalWorkspaceRepositoryAccess(
+    repositoryPath: repositoryPath,
+    defaultBranch: defaultBranch,
+    writeBranch: writeBranch,
+  );
+}
+
 Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,

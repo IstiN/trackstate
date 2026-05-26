@@ -19,6 +19,21 @@ extension type _DirectoryValuesAccessor._(JSObject _value) implements JSObject {
   external JSAny values();
 }
 
+extension type _FileSystemPermissionHandle._(JSObject _value)
+    implements JSObject {
+  external JSPromise<JSString> queryPermission([
+    _FileSystemPermissionDescriptor descriptor,
+  ]);
+  external JSPromise<JSString> requestPermission([
+    _FileSystemPermissionDescriptor descriptor,
+  ]);
+}
+
+extension type _FileSystemPermissionDescriptor._(JSObject _value)
+    implements JSObject {
+  external factory _FileSystemPermissionDescriptor({String mode});
+}
+
 final Map<String, web.FileSystemDirectoryHandle> _selectedDirectoriesByPath =
     <String, web.FileSystemDirectoryHandle>{};
 final _BrowserLocalWorkspaceSelectionsPersistence
@@ -27,41 +42,33 @@ _browserLocalWorkspaceSelectionsPersistence =
 
 @JS('window.indexedDB')
 external web.IDBFactory? get _indexedDbFactory;
+final _readWritePermissionDescriptor = _FileSystemPermissionDescriptor(
+  mode: 'readwrite',
+);
 
 Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   required String repositoryPath,
   required String defaultBranch,
   required String writeBranch,
 }) async {
-  final normalizedPath = _normalizeWorkspacePath(repositoryPath);
-  if (normalizedPath.isEmpty) {
-    return null;
-  }
-  final cachedHandle = _selectedDirectoriesByPath[normalizedPath];
-  if (cachedHandle != null) {
-    return _BrowserLocalTrackStateRepository(
-      directoryHandle: cachedHandle,
-      repositoryPath: normalizedPath,
-      dataRef: defaultBranch,
-      writeBranch: writeBranch,
-    );
-  }
-  if (!_browserLocalWorkspaceSelectionsPersistence.hasPersistedSelection(
-    workspacePath: normalizedPath,
-  )) {
-    return null;
-  }
-  final handle = await _browserLocalWorkspaceSelectionsPersistence.restore(
-    workspacePath: normalizedPath,
-  );
-  if (handle == null) {
-    return null;
-  }
-  return _BrowserLocalTrackStateRepository(
-    directoryHandle: handle,
-    repositoryPath: normalizedPath,
-    dataRef: defaultBranch,
+  return _openRememberedBrowserLocalWorkspaceRepository(
+    repositoryPath: repositoryPath,
+    defaultBranch: defaultBranch,
     writeBranch: writeBranch,
+    requestPermissionIfNeeded: false,
+  );
+}
+
+Future<TrackStateRepository?> requestBrowserLocalWorkspaceRepositoryAccess({
+  required String repositoryPath,
+  required String defaultBranch,
+  required String writeBranch,
+}) {
+  return _openRememberedBrowserLocalWorkspaceRepository(
+    repositoryPath: repositoryPath,
+    defaultBranch: defaultBranch,
+    writeBranch: writeBranch,
+    requestPermissionIfNeeded: true,
   );
 }
 
@@ -356,6 +363,89 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
 }
 
 String _normalizeWorkspacePath(String path) => path.trim();
+
+Future<TrackStateRepository?> _openRememberedBrowserLocalWorkspaceRepository({
+  required String repositoryPath,
+  required String defaultBranch,
+  required String writeBranch,
+  required bool requestPermissionIfNeeded,
+}) async {
+  final normalizedPath = _normalizeWorkspacePath(repositoryPath);
+  if (normalizedPath.isEmpty) {
+    return null;
+  }
+  final handle = await _resolveRememberedDirectoryHandle(normalizedPath);
+  if (handle == null) {
+    return null;
+  }
+  final hasPermission =
+      requestPermissionIfNeeded
+      ? await _requestDirectoryPermission(handle)
+      : await _hasGrantedDirectoryPermission(handle);
+  if (!hasPermission) {
+    return null;
+  }
+  return _BrowserLocalTrackStateRepository(
+    directoryHandle: handle,
+    repositoryPath: normalizedPath,
+    dataRef: defaultBranch,
+    writeBranch: writeBranch,
+  );
+}
+
+Future<web.FileSystemDirectoryHandle?> _resolveRememberedDirectoryHandle(
+  String normalizedPath,
+) async {
+  final rememberedHandle = _selectedDirectoriesByPath[normalizedPath];
+  if (rememberedHandle != null) {
+    return rememberedHandle;
+  }
+  if (!_browserLocalWorkspaceSelectionsPersistence.hasPersistedSelection(
+    workspacePath: normalizedPath,
+  )) {
+    return null;
+  }
+  return _browserLocalWorkspaceSelectionsPersistence.restore(
+    workspacePath: normalizedPath,
+  );
+}
+
+Future<bool> _hasGrantedDirectoryPermission(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final state = await _queryDirectoryPermissionState(handle);
+  return state == 'granted';
+}
+
+Future<bool> _requestDirectoryPermission(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final currentState = await _queryDirectoryPermissionState(handle);
+  if (currentState == 'granted') {
+    return true;
+  }
+  try {
+    final nextState = await _FileSystemPermissionHandle._(handle as JSObject)
+        .requestPermission(_readWritePermissionDescriptor)
+        .toDart;
+    return nextState.toDart == 'granted';
+  } on Object {
+    return false;
+  }
+}
+
+Future<String?> _queryDirectoryPermissionState(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  try {
+    final state = await _FileSystemPermissionHandle._(handle as JSObject)
+        .queryPermission(_readWritePermissionDescriptor)
+        .toDart;
+    return state.toDart;
+  } on Object {
+    return 'granted';
+  }
+}
 
 class _BrowserLocalTrackStateRepository
     extends ProviderBackedTrackStateRepository {
