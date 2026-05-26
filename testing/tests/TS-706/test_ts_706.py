@@ -448,32 +448,6 @@ def _collect_precondition_run_evidence(
             _read_nested_string(downstream_job, "conclusion") or "<missing>"
         )
         downstream_url = _read_nested_string(downstream_job, "html_url")
-        visible_warning = _runner_permission_warning(result)
-        if visible_warning and result.get("stable_runner_mismatch") is True:
-            result["precondition_failure"] = False
-            result["product_failure"] = True
-            result["error"] = (
-                "AssertionError: Step 4 failed: the Ubuntu preflight gate succeeded with a "
-                "visible warning that the token could not read repository runners, and the "
-                "downstream macOS job was still waiting for a runner after the workflow had "
-                "the full observation window to settle."
-            )
-            _record_step(
-                result,
-                step=4,
-                status="failed",
-                action=REQUEST_STEPS[3],
-                observed=(
-                    "The live run did not match the expected result: the run page showed "
-                    f"`{visible_warning}`, the preflight job page showed "
-                    f"`Verify macOS runner availability` succeeded, and the downstream macOS "
-                    f"job was still `{downstream_status}` after waiting for the workflow to "
-                    "settle instead of the workflow failing fast. "
-                    f"Preflight job URL: {preflight_url}. Downstream job URL: "
-                    f"{downstream_url or '<missing>'}."
-                ),
-            )
-            return
         _record_step(
             result,
             step=4,
@@ -482,9 +456,17 @@ def _collect_precondition_run_evidence(
             observed=(
                 "Observed a precondition-not-met run instead of the ticket's expected failure "
                 f"path: preflight job conclusion was `{preflight_conclusion}`, downstream job "
-                f"status/conclusion was `{downstream_status}` / `{downstream_conclusion}`, "
-                f"and the workflow did not fail fast on runner unavailability. Preflight job "
-                f"URL: {preflight_url}. Downstream job URL: {downstream_url or '<missing>'}."
+                f"status/conclusion was `{downstream_status}` / `{downstream_conclusion}`"
+                + (
+                    f", and the visible warning was `{_runner_permission_warning(result)}`"
+                    if _runner_permission_warning(result)
+                    else ""
+                )
+                + ". This signal is still ambiguous because a matching runner could be online "
+                "but busy, so TS-706 kept the outcome as precondition-not-met instead of "
+                "classifying it as a product defect. "
+                f"Preflight job URL: {preflight_url}. Downstream job URL: "
+                f"{downstream_url or '<missing>'}."
             ),
         )
 
@@ -953,6 +935,14 @@ def _review_reply_text(
             "the configured observation window and only reclassifies that path if the "
             "warning plus queued/waiting job state is still present after the workflow had "
             f"time to settle. {rerun_summary}"
+        )
+    if root_comment_id == 3301776695:
+        return (
+            "Fixed: TS-706 now keeps the settled `preflight succeeded + downstream still "
+            "queued/waiting` path as `PRECONDITION NOT MET` even when the UI shows the "
+            "repository-runner permission warning. That signal is still ambiguous because "
+            "a matching macOS runner could be online but busy, so the test no longer turns "
+            f"it into a product failure without a stable public discriminator. {rerun_summary}"
         )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "
