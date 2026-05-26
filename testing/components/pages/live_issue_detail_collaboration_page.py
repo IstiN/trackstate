@@ -64,9 +64,10 @@ class CommentComposerObservation:
 
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+    _connect_button_selector = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
@@ -82,6 +83,10 @@ class LiveIssueDetailCollaborationPage:
         'flt-semantics[role="button"][flt-tappable]:text-is("Keep current attachment")'
     )
     _selected_button_selector = _active_tab_button_selector
+    _disconnected_markers = (
+        "Needs sign-in",
+        "GitHub write access is not connected",
+    )
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -94,45 +99,25 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banner_variants(
             user_login=user_login,
             repository=repository,
         )
-        if self._is_connected(connected_banner):
+        if not self._is_connected(user_login=user_login, repository=repository):
+            try:
+                self._session.wait_for_any_text(
+                    [*connected_banners, "Attachments limited", "Manage GitHub access"],
+                    timeout_ms=10_000,
+                )
+            except WebAppTimeoutError:
+                pass
+        if self._is_connected(user_login=user_login, repository=repository):
             return
-        if self._session.count(self._connect_button_selector) == 0:
-            raise AssertionError(
-                "Step 1 failed: the hosted session did not expose either the connected "
-                "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            )
-
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
-        self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
-        self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-        self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-        self._session.click(
-            self._button_selector,
-            has_text="Connect token",
-            timeout_ms=30_000,
+        self._tracker_page.connect_with_token(
+            token=token,
+            repository=repository,
+            user_login=user_login,
         )
-        connected_markers = [
-            connected_banner,
-            "GitHub connection failed:",
-            "Manage GitHub access",
-            user_login,
-        ]
-        wait_match = self._session.wait_for_any_text(
-            connected_markers,
-            timeout_ms=120_000,
-        )
-        if wait_match.matched_text == "GitHub connection failed:":
-            raise AssertionError(
-                "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
-                f"Observed body text:\n{wait_match.body_text}",
-            )
 
     def open_jql_search(self) -> None:
         self._session.click(self._button_selector, has_text="JQL Search", timeout_ms=30_000)
@@ -1027,6 +1012,27 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def _is_connected(self, *, user_login: str, repository: str) -> bool:
+        body_text = self.current_body_text()
+        return (
+            self._session.count(self._connected_button_selector) > 0
+            or TrackStateTrackerPage.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            )
+            or (
+                "Connected as " in body_text
+                and not any(marker in body_text for marker in self._disconnected_markers)
+            )
+        )
+
+    def _connect_button_count(self) -> int:
+        return max(
+            self._session.count(self._connect_button_selector),
+            self._session.count(self._button_selector, has_text="Connect GitHub"),
+        )
+
     def activate_focused_control_in_new_page(
         self,
         *,
@@ -1537,12 +1543,6 @@ class LiveIssueDetailCollaborationPage:
             arg={"label": label},
         )
         return int(payload)
-
-    def _is_connected(self, connected_banner: str) -> bool:
-        return (
-            self._session.count(self._connected_button_selector) > 0
-            or connected_banner in self.current_body_text()
-        )
 
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:

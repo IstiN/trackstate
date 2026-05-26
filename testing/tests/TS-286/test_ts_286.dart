@@ -162,6 +162,7 @@ class _Ts286MoveValidationFailureRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => _delegate.uploadIssueAttachment(
     issue: issue,
     name: name,

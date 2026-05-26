@@ -27,11 +27,11 @@ class SettingsScreenRobot {
   Finder get projectSettingsHeading => find.text('Project Settings');
   Finder get projectSettingsAdmin =>
       find.text('Project settings administration');
-  Finder get statusesTab => find.widgetWithText(Tab, 'Statuses');
-  Finder get issueTypesCard => find.widgetWithText(Tab, 'Issue Types');
-  Finder get workflowCard => find.widgetWithText(Tab, 'Workflows');
-  Finder get fieldsCard => find.widgetWithText(Tab, 'Fields');
-  Finder get localesTab => find.widgetWithText(Tab, 'Locales');
+  Finder get statusesTab => tabByLabel('Statuses');
+  Finder get issueTypesCard => tabByLabel('Issue Types');
+  Finder get workflowCard => tabByLabel('Workflows');
+  Finder get fieldsCard => tabByLabel('Fields');
+  Finder get localesTab => tabByLabel('Locales');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
   Finder get settingsAdminSection =>
@@ -168,7 +168,8 @@ class SettingsScreenRobot {
 
   Size get viewportSize => tester.view.physicalSize;
 
-  Finder tabByLabel(String label) => find.widgetWithText(Tab, label);
+  Finder tabByLabel(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
   Future<void> selectTab(String label) async {
     final tab = tabByLabel(label);
@@ -707,26 +708,32 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
       return null;
     }
+
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
           return entry.key;
         }
       }

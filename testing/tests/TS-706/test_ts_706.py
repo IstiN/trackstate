@@ -549,16 +549,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     else:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
-        json.dumps(
-            {
-                "status": "failed",
-                "passed": 0,
-                "failed": 1,
-                "skipped": 0,
-                "summary": "0 passed, 1 failed",
-                "error": str(result.get("error", "AssertionError: TS-706 failed")),
-            }
-        )
+        json.dumps(_test_automation_result_payload(result, passed=False))
         + "\n",
         encoding="utf-8",
     )
@@ -856,6 +847,27 @@ def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
     )
 
 
+def _test_automation_result_payload(
+    result: dict[str, object], *, passed: bool
+) -> dict[str, object]:
+    if passed:
+        return {
+            "status": "passed",
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "summary": "1 passed, 0 failed",
+        }
+    return {
+        "status": "failed",
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "summary": "0 passed, 1 failed",
+        "error": str(result.get("error", "AssertionError: TS-706 failed")),
+    }
+
+
 def _discussion_threads() -> list[dict[str, object]]:
     if not DISCUSSIONS_RAW_PATH.is_file():
         return []
@@ -1026,7 +1038,7 @@ def _failed_step_summary(result: dict[str, object]) -> str:
             continue
         status = str(entry.get("status", "")).lower()
         if status == "blocked":
-            return f"Step {entry.get('step')} {status}: {entry.get('observed')}"
+            return f"Step {entry.get('step')} blocked: {entry.get('observed')}"
     return str(result.get("error", "Unknown failure"))
 
 

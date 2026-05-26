@@ -3,13 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
-import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../../components/services/demo_local_workspace_repository.dart';
 import '../../../components/screens/settings_screen_robot.dart';
 import '../../../core/utils/local_git_test_repository.dart';
 
@@ -94,7 +93,7 @@ class Ts724WorkspaceSwitchValidationFixture {
             if (!Directory(repositoryPath).existsSync()) {
               throw StateError(missingWorkspaceReason);
             }
-            return createTs724LocalWorkspaceRepository(
+            return createDemoLocalWorkspaceRepository(
               repositoryPath: repositoryPath,
             );
           },
@@ -305,50 +304,4 @@ class _Ts724MemoryTrackStateAuthStore implements TrackStateAuthStore {
     String? repository,
     String? workspaceId,
   }) async {}
-}
-
-Future<TrackStateRepository> createTs724LocalWorkspaceRepository({
-  required String repositoryPath,
-}) async {
-  return _Ts724LocalWorkspaceRepository(
-    snapshot: await _snapshotForRepository(repositoryPath),
-  );
-}
-
-Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
-  final base = await const DemoTrackStateRepository().loadSnapshot();
-  return TrackerSnapshot(
-    project: ProjectConfig(
-      key: base.project.key,
-      name: base.project.name,
-      repository: repository,
-      branch: base.project.branch,
-      defaultLocale: base.project.defaultLocale,
-      supportedLocales: base.project.supportedLocales,
-      issueTypeDefinitions: base.project.issueTypeDefinitions,
-      statusDefinitions: base.project.statusDefinitions,
-      fieldDefinitions: base.project.fieldDefinitions,
-      workflowDefinitions: base.project.workflowDefinitions,
-      priorityDefinitions: base.project.priorityDefinitions,
-      versionDefinitions: base.project.versionDefinitions,
-      componentDefinitions: base.project.componentDefinitions,
-      resolutionDefinitions: base.project.resolutionDefinitions,
-      attachmentStorage: base.project.attachmentStorage,
-    ),
-    issues: base.issues,
-    repositoryIndex: base.repositoryIndex,
-    loadWarnings: base.loadWarnings,
-    readiness: base.readiness,
-    startupRecovery: base.startupRecovery,
-  );
-}
-
-class _Ts724LocalWorkspaceRepository extends DemoTrackStateRepository {
-  const _Ts724LocalWorkspaceRepository({required super.snapshot});
-
-  @override
-  bool get usesLocalPersistence => true;
-
-  @override
-  bool get supportsGitHubAuth => false;
 }

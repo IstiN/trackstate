@@ -23,23 +23,23 @@ void main() {
     expect(inspection.detectedWriteBranch, 'main');
   });
 
-  test(
-    'inspectFolder allows initialization for a non-empty non-git folder',
-    () async {
-      final directory = await Directory.systemTemp.createTemp(
-        'trackstate-non-git-',
-      );
-      addTearDown(() => directory.delete(recursive: true));
-      await File('${directory.path}/notes.txt').writeAsString('hello');
+  test('inspectFolder blocks a non-empty non-git folder', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'trackstate-non-git-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    await File('${directory.path}/notes.txt').writeAsString('hello');
 
-      final service = const LocalGitWorkspaceOnboardingService();
-      final inspection = await service.inspectFolder(directory.path);
+    final service = const LocalGitWorkspaceOnboardingService();
+    final inspection = await service.inspectFolder(directory.path);
 
-      expect(inspection.state, LocalWorkspaceInspectionState.readyToInitialize);
-      expect(inspection.needsGitInitialization, isTrue);
-      expect(inspection.message, contains('not a Git repository yet'));
-    },
-  );
+    expect(inspection.state, LocalWorkspaceInspectionState.blocked);
+    expect(inspection.needsGitInitialization, isTrue);
+    expect(
+      inspection.message,
+      contains('Choose an existing Git repository or an empty folder'),
+    );
+  });
 
   test(
     'inspectFolder blocks a non-git folder with TrackState artifacts',
@@ -78,6 +78,29 @@ void main() {
   });
 
   test(
+    'inspectFolder treats a committed plain Git repository as ready to open',
+    () async {
+      final parentDirectory = await Directory.systemTemp.createTemp(
+        'trackstate-plain-parent-',
+      );
+      addTearDown(() => parentDirectory.delete(recursive: true));
+      final repository = await _createPlainGitRepository(parentDirectory);
+
+      final service = const LocalGitWorkspaceOnboardingService();
+      final inspection = await service.inspectFolder(repository.path);
+
+      expect(inspection.state, LocalWorkspaceInspectionState.readyToOpen);
+      expect(inspection.hasGitRepository, isTrue);
+      expect(inspection.canOpen, isTrue);
+      expect(inspection.detectedWriteBranch, 'main');
+      expect(
+        inspection.message,
+        'This folder is an existing committed Git repository and can be opened in TrackState without initialization.',
+      );
+    },
+  );
+
+  test(
     'initializeFolder writes the starter scaffold and extends gitattributes',
     () async {
       final directory = await Directory.systemTemp.createTemp(
@@ -113,7 +136,17 @@ void main() {
         File(
           '${directory.path}/STARTERWOR/.trackstate/index/issues.json',
         ).readAsStringSync(),
-        '[]\n',
+        contains('"key":"STARTERWOR-1"'),
+      );
+      expect(
+        File('${directory.path}/STARTERWOR/STARTERWOR-1/main.md').existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          '${directory.path}/STARTERWOR/STARTERWOR-1/main.md',
+        ).readAsStringSync(),
+        contains('Welcome to Starter Workspace'),
       );
       final gitattributes = File(
         '${directory.path}/.gitattributes',
@@ -235,6 +268,29 @@ updated: 2026-05-05T00:00:00Z
 
 Ready issue.
 ''');
+  await _git(directory.path, ['init', '-b', 'main']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
+  await _git(directory.path, ['add', '.']);
+  await _git(directory.path, ['commit', '-m', 'Initial import']);
+  return directory;
+}
+
+Future<Directory> _createPlainGitRepository(Directory parentDirectory) async {
+  final directory = Directory('${parentDirectory.path}/plain-demo-repo');
+  await directory.create(recursive: true);
+  await _writeFile(directory, 'README.md', '# Plain Git repository fixture\n');
+  await _writeFile(directory, 'docs/notes.txt', 'Plain repository notes\n');
   await _git(directory.path, ['init', '-b', 'main']);
   await _git(directory.path, [
     'config',

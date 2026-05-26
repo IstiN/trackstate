@@ -208,11 +208,17 @@ abstract class AppLocalizations {
   /// **'Syncing'**
   String get workspaceSyncChecking;
 
-  /// No description provided for @workspaceSyncAttentionNeeded.
+  /// No description provided for @workspaceSyncAttentionNeededVisibleLabel.
   ///
   /// In en, this message translates to:
   /// **'Attention needed'**
-  String get workspaceSyncAttentionNeeded;
+  String get workspaceSyncAttentionNeededVisibleLabel;
+
+  /// No description provided for @workspaceSyncAttentionNeededSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync error, attention needed'**
+  String get workspaceSyncAttentionNeededSemanticLabel;
 
   /// No description provided for @workspaceSyncUnavailable.
   ///
@@ -388,6 +394,12 @@ abstract class AppLocalizations {
   /// **'Detail'**
   String get detail;
 
+  /// No description provided for @comment.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment'**
+  String get comment;
+
   /// No description provided for @comments.
   ///
   /// In en, this message translates to:
@@ -403,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
+  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
@@ -477,6 +489,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download {fileName}'**
   String downloadAttachment(String fileName);
+
+  /// No description provided for @commentPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a comment...'**
+  String get commentPlaceholder;
 
   /// No description provided for @postComment.
   ///
@@ -1633,7 +1651,7 @@ abstract class AppLocalizations {
   /// No description provided for @repositoryConfigFallback.
   ///
   /// In en, this message translates to:
-  /// **'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}'**
+  /// **'TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}'**
   String repositoryConfigFallback(String error);
 
   /// No description provided for @workspaceSwitchFailed.
@@ -1653,6 +1671,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}'**
   String workspaceRestoreFailed(String workspaceName, String reason);
+
+  /// No description provided for @selectedIssueUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'{issueKey} is no longer available in this workspace.'**
+  String selectedIssueUnavailable(String issueKey);
 
   /// No description provided for @localGitTokensNotNeeded.
   ///
@@ -1791,6 +1815,12 @@ abstract class AppLocalizations {
   /// **'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.'**
   String get localGitRuntimeDescription;
 
+  /// No description provided for @localGitHostedAccessDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.'**
+  String get localGitHostedAccessDescription;
+
   /// No description provided for @close.
   ///
   /// In en, this message translates to:
@@ -1808,6 +1838,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retry'**
   String get retry;
+
+  /// No description provided for @retryStartup.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry startup'**
+  String get retryStartup;
 
   /// No description provided for @editIssue.
   ///
@@ -1872,8 +1908,21 @@ abstract class AppLocalizations {
   /// No description provided for @hierarchyChangeConfirmationMessage.
   ///
   /// In en, this message translates to:
-  /// **'Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
-  String hierarchyChangeConfirmationMessage(int descendantCount);
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
+  String hierarchyChangeConfirmationMessage(
+    String issueLabel,
+    int descendantCount,
+  );
+
+  /// No description provided for @hierarchyChangeConfirmationDestinationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.'**
+  String hierarchyChangeConfirmationDestinationMessage(
+    String issueLabel,
+    int descendantCount,
+    String destinationLabel,
+  );
 
   /// No description provided for @confirmMove.
   ///
