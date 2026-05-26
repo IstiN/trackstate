@@ -1,0 +1,8 @@
+test_id: TS-372
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses the shared hosted read-only provider fixture to exercise the production issue-detail Comments auth-gate in a connected but non-writable session.
+  - Verifies the comment composer stays visible, the inline read-only explanation renders in place, and the recovery CTA routes the user to Settings.

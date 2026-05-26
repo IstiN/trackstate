@@ -1,0 +1,46 @@
+test_id: TS-543
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the current supported local attachment download command from a disposable TrackState repository whose attachments metadata points at github-releases storage and whose Git repository has no remotes configured.
+  - Uses `--attachment-id` plus `--out` because the ticket's `--issue` and `--file` download form is not supported by the current CLI surface.
+  - Expects an explicit repository-identity error that explains no Git remote is configured and treats the generic provider capability error as a product-visible failure.
+runtime_inputs:
+  ticket_command: trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-543 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local download missing-remote fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_size_bytes: 19
+  attachment_revision_or_oid: missing-remote-543
+  attachment_created_at: "2026-05-13T00:00:00Z"
+  attachment_author: tester
+  attachment_tag_prefix: ts543-
+  attachment_release_tag: v2.74.0
+  attachment_release_asset_name: manual.pdf
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  expected_identity_fragments:
+    - github repository identity
+    - local git configuration
+    - no remote is configured
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider

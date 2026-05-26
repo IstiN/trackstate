@@ -33,8 +33,10 @@ void main() {
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
         expect(
-          await screen.isTopBarSemanticsLabelVisible('Local Git') ||
-              await screen.isTopBarTextVisible('Local Git'),
+          await screen.isTopBarSemanticsLabelVisible(
+                'Workspace switcher: ${fixture.repositoryPath}, Local, Local Git',
+              ) ||
+              await screen.isTopBarTextVisible(fixture.repositoryPath),
           isTrue,
         );
         expect(
