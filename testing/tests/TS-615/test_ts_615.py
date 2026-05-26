@@ -20,6 +20,7 @@ from testing.components.pages.live_tracker_header_page import (  # noqa: E402
     DesktopHeaderObservation,
     HeaderControlObservation,
     LiveTrackerHeaderPage,
+    RepositoryAccessStateObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -129,23 +130,11 @@ def main() -> None:
                 )
 
                 observation = header_page.observe_desktop_header()
+                state_observation = header_page.observe_repository_access_state_surface()
                 rendered_observation = _observe_rendered_header(header_page, observation)
                 result["header_observation"] = asdict(observation)
+                result["repository_access_state_observation"] = asdict(state_observation)
                 result["rendered_header_observation"] = asdict(rendered_observation)
-                _assert_repository_access_button(observation)
-                _record_step(
-                    result,
-                    step=2,
-                    status="passed",
-                    action="Locate the repository access state button in the desktop header.",
-                    observed=(
-                        f"repository_access_label={observation.repository_access.label}; "
-                        f"x={observation.repository_access.x:.1f}; "
-                        f"y={observation.repository_access.y:.1f}; "
-                        f"width={observation.repository_access.width:.1f}; "
-                        f"height={observation.repository_access.height:.1f}"
-                    ),
-                )
                 _record_human_verification(
                     result,
                     check=(
@@ -157,6 +146,28 @@ def main() -> None:
                 )
 
                 step_errors: list[str] = []
+                try:
+                    _assert_repository_access_button(observation, state_observation)
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action="Locate the repository access state button in the desktop header.",
+                        observed=str(error),
+                    )
+                    step_errors.append(str(error))
+                else:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action="Locate the repository access state button in the desktop header.",
+                        observed=_repository_access_visibility_summary(
+                            observation,
+                            state_observation,
+                        ),
+                    )
                 try:
                     _assert_visual_parity(observation, rendered_observation)
                 except AssertionError as error:
@@ -208,6 +219,18 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
+                        "Verified the rendered `Attachments limited` state itself was visible "
+                        "inside the workspace-switcher trigger rather than inferred only from "
+                        "accessibility metadata."
+                    ),
+                    observed=_repository_access_visibility_summary(
+                        observation,
+                        state_observation,
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
                         "Verified the repository access label was legible and visually sat "
                         "on the same centered baseline as the neighboring desktop controls."
                     ),
@@ -235,12 +258,37 @@ def main() -> None:
     _write_pass_outputs(result)
 
 
-def _assert_repository_access_button(observation: DesktopHeaderObservation) -> None:
-    if observation.repository_access.label != "Attachments limited":
+def _assert_repository_access_button(
+    observation: DesktopHeaderObservation,
+    state_observation: RepositoryAccessStateObservation,
+) -> None:
+    expected_state = "Attachments limited"
+    if not state_observation.state_found:
         raise AssertionError(
-            "Step 2 failed: the desktop header did not expose the expected "
-            "`Attachments limited` repository access label.\n"
-            f"Observed header metrics: {_semantic_summary(observation)}",
+            "Step 2 failed: the visible workspace-switcher trigger did not expose a "
+            "rendered `Attachments limited` state surface in the desktop header.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    rendered_state_text = _normalize_visible_text(
+        state_observation.state_visible_text or state_observation.trigger_visible_text
+    )
+    if expected_state not in rendered_state_text:
+        raise AssertionError(
+            "Step 2 failed: the rendered repository access trigger did not show "
+            "the expected `Attachments limited` text clearly.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    if not state_observation.state_fully_within_trigger:
+        raise AssertionError(
+            "Step 2 failed: the rendered `Attachments limited` state surface overflowed "
+            "the workspace-switcher trigger instead of fitting clearly within it.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
+        )
+    if not state_observation.center_hit_within_trigger:
+        raise AssertionError(
+            "Step 2 failed: the detected `Attachments limited` text was not hit-test "
+            "visible within the workspace-switcher trigger.\n"
+            f"Observed visibility: {_repository_access_visibility_summary(observation, state_observation)}",
         )
 
 
@@ -248,15 +296,15 @@ def _assert_visual_parity(
     semantic_observation: DesktopHeaderObservation,
     rendered_observation: RenderedHeaderObservation,
 ) -> None:
+    search_field = rendered_observation.search_field
     repository_access = rendered_observation.repository_access
     create_issue = rendered_observation.create_issue
-    search_input = semantic_observation.search_input
     errors: list[str] = []
 
-    if not _within(search_input.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
+    if not _within(search_field.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
         errors.append(
-            "the visible Search issues input measured "
-            f"{search_input.height:.1f}px instead of the documented "
+            "the visible Search issues field measured "
+            f"{search_field.height:.1f}px instead of the documented "
             f"{EXPECTED_CONTROL_HEIGHT:.1f}px control height"
         )
     if not _within(repository_access.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
@@ -273,23 +321,23 @@ def _assert_visual_parity(
         )
     if not _within(
         repository_access.center_y,
-        search_input.center_y,
+        search_field.center_y,
         CENTER_TOLERANCE,
     ):
         errors.append(
             "repository access rendered vertical center "
             f"({repository_access.center_y:.1f}px) drifted from the visible Search issues "
-            f"input center ({search_input.center_y:.1f}px)"
+            f"field center ({search_field.center_y:.1f}px)"
         )
     if not _within(
         create_issue.center_y,
-        search_input.center_y,
+        search_field.center_y,
         CENTER_TOLERANCE,
     ):
         errors.append(
             "Create issue rendered vertical center "
             f"({create_issue.center_y:.1f}px) drifted from the visible Search issues "
-            f"input center ({search_input.center_y:.1f}px)"
+            f"field center ({search_field.center_y:.1f}px)"
         )
 
     if errors:
@@ -303,7 +351,7 @@ def _assert_visual_parity(
 
 def _assert_shared_spacing_token(observation: RenderedHeaderObservation) -> None:
     left_gap = observation.repository_access.x - observation.create_issue.right
-    right_gap = observation.theme_toggle.x - observation.repository_access.right
+    right_gap = observation.search_field.x - observation.repository_access.right
     errors: list[str] = []
     if not _within(left_gap, ACTION_GAP, GAP_TOLERANCE):
         errors.append(
@@ -312,7 +360,7 @@ def _assert_shared_spacing_token(observation: RenderedHeaderObservation) -> None
         )
     if not _within(right_gap, ACTION_GAP, GAP_TOLERANCE):
         errors.append(
-            "the gap between `Attachments limited` and the theme toggle measured "
+            "the gap between `Attachments limited` and the visible Search issues field measured "
             f"{right_gap:.1f}px instead of {ACTION_GAP:.1f}px"
         )
     if errors:
@@ -369,6 +417,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
@@ -513,10 +562,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
-    observation = result.get("rendered_header_observation", {})
+    rendered_observation = result.get("rendered_header_observation", {})
+    state_observation = result.get("repository_access_state_observation", {})
     return "\n".join(
         [
-            "# TS-615 - Desktop header `Attachments limited` control does not match adjacent rendered header geometry",
+            "# TS-615 - Desktop header `Attachments limited` control does not clearly display the state or match adjacent rendered header geometry",
             "",
             "## Steps to reproduce",
             "1. Launch the web application and trigger the `Attachments limited` state.",
@@ -557,7 +607,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-            f"- Rendered header observation: `{observation}`",
+            f"- Repository access state observation: `{state_observation}`",
+            f"- Rendered header observation: `{rendered_observation}`",
             f"- Runtime state: `{result.get('runtime_state', '')}`",
             f"- Connected body text: `{result.get('connected_body_text', '')}`",
         ],
@@ -639,16 +690,36 @@ def _semantic_summary(observation: DesktopHeaderObservation) -> str:
     )
 
 
+def _repository_access_visibility_summary(
+    observation: DesktopHeaderObservation,
+    state_observation: RepositoryAccessStateObservation,
+) -> str:
+    return (
+        f"workspace_switcher_label={observation.repository_access.accessible_label!r}; "
+        f"workspace_switcher_visible_text={observation.repository_access.visible_text!r}; "
+        f"state_found={state_observation.state_found}; "
+        f"state_source={state_observation.state_source!r}; "
+        f"state_label={state_observation.state_label!r}; "
+        f"state_visible_text={state_observation.state_visible_text!r}; "
+        f"state_bounds=({state_observation.state_x:.1f},{state_observation.state_y:.1f},"
+        f"{state_observation.state_width:.1f}x{state_observation.state_height:.1f}); "
+        f"state_within_trigger={state_observation.state_fully_within_trigger}; "
+        f"center_hit_within_trigger={state_observation.center_hit_within_trigger}; "
+        f"center_hit_tag={state_observation.center_hit_tag_name!r}; "
+        f"center_hit_text={state_observation.center_hit_text!r}"
+    )
+
+
 def _parity_summary(
     semantic_observation: DesktopHeaderObservation,
     rendered_observation: RenderedHeaderObservation,
 ) -> str:
     return (
         f"expected_control_height={EXPECTED_CONTROL_HEIGHT:.1f}px; "
-        f"search_input_height={semantic_observation.search_input.height:.1f}px; "
+        f"search_field_height={rendered_observation.search_field.height:.1f}px; "
         f"create_issue_height={rendered_observation.create_issue.height:.1f}px; "
         f"repository_access_height={rendered_observation.repository_access.height:.1f}px; "
-        f"search_input_center_y={semantic_observation.search_input.center_y:.1f}px; "
+        f"search_field_center_y={rendered_observation.search_field.center_y:.1f}px; "
         f"create_issue_center_y={rendered_observation.create_issue.center_y:.1f}px; "
         f"repository_access_center_y={rendered_observation.repository_access.center_y:.1f}px"
     )
@@ -657,13 +728,17 @@ def _parity_summary(
 def _spacing_summary(observation: RenderedHeaderObservation) -> str:
     return (
         f"create_to_repository_gap={observation.repository_access.x - observation.create_issue.right:.1f}px; "
-        f"repository_to_theme_gap={observation.theme_toggle.x - observation.repository_access.right:.1f}px; "
+        f"repository_to_search_gap={observation.search_field.x - observation.repository_access.right:.1f}px; "
         f"expected_gap={ACTION_GAP:.1f}px"
     )
 
 
 def _within(value: float, expected: float, tolerance: float) -> bool:
     return abs(value - expected) <= tolerance
+
+
+def _normalize_visible_text(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _observe_rendered_header(

@@ -302,7 +302,6 @@ class TrackStateCliReleaseBodyNormalizationScenario:
             )
         if step_4_failures:
             return step_4_failures
-
         _record_step(
             result,
             step=4,

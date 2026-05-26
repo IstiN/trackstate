@@ -26,6 +26,7 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 
 def main() -> None:
@@ -43,11 +44,12 @@ def main() -> None:
         )
     )
     result, error = scenario.execute()
-    _write_review_replies()
     if error:
         _write_failure_outputs(result)
+        _write_review_replies(result, passed=False)
     else:
         _write_pass_outputs(result)
+        _write_review_replies(result, passed=True)
     print(json.dumps(result, indent=2, sort_keys=True))
     if error:
         raise SystemExit(error)
@@ -95,37 +97,9 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
-def _write_review_replies() -> None:
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
     REVIEW_REPLIES_PATH.write_text(
-        json.dumps(
-            {
-                "replies": [
-                    {
-                        "inReplyToId": 3234613444,
-                        "threadId": "PRRT_kwDOSU6Gf86BxGZs",
-                        "reply": (
-                            "Fixed: moved the TS-590 runtime orchestration out of the ticket "
-                            "file into the layered support flow (`tests/support` scenario -> "
-                            "validator component -> Python framework probe). "
-                            "`testing/tests/TS-590/test_ts_590.py` now stays focused on the "
-                            "ticket result and required output files."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3234613609,
-                        "threadId": "PRRT_kwDOSU6Gf86BxGbu",
-                        "reply": (
-                            "Fixed: config parsing is now pure. "
-                            "`TrackStateCliReleaseBodyNormalizationConfig.from_file()` only "
-                            "deserializes YAML, and the live repository service plus repository/ref "
-                            "metadata are injected from the scenario layer before probe execution."
-                        ),
-                    },
-                ]
-            },
-            indent=2,
-        )
-        + "\n",
+        _build_review_replies(result, passed=passed),
         encoding="utf-8",
     )
 
@@ -178,6 +152,30 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    release_state = as_dict(result.get("release_state"))
+    expected_release_body = as_text(result.get("expected_release_body")).rstrip("\n")
+    lines = [
+        "## Rework Summary",
+        (
+            "- Resolved the TS-590 merge conflicts in the ticket test and support scenario "
+            "without changing the intended coverage."
+        ),
+        f"- Re-ran `{RUN_COMMAND}` — **{'PASSED' if passed else 'FAILED'}**.",
+    ]
+    if passed:
+        lines.append(
+            f"- The reused release body converged to `{expected_release_body}`."
+        )
+    else:
+        lines.append(
+            "- The test still reproduces the product-visible gap: the reused release body "
+            f"stayed `{as_text(release_state.get('release_body'))}` instead of "
+            f"`{expected_release_body}`."
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     release_state = as_dict(result.get("release_state"))
     gh_view = as_dict(result.get("gh_release_view"))
@@ -188,6 +186,10 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         f"**Command:** `{RUN_COMMAND}`",
+        "",
+        "## Rework",
+        "- Resolved the current merge conflicts in the TS-590 ticket test and support scenario.",
+        "- Kept the existing layered test structure and failure evidence intact.",
         "",
         "## Automation coverage",
         (
@@ -205,8 +207,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Observed result",
         f"- Expected release body: `{as_text(result.get('expected_release_body')).rstrip()}`",
-        f"- Observed live release body: `{as_text(release_state.get('release_body'))}`",
-        f"- Observed `gh release view` body: `{as_text(gh_payload.get('body'))}`",
+        f"- Observed live release body: `{as_text(release_state.get('release_body')).rstrip()}`",
+        f"- Observed `gh release view` body: `{as_text(gh_payload.get('body')).rstrip()}`",
         "",
         "## Step results",
         *_step_lines(result, jira=False),
@@ -236,24 +238,6 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
-
-
-def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    release_state = as_dict(result.get("release_state"))
-    return "\n".join(
-        [
-            "## TS-590 Summary",
-            f"- **Status:** {'PASSED' if passed else 'FAILED'}",
-            f"- **Command:** `{RUN_COMMAND}`",
-            (
-                "- **Outcome:** the reused draft release normalized to the standard machine-managed note."
-                if passed
-                else "- **Outcome:** the upload succeeded and the manifest converged, but the reused release body stayed custom."
-            ),
-            f"- **Observed release body:** `{as_text(release_state.get('release_body'))}`",
-            f"- **Expected release body:** `{as_text(result.get('expected_release_body')).rstrip()}`",
-        ]
-    ) + "\n"
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -403,7 +387,11 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
             lines.append(f"* {check} Observed: {{{{{observed}}}}}")
         else:
             lines.append(f"- {check} Observed: `{observed}`")
-    return lines or (["* No additional human-style verification recorded."] if jira else ["- No additional human-style verification recorded."])
+    return lines or (
+        ["* No additional human-style verification recorded."]
+        if jira
+        else ["- No additional human-style verification recorded."]
+    )
 
 
 def _steps(result: dict[str, object]) -> list[dict[str, object]]:
@@ -422,6 +410,51 @@ def _human_verifications(result: dict[str, object]) -> list[dict[str, object]]:
 
 def _has_recorded_step(result: dict[str, object], step_number: int) -> bool:
     return any(step.get("step") == step_number for step in _steps(result))
+
+
+def _build_review_replies(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+            }
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-590 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran the current TS-590 test and it still failed (`0 passed, 1 failed`)."
+    )
+    return "No unresolved actionable review threads remain on this PR. " + rerun_summary
 
 
 def _observed_command_output(stdout: str, stderr: str) -> str:

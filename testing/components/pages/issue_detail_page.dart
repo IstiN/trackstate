@@ -52,8 +52,8 @@ class IssueDetailPage {
   ActionAvailability editAction(String issueKey) =>
       driver.getActionAvailability('Edit', within: issueDetailLabel(issueKey));
 
-  ActionAvailability commentAction(String issueKey) => driver
-      .getActionAvailability('Comments', within: issueDetailLabel(issueKey));
+  ActionAvailability commentAction(String issueKey) =>
+      driver.getActionAvailability('Comment', within: issueDetailLabel(issueKey));
 
   bool hasReadOnlyExplanation(String issueKey) => driver.hasAnyMessage([
     RegExp('permission required', caseSensitive: false),
