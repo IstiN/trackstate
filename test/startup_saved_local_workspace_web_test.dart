@@ -110,7 +110,7 @@ void main() {
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -179,7 +179,7 @@ void main() {
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -333,7 +333,7 @@ void main() {
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -527,7 +527,7 @@ void main() {
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       final savedStateAfterSwitch = await workspaceProfiles.loadState();
-      expect(savedStateAfterSwitch.activeWorkspaceId, _hostedWorkspaceId);
+      _expectHostedFallbackWorkspaceState(savedStateAfterSwitch);
       _expectRestrictedFallbackShell(delayedRepository);
       await _expectBlockedCreateIssueGate(tester);
       delayedRepository.completeUserProbe();
@@ -613,7 +613,7 @@ void main() {
       await _expectHostedFallbackWorkspaceRow(tester);
       await _expectBlockedCreateIssueGate(tester);
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      expect(savedStateAfterStartup.activeWorkspaceId, _hostedWorkspaceId);
+      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -959,7 +959,8 @@ class _SlowBrowserStartupAuthProbeRepository
 }
 
 class _RealHostedStartupDelayedAuthHarness {
-  final Completer<http.Response> _userProbeCompleter = Completer<http.Response>();
+  final Completer<http.Response> _userProbeCompleter =
+      Completer<http.Response>();
   final List<String> requestedPaths = <String>[];
 
   int get userProbeRequestCount =>
@@ -1102,6 +1103,17 @@ Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
   );
   await tester.tapAt(const Offset(8, 8));
   await tester.pumpAndSettle();
+}
+
+void _expectHostedFallbackWorkspaceState(WorkspaceProfilesState state) {
+  expect(state.activeWorkspaceId, _hostedWorkspaceId);
+  final hostedWorkspace = state.profiles.firstWhere(
+    (workspace) => workspace.id == _hostedWorkspaceId,
+  );
+  expect(
+    hostedWorkspace.hostedAccessMode,
+    HostedWorkspaceAccessMode.disconnected,
+  );
 }
 
 Future<void> _expectBlockedCreateIssueGate(WidgetTester tester) async {

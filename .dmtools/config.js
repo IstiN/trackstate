@@ -261,10 +261,14 @@ module.exports = {
         },
         pr_review: {
             customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
             }
         },
         pr_test_automation_review: {
             customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
             }
         },
         pr_rework: {

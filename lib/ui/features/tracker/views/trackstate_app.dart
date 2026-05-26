@@ -591,9 +591,15 @@ class _TrackStateAppState extends State<TrackStateApp>
         );
         continue;
       }
-      final selectedState = await widget.workspaceProfileService.selectProfile(
+      var selectedState = await widget.workspaceProfileService.selectProfile(
         prepared.workspace?.id ?? workspace.id,
       );
+      selectedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: selectedState,
+          ) ??
+          selectedState;
       _pendingWorkspaceRestoreFailure = null;
       if (lastFailure != null) {
         prepared.viewModel.showMessage(
@@ -626,6 +632,36 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   bool _shouldDeferAccessRestoreForWorkspace(WorkspaceProfile workspace) {
     return kIsWeb && workspace.isHosted;
+  }
+
+  Future<WorkspaceProfilesState?> _persistPreparedHostedWorkspaceState(
+    _PreparedWorkspaceSwitch prepared, {
+    WorkspaceProfilesState? workspaceState,
+  }) async {
+    if (widget.repository != null) {
+      return workspaceState;
+    }
+    final workspace = prepared.workspace;
+    if (workspace == null || !workspace.isHosted) {
+      return workspaceState;
+    }
+    var nextState = workspaceState;
+    if (nextState == null || nextState.activeWorkspaceId != workspace.id) {
+      nextState = await widget.workspaceProfileService.selectProfile(
+        workspace.id,
+      );
+    }
+    final activeWorkspace = nextState.activeWorkspace;
+    final accessMode = _hostedWorkspaceAccessModeForViewModel(
+      prepared.viewModel,
+    );
+    if (activeWorkspace?.hostedAccessMode != accessMode) {
+      nextState = await widget.workspaceProfileService.saveHostedAccessMode(
+        workspace.id,
+        accessMode,
+      );
+    }
+    return nextState;
   }
 
   Future<WorkspaceProfile?>
@@ -1325,6 +1361,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       selectedState = await widget.workspaceProfileService.selectProfile(
         workspace.id,
       );
+      selectedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: selectedState,
+          ) ??
+          selectedState;
     }
     await _commitPreparedWorkspaceSwitch(
       prepared,
@@ -1362,6 +1404,12 @@ class _TrackStateAppState extends State<TrackStateApp>
         isAvailable: true,
       );
     }
+    selectedState =
+        await _persistPreparedHostedWorkspaceState(
+          prepared,
+          workspaceState: selectedState,
+        ) ??
+        selectedState;
     await _commitPreparedWorkspaceSwitch(
       prepared,
       previousViewModel: previousViewModel,
