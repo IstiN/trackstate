@@ -20,7 +20,7 @@ void main() {
   });
 
   testWidgets(
-    'hosted create flow opens the create surface before editing starts',
+    'hosted create flow keeps the create surface gated until write access is connected',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
@@ -36,8 +36,13 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('Summary'), findsAtLeastNWidgets(1));
-        expect(find.text('Description'), findsAtLeastNWidgets(1));
+        expect(find.text('GitHub write access is not connected'), findsWidgets);
+        expect(find.text('Summary'), findsNothing);
+        expect(find.text('Description'), findsNothing);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Open settings'),
+          findsOneWidget,
+        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -73,7 +78,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.bySemanticsLabel(RegExp('^Create issue\$')).first);
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Create issue\$')).first,
+        );
         await tester.pumpAndSettle();
 
         final callout = find.ancestor(

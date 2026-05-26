@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 import json
-from typing import Sequence
+from typing import Any, Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
 
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
