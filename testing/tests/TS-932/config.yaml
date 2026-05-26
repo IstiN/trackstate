@@ -1,0 +1,40 @@
+test_id: TS-932
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub pull requests, checks, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts932_probe_surface.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts932-placeholder-verification
+  commit_message: "TS-932 probe: verify semantics placeholder logging before scan"
+  pull_request_title: "TS-932 disposable probe: verify semantics placeholder logging before scan"
+  pull_request_body: "Disposable PR created by TS-932 automation to verify that the live accessibility gate logs flt-semantics-placeholder verification before the hosted WCAG scan proceeds."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - axe
+    - wcag
+  contrast_evidence_markers:
+    - contrast
+    - color contrast
+    - ratio
+    - wcag
+    - 4.5:1
+  semantic_evidence_markers:
+    - semantics
+    - placeholder
+    - flt-semantics-placeholder
+    - label
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable WCAG-compliant pull request so the hosted Accessibility checks job should pass on the live implementation.
+  - Verifies the contributor-visible Actions log records flt-semantics-placeholder verification before the runtime accessibility surface becomes ready and the scan completes.

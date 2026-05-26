@@ -27,11 +27,11 @@ class SettingsScreenRobot {
   Finder get projectSettingsHeading => find.text('Project Settings');
   Finder get projectSettingsAdmin =>
       find.text('Project settings administration');
-  Finder get statusesTab => find.widgetWithText(Tab, 'Statuses');
-  Finder get issueTypesCard => find.widgetWithText(Tab, 'Issue Types');
-  Finder get workflowCard => find.widgetWithText(Tab, 'Workflows');
-  Finder get fieldsCard => find.widgetWithText(Tab, 'Fields');
-  Finder get localesTab => find.widgetWithText(Tab, 'Locales');
+  Finder get statusesTab => tabByLabel('Statuses');
+  Finder get issueTypesCard => tabByLabel('Issue Types');
+  Finder get workflowCard => tabByLabel('Workflows');
+  Finder get fieldsCard => tabByLabel('Fields');
+  Finder get localesTab => tabByLabel('Locales');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
   Finder get settingsAdminSection =>
@@ -45,8 +45,14 @@ class SettingsScreenRobot {
       topBarProviderControl('Connect GitHub');
   Finder get connectGitHubSettingsControl =>
       settingsProviderControl('Connect GitHub');
+  Finder get readOnlyTopBarControl => topBarProviderControl('Read-only');
+  Finder get readOnlySettingsControl => settingsProviderControl('Read-only');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
+  Finder get attachmentsLimitedTopBarControl =>
+      topBarProviderControl('Attachments limited');
+  Finder get attachmentsLimitedSettingsControl =>
+      settingsProviderControl('Attachments limited');
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
   Finder get localGitControl => providerControl('Local Git');
@@ -77,6 +83,43 @@ class SettingsScreenRobot {
       matching: find.byWidgetPredicate(
         (widget) => widget is Container && widget.decoration is BoxDecoration,
         description: 'startup recovery callout container',
+      ),
+    ),
+  );
+
+  Finder accessCallout(String title, {String? message}) => _smallestByArea(
+    find.ancestor(
+      of: find.text(title),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label;
+        if (label == null || label.isEmpty) {
+          return false;
+        }
+        if (message != null && !label.contains(message)) {
+          return false;
+        }
+        return label.contains(title);
+      }, description: 'access callout "$title"'),
+    ),
+  );
+
+  Finder semanticsNode(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
+  Finder semanticsNodeContaining(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label)));
+
+  Finder labeledTextField(String label) => _labeledTextField(label);
+
+  Finder checkboxTile(String label) => _smallestByArea(
+    find.ancestor(
+      of: semanticsNodeContaining(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is CheckboxListTile,
+        description: 'checkbox tile "$label"',
       ),
     ),
   );
@@ -125,7 +168,8 @@ class SettingsScreenRobot {
 
   Size get viewportSize => tester.view.physicalSize;
 
-  Finder tabByLabel(String label) => find.widgetWithText(Tab, label);
+  Finder tabByLabel(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
   Future<void> selectTab(String label) async {
     final tab = tabByLabel(label);
@@ -137,6 +181,21 @@ class SettingsScreenRobot {
   Future<void> openLocalesTab() => selectTab('Locales');
 
   Future<void> openStatusesTab() => selectTab('Statuses');
+
+  Future<void> selectAttachmentStorageMode(String optionText) {
+    return _selectDropdownOption(
+      'Attachment storage mode',
+      optionText: optionText,
+    );
+  }
+
+  Future<void> enterAttachmentReleaseTagPrefix(String value) {
+    return enterTextField('Release tag prefix', value);
+  }
+
+  Future<bool> showsAttachmentReleaseTagPrefixField() {
+    return isTextFieldVisible('Release tag prefix');
+  }
 
   Future<void> openProjectStatuses() async {
     await openSettings();
@@ -156,21 +215,42 @@ class SettingsScreenRobot {
   Finder removeLocaleButton(String locale) =>
       actionButton('Remove locale $locale');
 
-  Finder localeEntryFieldScope({required String locale, required String id}) =>
-      find.byKey(ValueKey('locale-$locale-$id'));
+  Finder localeEntryFieldScope({
+    required String locale,
+    required String id,
+    String? section,
+  }) {
+    if (section != null) {
+      return find.byKey(ValueKey('locale-$locale-$section-$id'));
+    }
+    return find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('locale-$locale-') &&
+          key.value.endsWith('-$id');
+    }, description: 'locale entry scope for $locale/$id');
+  }
 
-  Finder localeEntryTextField({required String locale, required String id}) =>
-      find.descendant(
-        of: localeEntryFieldScope(locale: locale, id: id),
-        matching: find.byType(EditableText),
-      );
+  Finder localeEntryTextField({
+    required String locale,
+    required String id,
+    String? section,
+  }) => find.descendant(
+    of: localeEntryFieldScope(locale: locale, id: id, section: section),
+    matching: find.byType(EditableText),
+  );
 
   Future<void> enterLocaleTranslation({
     required String locale,
     required String id,
     required String text,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pump();
@@ -181,8 +261,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldValue({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -194,8 +279,13 @@ class SettingsScreenRobot {
   Future<void> focusLocaleTranslationField({
     required String locale,
     required String id,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pumpAndSettle();
@@ -204,8 +294,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldSemanticsLabel({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -217,9 +312,10 @@ class SettingsScreenRobot {
   Color localeTranslationFieldPlaceholderColor({
     required String locale,
     required String id,
+    String? section,
   }) {
     return _decoratedFieldTextColorWithin(
-      localeEntryFieldScope(locale: locale, id: id),
+      localeEntryFieldScope(locale: locale, id: id, section: section),
       'Translation ($locale)',
     );
   }
@@ -356,6 +452,13 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<void> focusTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+  }
+
   String textFieldValue(String label) {
     final field = _labeledTextField(label);
     if (field.evaluate().isEmpty) {
@@ -373,6 +476,60 @@ class SettingsScreenRobot {
 
   bool isVisibleText(String text) =>
       find.text(text, findRichText: true).evaluate().isNotEmpty;
+
+  bool showsModalDialog() => settingsEditorDialog.evaluate().isNotEmpty;
+
+  bool showsProjectSettingsSurface() =>
+      isVisibleText('Project Settings') &&
+      projectSettingsHeading.evaluate().isNotEmpty;
+
+  bool showsHostedReleaseUploadRestriction({required String storageLabel}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    return snapshot.contains(lowerStorageLabel) &&
+        (snapshot.contains('unavailable') ||
+            snapshot.contains('not available') ||
+            snapshot.contains('cannot complete')) &&
+        (snapshot.contains('upload') || snapshot.contains('transfer'));
+  }
+
+  bool showsReleaseAttachmentStorageConfiguration({
+    required String storageLabel,
+    required String tagPrefix,
+  }) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    return snapshot.contains(storageLabel.toLowerCase()) &&
+        snapshot.contains(tagPrefix.toLowerCase());
+  }
+
+  bool suggestsHostedReleaseUploadSupport({required String tagPrefix}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final mentionsSupportedUpload =
+        snapshot.contains('can complete release-backed uploads') ||
+        snapshot.contains(
+          'hosted session can complete release-backed uploads',
+        ) ||
+        snapshot.contains('uploads are available') ||
+        snapshot.contains('release-backed uploads are supported');
+    final mentionsUnavailableUpload =
+        snapshot.contains('cannot complete release-backed uploads') ||
+        snapshot.contains('uploads are unavailable') ||
+        snapshot.contains('unavailable in the browser');
+    return snapshot.contains(tagPrefix.toLowerCase()) &&
+        mentionsSupportedUpload &&
+        !mentionsUnavailableUpload;
+  }
+
+  String repositoryAccessSnapshot() => [
+    ..._textsWithin(repositoryAccessSection),
+    ..._semanticsLabelsWithin(repositoryAccessSection),
+  ].join(' | ');
+
+  bool showsProjectSettingsTab(String label) =>
+      showsProjectSettingsSurface() && tabByLabel(label).evaluate().isNotEmpty;
+
+  bool showsAttachmentStorageModeSetting() =>
+      isVisibleText('Attachment storage mode');
 
   bool statusSummaryVisible({
     required String name,
@@ -446,6 +603,22 @@ class SettingsScreenRobot {
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
+  }
+
+  Future<List<String>> collectLocalWorkspaceDetailsFocusOrder({
+    required String submitLabel,
+    int tabs = 20,
+  }) async {
+    await clearFocus();
+    return collectFocusOrder(
+      candidates: <String, Finder>{
+        'Change folder': actionButton('Change folder'),
+        'Workspace name': labeledTextField('Workspace name'),
+        'Write Branch': labeledTextField('Write Branch'),
+        submitLabel: actionButton(submitLabel),
+      },
+      tabs: tabs,
+    );
   }
 
   void expectVisibleSettingsContent() {
@@ -535,26 +708,32 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
       return null;
     }
+
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
           return entry.key;
         }
       }
@@ -573,6 +752,14 @@ class SettingsScreenRobot {
       }
     }
     throw StateError('No rendered text color found for $finder');
+  }
+
+  Color renderedVisibleTextColor(String text) {
+    final finder = find.text(text, findRichText: true);
+    if (finder.evaluate().isEmpty) {
+      throw StateError('Expected visible text "$text".');
+    }
+    return renderedTextColor(finder.first);
   }
 
   Color renderedTextColorWithin(Finder scope, String text) {
@@ -770,8 +957,15 @@ class SettingsScreenRobot {
     return labels.map((entry) => entry.label).toList();
   }
 
-  Finder topBarProviderControl(String label) =>
-      _buttonControlWithText(label, requiresTrackStateIcon: true);
+  Finder topBarProviderControl(String label) {
+    final exact = _buttonControlWithText(label, requiresTrackStateIcon: true);
+    if (exact.evaluate().isNotEmpty) {
+      return exact;
+    }
+    return find.bySemanticsLabel(
+      RegExp('Workspace switcher: .*${RegExp.escape(label)}'),
+    );
+  }
 
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
@@ -805,6 +999,42 @@ class SettingsScreenRobot {
         description: 'editable control labeled $label',
       ),
     );
+  }
+
+  Finder _labeledDropdownField(String label) =>
+      find.byWidgetPredicate((widget) {
+        if (widget is DropdownButtonFormField) {
+          return widget.decoration?.labelText == label;
+        }
+        return false;
+      }, description: 'dropdown field labeled $label');
+
+  Future<void> _selectDropdownOption(
+    String label, {
+    required String optionText,
+  }) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final option = find.text(optionText, findRichText: true);
+    if (option.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to expose the option "$optionText", '
+        'but it was not visible after opening the menu.',
+      );
+    }
+    await tester.ensureVisible(option.last);
+    await tester.tap(option.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
   }
 
   Container? _decoratedContainerWithin(Finder scope) {
@@ -868,6 +1098,28 @@ class SettingsScreenRobot {
     return tester
         .widgetList<Text>(find.byType(Text))
         .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _textsWithin(Finder scope) {
+    return tester
+        .widgetList<Text>(
+          find.descendant(of: scope, matching: find.byType(Text)),
+        )
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _semanticsLabelsWithin(Finder scope) {
+    return tester
+        .widgetList<Semantics>(
+          find.descendant(of: scope, matching: find.byType(Semantics)),
+        )
+        .map((widget) => widget.properties.label?.trim())
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
@@ -983,13 +1235,19 @@ class SettingsScreenRobot {
   }
 
   Finder _currentTopBarControl() {
-    for (final label in const ['Connected', 'Connect GitHub', 'Local Git']) {
+    for (final label in const [
+      'Connected',
+      'Read-only',
+      'Attachments limited',
+      'Connect GitHub',
+      'Local Git',
+    ]) {
       final control = topBarProviderControl(label);
       if (control.evaluate().isNotEmpty) {
         return control;
       }
     }
-    return connectGitHubTopBarControl;
+    return find.bySemanticsLabel(RegExp('Workspace switcher: .*'));
   }
 
   bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {
