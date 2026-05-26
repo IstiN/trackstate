@@ -67,14 +67,18 @@ class LiveIssueDetailCollaborationPage:
     _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
-        'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[aria-label*="Choose attachment"] flt-semantics[flt-tappable], '
+        'flt-semantics[role="button"][aria-label*="Choose attachment"], '
+        '[role="button"][aria-label*="Choose attachment"]'
     )
     _upload_attachment_button_selector = (
-        'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[aria-label*="Upload attachment"] flt-semantics[flt-tappable], '
+        'flt-semantics[role="button"][aria-label*="Upload attachment"], '
+        '[role="button"][aria-label*="Upload attachment"]'
     )
     _replace_attachment_button_selector = (
         'flt-semantics[role="button"][flt-tappable]:text-is("Replace attachment")'
@@ -113,6 +117,14 @@ class LiveIssueDetailCollaborationPage:
                 pass
         if self._is_connected(user_login=user_login, repository=repository):
             return
+        if self._connect_button_count() == 0:
+            raise AssertionError(
+                "Step 1 failed: the hosted session did not expose either the connected "
+                "state or the Connect GitHub action needed to prove the authentication "
+                "precondition for TS-389.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+
         self._tracker_page.connect_with_token(
             token=token,
             repository=repository,
@@ -1114,14 +1126,19 @@ class LiveIssueDetailCollaborationPage:
                 const style = window.getComputedStyle(element);
                 return style.visibility !== 'hidden' && style.display !== 'none';
               };
-              const controlRoots = (label) => Array.from(
-                document.querySelectorAll(`flt-semantics[aria-label="${label}"]`)
-              ).filter((element) =>
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const collectLabel = (element) => normalize(
+                [
+                  element?.getAttribute?.('aria-label') ?? '',
+                  element?.innerText ?? '',
+                  element?.textContent ?? '',
+                ].join(' ')
+              );
+              const hasVisibleSurface = (element) =>
                 isVisible(element)
                 || Array.from(
-                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
-                ).some(isVisible)
-              );
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label], *')
+                ).some(isVisible);
               const controlTrigger = (element) => [
                 element?.querySelector('flt-semantics[flt-tappable]'),
                 element?.querySelector('[flt-tappable]'),
@@ -1134,6 +1151,15 @@ class LiveIssueDetailCollaborationPage:
                   ? element
                   : null,
               ].find((candidate) => !!candidate && isVisible(candidate)) ?? null;
+              const controlRoots = (label) => Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label], [role="button"]')
+              ).filter((element) =>
+                collectLabel(element).includes(label)
+                && (
+                  hasVisibleSurface(element)
+                  || !!controlTrigger(element)
+                )
+              );
               const isEnabled = (element) => {
                 const trigger = controlTrigger(element);
                 return (
@@ -1171,17 +1197,32 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def choose_attachment_file(self, file_path: str) -> None:
-        self._session.click_and_set_files(
-            self._choose_attachment_button_selector,
-            [file_path],
-            timeout_ms=30_000,
-        )
+        try:
+            self._session.click_and_set_files(
+                self._choose_attachment_button_selector,
+                [file_path],
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click_and_set_files(
+                self._button_selector,
+                has_text="Choose attachment",
+                files=[file_path],
+                timeout_ms=30_000,
+            )
 
     def click_upload_attachment(self) -> None:
-        self._session.click(
-            self._upload_attachment_button_selector,
-            timeout_ms=30_000,
-        )
+        try:
+            self._session.click(
+                self._upload_attachment_button_selector,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click(
+                self._button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
 
     def wait_for_selected_attachment_summary(
         self,

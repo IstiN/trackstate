@@ -69,7 +69,7 @@ class TrackStateLiveAppPage:
         return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        connect_selector = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+        connect_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
         try:
             if self.session.count(connect_selector) > 0:
                 self.session.click(connect_selector, timeout_ms=30_000)
