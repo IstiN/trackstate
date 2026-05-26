@@ -839,6 +839,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workspaceStateReadOnly => 'Read-only';
 
   @override
+  String get workspaceStateSyncIssue => 'Sync issue';
+
+  @override
   String get workspaceStateNeedsSignIn => 'Needs sign-in';
 
   @override
