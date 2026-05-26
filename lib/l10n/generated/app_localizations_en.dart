@@ -653,6 +653,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
 
   @override
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  ) {
+    return 'Current session flags: canWrite=$canWrite, canCreateBranch=$canCreateBranch.';
+  }
+
+  @override
   String get repositoryAccessAttachmentRestrictedTitle =>
       'Attachments stay download-only in the browser';
 
