@@ -95,7 +95,7 @@ class LiveSettingsFieldsPage:
 
     def field_row_observation(self, field_name: str) -> SettingsFieldRowObservation:
         selector = self._field_row_selector(field_name)
-        self._session.wait_for_selector(selector, timeout_ms=30_000)
+        self._ensure_field_row_visible(selector)
         payload = self._session.evaluate(
             """
             ({ rowSelector, fieldName }) => {
@@ -135,6 +135,7 @@ class LiveSettingsFieldsPage:
 
     def open_field_editor(self, field_name: str) -> str:
         selector = self._field_row_edit_button_selector(field_name)
+        self._ensure_field_row_visible(self._field_row_selector(field_name))
         self._scroll_into_view(selector)
         self._session.click(selector, timeout_ms=30_000)
         self._wait_for_editor(self._editor_title)
@@ -162,7 +163,25 @@ class LiveSettingsFieldsPage:
         selector = self._editor_input_selector(label)
         self._session.focus(selector, timeout_ms=30_000)
         self._session.fill(selector, value, timeout_ms=30_000)
-        self._session.wait_for_input_value(selector, value, timeout_ms=30_000)
+        if label == "Options":
+            self._session.wait_for_function(
+                """
+                ({ selector, expectedValue }) => {
+                  const normalizeOptions = (value) => String(value ?? '')
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter((item) => item.length > 0)
+                    .join(',');
+                  const input = document.querySelector(selector);
+                  return !!input
+                    && normalizeOptions(input.value) === normalizeOptions(expectedValue);
+                }
+                """,
+                arg={"selector": selector, "expectedValue": value},
+                timeout_ms=30_000,
+            )
+        else:
+            self._session.wait_for_input_value(selector, value, timeout_ms=30_000)
         self._session.press(selector, "Tab", timeout_ms=30_000)
 
     def select_field_type(self, type_name: str) -> None:
@@ -273,15 +292,27 @@ class LiveSettingsFieldsPage:
                   readOnly: !!element.readOnly,
                 };
               };
-              const typeControl = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              )
+              const typeControl = Array.from(document.querySelectorAll('flt-semantics'))
                 .map((element) => ({
                   text: (element.innerText ?? '').trim(),
+                  ariaLabel: (element.getAttribute('aria-label') ?? '').trim(),
                   role: element.getAttribute('role'),
                   disabled: element.getAttribute('aria-disabled'),
                 }))
-                .find((candidate) => candidate.text.startsWith('Type '));
+                .filter((candidate) =>
+                  candidate.text.startsWith('Type ')
+                  || candidate.ariaLabel.startsWith('Type ')
+                )
+                .sort((left, right) => {
+                  const leftText = left.text || left.ariaLabel;
+                  const rightText = right.text || right.ariaLabel;
+                  const leftNewlines = leftText.split('\\n').length - 1;
+                  const rightNewlines = rightText.split('\\n').length - 1;
+                  if (leftNewlines !== rightNewlines) {
+                    return leftNewlines - rightNewlines;
+                  }
+                  return leftText.length - rightText.length;
+                })[0] ?? null;
               const chipTexts = ['Epic', 'Story', 'Task', 'Sub-task', 'Bug'];
               const issueTypeChips = chipTexts.map((chipText) => {
                 const matches = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
@@ -331,7 +362,13 @@ class LiveSettingsFieldsPage:
         self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
         self._session.wait_for_function(
             """
-            () => document.querySelector('input[aria-label="ID"]') === null
+            () => {
+              const bodyText = document.body?.innerText ?? '';
+              const hasEditorInput = document.querySelector('input[aria-label="ID"]') !== null;
+              return !hasEditorInput
+                && !bodyText.includes('Edit field')
+                && !bodyText.includes('Add field');
+            }
             """,
             timeout_ms=30_000,
         )
@@ -400,6 +437,54 @@ class LiveSettingsFieldsPage:
             arg=selector,
         )
 
+    def _ensure_field_row_visible(self, selector: str) -> None:
+        found = self._session.evaluate(
+            """
+            (rowSelector) => {
+              const scrollRoots = () => {
+                const roots = [];
+                const documentScroller = document.scrollingElement;
+                if (documentScroller) {
+                  roots.push(documentScroller);
+                }
+                for (const element of Array.from(document.querySelectorAll('*'))) {
+                  const style = window.getComputedStyle(element);
+                  const isScrollable =
+                    element.scrollHeight > element.clientHeight
+                    && ['auto', 'scroll'].includes(style.overflowY);
+                  if (isScrollable) {
+                    roots.push(element);
+                  }
+                }
+                return roots;
+              };
+
+              for (let attempt = 0; attempt < 12; attempt += 1) {
+                const row = document.querySelector(rowSelector);
+                if (row) {
+                  row.scrollIntoView({ block: 'center' });
+                  return true;
+                }
+                for (const root of scrollRoots()) {
+                  if (root === document.scrollingElement) {
+                    root.scrollBy(0, window.innerHeight * 0.8);
+                    continue;
+                  }
+                  root.scrollTop += Math.max(root.clientHeight * 0.8, 200);
+                }
+              }
+              return document.querySelector(rowSelector) !== null;
+            }
+            """,
+            arg=selector,
+        )
+        if found is not True:
+            raise AssertionError(
+                "Could not locate the requested field row in Settings > Fields after "
+                "scrolling the hosted field catalog.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+
     @staticmethod
     def _escape(value: str) -> str:
         return value.replace("\\", "\\\\").replace('"', '\\"')
@@ -420,7 +505,7 @@ def _type_control_observation(payload: object) -> TypeControlObservation | None:
     if not isinstance(payload, dict):
         return None
     return TypeControlObservation(
-        text=str(payload["text"]),
+        text=str(payload.get("text") or payload.get("ariaLabel") or ""),
         role=str(payload["role"]) if payload["role"] is not None else None,
         disabled=str(payload["disabled"]) if payload["disabled"] is not None else None,
     )

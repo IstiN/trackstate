@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -43,6 +45,17 @@ CUSTOM_FIELD_OPTIONS_TEXT = ", ".join(CUSTOM_FIELD_OPTIONS)
 CUSTOM_FIELD_ISSUE_TYPES = {"Bug"}
 
 
+@dataclass(frozen=True)
+class FieldSnapshot:
+    field_name: str
+    field_id: str
+    field_name_value: str
+    field_type: str
+    options_value: str
+    default_value: str
+    selected_issue_types: frozenset[str]
+
+
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +80,7 @@ def main() -> None:
         "human_verification": [],
     }
     scenario_failures: list[str] = []
+    cleanup_failures: list[str] = []
     writes_product_bug_report = False
 
     try:
@@ -76,6 +90,7 @@ def main() -> None:
         ) as tracker_page:
             settings_page = LiveSettingsFieldsPage(tracker_page)
             collaboration_page = LiveIssueDetailCollaborationPage(tracker_page)
+            original_environment: FieldSnapshot | None = None
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
@@ -246,9 +261,15 @@ def main() -> None:
                 finally:
                     settings_page.close_editor_if_open()
 
-                had_existing_environment = settings_page.field_exists(CUSTOM_FIELD_NAME)
-                result["environment_field_preexisting"] = had_existing_environment
-                if had_existing_environment:
+                original_environment = _capture_field_snapshot(
+                    settings_page=settings_page,
+                    field_name=CUSTOM_FIELD_NAME,
+                )
+                result["environment_field_preexisting"] = original_environment is not None
+                if original_environment is not None:
+                    result["environment_field_original"] = _field_snapshot_payload(
+                        original_environment,
+                    )
                     settings_page.delete_field(CUSTOM_FIELD_NAME)
                     settings_page.save_settings()
                     refreshed_fields_text = _reopen_fields_tab(
@@ -269,93 +290,137 @@ def main() -> None:
                             f"Observed body text:\n{refreshed_fields_text}",
                         )
 
-                settings_page.open_add_field_editor()
-                settings_page.select_field_type(CUSTOM_FIELD_TYPE)
-                settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
-                settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
-                settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
-                settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
-                environment_editor_draft = settings_page.read_editor_observation()
-                result["environment_editor_before_save"] = _editor_payload(
-                    environment_editor_draft,
-                )
-                _assert_environment_field_editor(
-                    environment_editor_draft,
-                    step=6,
-                    action_description=(
-                        "creating the Environment field before saving settings"
-                    ),
-                )
-                settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
-                environment_row_before_save = settings_page.field_row_observation(
-                    CUSTOM_FIELD_NAME,
-                )
-                result["environment_row_before_save_settings"] = _row_payload(
-                    environment_row_before_save,
-                )
-                _assert_custom_field_row(environment_row_before_save)
-                settings_page.save_settings()
-                refreshed_fields_text = _reopen_fields_tab(
-                    tracker_page=tracker_page,
-                    settings_page=settings_page,
-                    collaboration_page=collaboration_page,
-                    token=token,
-                    repository=service.repository,
-                    user_login=user.login,
-                )
-                result["fields_tab_body_text_after_environment_save"] = refreshed_fields_text
-                environment_row = settings_page.field_row_observation(CUSTOM_FIELD_NAME)
-                result["environment_row"] = _row_payload(environment_row)
-                _assert_custom_field_row(environment_row)
-                _record_step(
-                    result,
-                    step=6,
-                    status="passed",
-                    action=(
-                        "Create the Environment custom field, set its type to Select, "
-                        "add three option values, and save the hosted field catalog."
-                    ),
-                    observed=environment_row.aria_label,
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Viewed the saved Environment field in the live catalog and "
-                        "confirmed it appeared as a normal custom field with edit/delete "
-                        "actions after save."
-                    ),
-                    observed=environment_row.aria_label,
-                )
+                step_6_observed: str | None = None
+                try:
+                    settings_page.open_add_field_editor()
+                    settings_page.select_field_type(CUSTOM_FIELD_TYPE)
+                    settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
+                    settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
+                    settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
+                    settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
+                    environment_editor_draft = settings_page.read_editor_observation()
+                    result["environment_editor_before_save"] = _editor_payload(
+                        environment_editor_draft,
+                    )
+                    _assert_environment_field_editor(
+                        environment_editor_draft,
+                        step=6,
+                        action_description=(
+                            "creating the Environment field before saving settings"
+                        ),
+                    )
+                    settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
+                    environment_row_before_save = settings_page.field_row_observation(
+                        CUSTOM_FIELD_NAME,
+                    )
+                    result["environment_row_before_save_settings"] = _row_payload(
+                        environment_row_before_save,
+                    )
+                    _assert_custom_field_row(environment_row_before_save)
+                    settings_page.save_settings()
+                    refreshed_fields_text = _reopen_fields_tab(
+                        tracker_page=tracker_page,
+                        settings_page=settings_page,
+                        collaboration_page=collaboration_page,
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    result["fields_tab_body_text_after_environment_save"] = (
+                        refreshed_fields_text
+                    )
+                    environment_row = settings_page.field_row_observation(
+                        CUSTOM_FIELD_NAME,
+                    )
+                    result["environment_row"] = _row_payload(environment_row)
+                    _assert_custom_field_row(environment_row)
+                    step_6_observed = environment_row.aria_label
+                except AssertionError as error:
+                    writes_product_bug_report = True
+                    failure = str(error)
+                    scenario_failures.append(failure)
+                    _record_step(
+                        result,
+                        step=6,
+                        status="failed",
+                        action=(
+                            "Create the Environment custom field, set its type to Select, "
+                            "add three option values, and save the hosted field catalog."
+                        ),
+                        observed=failure,
+                    )
+                else:
+                    _record_step(
+                        result,
+                        step=6,
+                        status="passed",
+                        action=(
+                            "Create the Environment custom field, set its type to Select, "
+                            "add three option values, and save the hosted field catalog."
+                        ),
+                        observed=step_6_observed or "",
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the saved Environment field in the live catalog and "
+                            "confirmed it appeared as a normal custom field with edit/delete "
+                            "actions after save."
+                        ),
+                        observed=step_6_observed or "",
+                    )
+                finally:
+                    settings_page.close_editor_if_open()
 
-                settings_page.open_field_editor(CUSTOM_FIELD_NAME)
-                environment_editor = settings_page.read_editor_observation()
-                result["environment_editor"] = _editor_payload(environment_editor)
-                _assert_environment_field_editor(
-                    environment_editor,
-                    step=7,
-                    action_description=(
-                        "re-opening the saved Environment field editor after the hosted "
-                        "save completed"
-                    ),
-                )
-                _record_step(
-                    result,
-                    step=7,
-                    status="passed",
-                    action=(
-                        "Verify the saved Environment field keeps its option metadata and "
-                        "applies only to Bug."
-                    ),
-                    observed=environment_editor.body_text,
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Re-opened the saved Environment field editor and confirmed the "
-                        "visible option values and Bug-only applicability were retained."
-                    ),
-                    observed=environment_editor.body_text,
-                )
+                if step_6_observed is not None:
+                    try:
+                        settings_page.open_field_editor(CUSTOM_FIELD_NAME)
+                        environment_editor = settings_page.read_editor_observation()
+                        result["environment_editor"] = _editor_payload(environment_editor)
+                        _assert_environment_field_editor(
+                            environment_editor,
+                            step=7,
+                            action_description=(
+                                "re-opening the saved Environment field editor after the "
+                                "hosted save completed"
+                            ),
+                        )
+                    except AssertionError as error:
+                        writes_product_bug_report = True
+                        failure = str(error)
+                        scenario_failures.append(failure)
+                        _record_step(
+                            result,
+                            step=7,
+                            status="failed",
+                            action=(
+                                "Verify the saved Environment field keeps its option metadata "
+                                "and applies only to Bug."
+                            ),
+                            observed=failure,
+                        )
+                    else:
+                        _record_step(
+                            result,
+                            step=7,
+                            status="passed",
+                            action=(
+                                "Verify the saved Environment field keeps its option metadata "
+                                "and applies only to Bug."
+                            ),
+                            observed=environment_editor.body_text,
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Re-opened the saved Environment field editor and confirmed "
+                                "the visible option values and Bug-only applicability were "
+                                "retained."
+                            ),
+                            observed=environment_editor.body_text,
+                        )
+                    finally:
+                        settings_page.close_editor_if_open()
 
                 if scenario_failures:
                     raise AssertionError("\n\n".join(scenario_failures))
@@ -366,21 +431,48 @@ def main() -> None:
                 settings_page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
+            finally:
+                cleanup_failures.extend(
+                    _restore_environment_state(
+                        tracker_page=tracker_page,
+                        settings_page=settings_page,
+                        collaboration_page=collaboration_page,
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                        original_environment=original_environment,
+                    ),
+                )
+                if cleanup_failures:
+                    result["cleanup_failures"] = cleanup_failures
     except AssertionError as error:
-        result["error"] = str(error)
+        message = str(error)
+        if cleanup_failures:
+            message = "\n\n".join([message, *cleanup_failures])
+        result["error"] = message
         result["traceback"] = traceback.format_exc()
         _write_output_artifacts(result, writes_product_bug_report=writes_product_bug_report)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
-        result["error"] = f"{type(error).__name__}: {error}"
+        message = f"{type(error).__name__}: {error}"
+        if cleanup_failures:
+            message = "\n\n".join([message, *cleanup_failures])
+        result["error"] = message
         result["traceback"] = traceback.format_exc()
         _write_output_artifacts(result, writes_product_bug_report=False)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
         raise
     else:
+        if cleanup_failures:
+            result["error"] = "\n\n".join(cleanup_failures)
+            result["traceback"] = ""
+            _write_output_artifacts(result, writes_product_bug_report=False)
+            _write_result_if_requested(result)
+            print(json.dumps(result, indent=2))
+            raise AssertionError(result["error"])
         result["status"] = "passed"
         result["summary"] = (
             "Verified the hosted Settings > Fields screen keeps the reserved Summary "
@@ -390,6 +482,135 @@ def main() -> None:
         _write_output_artifacts(result, writes_product_bug_report=False)
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
+
+
+def _capture_field_snapshot(
+    *,
+    settings_page: LiveSettingsFieldsPage,
+    field_name: str,
+) -> FieldSnapshot | None:
+    if not settings_page.field_exists(field_name):
+        return None
+    settings_page.open_field_editor(field_name)
+    try:
+        editor = settings_page.read_editor_observation()
+        return FieldSnapshot(
+            field_name=field_name,
+            field_id=editor.id_input.value if editor.id_input is not None else "",
+            field_name_value=(
+                editor.name_input.value if editor.name_input is not None else field_name
+            ),
+            field_type=_field_type_name(editor),
+            options_value=(
+                editor.options_input.value if editor.options_input is not None else ""
+            ),
+            default_value=(
+                editor.default_value_input.value
+                if editor.default_value_input is not None
+                else ""
+            ),
+            selected_issue_types=frozenset(
+                chip.text
+                for chip in editor.issue_type_chips
+                if chip.selected == "true"
+            ),
+        )
+    finally:
+        settings_page.close_editor_if_open()
+
+
+def _field_snapshot_payload(snapshot: FieldSnapshot) -> dict[str, object]:
+    return {
+        "field_name": snapshot.field_name,
+        "field_id": snapshot.field_id,
+        "field_name_value": snapshot.field_name_value,
+        "field_type": snapshot.field_type,
+        "options_value": snapshot.options_value,
+        "default_value": snapshot.default_value,
+        "selected_issue_types": sorted(snapshot.selected_issue_types),
+    }
+
+
+def _restore_environment_state(
+    *,
+    tracker_page,
+    settings_page: LiveSettingsFieldsPage,
+    collaboration_page: LiveIssueDetailCollaborationPage,
+    token: str,
+    repository: str,
+    user_login: str,
+    original_environment: FieldSnapshot | None,
+) -> list[str]:
+    failures: list[str] = []
+    try:
+        if settings_page.field_exists(CUSTOM_FIELD_NAME):
+            settings_page.delete_field(CUSTOM_FIELD_NAME)
+            settings_page.save_settings()
+            _reopen_fields_tab(
+                tracker_page=tracker_page,
+                settings_page=settings_page,
+                collaboration_page=collaboration_page,
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+            if settings_page.field_exists(CUSTOM_FIELD_NAME):
+                raise AssertionError(
+                    'Cleanup failed: the temporary "Environment" field still existed after '
+                    "the test tried to delete it.",
+                )
+        if original_environment is not None:
+            _restore_field_snapshot(settings_page=settings_page, snapshot=original_environment)
+            settings_page.save_settings()
+            _reopen_fields_tab(
+                tracker_page=tracker_page,
+                settings_page=settings_page,
+                collaboration_page=collaboration_page,
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+            restored_snapshot = _capture_field_snapshot(
+                settings_page=settings_page,
+                field_name=original_environment.field_name,
+            )
+            if restored_snapshot != original_environment:
+                raise AssertionError(
+                    'Cleanup failed: the original "Environment" field metadata was not '
+                    "restored after the test run.",
+                )
+    except Exception as error:
+        failures.append(f"Cleanup failed: {type(error).__name__}: {error}")
+    return failures
+
+
+def _restore_field_snapshot(
+    *,
+    settings_page: LiveSettingsFieldsPage,
+    snapshot: FieldSnapshot,
+) -> None:
+    settings_page.open_add_field_editor()
+    settings_page.select_field_type(snapshot.field_type)
+    settings_page.fill_editor_input("ID", snapshot.field_id)
+    settings_page.fill_editor_input("Name", snapshot.field_name_value)
+    if snapshot.options_value:
+        settings_page.fill_editor_input("Options", snapshot.options_value)
+    if snapshot.default_value:
+        settings_page.fill_editor_input("Default value", snapshot.default_value)
+    settings_page.set_applicable_issue_types(set(snapshot.selected_issue_types))
+    settings_page.save_field_editor(field_name=snapshot.field_name)
+
+
+def _field_type_name(editor: FieldEditorObservation) -> str:
+    if editor.type_control is not None and editor.type_control.text.startswith("Type "):
+        return editor.type_control.text.removeprefix("Type ").strip()
+    match = re.search(r"\bType\s+([^\n]+)", editor.body_text)
+    if match is None:
+        raise AssertionError(
+            "Could not determine the existing field type needed to restore the "
+            "pre-test Environment field.",
+        )
+    return match.group(1).strip()
 
 
 def _assert_summary_row(summary_row: SettingsFieldRowObservation) -> None:
@@ -437,7 +658,7 @@ def _assert_reserved_field_editor(editor: FieldEditorObservation) -> None:
                 "the Type control did not show the reserved Summary type "
                 f'("{EXPECTED_RESERVED_FIELD_TYPE}")',
             )
-        if type_control.role == "button" and type_control.disabled is None:
+        if type_control.role == "button" and type_control.disabled != "true":
             failures.append(
                 "the Type value was rendered as an enabled interactive button instead of "
                 "an immutable read-only value",

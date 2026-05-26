@@ -6,7 +6,10 @@ from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,86 @@ class EditControlObservation:
         return fragment in self.text or (
             self.label is not None and fragment in self.label
         )
+
+
+@dataclass(frozen=True)
+class ConstrainedChipFieldObservation:
+    label: str
+    semantics_label: str | None
+    field_text: str
+    option_labels: tuple[str, ...]
+    input_count: int
+    listbox_count: int
+    menu_item_count: int
+
+
+@dataclass(frozen=True)
+class EditSurfaceObservation:
+    viewport_width: float
+    viewport_height: float
+    left: float
+    top: float
+    width: float
+    height: float
+    summary_value: str
+    description_value: str
+    priority_label: str | None
+    priority_text: str
+    body_text: str
+
+    @property
+    def width_fraction(self) -> float:
+        return self.width / self.viewport_width if self.viewport_width else 0.0
+
+    @property
+    def height_fraction(self) -> float:
+        return self.height / self.viewport_height if self.viewport_height else 0.0
+
+    @property
+    def right_inset(self) -> float:
+        return self.viewport_width - (self.left + self.width)
+
+    @property
+    def bottom_inset(self) -> float:
+        return self.viewport_height - (self.top + self.height)
+
+
+@dataclass(frozen=True)
+class LabeledTextFieldObservation:
+    label: str
+    value: str
+    enabled: bool
+    disabled: bool
+    read_only: bool
+    aria_label: str | None
+    aria_invalid: str | None
+    aria_describedby: str | None
+    aria_errormessage: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class ValidationMessageObservation:
+    text: str
+    tag_name: str
+    role: str | None
+    aria_live: str | None
+    element_id: str | None
+    color: str | None
+    background_color: str | None
+    contrast_ratio: float | None
+
+
+@dataclass(frozen=True)
+class SummaryRequiredValidationObservation:
+    field: LabeledTextFieldObservation
+    message: ValidationMessageObservation | None
+    describedby_texts: tuple[str, ...]
+    errormessage_texts: tuple[str, ...]
+    live_region_texts: tuple[str, ...]
+    active_element: FocusedElementObservation
+    field_is_active: bool
+    dialog_text: str
 
 
 class LiveMultiViewRefreshPage:
@@ -46,6 +129,24 @@ class LiveMultiViewRefreshPage:
             user_login=user_login,
         )
 
+    def set_viewport(self, *, width: int, height: int) -> None:
+        self._session.set_viewport_size(width=width, height=height)
+        try:
+            self._session.wait_for_function(
+                """
+                ({ expectedWidth, expectedHeight }) =>
+                  window.innerWidth === expectedWidth && window.innerHeight === expectedHeight
+                """,
+                arg={"expectedWidth": width, "expectedHeight": height},
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step failed: resizing the hosted browser to {width}x{height} did not "
+                "settle to the requested viewport.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
         self.navigate_to_section("JQL Search")
         self._session.wait_for_selector(
@@ -58,15 +159,632 @@ class LiveMultiViewRefreshPage:
         )
         self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
         self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        dialog_text = self._session.wait_for_text("Edit issue", timeout_ms=30_000)
-        if issue_key not in dialog_text:
+        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+
+    def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
+        self.navigate_to_section("JQL Search")
+        label = self.visible_issue_open_label(issue_key=issue_key)
+        self._session.click(
+            f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
+        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+
+    def open_edit_dialog_from_board_card(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> str:
+        self.navigate_to_section("Board")
+        self._session.wait_for_text(issue_summary, timeout_ms=60_000)
+        board_text = self.current_body_text()
+        if issue_summary not in board_text:
             raise AssertionError(
-                "Step 3 failed: opening the requested issue from JQL Search did not "
-                f"lead to the edit surface for {issue_key}.\n"
-                f"Expected issue key in edit dialog: {issue_key}\n"
-                f"Observed dialog text:\n{dialog_text}",
+                f"Step failed: the Board view did not visibly render {issue_key} before "
+                "the shared edit-surface scenario began.\n"
+                f"Observed Board text:\n{board_text}",
             )
-        return dialog_text
+
+        card_bounds = self._board_issue_card_bounds(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
+        edit_bounds = self._reveal_board_issue_edit_button(card_bounds=card_bounds)
+        if edit_bounds is None:
+            nearby_controls = self._board_issue_controls_snapshot(card_bounds=card_bounds)
+            raise AssertionError(
+                f"Step failed: the Board card for {issue_key} did not expose a visible "
+                "Edit affordance.\n"
+                "Expected the ticketed Board flow to let the user open Edit directly from "
+                "the issue card.\n"
+                f"Nearby visible controls after hovering the card: {nearby_controls}\n"
+                f"Observed Board text:\n{board_text}",
+            )
+
+        self._session.mouse_click(
+            edit_bounds["x"] + (edit_bounds["width"] / 2),
+            edit_bounds["y"] + (edit_bounds["height"] / 2),
+        )
+        return self._wait_for_edit_dialog(
+            issue_key=issue_key,
+            origin_label="Board card Edit affordance",
+        )
+
+    def open_edit_dialog_from_current_issue_detail(self, *, issue_key: str) -> str:
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=60_000,
+        )
+        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
+        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        return self._wait_for_edit_dialog(
+            issue_key=issue_key,
+            origin_label="current issue detail",
+        )
+
+    def close_edit_dialog(self) -> None:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        if self._session.count(self._button_selector, has_text="Cancel") > 0:
+            self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
+        else:
+            self._session.press_key("Escape", timeout_ms=30_000)
+        try:
+            self._session.wait_for_count(self._dialog_group_selector, 0, timeout_ms=30_000)
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step failed: dismissing the hosted Edit issue surface did not close the "
+                "dialog.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    def observe_edit_surface(
+        self,
+        *,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> EditSurfaceObservation:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        rect = self._session.bounding_box(self._dialog_group_selector, timeout_ms=30_000)
+        summary_value = self.read_labeled_text_field_value("Summary")
+        description_value = self.read_labeled_text_field_value("Description")
+        priority = self.priority_control()
+        return EditSurfaceObservation(
+            viewport_width=float(viewport_width),
+            viewport_height=float(viewport_height),
+            left=rect.x,
+            top=rect.y,
+            width=rect.width,
+            height=rect.height,
+            summary_value=summary_value,
+            description_value=description_value,
+            priority_label=priority.label,
+            priority_text=priority.text,
+            body_text=self.current_body_text(),
+        )
+
+    def read_labeled_text_field_value(self, label: str) -> str:
+        payload = self._session.evaluate(
+            """
+            ({ dialogSelector, label }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return null;
+              }
+              const selectors = [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ];
+              for (const selector of selectors) {
+                const field = root.querySelector(selector);
+                if (!field) {
+                  continue;
+                }
+                if ('value' in field && typeof field.value === 'string') {
+                  return field.value;
+                }
+                return (field.innerText || field.textContent || '').trim();
+              }
+              return null;
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector, "label": label},
+        )
+        if not isinstance(payload, str):
+            raise AssertionError(
+                f"Human-style verification failed: the hosted Edit issue surface did not "
+                f"expose a readable {label!r} field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def observe_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        payload = self._session.evaluate(
+            """
+            ({ dialogSelector, label }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return null;
+              }
+              const selectors = [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ];
+              for (const selector of selectors) {
+                const field = root.querySelector(selector);
+                if (!field) {
+                  continue;
+                }
+                const value =
+                  'value' in field && typeof field.value === 'string'
+                    ? field.value
+                    : (field.innerText || field.textContent || '').trim();
+                return {
+                  value,
+                  enabled: !field.disabled,
+                  disabled: !!field.disabled,
+                  readOnly: !!field.readOnly,
+                  ariaLabel: field.getAttribute('aria-label'),
+                  ariaInvalid: field.getAttribute('aria-invalid'),
+                  ariaDescribedBy: field.getAttribute('aria-describedby'),
+                  ariaErrormessage: field.getAttribute('aria-errormessage'),
+                  outerHtml: field.outerHTML.slice(0, 800),
+                };
+              }
+              return null;
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector, "label": label},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Human-style verification failed: the hosted Edit issue surface did not "
+                f"expose the visible {label!r} field.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        return LabeledTextFieldObservation(
+            label=label,
+            value=str(payload.get("value", "")),
+            enabled=bool(payload.get("enabled")),
+            disabled=bool(payload.get("disabled")),
+            read_only=bool(payload.get("readOnly")),
+            aria_label=(
+                str(payload["ariaLabel"]) if payload.get("ariaLabel") is not None else None
+            ),
+            aria_invalid=(
+                str(payload["ariaInvalid"])
+                if payload.get("ariaInvalid") is not None
+                else None
+            ),
+            aria_describedby=(
+                str(payload["ariaDescribedBy"])
+                if payload.get("ariaDescribedBy") is not None
+                else None
+            ),
+            aria_errormessage=(
+                str(payload["ariaErrormessage"])
+                if payload.get("ariaErrormessage") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def clear_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        field = self.observe_labeled_text_field(label)
+        if not field.enabled:
+            raise AssertionError(
+                f"Step failed: the visible {label} field was not editable.\n"
+                f"Enabled: {field.enabled}\n"
+                f"Disabled: {field.disabled}\n"
+                f"Read-only: {field.read_only}\n"
+                f"Outer HTML: {field.outer_html}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        self._session.fill(f'input[aria-label="{self._escape(label)}"]', "", timeout_ms=30_000)
+        return self.observe_labeled_text_field(label)
+
+    def active_element(self) -> FocusedElementObservation:
+        return self._session.active_element()
+
+    def trigger_required_summary_validation(
+        self,
+        *,
+        message_fragment: str,
+    ) -> SummaryRequiredValidationObservation:
+        self._session.click(
+            'flt-semantics[role="button"][aria-label="Save"]',
+            timeout_ms=30_000,
+        )
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ dialogSelector, label, messageFragment, errorPrefix }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  if (bodyText.includes(errorPrefix)) {
+                    return { kind: 'save-error', bodyText };
+                  }
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return (
+                      rect.width > 0
+                      && rect.height > 0
+                      && style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number.parseFloat(style.opacity || '1') > 0
+                    );
+                  };
+                  const findField = (root) => {
+                    const selectors = [
+                      `input[aria-label="${label}"]`,
+                      `textarea[aria-label="${label}"]`,
+                      `[role="textbox"][aria-label="${label}"]`,
+                    ];
+                    for (const selector of selectors) {
+                      const field = root.querySelector(selector);
+                      if (field) {
+                        return field;
+                      }
+                    }
+                    return null;
+                  };
+                  const parseColor = (value) => {
+                    if (!value) {
+                      return null;
+                    }
+                    const match = value.match(
+                      /^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i,
+                    );
+                    if (!match) {
+                      return null;
+                    }
+                    return [
+                      Number.parseInt(match[1], 10),
+                      Number.parseInt(match[2], 10),
+                      Number.parseInt(match[3], 10),
+                    ];
+                  };
+                  const isTransparent = (value) =>
+                    !value
+                    || value === 'transparent'
+                    || /^rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0(?:\\.0+)?\\s*\\)$/i.test(value);
+                  const relativeLuminance = (color) => {
+                    const channel = (value) => {
+                      const normalized = value / 255;
+                      if (normalized <= 0.03928) {
+                        return normalized / 12.92;
+                      }
+                      return ((normalized + 0.055) / 1.055) ** 2.4;
+                    };
+                    return (
+                      (0.2126 * channel(color[0]))
+                      + (0.7152 * channel(color[1]))
+                      + (0.0722 * channel(color[2]))
+                    );
+                  };
+                  const contrastRatio = (foreground, background) => {
+                    const lighter = relativeLuminance(foreground);
+                    const darker = relativeLuminance(background);
+                    const max = lighter > darker ? lighter : darker;
+                    const min = lighter > darker ? darker : lighter;
+                    return (max + 0.05) / (min + 0.05);
+                  };
+                  const effectiveBackgroundColor = (element) => {
+                    let current = element;
+                    while (current) {
+                      const background = window.getComputedStyle(current).backgroundColor;
+                      if (!isTransparent(background)) {
+                        return background;
+                      }
+                      current = current.parentElement;
+                    }
+                    const bodyBackground = window.getComputedStyle(document.body).backgroundColor;
+                    return isTransparent(bodyBackground) ? 'rgb(255, 255, 255)' : bodyBackground;
+                  };
+                  const collectText = (element) =>
+                    normalize(
+                      element.innerText
+                        || element.textContent
+                        || element.getAttribute('aria-label')
+                        || '',
+                    );
+                  const root = document.querySelector(dialogSelector);
+                  if (!root) {
+                    return { kind: 'dialog-closed', bodyText };
+                  }
+                  const field = findField(root);
+                  if (!field) {
+                    return null;
+                  }
+                  const expected = normalize(messageFragment).toLowerCase();
+                  const resolveIds = (attributeValue) => {
+                    const ids = normalize(attributeValue).split(' ').filter(Boolean);
+                    return ids
+                      .map((id) => document.getElementById(id))
+                      .filter((element) => !!element)
+                      .map((element) => collectText(element))
+                      .filter((text) => text.length > 0);
+                  };
+                  const describedbyTexts = resolveIds(field.getAttribute('aria-describedby'));
+                  const errormessageTexts = resolveIds(field.getAttribute('aria-errormessage'));
+                  const liveRegionTexts = Array.from(
+                    root.querySelectorAll('[aria-live], [role="alert"], [role="status"]'),
+                  )
+                    .filter((element) => isVisible(element))
+                    .map((element) => collectText(element))
+                    .filter((text) => text.length > 0);
+                  const matchingMessageElements = Array.from(root.querySelectorAll('*'))
+                    .filter((element) => isVisible(element))
+                    .map((element) => {
+                      const text = collectText(element);
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        text,
+                        textLength: text.length,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter(
+                      (candidate) =>
+                        candidate.text.length > 0
+                        && candidate.text.toLowerCase().includes(expected),
+                    )
+                    .sort((left, right) => {
+                      if (left.textLength !== right.textLength) {
+                        return left.textLength - right.textLength;
+                      }
+                      return left.area - right.area;
+                    });
+                  const messageElement =
+                    matchingMessageElements.length > 0
+                      ? matchingMessageElements[0].element
+                      : null;
+                  const message =
+                    messageElement === null
+                      ? null
+                      : (() => {
+                          const style = window.getComputedStyle(messageElement);
+                          const backgroundColor = effectiveBackgroundColor(messageElement);
+                          const foreground = parseColor(style.color);
+                          const background = parseColor(backgroundColor);
+                          return {
+                            text: collectText(messageElement),
+                            tagName: messageElement.tagName,
+                            role: messageElement.getAttribute('role'),
+                            ariaLive: messageElement.getAttribute('aria-live'),
+                            elementId: messageElement.id || null,
+                            color: style.color,
+                            backgroundColor,
+                            contrastRatio:
+                              foreground === null || background === null
+                                ? null
+                                : contrastRatio(foreground, background),
+                          };
+                        })();
+                  const fieldInvalid =
+                    String(field.getAttribute('aria-invalid') || '').toLowerCase() === 'true';
+                  const hasAssociatedFeedback = [
+                    ...(message === null ? [] : [message.text]),
+                    ...describedbyTexts,
+                    ...errormessageTexts,
+                    ...liveRegionTexts,
+                  ].some((text) => text.toLowerCase().includes(expected));
+                  if (!fieldInvalid && !hasAssociatedFeedback) {
+                    return null;
+                  }
+                  const active = document.activeElement;
+                  const activeText =
+                    active === null
+                      ? ''
+                      : normalize(
+                          active.innerText
+                            || active.textContent
+                            || active.getAttribute('aria-label')
+                            || '',
+                        );
+                  return {
+                    kind: 'validation',
+                    field: {
+                      value:
+                        'value' in field && typeof field.value === 'string'
+                          ? field.value
+                          : collectText(field),
+                      enabled: !field.disabled,
+                      disabled: !!field.disabled,
+                      readOnly: !!field.readOnly,
+                      ariaLabel: field.getAttribute('aria-label'),
+                      ariaInvalid: field.getAttribute('aria-invalid'),
+                      ariaDescribedBy: field.getAttribute('aria-describedby'),
+                      ariaErrormessage: field.getAttribute('aria-errormessage'),
+                      outerHtml: field.outerHTML.slice(0, 800),
+                    },
+                    message,
+                    describedbyTexts,
+                    errormessageTexts,
+                    liveRegionTexts,
+                    activeElement: active
+                      ? {
+                          tagName: active.tagName,
+                          role: active.getAttribute('role'),
+                          accessibleName:
+                            active.getAttribute('aria-label') || activeText || null,
+                          text: activeText,
+                          tabindex: active.getAttribute('tabindex'),
+                          outerHtml: active.outerHTML.slice(0, 400),
+                        }
+                      : {
+                          tagName: '',
+                          role: null,
+                          accessibleName: null,
+                          text: '',
+                          tabindex: null,
+                          outerHtml: '',
+                        },
+                    fieldIsActive: active === field,
+                    dialogText: collectText(root),
+                  };
+                }
+                """,
+                arg={
+                    "dialogSelector": self._dialog_group_selector,
+                    "label": "Summary",
+                    "messageFragment": message_fragment,
+                    "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
+                },
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step failed: clicking Save did not surface the expected Summary-required "
+                "validation feedback in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step failed: clicking Save did not produce an observable Summary-required "
+                "validation state in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        kind = str(payload.get("kind", ""))
+        if kind == "save-error":
+            raise AssertionError(
+                "Step failed: clicking Save showed a visible save error instead of the "
+                "required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind == "dialog-closed":
+            raise AssertionError(
+                "Step failed: clicking Save dismissed the Edit issue dialog and returned to "
+                "the issue view without showing the required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind != "validation":
+            raise AssertionError(
+                "Step failed: clicking Save produced an unexpected validation probe result "
+                "for the hosted Edit issue dialog.\n"
+                f"Validation payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        field_payload = payload.get("field")
+        active_payload = payload.get("activeElement")
+        if not isinstance(field_payload, dict) or not isinstance(active_payload, dict):
+            raise AssertionError(
+                "Step failed: the hosted Edit issue validation probe returned an incomplete "
+                "Summary validation payload.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        message_payload = payload.get("message")
+        message = (
+            None
+            if not isinstance(message_payload, dict)
+            else ValidationMessageObservation(
+                text=str(message_payload.get("text", "")),
+                tag_name=str(message_payload.get("tagName", "")),
+                role=(
+                    str(message_payload["role"])
+                    if message_payload.get("role") is not None
+                    else None
+                ),
+                aria_live=(
+                    str(message_payload["ariaLive"])
+                    if message_payload.get("ariaLive") is not None
+                    else None
+                ),
+                element_id=(
+                    str(message_payload["elementId"])
+                    if message_payload.get("elementId") is not None
+                    else None
+                ),
+                color=(
+                    str(message_payload["color"])
+                    if message_payload.get("color") is not None
+                    else None
+                ),
+                background_color=(
+                    str(message_payload["backgroundColor"])
+                    if message_payload.get("backgroundColor") is not None
+                    else None
+                ),
+                contrast_ratio=(
+                    float(message_payload["contrastRatio"])
+                    if message_payload.get("contrastRatio") is not None
+                    else None
+                ),
+            )
+        )
+        return SummaryRequiredValidationObservation(
+            field=LabeledTextFieldObservation(
+                label="Summary",
+                value=str(field_payload.get("value", "")),
+                enabled=bool(field_payload.get("enabled")),
+                disabled=bool(field_payload.get("disabled")),
+                read_only=bool(field_payload.get("readOnly")),
+                aria_label=(
+                    str(field_payload["ariaLabel"])
+                    if field_payload.get("ariaLabel") is not None
+                    else None
+                ),
+                aria_invalid=(
+                    str(field_payload["ariaInvalid"])
+                    if field_payload.get("ariaInvalid") is not None
+                    else None
+                ),
+                aria_describedby=(
+                    str(field_payload["ariaDescribedBy"])
+                    if field_payload.get("ariaDescribedBy") is not None
+                    else None
+                ),
+                aria_errormessage=(
+                    str(field_payload["ariaErrormessage"])
+                    if field_payload.get("ariaErrormessage") is not None
+                    else None
+                ),
+                outer_html=str(field_payload.get("outerHtml", "")),
+            ),
+            message=message,
+            describedby_texts=tuple(
+                str(text) for text in payload.get("describedbyTexts", []) if isinstance(text, str)
+            ),
+            errormessage_texts=tuple(
+                str(text)
+                for text in payload.get("errormessageTexts", [])
+                if isinstance(text, str)
+            ),
+            live_region_texts=tuple(
+                str(text) for text in payload.get("liveRegionTexts", []) if isinstance(text, str)
+            ),
+            active_element=FocusedElementObservation(
+                tag_name=str(active_payload.get("tagName", "")),
+                role=(
+                    str(active_payload["role"])
+                    if active_payload.get("role") is not None
+                    else None
+                ),
+                accessible_name=(
+                    str(active_payload["accessibleName"])
+                    if active_payload.get("accessibleName") is not None
+                    else None
+                ),
+                text=str(active_payload.get("text", "")),
+                tabindex=(
+                    str(active_payload["tabindex"])
+                    if active_payload.get("tabindex") is not None
+                    else None
+                ),
+                outer_html=str(active_payload.get("outerHtml", "")),
+            ),
+            field_is_active=bool(payload.get("fieldIsActive")),
+            dialog_text=str(payload.get("dialogText", "")),
+        )
 
     def open_issue_from_current_section(
         self,
@@ -75,8 +793,55 @@ class LiveMultiViewRefreshPage:
         issue_summary: str,
     ) -> str:
         selector = self._issue_selector(issue_key=issue_key, issue_summary=issue_summary)
-        self._session.wait_for_selector(selector, timeout_ms=60_000)
-        self._session.click(selector, timeout_ms=30_000)
+        if self._session.count(selector) > 0:
+            self._session.click(selector, timeout_ms=30_000)
+        else:
+            clicked = self._session.evaluate(
+                """
+                ({ issueKey, issueSummary }) => {
+                  const candidates = Array.from(
+                    document.querySelectorAll('flt-semantics, flt-semantics-img'),
+                  )
+                    .map((element) => {
+                      const label = element.getAttribute('aria-label') ?? '';
+                      const text = (element.innerText || element.textContent || '').trim();
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        label,
+                        text,
+                        width: rect.width,
+                        height: rect.height,
+                        left: rect.left,
+                        top: rect.top,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.width > 0
+                      && candidate.height > 0
+                      && (candidate.label.includes(issueKey) || candidate.text.includes(issueKey))
+                      && (
+                        candidate.label.includes(issueSummary)
+                        || candidate.text.includes(issueSummary)
+                      ),
+                    )
+                    .sort((left, right) => left.area - right.area);
+                  if (candidates.length === 0) {
+                    return false;
+                  }
+                  candidates[0].element.click();
+                  return true;
+                }
+                """,
+                arg={"issueKey": issue_key, "issueSummary": issue_summary},
+            )
+            if clicked is not True:
+                raise AssertionError(
+                    f"Step failed: the hosted tracker did not expose a visible clickable "
+                    f"region for {issue_key} in the current section.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                )
         self._session.wait_for_selector(
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
@@ -148,6 +913,76 @@ class LiveMultiViewRefreshPage:
                 f"Observed dialog text:\n{self.current_body_text()}",
             )
         return observation
+
+    def constrained_chip_field(self, label: str) -> ConstrainedChipFieldObservation:
+        payload = self._session.evaluate(
+            """
+            ({ label }) => {
+              const groups = Array.from(
+                document.querySelectorAll('flt-semantics[role="group"]'),
+              );
+              const group = groups.find((element) => {
+                const aria = element.getAttribute('aria-label') ?? '';
+                const text = (element.innerText || element.textContent || '').trim();
+                return (
+                  aria === label ||
+                  aria.startsWith(`${label}\n`) ||
+                  text === label ||
+                  text.startsWith(`${label}\n`)
+                );
+              });
+              if (!group) {
+                return null;
+              }
+
+              const optionLabels = Array.from(
+                group.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .map((button) => {
+                  const aria = button.getAttribute('aria-label');
+                  const text = (button.innerText || button.textContent || '').trim();
+                  return (aria || text || '').trim();
+                })
+                .filter((value) => value.length > 0);
+
+              return {
+                semanticsLabel: group.getAttribute('aria-label'),
+                fieldText: (group.innerText || group.textContent || '').trim(),
+                optionLabels,
+                inputCount: group.querySelectorAll(
+                  'input, textarea, [contenteditable="true"]',
+                ).length,
+                listboxCount: group.querySelectorAll('[role="listbox"]').length,
+                menuItemCount: group.querySelectorAll(
+                  '[role="option"], flt-semantics[role="menuitem"]',
+                ).length,
+              };
+            }
+            """,
+            arg={"label": label},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Human-style verification failed: the Edit issue surface did not show "
+                f"the visible {label!r} field.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        option_labels = payload.get("optionLabels")
+        if not isinstance(option_labels, list):
+            option_labels = []
+        return ConstrainedChipFieldObservation(
+            label=label,
+            semantics_label=(
+                str(payload["semanticsLabel"])
+                if payload.get("semanticsLabel") is not None
+                else None
+            ),
+            field_text=str(payload.get("fieldText", "")),
+            option_labels=tuple(str(value) for value in option_labels),
+            input_count=int(payload.get("inputCount", 0)),
+            listbox_count=int(payload.get("listboxCount", 0)),
+            menu_item_count=int(payload.get("menuItemCount", 0)),
+        )
 
     def change_priority(self, target_label: str) -> EditControlObservation:
         control = self.priority_control()
@@ -508,6 +1343,40 @@ class LiveMultiViewRefreshPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    def visible_issue_open_label(self, *, issue_key: str) -> str:
+        payload = self._session.evaluate(
+            """
+            (issueKey) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const matches = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][aria-label^="Open "]'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.startsWith(`Open ${issueKey} `));
+              return matches[0] ?? null;
+            }
+            """,
+            arg=issue_key,
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
+
     def _wait_for_issue_projection(
         self,
         *,
@@ -669,6 +1538,261 @@ class LiveMultiViewRefreshPage:
                 str(payload["expanded"]) if payload["expanded"] is not None else None
             ),
         )
+
+    def _wait_for_edit_dialog(self, *, issue_key: str, origin_label: str) -> str:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        self._session.wait_for_function(
+            """
+            ({ dialogSelector }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return false;
+              }
+              return (
+                root.querySelector('input[aria-label="Summary"]') !== null
+                && root.querySelector('textarea[aria-label="Description"]') !== null
+                && (document.body?.innerText ?? '').includes('Edit issue')
+              );
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector},
+            timeout_ms=30_000,
+        )
+        dialog_text = self.current_body_text()
+        if issue_key not in dialog_text:
+            raise AssertionError(
+                f"Step failed: opening the requested issue from {origin_label} did not "
+                f"lead to the edit surface for {issue_key}.\n"
+                f"Expected issue key in edit dialog: {issue_key}\n"
+                f"Observed dialog text:\n{dialog_text}",
+            )
+        return dialog_text
+
+    def _reveal_board_issue_edit_button(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> dict[str, float] | None:
+        for point in self._board_issue_hover_points(card_bounds=card_bounds):
+            self._session.mouse_move(point["x"], point["y"])
+            try:
+                self._session.wait_for_function(
+                    self._board_issue_edit_button_script(),
+                    arg={"cardBounds": card_bounds},
+                    timeout_ms=1_500,
+                )
+            except WebAppTimeoutError:
+                continue
+            edit_bounds = self._board_issue_edit_button_bounds(card_bounds=card_bounds)
+            if edit_bounds is not None:
+                return edit_bounds
+        return self._board_issue_edit_button_bounds(card_bounds=card_bounds)
+
+    @staticmethod
+    def _board_issue_hover_points(
+        *,
+        card_bounds: dict[str, float],
+    ) -> tuple[dict[str, float], ...]:
+        left = card_bounds["x"]
+        top = card_bounds["y"]
+        width = card_bounds["width"]
+        height = card_bounds["height"]
+        return (
+            {"x": left + (width / 2), "y": top + (height / 2)},
+            {"x": left + width - 24, "y": top + 24},
+            {"x": left + 24, "y": top + 24},
+            {"x": left + width - 24, "y": top + height - 24},
+        )
+
+    def _board_issue_card_bounds(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> dict[str, float]:
+        payload = self._session.evaluate(
+            """
+            ({ issueKey, issueSummary }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    label,
+                    text,
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  (candidate.label.includes(issueKey) || candidate.text.includes(issueKey))
+                  && (
+                    candidate.label.includes(issueSummary)
+                    || candidate.text.includes(issueSummary)
+                  ),
+                )
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+            """,
+            arg={"issueKey": issue_key, "issueSummary": issue_summary},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step failed: the Board view did not expose a visible card region for "
+                f"{issue_key}.\n"
+                f"Observed Board text:\n{self.current_body_text()}",
+            )
+        for key in ("x", "y", "width", "height"):
+            value = payload.get(key)
+            if not isinstance(value, int | float):
+                raise AssertionError(
+                    f"Step failed: the Board card geometry for {issue_key} was not readable.\n"
+                    f"Observed Board text:\n{self.current_body_text()}",
+                )
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
+    def _board_issue_edit_button_bounds(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> dict[str, float] | None:
+        payload = self._session.evaluate(
+            self._board_issue_edit_button_script(),
+            arg={"cardBounds": card_bounds},
+        )
+        if not isinstance(payload, dict):
+            return None
+        coordinates = (
+            payload.get("x"),
+            payload.get("y"),
+            payload.get("width"),
+            payload.get("height"),
+        )
+        if not all(isinstance(value, int | float) for value in coordinates):
+            return None
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
+    def _board_issue_controls_snapshot(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            ({ cardBounds }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const overlapsCard = (rect) => (
+                rect.left < (cardBounds.x + cardBounds.width + 24)
+                && (rect.left + rect.width) > (cardBounds.x - 24)
+                && rect.top < (cardBounds.y + cardBounds.height + 24)
+                && (rect.top + rect.height) > (cardBounds.y - 24)
+              );
+              return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = (element.getAttribute('aria-label') ?? '').trim();
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    rect,
+                    label,
+                    text,
+                    description: `${label || '<no-aria>'} | ${text || '<no-text>'}`,
+                  };
+                })
+                .filter((candidate) => overlapsCard(candidate.rect))
+                .map((candidate) => candidate.description)
+                .slice(0, 8);
+            }
+            """,
+            arg={"cardBounds": card_bounds},
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(entry) for entry in payload if str(entry).strip())
+
+    @staticmethod
+    def _board_issue_edit_button_script() -> str:
+        return """
+            ({ cardBounds }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const overlapsCard = (rect) => (
+                rect.left < (cardBounds.x + cardBounds.width + 24)
+                && (rect.left + rect.width) > (cardBounds.x - 24)
+                && rect.top < (cardBounds.y + cardBounds.height + 24)
+                && (rect.top + rect.height) > (cardBounds.y - 24)
+              );
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                    label,
+                    text,
+                    matchesEdit: /edit/i.test(`${label}\n${text}`),
+                    overlapsCard: overlapsCard(rect),
+                  };
+                })
+                .filter((candidate) => candidate.matchesEdit && candidate.overlapsCard)
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+        """
 
     def _open_focusable_dropdown(
         self,
@@ -833,3 +1957,7 @@ class LiveMultiViewRefreshPage:
             'flt-semantics-img[aria-label*="Issue detail '
             f'{escaped}"]'
         )
+
+    @staticmethod
+    def _escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')

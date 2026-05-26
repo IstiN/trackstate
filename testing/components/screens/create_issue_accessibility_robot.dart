@@ -245,6 +245,20 @@ class CreateIssueAccessibilityRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<void> scrollToTop() async {
+    final observation = observeVerticalScroll();
+    if (!observation.hasOverflow) {
+      await tester.pump();
+      return;
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    scrollableState.position.jumpTo(0);
+    await tester.pump();
+    await tester.pumpAndSettle();
+  }
+
   CreateIssueTextContrastObservation observeTextContrast(String text) {
     final foreground = _renderedTextColor(text);
     final background = _surfaceBackgroundColor();
