@@ -848,11 +848,12 @@ def _assert_first_row_focus_ready(state: dict[str, object]) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     row_focus = _row_focus_from_state(state, FIRST_WORKSPACE_DISPLAY_NAME)
+    active_summary = _element_label_for_summary(active)
     failures: list[str] = []
 
     if active.get("accessible_name") != state.get("first_row_label"):
         failures.append(
-            f"the active element before Tab traversal was {active.get('accessible_name')!r} instead of {state.get('first_row_label')!r}",
+            f"the active element before Tab traversal was {active_summary!r} instead of {state.get('first_row_label')!r}",
         )
     if not bool(focus.get("focus_owned_by_switcher")):
         failures.append("keyboard focus was not owned by the workspace switcher before the Tab traversal")
@@ -880,6 +881,7 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
     active = _active_from_state(state)
     focus = _focus_from_state(state)
     first_internal_label = _first_internal_label(state)
+    active_summary = _element_label_for_summary(active)
     failures: list[str] = []
 
     if not bool(focus.get("focus_owned_by_switcher")):
@@ -888,7 +890,7 @@ def _assert_first_keyboard_target(state: dict[str, object]) -> None:
         failures.append("focus escaped the workspace switcher while proving the first keyboard target")
     if active.get("accessible_name") != first_internal_label:
         failures.append(
-            f"focus landed on {active.get('accessible_name')!r} instead of the first internal target {first_internal_label!r}",
+            f"focus landed on {active_summary!r} instead of the first internal target {first_internal_label!r}",
         )
     if _state_active_is_workspace_trigger(state):
         failures.append("focus stayed on the workspace-switcher trigger instead of the first internal target")
@@ -913,6 +915,7 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
     row_focus = {name: _row_focus_from_state(state, name) for name in WORKSPACE_NAMES}
     monitor = _monitor_from_state(state)
     active_label = str(active.get("accessible_name") or "")
+    active_summary = _element_label_for_summary(active)
     failures: list[str] = []
 
     if _before_label_for_summary(state) != _first_internal_label(state):
@@ -929,7 +932,7 @@ def _assert_reverse_wrap(state: dict[str, object]) -> None:
         failures.append("the workspace switcher panel became hidden during the reverse-wrap attempt")
     if active.get("accessible_name") != expected_target.get("label"):
         failures.append(
-            f"focus landed on {active.get('accessible_name')!r} instead of the last internal control {expected_target.get('label')!r}",
+            f"focus landed on {active_summary!r} instead of the last internal control {expected_target.get('label')!r}",
         )
     if active.get("accessible_name") == _first_internal_label(state):
         failures.append("focus stayed on the first internal target instead of wrapping")
@@ -2088,11 +2091,27 @@ def _monitor_from_state(state: object) -> dict[str, object]:
 
 
 def _active_label_for_summary(state: object) -> object:
-    return _active_from_state(state).get("accessible_name")
+    return _element_label_for_summary(_active_from_state(state))
 
 
 def _before_label_for_summary(state: object) -> object:
-    return _before_from_state(state).get("accessible_name")
+    return _element_label_for_summary(_before_from_state(state))
+
+
+def _element_label_for_summary(element: object) -> str | None:
+    if not isinstance(element, dict):
+        return None
+    tag_name = str(element.get("tag_name") or "").upper()
+    raw_label = str(element.get("accessible_name") or element.get("text") or "").strip()
+    if tag_name == "BODY":
+        return "document body (<body>)"
+    if raw_label:
+        if len(raw_label) <= 160:
+            return raw_label
+        return raw_label[:157] + "..."
+    if tag_name:
+        return f"<{tag_name.lower()}>"
+    return None
 
 
 def _first_internal_label(state: object) -> object:
