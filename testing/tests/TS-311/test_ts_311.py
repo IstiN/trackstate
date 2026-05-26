@@ -29,7 +29,13 @@ SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts311_success.png"
 
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 DOWNLOAD_ONLY_MESSAGE = "This repository session is download-only for Git LFS attachments."
-UPLOAD_CONTROL_FRAGMENTS = ("Upload", "Choose file", "Select file", "Add attachment")
+UPLOAD_CONTROL_FRAGMENTS = (
+    "Upload",
+    "Choose attachment",
+    "Choose file",
+    "Select file",
+    "Add attachment",
+)
 
 
 def main() -> None:
@@ -346,6 +352,7 @@ def _exercise_attachments_tab(
         return
 
     attachments_text = live_issue_page.current_body_text()
+    upload_controls = live_issue_page.observe_attachment_upload_controls()
     upload_button_counts = {
         fragment: live_issue_page.visible_button_label_fragment_count(fragment)
         for fragment in UPLOAD_CONTROL_FRAGMENTS
@@ -362,6 +369,12 @@ def _exercise_attachments_tab(
         "download_button_disabled_count": live_issue_page.button_label_fragment_disabled_count(
             "Download",
         ),
+        "upload_controls": {
+            "choose_button_count": upload_controls.choose_button_count,
+            "choose_button_enabled": upload_controls.choose_button_enabled,
+            "upload_button_count": upload_controls.upload_button_count,
+            "upload_button_enabled": upload_controls.upload_button_enabled,
+        },
         "upload_button_counts": upload_button_counts,
         "visible_file_input_count": live_issue_page.visible_file_input_count(),
     }
@@ -412,12 +425,16 @@ def _exercise_attachments_tab(
             "requires download to remain available for LFS-backed attachments.\n"
             f"Observed body text:\n{attachments_text}",
         )
-    if attachments_observation["visible_file_input_count"] > 0 or any(
+    upload_controls_visible = (
+        upload_controls.choose_button_count > 0 or upload_controls.upload_button_count > 0
+    )
+    if attachments_observation["visible_file_input_count"] > 0 or upload_controls_visible or any(
         count > 0 for count in upload_button_counts.values()
     ):
         failures.append(
             "Step 5 failed: the hosted Attachments tab still exposed upload controls "
             "instead of a download-only experience for Git LFS attachments.\n"
+            f"Observed upload controls: {attachments_observation['upload_controls']}\n"
             f"Visible upload button counts: {upload_button_counts}\n"
             f"Visible file input count: {attachments_observation['visible_file_input_count']}\n"
             f"Observed body text:\n{attachments_text}",

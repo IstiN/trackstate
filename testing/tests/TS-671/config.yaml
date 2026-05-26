@@ -1,0 +1,20 @@
+test_id: TS-671
+type: cli
+framework: python
+platform: compiled-cli
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Compiles a temporary repository-local `trackstate` executable from this checkout.
+  - Executes `trackstate ticket --help` through the compiled entry point instead of any globally installed CLI binary.
+  - Passes only when the visible `Actions:` list includes `show` with the deployed ticket-detail description and the help text also shows the `trackstate ticket show --target local --key TRACK-1` example.
+runtime_inputs:
+  ticket_command: trackstate ticket --help
+  requested_command:
+    - trackstate
+    - ticket
+    - --help
+  required_actions_header: Actions:
+  required_action_name: show
+  required_action_description: Display one ticket with TrackState-native detail payload.
+  required_example: trackstate ticket show --target local --key TRACK-1
