@@ -16,6 +16,7 @@ TrackStateRepository createPlatformTrackStateRepository({
           (localRepositoryPath ?? configuredLocalRepositoryPath).trim().isEmpty
           ? '.'
           : (localRepositoryPath ?? configuredLocalRepositoryPath).trim(),
+      client: client,
     ),
   };
 }

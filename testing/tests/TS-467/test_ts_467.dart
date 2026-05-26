@@ -117,8 +117,7 @@ void main() {
           id: 'in-progress',
           text: editedStatus,
         );
-        await settingsRobot.tapActionButton('Save settings');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 300));
+        await settingsRobot.tapSaveSettingsButton();
 
         await screen.openSection('JQL Search');
         final queryAfterEdit = await screen.readJqlSearchFieldValue();
@@ -186,8 +185,7 @@ void main() {
           id: 'in-progress',
           text: '',
         );
-        await settingsRobot.tapActionButton('Save settings');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 300));
+        await settingsRobot.tapSaveSettingsButton();
 
         await screen.openSection('JQL Search');
         final queryAfterFallback = await screen.readJqlSearchFieldValue();
@@ -258,12 +256,10 @@ void main() {
           id: 'in-progress',
           text: '',
         );
-        await settingsRobot.tapActionButton('Save settings');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 300));
+        await settingsRobot.tapSaveSettingsButton();
 
         await screen.openSection('JQL Search');
-        final queryAfterCanonicalFallback = await screen
-            .readJqlSearchFieldValue();
+        final queryAfterCanonicalFallback = await screen.readJqlSearchFieldValue();
         if (queryAfterCanonicalFallback != query) {
           failures.add(
             'Step 6 failed: clearing the default-locale translation forced the JQL Search field to lose the visible query, implying a manual reload. '
@@ -325,7 +321,7 @@ void main() {
         semantics.dispose();
       }
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 }
 

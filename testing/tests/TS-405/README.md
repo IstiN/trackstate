@@ -11,7 +11,8 @@ The automation:
 3. creates a new draft status with duplicate ID `in-progress` and name `Doing`
 4. saves the draft, then clicks **Save settings** and checks for the expected
    duplicate-ID validation message without any repository write
-5. attempts to save another new status with a blank name and verifies the
+5. reopens a clean Settings session against the unchanged repository baseline
+6. attempts to save another new status with a blank name and verifies the
    missing-name validation message without any repository write
 
 ## Install dependencies
@@ -35,8 +36,6 @@ flutter test testing/tests/TS-405/test_ts_405.dart --reporter expanded
 ## Expected result
 
 ```text
-Current expected outcome: PASS
-
 The duplicate-ID save attempt should render:
 Save failed: Status ID "in-progress" is defined more than once.
 
@@ -45,7 +44,4 @@ Save failed: Statuses must include both an ID and a name.
 
 The repository HEAD, worktree cleanliness, and DEMO/config/statuses.json must
 remain unchanged for both blocked save attempts.
-
-If this automation fails, the current implementation has regressed from the
-ticket's shipped validation behavior.
 ```

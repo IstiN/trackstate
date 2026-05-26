@@ -109,8 +109,7 @@ void main() {
 
         final failures = <String>[];
 
-        await robot.tapActionButton('Save settings');
-        await _waitForSettingsFeedback(tester);
+        await robot.tapSaveSettingsButton();
         final duplicateAttemptHead =
             await tester.runAsync(fixture.headRevision) ?? '';
         final duplicateAttemptStatus =
@@ -165,8 +164,7 @@ void main() {
         );
 
         await robot.tapActionButton('Save');
-        await robot.tapActionButton('Save settings');
-        await _waitForSettingsFeedback(tester);
+        await robot.tapSaveSettingsButton();
 
         if (!robot.isVisibleText(missingNameError)) {
           failures.add(
@@ -201,11 +199,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-Future<void> _waitForSettingsFeedback(WidgetTester tester) async {
-  await tester.pump(const Duration(milliseconds: 300));
-  await tester.pumpAndSettle();
 }
 
 Future<void> _expectRepositoryUnchanged(
