@@ -259,8 +259,7 @@ void main() {
         await settingsRobot.tapSaveSettingsButton();
 
         await screen.openSection('JQL Search');
-        final queryAfterCanonicalFallback = await screen
-            .readJqlSearchFieldValue();
+        final queryAfterCanonicalFallback = await screen.readJqlSearchFieldValue();
         if (queryAfterCanonicalFallback != query) {
           failures.add(
             'Step 6 failed: clearing the default-locale translation forced the JQL Search field to lose the visible query, implying a manual reload. '

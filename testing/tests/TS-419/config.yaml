@@ -1,0 +1,8 @@
+test_id: TS-419
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed hosted bootstrap path against https://istin.github.io/trackstate-setup/.
+  - Records repository GitHub API requests during startup, verifies the summary index and project metadata envelope, and confirms Dashboard issue summaries render without eager detail hydration.

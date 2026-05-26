@@ -43,11 +43,7 @@ class Ts467LocaleResolutionFixture {
       'DEMO/config/statuses.json',
       '${jsonEncode([
         {'id': 'todo', 'name': 'To Do', 'category': 'new'},
-        {
-          'id': 'in-progress',
-          'name': canonicalInProgressStatus,
-          'category': 'indeterminate',
-        },
+        {'id': 'in-progress', 'name': canonicalInProgressStatus, 'category': 'indeterminate'},
         {'id': 'done', 'name': 'Done', 'category': 'done'},
       ])}\n',
     );
@@ -58,18 +54,8 @@ class Ts467LocaleResolutionFixture {
           'name': 'Delivery workflow',
           'statuses': ['To Do', 'In Progress', 'Done'],
           'transitions': [
-            {
-              'id': 'start',
-              'name': 'Start work',
-              'from': 'To Do',
-              'to': 'In Progress',
-            },
-            {
-              'id': 'finish',
-              'name': 'Finish work',
-              'from': 'In Progress',
-              'to': 'Done',
-            },
+            {'id': 'start', 'name': 'Start work', 'from': 'To Do', 'to': 'In Progress'},
+            {'id': 'finish', 'name': 'Finish work', 'from': 'In Progress', 'to': 'Done'},
           ],
         },
       })}\n',
@@ -84,12 +70,7 @@ class Ts467LocaleResolutionFixture {
       'DEMO/config/fields.json',
       '${jsonEncode([
         {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
-        {
-          'id': 'description',
-          'name': 'Description',
-          'type': 'markdown',
-          'required': false,
-        },
+        {'id': 'description', 'name': 'Description', 'type': 'markdown', 'required': false},
       ])}\n',
     );
     await _repositoryFixture.writeFile(
@@ -104,11 +85,7 @@ class Ts467LocaleResolutionFixture {
     await _repositoryFixture.writeFile(
       'DEMO/config/i18n/en.json',
       '${jsonEncode({
-        'statuses': {
-          'todo': 'To Do',
-          'in-progress': defaultLocaleInProgressStatus,
-          'done': 'Done',
-        },
+        'statuses': {'todo': 'To Do', 'in-progress': defaultLocaleInProgressStatus, 'done': 'Done'},
       })}\n',
     );
     await _repositoryFixture.writeFile(

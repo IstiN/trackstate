@@ -1,0 +1,10 @@
+test_id: TS-726
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with preloaded hosted and local saved workspaces.
+  - Verifies keyboard access to the workspace switcher trigger, focus traversal inside the switcher surface, badge contrast, semantics labels, and mobile trigger focus-ring visibility.
