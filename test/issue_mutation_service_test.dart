@@ -361,6 +361,56 @@ void main() {
   );
 
   test(
+    'service preserves repository-index links after archive and reload',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+      expect(linkResult.isSuccess, isTrue);
+
+      final archiveResult = await service.archiveIssue('DEMO-10');
+
+      expect(archiveResult.isSuccess, isTrue);
+
+      final reloadedRepository = LocalTrackStateRepository(
+        repositoryPath: repo.path,
+      );
+      final reloadedSnapshot = await reloadedRepository.loadSnapshot();
+      final linkedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-2',
+      );
+      final archivedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-10',
+      );
+
+      expect(archivedIssue.isArchived, isTrue);
+      expect(
+        linkedIssue.links,
+        contains(
+          predicate<IssueLink>(
+            (link) =>
+                link.type == 'blocks' &&
+                link.direction == 'outward' &&
+                link.targetKey == 'DEMO-10',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'service rejects self-referencing links without writing metadata',
     () async {
       final repo = await _createMutationRepository();
@@ -471,6 +521,58 @@ void main() {
       contains('archived: true'),
     );
   });
+
+  test(
+    'service preserves repository-index links after delete and reload',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final createdIssue = await service.createIssue(
+        summary: 'Disposable story',
+        description: 'Deleted after link persistence regression coverage.',
+      );
+      expect(createdIssue.isSuccess, isTrue);
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+      expect(linkResult.isSuccess, isTrue);
+
+      final deleteResult = await service.deleteIssue(createdIssue.value!.key);
+
+      expect(deleteResult.isSuccess, isTrue);
+
+      final reloadedRepository = LocalTrackStateRepository(
+        repositoryPath: repo.path,
+      );
+      final reloadedSnapshot = await reloadedRepository.loadSnapshot();
+      final linkedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-2',
+      );
+
+      expect(
+        linkedIssue.links,
+        contains(
+          predicate<IssueLink>(
+            (link) =>
+                link.type == 'blocks' &&
+                link.direction == 'outward' &&
+                link.targetKey == 'DEMO-10',
+          ),
+        ),
+      );
+    },
+  );
 
   test('service blocks delete when child issues would be orphaned', () async {
     final repo = await _createMutationRepository();

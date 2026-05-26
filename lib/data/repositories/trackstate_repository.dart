@@ -5313,6 +5313,15 @@ List<Map<String, Object?>> _repositoryIndexEntriesJson(
       'updated': entry.updatedLabel,
       'revision': entry.revision,
       'progress': entry.progress,
+      if (entry.links.isNotEmpty)
+        'links': [
+          for (final link in entry.links)
+            {
+              'type': link.type,
+              'target': link.targetKey,
+              'direction': link.direction,
+            },
+        ],
       'resolution': entry.resolutionId,
       'children': entry.childKeys,
       'archived': entry.isArchived,
