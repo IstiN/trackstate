@@ -351,7 +351,6 @@ class PlaywrightWebAppSession(WebAppSession):
         timeout_ms: int = 60_000,
     ) -> str:
         return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
-
     def wait_for_any_text(
         self,
         texts: Sequence[str],
