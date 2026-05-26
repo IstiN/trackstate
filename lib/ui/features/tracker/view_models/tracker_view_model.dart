@@ -358,6 +358,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isLoadingMoreSearchResults = false;
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
+  bool _startupTimeoutFallbackAwaitingShellReady = false;
   WorkspaceSyncService? _workspaceSyncService;
   WorkspaceSyncStatus _workspaceSyncStatus = const WorkspaceSyncStatus();
   WorkspaceSyncRefresh? _pendingWorkspaceSyncRefresh;
@@ -555,6 +556,7 @@ class TrackerViewModel extends ChangeNotifier {
     _message = null;
     _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
+    _startupTimeoutFallbackAwaitingShellReady = false;
     notifyListeners();
     Future<void> Function()? deferredAccessRestore;
     var startedDeferredAccessRestore = false;
@@ -628,7 +630,7 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } finally {
       _isLoading = false;
-      startupAuthProbeDiagnostics.recordShellReady();
+      _publishStartupShellReadyDiagnosticIfNeeded();
       notifyListeners();
     }
   }
@@ -2069,8 +2071,22 @@ class TrackerViewModel extends ChangeNotifier {
       startupAuthProbeDiagnostics.recordTimeoutFallback(
         timeout: _startupAccessRestoreTimeout,
       );
+      _startupTimeoutFallbackAwaitingShellReady = true;
+      _publishStartupShellReadyDiagnosticIfNeeded();
       return;
     }
+  }
+
+  void _publishStartupShellReadyDiagnosticIfNeeded() {
+    if (!_startupTimeoutFallbackAwaitingShellReady) {
+      startupAuthProbeDiagnostics.recordShellReady();
+      return;
+    }
+    if (_snapshot == null) {
+      return;
+    }
+    startupAuthProbeDiagnostics.recordShellReady();
+    _startupTimeoutFallbackAwaitingShellReady = false;
   }
 
   Future<void> _ensureIssueHydrated(
@@ -2166,6 +2182,12 @@ class TrackerViewModel extends ChangeNotifier {
       previousSelectedIssue: _selectedIssue,
       preferredSelectedIssueKey: _selectedIssue?.key,
     );
+    if (repository is ProviderBackedTrackStateRepository &&
+        repository.usesHostedStartupShellFallback(snapshot)) {
+      startupAuthProbeDiagnostics.recordFallbackShellReady(
+        timeout: _startupAccessRestoreTimeout,
+      );
+    }
     notifyListeners();
     final requestToken = _beginSearchRequest();
     if (shouldDeferInitialSearchUntilAfterShellReady) {
@@ -2207,6 +2229,10 @@ class TrackerViewModel extends ChangeNotifier {
     if (hasStartupRecovery && _snapshot != null) {
       _section = TrackerSection.settings;
     }
+    startupAuthProbeDiagnostics.recordFallbackShellReady(
+      timeout: _startupAccessRestoreTimeout,
+    );
+    _publishStartupShellReadyDiagnosticIfNeeded();
     if (!_disposed) {
       notifyListeners();
     }

@@ -588,7 +588,10 @@ void main() {
       expect(browserHarness.userProbeRequestCount, 1);
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
-      _expectRestrictedFallbackShell(delayedRepository);
+      _expectRestrictedFallbackShell(
+        delayedRepository,
+        consoleMessages: browserHarness.consoleMessages,
+      );
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
     },
@@ -779,7 +782,9 @@ void main() {
         browserHarness.requestedPaths,
         contains('/repos/stable/repo/git/trees/main'),
       );
-      _expectBrowserObservedShellReady();
+      _expectBrowserObservedShellReady(
+        consoleMessages: browserHarness.consoleMessages,
+      );
       expect(find.text('Connect GitHub'), findsWidgets);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -996,11 +1001,12 @@ class _BrowserStartupAuthProbeHarness {
   _BrowserStartupAuthProbeHarness();
 
   final List<String> requestedPaths = <String>[];
-  final List<String> consoleMessages = <String>[];
+  final _ConsoleInfoCapture _consoleInfoCapture = _ConsoleInfoCapture();
   final Completer<web.Response> _userProbeCompleter = Completer<web.Response>();
   bool _installed = false;
   late final JSFunction _previousFetch = _windowFetch;
-  late final JSFunction _previousConsoleInfo = _consoleInfo;
+
+  List<String> get consoleMessages => _consoleInfoCapture.consoleMessages;
 
   int get userProbeRequestCount =>
       requestedPaths.where((path) => path == '/user').length;
@@ -1019,6 +1025,7 @@ class _BrowserStartupAuthProbeHarness {
       return;
     }
     _installed = true;
+    _consoleInfoCapture.install();
     _windowFetch = ((JSAny? input, JSAny? init) {
       final requestUrl = (input! as JSString).toDart;
       final path = Uri.parse(requestUrl).path;
@@ -1027,9 +1034,6 @@ class _BrowserStartupAuthProbeHarness {
         '/user' => _userProbeCompleter.future.toJS,
         _ => Future<web.Response>.value(_jsonResponse('{}', status: 404)).toJS,
       };
-    }).toJS;
-    _consoleInfo = ((JSAny? message) {
-      consoleMessages.add((message! as JSString).toDart);
     }).toJS;
   }
 
@@ -1054,7 +1058,7 @@ class _BrowserStartupAuthProbeHarness {
       return;
     }
     _windowFetch = _previousFetch;
-    _consoleInfo = _previousConsoleInfo;
+    _consoleInfoCapture.dispose();
     completeUserProbe();
   }
 
@@ -1078,18 +1082,21 @@ class _RealHostedBrowserFetchHarness {
 
   final _RealHostedStartupDelayedAuthHarness _delegate =
       _RealHostedStartupDelayedAuthHarness();
+  final _ConsoleInfoCapture _consoleInfoCapture = _ConsoleInfoCapture();
   bool _installed = false;
   late final JSFunction _previousFetch = _windowFetch;
 
   List<String> get requestedPaths => _delegate.requestedPaths;
   int get userProbeRequestCount => _delegate.userProbeRequestCount;
   bool get userProbePending => _delegate.userProbePending;
+  List<String> get consoleMessages => _consoleInfoCapture.consoleMessages;
 
   void install() {
     if (_installed) {
       return;
     }
     _installed = true;
+    _consoleInfoCapture.install();
     _windowFetch = ((JSAny? input, JSAny? init) {
       final requestUrl = _requestUrl(input);
       if (requestUrl.isEmpty) {
@@ -1117,6 +1124,7 @@ class _RealHostedBrowserFetchHarness {
       return;
     }
     _windowFetch = _previousFetch;
+    _consoleInfoCapture.dispose();
     _delegate.completeUserProbe();
   }
 
@@ -1146,10 +1154,35 @@ class _RealHostedBrowserFetchHarness {
   }
 }
 
+class _ConsoleInfoCapture {
+  final List<String> consoleMessages = <String>[];
+  bool _installed = false;
+  late final JSFunction _previousConsoleInfo = _consoleInfo;
+
+  void install() {
+    if (_installed) {
+      return;
+    }
+    _installed = true;
+    _consoleInfo = ((JSAny? message) {
+      consoleMessages.add((message! as JSString).toDart);
+    }).toJS;
+  }
+
+  void dispose() {
+    if (!_installed) {
+      return;
+    }
+    _consoleInfo = _previousConsoleInfo;
+    _installed = false;
+  }
+}
+
 void _expectRestrictedFallbackShell(
-  ProviderBackedTrackStateRepository repository,
-) {
-  _expectBrowserObservedShellReady();
+  ProviderBackedTrackStateRepository repository, {
+  Iterable<String>? consoleMessages,
+}) {
+  _expectBrowserObservedShellReady(consoleMessages: consoleMessages);
   expect(find.byType(CircularProgressIndicator), findsNothing);
   expect(find.text('Connect GitHub'), findsWidgets);
   expect(repository.session, isNotNull);
@@ -1176,7 +1209,19 @@ void _expectHostedFallbackTrigger() {
   );
 }
 
-void _expectBrowserObservedShellReady() {
+void _expectBrowserObservedShellReady({Iterable<String>? consoleMessages}) {
+  if (consoleMessages != null) {
+    expect(
+      consoleMessages.any(
+        (message) =>
+            message.startsWith('TrackState startup fallback diagnostic:') &&
+            message.contains('shell_ready transition after timeout fallback'),
+      ),
+      isTrue,
+      reason:
+          'Expected the browser startup flow to emit the fallback shell_ready diagnostic before auth finished.',
+    );
+  }
   expect(
     find.byKey(const ValueKey('workspace-switcher-trigger')),
     findsOneWidget,
