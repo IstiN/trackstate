@@ -89,6 +89,7 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
 
     @property
     def auth_probe_pending(self) -> bool:
+        self._poll_delay_state()
         with self._delay_lock:
             return self._pending_delayed_requests > 0
 
@@ -100,12 +101,70 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
     def _handle_console_message(self, message: ConsoleMessage) -> None:
         text = message.text or ""
         if text.startswith(self._START_CONSOLE_PREFIX):
-            self._record_delayed_request_start(text[len(self._START_CONSOLE_PREFIX) :].strip())
+            request_url = text[len(self._START_CONSOLE_PREFIX) :].strip()
+            if self._matches_delayed_path(request_url):
+                self._record_delayed_request_start(request_url)
             return
         if text.startswith(self._RELEASE_CONSOLE_PREFIX):
-            self._record_delayed_request_release(
-                text[len(self._RELEASE_CONSOLE_PREFIX) :].strip(),
-            )
+            request_url = text[len(self._RELEASE_CONSOLE_PREFIX) :].strip()
+            if self._matches_delayed_path(request_url):
+                self._record_delayed_request_release(request_url)
+
+    def _read_delay_state(self) -> dict[str, Any] | None:
+        if self._page is None or not hasattr(self._page, "evaluate"):
+            return None
+        payload = self._page.evaluate(
+            """
+            () => {
+              const state = window.__delayedAuthWorkspaceProfilesState;
+              if (!state) {
+                return null;
+              }
+              return {
+                activeCount: state.activeCount,
+                startedUrls: [...state.startedUrls],
+                completedUrls: [...state.completedUrls],
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "active_count": int(payload.get("activeCount", 0) or 0),
+            "started_urls": [
+                str(url)
+                for url in payload.get("startedUrls", [])
+                if isinstance(url, str)
+            ],
+            "completed_urls": [
+                str(url)
+                for url in payload.get("completedUrls", [])
+                if isinstance(url, str)
+            ],
+        }
+
+    def _poll_delay_state(self) -> None:
+        state = self._read_delay_state()
+        if state is not None:
+            self._sync_delay_state(state)
+
+    def _sync_delay_state(self, state: dict[str, Any]) -> None:
+        started_urls = state["started_urls"]
+        completed_urls = state["completed_urls"]
+        with self._delay_lock:
+            self._pending_delayed_requests = int(state["active_count"])
+            self.delayed_request_urls = list(started_urls)
+            if started_urls and self.auth_probe_started_at_monotonic is None:
+                self.auth_probe_started_at_monotonic = time.monotonic()
+                self._auth_request_started.set()
+            if (
+                completed_urls
+                and state["active_count"] == 0
+                and self.auth_probe_released_at_monotonic is None
+            ):
+                self.auth_probe_released_at_monotonic = time.monotonic()
+                self._auth_request_released.set()
 
     def _record_delayed_request_start(self, request_url: str) -> None:
         if not request_url:
@@ -172,13 +231,15 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
             return True
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
+            self._poll_delay_state()
+            if event.is_set():
+                return True
             page = self._page
             if page is not None:
                 page.wait_for_timeout(poll_interval_ms)
             else:
                 time.sleep(poll_interval_ms / 1000)
-            if event.is_set():
-                return True
+        self._poll_delay_state()
         return event.is_set()
 
 
@@ -200,6 +261,12 @@ def _build_delayed_auth_fetch_script(
   const delayMs = {delay_ms};
   const startPrefix = {start_prefix!r};
   const releasePrefix = {release_prefix!r};
+  const state = {{
+    activeCount: 0,
+    startedUrls: [],
+    completedUrls: [],
+  }};
+  window.__delayedAuthWorkspaceProfilesState = state;
   const originalFetch = window.fetch.bind(window);
   const normalizePath = (value) => {{
     try {{
@@ -227,10 +294,17 @@ def _build_delayed_auth_fetch_script(
     if (!shouldDelay(url)) {{
       return originalFetch(input, init);
     }}
+    state.startedUrls.push(url);
+    state.activeCount += 1;
     console.info(`${{startPrefix}}${{url}}`);
-    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
-    console.info(`${{releasePrefix}}${{url}}`);
-    return originalFetch(input, init);
+    try {{
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      return await originalFetch(input, init);
+    }} finally {{
+      state.activeCount = Math.max(0, state.activeCount - 1);
+      state.completedUrls.push(url);
+      console.info(`${{releasePrefix}}${{url}}`);
+    }}
   }};
 }})();
 """
