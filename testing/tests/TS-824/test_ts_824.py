@@ -236,7 +236,8 @@ def main() -> None:
                         f"pre_tab_focus_on_trigger={pre_tab_focus.active_on_trigger}; "
                         f"pre_tab_restore_attempts={max(0, len(pre_tab_restore_attempts) - 1)}; "
                         f"row_count={switcher.row_count}; "
-                        f"title_visible={'Workspace switcher' in switcher.switcher_text}"
+                        f"title_visible={'Workspace switcher' in switcher.switcher_text}; "
+                        f"content_excerpt={_snippet(switcher.switcher_text)}"
                     ),
                 )
                 _record_human_verification(
@@ -244,8 +245,8 @@ def main() -> None:
                     check=(
                         "Reached the workspace switcher trigger through real keyboard Tab "
                         "navigation, opened the visible desktop panel from that focused "
-                        "trigger, and confirmed the panel title plus visible workspace-"
-                        "switcher content were shown before pressing Tab again."
+                        "trigger, and confirmed the panel content a user would see before "
+                        "pressing Tab again."
                     ),
                     observed=(
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
@@ -256,8 +257,8 @@ def main() -> None:
                         f"pre_tab_on_trigger={pre_tab_focus.active_on_trigger}; "
                         f"pre_tab_restore_attempts={len(pre_tab_restore_attempts)}; "
                         f"row_count={switcher.row_count}; "
-                        f"text_excerpt={switcher.switcher_text!r}; "
-                        f"panel_excerpt={panel.container_text!r}"
+                        f"text_excerpt={_snippet(switcher.switcher_text)}; "
+                        f"panel_excerpt={_snippet(panel.container_text)}"
                     ),
                 )
 
@@ -445,15 +446,25 @@ def _assert_desktop_panel_open(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
-    panel_signals = ("Saved workspaces", "Add workspace", "Save and switch")
-    has_expected_panel_content = any(
-        signal in switcher.switcher_text or signal in panel.container_text
-        for signal in panel_signals
-    )
-    if switcher.row_count <= 0 and not has_expected_panel_content:
+    switcher_text = switcher.switcher_text.strip()
+    panel_text = panel.container_text.strip()
+    if not switcher_text:
         raise AssertionError(
             "Step 2 failed: opening the workspace switcher did not expose readable "
-            "desktop switcher content.\n"
+            "visible panel content.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}",
+        )
+    if (
+        "Workspace switcher" not in switcher_text
+        and trigger.display_name not in switcher_text
+        and "Add workspace" not in switcher_text
+        and not any(
+            signal in panel_text for signal in ("Saved workspaces", "Add workspace", "Save and switch")
+        )
+    ):
+        raise AssertionError(
+            "Step 2 failed: opening the workspace switcher trigger did not expose the "
+            "expected desktop workspace-switcher content.\n"
             f"Observed switcher text:\n{switcher.switcher_text}\n"
             f"Observed panel text:\n{panel.container_text}",
         )
