@@ -1,0 +1,9 @@
+test_id: TS-734
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a mutable hosted ProviderBackedTrackStateRepository to drive production workspace sync refreshes through the real TrackState app.
+  - Verifies a comments-only sync updates the selected issue comments while the board and hierarchy surfaces remain stable.
+  - Verifies a project-metadata refresh updates dashboard counters and the Settings attachments display.

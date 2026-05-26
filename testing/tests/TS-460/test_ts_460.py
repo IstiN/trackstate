@@ -380,7 +380,7 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
             ),
         )
         return payload
-
+ 
     @staticmethod
     def _check_true(
         *,
@@ -444,7 +444,6 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
     ) -> None:
         if member in container:
             failures.append(message)
-
 
 if __name__ == "__main__":
     unittest.main()

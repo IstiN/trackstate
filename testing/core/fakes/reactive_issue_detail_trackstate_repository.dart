@@ -22,6 +22,7 @@ class ReactiveIssueDetailTrackStateRepository
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
       permission: permission,
@@ -29,10 +30,13 @@ class ReactiveIssueDetailTrackStateRepository
       failingTextPaths: failingTextPaths,
       textFixtures: textFixtures,
       binaryFixtures: binaryFixtures,
+      includeDefaultBinaryFixtures: includeDefaultBinaryFixtures,
     ),
   );
 
   final MutableIssueDetailTrackStateProvider _provider;
+
+  String? textFixture(String path) => _provider.textFixture(path);
 
   void synchronizeSessionToReadOnly() {
     final currentSession = session;
@@ -61,6 +65,8 @@ class ReactiveIssueDetailTrackStateRepository
       canCreateBranch: readOnlyPermission.canCreateBranch,
       canManageAttachments: readOnlyPermission.canManageAttachments,
       attachmentUploadMode: readOnlyPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          readOnlyPermission.supportsReleaseAttachmentWrites,
       canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
     );
   }
@@ -93,6 +99,8 @@ class ReactiveIssueDetailTrackStateRepository
       canCreateBranch: attachmentRestrictedPermission.canCreateBranch,
       canManageAttachments: attachmentRestrictedPermission.canManageAttachments,
       attachmentUploadMode: attachmentRestrictedPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          attachmentRestrictedPermission.supportsReleaseAttachmentWrites,
       canCheckCollaborators:
           attachmentRestrictedPermission.canCheckCollaborators,
     );
@@ -100,7 +108,10 @@ class ReactiveIssueDetailTrackStateRepository
 }
 
 class MutableIssueDetailTrackStateProvider
-    implements TrackStateProviderAdapter, RepositoryFileMutator {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryFileMutator,
+        RepositoryReleaseAttachmentStore {
   MutableIssueDetailTrackStateProvider({
     RepositoryPermission permission = const RepositoryPermission(
       canRead: true,
@@ -114,23 +125,43 @@ class MutableIssueDetailTrackStateProvider
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
   }) : _permission = permission,
        _lfsTrackedPaths = lfsTrackedPaths,
        _failingTextPaths = failingTextPaths,
        _textFiles = Map<String, String>.from(_textFixtures)
          ..addAll(textFixtures),
        _binaryFiles = <String, Uint8List>{
-         for (final entry in _binaryFixtures.entries)
+         for (final entry
+             in (includeDefaultBinaryFixtures
+                 ? _binaryFixtures.entries
+                 : const <MapEntry<String, Uint8List>>[]))
            entry.key: Uint8List.fromList(entry.value),
          for (final entry in binaryFixtures.entries)
            entry.key: Uint8List.fromList(entry.value),
        };
 
   RepositoryPermission _permission;
+  ProviderConnectionState _connectionState =
+      ProviderConnectionState.disconnected;
   final Set<String> _lfsTrackedPaths;
   final Set<String> _failingTextPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: _revision,
+      sessionRevision:
+          '${_connectionState.name}:${_permission.canRead}:${_permission.canWrite}:${_permission.supportsReleaseAttachmentWrites}',
+      connectionState: _connectionState,
+      permission: _permission,
+    ),
+  );
 
   static const Map<String, String> _textFixtures = {
     'project.json': '''
@@ -303,6 +334,11 @@ Read and write tracker files through GitHub Contents API.
   };
   final Map<String, String> _textFiles;
   final Map<String, Uint8List> _binaryFiles;
+  final Map<String, _ReactiveReleaseAttachment> _releaseAttachments =
+      <String, _ReactiveReleaseAttachment>{};
+  int _nextReleaseAssetId = 1;
+
+  String? textFixture(String path) => _textFiles[path];
 
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
@@ -318,11 +354,13 @@ Read and write tracker files through GitHub Contents API.
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override
-  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(
-        login: 'write-enabled-user',
-        displayName: 'Write Enabled User',
-      );
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connectionState = ProviderConnectionState.connected;
+    return const RepositoryUser(
+      login: 'write-enabled-user',
+      displayName: 'Write Enabled User',
+    );
+  }
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>
@@ -454,6 +492,72 @@ Read and write tracker files through GitHub Contents API.
       revision: _revision,
     ).copyWith(path: request.path, branch: request.branch);
   }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final attachment =
+        _releaseAttachments[_releaseAttachmentKey(
+          request.releaseTag,
+          request.assetName,
+        )];
+    if (attachment == null) {
+      throw TrackStateProviderException(
+        'Missing release attachment fixture for ${request.releaseTag}/${request.assetName}.',
+      );
+    }
+    return RepositoryAttachment(
+      path: '${request.releaseTag}/${request.assetName}',
+      bytes: Uint8List.fromList(attachment.bytes),
+      revision: attachment.assetId,
+      declaredSizeBytes: attachment.bytes.length,
+    );
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final key = _releaseAttachmentKey(request.releaseTag, request.assetName);
+    final existing = _releaseAttachments[key];
+    final assetId =
+        existing?.assetId ?? 'reactive-release-${_nextReleaseAssetId++}';
+    _releaseAttachments[key] = _ReactiveReleaseAttachment(
+      assetId: assetId,
+      bytes: Uint8List.fromList(request.bytes),
+      mediaType: request.mediaType,
+    );
+    return RepositoryReleaseAttachmentWriteResult(
+      releaseTag: request.releaseTag,
+      assetName: request.assetName,
+      assetId: assetId,
+    );
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    _releaseAttachments.remove(
+      _releaseAttachmentKey(request.releaseTag, request.assetName),
+    );
+  }
+
+  String _releaseAttachmentKey(String releaseTag, String assetName) =>
+      '$releaseTag::$assetName';
+}
+
+class _ReactiveReleaseAttachment {
+  const _ReactiveReleaseAttachment({
+    required this.assetId,
+    required this.bytes,
+    required this.mediaType,
+  });
+
+  final String assetId;
+  final Uint8List bytes;
+  final String mediaType;
 }
 
 extension on RepositoryTextFile {

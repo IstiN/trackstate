@@ -1,0 +1,9 @@
+test_id: TS-504
+type: api
+framework: python
+platform: github-hosted
+dependencies: []
+notes:
+  - Seeds a hosted DEMO/TS-400 issue in the live setup repository with github-releases attachment storage.
+  - Creates a valid GitHub release container for TS-400, then uploads a foreign extra_file.zip asset that is absent from attachments.json.
+  - Runs the real hosted CLI attachment upload flow and verifies the command fails without deleting or absorbing the foreign asset.

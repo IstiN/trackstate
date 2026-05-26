@@ -1,0 +1,42 @@
+test_id: TS-951
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - Playwright for human-style GitHub workflow page verification
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts951_early_engine_crash_simulation.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts951-log-validation-always
+  commit_message: "TS-951 probe: verify log-validation always runs after axe failure"
+  pull_request_title: "TS-951 disposable probe: verify log-validation always runs after axe failure"
+  pull_request_body: "Disposable PR created by TS-951 automation to force a real accessibility scan failure through the live PR accessibility gate and verify that log-validation is configured with always() and still executes after the failing axe-core step."
+  expected_accessibility_markers:
+    - axe-core
+    - accessibility
+    - flutter engine initialization
+    - crash
+  contrast_evidence_markers:
+    - TS-944 simulated Flutter engine crash after bootstrap
+    - process completed with exit code 1
+    - timeout
+  semantic_evidence_markers:
+    - semantics
+    - surface ready
+    - nodes
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+  ui_timeout_seconds: 60
+  accessibility_job_name: Accessibility checks
+  axe_step_name: Run axe-core accessibility checks
+  log_validation_step_name: log-validation
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files and forces the live accessibility scan to fail before the workflow reaches log-validation.
+  - Verifies both the workflow contract and the contributor-visible run sequence for the log-validation step after the forced accessibility failure.
