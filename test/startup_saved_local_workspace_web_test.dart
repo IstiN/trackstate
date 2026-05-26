@@ -34,6 +34,13 @@ external JSFunction get _consoleInfo;
 external set _consoleInfo(JSFunction value);
 
 const String _hostedWorkspaceId = 'hosted:stable/repo@main';
+const List<String> _shellNavigationLabels = <String>[
+  'Dashboard',
+  'Board',
+  'JQL Search',
+  'Hierarchy',
+  'Settings',
+];
 final List<String> _startupDiagnosticMessages = <String>[];
 
 void main() {
@@ -111,6 +118,7 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       _expectRuntimeStartupFallbackSignal(
+        authPending: browserHarness.userProbePending,
         consoleMessages: browserHarness.consoleMessages,
       );
       _expectRestrictedFallbackShell(delayedRepository);
@@ -182,7 +190,9 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -278,7 +288,9 @@ void main() {
 
       expect(workspaceProfiles.selectProfilePending, isTrue);
       expect(delayedRepository.userProbePending, isTrue);
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -360,7 +372,9 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -444,6 +458,7 @@ void main() {
       expect(browserHarness.requestedPaths, contains('/user'));
       expect(browserHarness.unexpectedConsoleMessages, isEmpty);
       _expectRuntimeStartupFallbackSignal(
+        authPending: browserHarness.userProbePending,
         consoleMessages: browserHarness.consoleMessages,
       );
       _expectRestrictedFallbackShell(delayedRepository);
@@ -538,7 +553,9 @@ void main() {
       expect(delayedRepository.userProbeRequestCount, 1);
       expect(delayedRepository.userProbePending, isTrue);
       expect(delayedRepository.requestedPaths, contains('/user'));
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
@@ -610,6 +627,7 @@ void main() {
       expect(browserHarness.userProbePending, isTrue);
       expect(browserHarness.requestedPaths, contains('/user'));
       _expectRuntimeStartupFallbackSignal(
+        authPending: browserHarness.userProbePending,
         consoleMessages: browserHarness.consoleMessages,
       );
       _expectRestrictedFallbackShell(delayedRepository);
@@ -737,12 +755,16 @@ void main() {
       await tester.pump();
 
       expect(delayedRepository.userProbePending, isTrue);
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       final savedStateAfterSwitch = await workspaceProfiles.loadState();
       _expectHostedFallbackWorkspaceState(savedStateAfterSwitch);
-      _expectRuntimeStartupFallbackSignal();
+      _expectRuntimeStartupFallbackSignal(
+        authPending: delayedRepository.userProbePending,
+      );
       _expectRestrictedFallbackShell(delayedRepository);
       await _expectBlockedCreateIssueGate(tester);
       delayedRepository.completeUserProbe();
@@ -806,6 +828,7 @@ void main() {
         contains('/repos/stable/repo/git/trees/main'),
       );
       _expectBrowserObservedShellReady(
+        authPending: browserHarness.userProbePending,
         consoleMessages: browserHarness.consoleMessages,
       );
       expect(find.text('Connect GitHub'), findsWidgets);
@@ -1216,9 +1239,11 @@ void _expectRestrictedFallbackShell(
 }
 
 void _expectRuntimeStartupFallbackSignal({
+  required bool authPending,
   Iterable<String>? consoleMessages,
 }) {
   _expectBrowserObservedShellReady(
+    authPending: authPending,
     consoleMessages: consoleMessages,
     expectStartupDiagnostic: true,
   );
@@ -1240,6 +1265,7 @@ void _expectHostedFallbackTrigger() {
 }
 
 void _expectBrowserObservedShellReady({
+  required bool authPending,
   Iterable<String>? consoleMessages,
   bool expectStartupDiagnostic = false,
 }) {
@@ -1268,17 +1294,29 @@ void _expectBrowserObservedShellReady({
     );
   }
   expect(
+    authPending,
+    isTrue,
+    reason:
+        'Expected the browser regression to observe the startup shell contract while the delayed /user probe was still pending.',
+  );
+  final visibleNavigationLabels = <String>[
+    for (final label in _shellNavigationLabels)
+      if (find.text(label).evaluate().isNotEmpty) label,
+  ];
+  expect(
+    visibleNavigationLabels,
+    orderedEquals(_shellNavigationLabels),
+    reason:
+        'Expected the same browser-observed shell_ready contract used by TS-1001: all navigation labels must be visible while auth is still pending.',
+  );
+  expect(
     find.byKey(const ValueKey('workspace-switcher-trigger')),
     findsOneWidget,
+    reason:
+        'Expected the mounted header workspace trigger to be visible while the delayed auth probe remains pending.',
   );
   expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
-  for (final label in const <String>[
-    'Dashboard',
-    'Board',
-    'JQL Search',
-    'Hierarchy',
-    'Settings',
-  ]) {
+  for (final label in _shellNavigationLabels) {
     expect(find.text(label), findsWidgets);
   }
 }

@@ -14,13 +14,12 @@ void main() {
   });
 
   testWidgets(
-    'desktop web workspace switcher stays dismissible after keyboard navigation',
+    'desktop web workspace switcher tabs into the open panel and Escape closes it',
     (tester) async {
       if (!kIsWeb) {
         return;
       }
 
-      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -90,19 +89,17 @@ void main() {
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        semantics.dispose();
       }
     },
   );
 
   testWidgets(
-    'desktop web workspace open action switches workspaces and closes the panel',
+    'desktop web workspace open action keeps focus on the browser-owned control',
     (tester) async {
       if (!kIsWeb) {
         return;
       }
 
-      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -170,7 +167,6 @@ void main() {
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        semantics.dispose();
       }
     },
   );
