@@ -405,7 +405,6 @@ class PlaywrightWebAppSession(WebAppSession):
                 "Timed out waiting for the page to satisfy a function condition.",
             ) from error
         return wait_handle.json_value()
-
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """
