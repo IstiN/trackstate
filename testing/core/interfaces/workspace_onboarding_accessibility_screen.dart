@@ -1,17 +1,19 @@
 import '../models/workspace_onboarding_contrast_observation.dart';
 
 abstract interface class WorkspaceOnboardingAccessibilityScreenHandle {
-  List<String> visibleTexts();
+  Future<List<String>> visibleTexts({required bool hosted});
 
-  List<String> interactiveSemanticsLabels();
+  Future<List<String>> interactiveSemanticsLabels({required bool hosted});
 
-  Future<List<String>> collectForwardFocusOrder();
+  Future<List<String>> collectForwardFocusOrder({required bool hosted});
 
-  Future<List<String>> collectBackwardFocusOrder();
+  Future<List<String>> collectBackwardFocusOrder({required bool hosted});
 
-  List<WorkspaceOnboardingContrastObservation> observeContrastSet();
+  Future<List<WorkspaceOnboardingContrastObservation>> observeContrastSet({
+    required bool hosted,
+  });
 
-  bool hasVisiblePlaceholderText();
+  Future<bool> hasVisiblePlaceholderText({required bool hosted});
 
-  bool hasVisibleIcons();
+  Future<bool> hasVisibleIcons({required bool hosted});
 }

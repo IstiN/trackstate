@@ -22,25 +22,59 @@ const List<String> _requestSteps = <String>[
   'Verify text and icon contrast ratios (e.g., placeholder text vs input background).',
 ];
 
-const List<String> _ticketVisibleTexts = <String>[
+const List<String> _expectedLocalVisibleTexts = <String>[
   'Add workspace',
   'Choose a local folder or hosted repository to get started.',
   'Local folder',
   'Hosted repository',
   'Repository Path',
-  'Branch',
   'Enter the local Git folder path.',
+  'Branch',
   'Open',
 ];
 
-const List<String> _currentInteractiveLabels = <String>[
-  'Open existing folder',
-  'Initialize folder',
+const List<String> _expectedHostedVisibleTexts = <String>[
+  'Add workspace',
+  'Choose a local folder or hosted repository to get started.',
+  'Local folder',
+  'Hosted repository',
+  'Repository',
+  'Enter the repository as owner/repo.',
+  'Branch',
+  'Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.',
+  'Open',
 ];
 
-const List<String> _currentFocusOrder = <String>[
-  'Open existing folder',
-  'Initialize folder',
+const List<String> _expectedLocalInteractiveLabels = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository Path',
+  'Branch',
+  'Open',
+];
+
+const List<String> _expectedHostedInteractiveLabels = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository',
+  'Branch',
+  'Open',
+];
+
+const List<String> _expectedLocalFocusOrder = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository Path',
+  'Branch',
+  'Open',
+];
+
+const List<String> _expectedHostedFocusOrder = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository',
+  'Branch',
+  'Open',
 ];
 
 void main() {
@@ -65,28 +99,39 @@ void main() {
         );
         final failures = <String>[];
 
-        final visibleTexts = screen.visibleTexts();
-        result['visible_texts'] = visibleTexts;
-        final missingTicketVisibleTexts = _missingExpectedLabels(
-          expected: _ticketVisibleTexts,
-          observed: visibleTexts,
+        final localVisibleTexts = await screen.visibleTexts(hosted: false);
+        final hostedVisibleTexts = await screen.visibleTexts(hosted: true);
+        result['local_visible_texts'] = localVisibleTexts;
+        result['hosted_visible_texts'] = hostedVisibleTexts;
+
+        final missingLocalVisibleTexts = _missingExpectedLabels(
+          expected: _expectedLocalVisibleTexts,
+          observed: localVisibleTexts,
+        );
+        final missingHostedVisibleTexts = _missingExpectedLabels(
+          expected: _expectedHostedVisibleTexts,
+          observed: hostedVisibleTexts,
         );
 
-        if (missingTicketVisibleTexts.isNotEmpty) {
+        if (missingLocalVisibleTexts.isNotEmpty ||
+            missingHostedVisibleTexts.isNotEmpty) {
           _recordStep(
             result,
             step: 1,
             status: 'failed',
             action: _requestSteps[0],
             observed:
-                'missing_ticket_texts=${missingTicketVisibleTexts.join(', ')}; '
-                'observed_visible_texts=${visibleTexts.join(' | ')}',
+                'missing_local_texts=${missingLocalVisibleTexts.join(', ')}; '
+                'local_visible_texts=${localVisibleTexts.join(' | ')}; '
+                'missing_hosted_texts=${missingHostedVisibleTexts.join(', ')}; '
+                'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}',
           );
           failures.add(
-            'Step 1 failed: the first-launch onboarding screen does not expose the ticket-required local-folder/hosted-repository onboarding flow.\n'
-            'Missing ticket-visible texts: ${missingTicketVisibleTexts.join(', ')}\n'
-            'Observed visible texts: ${visibleTexts.join(' | ')}\n'
-            'Missing production capability: with no saved workspace profiles, users cannot reach a first-launch hosted-repository onboarding form because the screen only exposes "Open existing folder" and "Initialize folder".',
+            'Step 1 failed: the first-launch onboarding screen did not expose the ticket-required dual local-folder/hosted-repository onboarding flow.\n'
+            'Missing local-mode texts: ${missingLocalVisibleTexts.join(', ')}\n'
+            'Observed local-mode texts: ${localVisibleTexts.join(' | ')}\n'
+            'Missing hosted-mode texts: ${missingHostedVisibleTexts.join(', ')}\n'
+            'Observed hosted-mode texts: ${hostedVisibleTexts.join(' | ')}',
           );
         } else {
           _recordStep(
@@ -94,21 +139,39 @@ void main() {
             step: 1,
             status: 'passed',
             action: _requestSteps[0],
-            observed: 'visible_texts=${visibleTexts.join(' | ')}',
+            observed:
+                'local_visible_texts=${localVisibleTexts.join(' | ')}; '
+                'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}',
           );
         }
 
-        final interactiveLabels = screen.interactiveSemanticsLabels();
-        result['interactive_semantics_labels'] = interactiveLabels;
-        final missingInteractiveLabels = _missingExpectedLabels(
-          expected: _currentInteractiveLabels,
-          observed: interactiveLabels,
+        final localInteractiveLabels = await screen.interactiveSemanticsLabels(
+          hosted: false,
         );
-        final emptyInteractiveLabels = interactiveLabels
-            .where((label) => label.trim().isEmpty)
-            .toList(growable: false);
+        final hostedInteractiveLabels = await screen.interactiveSemanticsLabels(
+          hosted: true,
+        );
+        result['local_interactive_semantics_labels'] = localInteractiveLabels;
+        result['hosted_interactive_semantics_labels'] = hostedInteractiveLabels;
 
-        if (missingInteractiveLabels.isNotEmpty ||
+        final missingLocalInteractiveLabels = _missingExpectedLabels(
+          expected: _expectedLocalInteractiveLabels,
+          observed: localInteractiveLabels,
+        );
+        final missingHostedInteractiveLabels = _missingExpectedLabels(
+          expected: _expectedHostedInteractiveLabels,
+          observed: hostedInteractiveLabels,
+        );
+        final emptyInteractiveLabels = <String>[
+          ...localInteractiveLabels,
+          ...hostedInteractiveLabels,
+        ].where((label) => label.trim().isEmpty).toList(growable: false);
+        final emptyInteractiveLabelsObserved = emptyInteractiveLabels.isEmpty
+            ? '<none>'
+            : emptyInteractiveLabels.join(', ');
+
+        if (missingLocalInteractiveLabels.isNotEmpty ||
+            missingHostedInteractiveLabels.isNotEmpty ||
             emptyInteractiveLabels.isNotEmpty) {
           _recordStep(
             result,
@@ -116,15 +179,19 @@ void main() {
             status: 'failed',
             action: _requestSteps[1],
             observed:
-                'interactive_labels=${interactiveLabels.join(' | ')}; '
-                'missing_labels=${missingInteractiveLabels.join(', ')}; '
-                'empty_labels=${emptyInteractiveLabels.join(', ')}',
+                'local_labels=${localInteractiveLabels.join(' | ')}; '
+                'missing_local_labels=${missingLocalInteractiveLabels.join(', ')}; '
+                'hosted_labels=${hostedInteractiveLabels.join(' | ')}; '
+                'missing_hosted_labels=${missingHostedInteractiveLabels.join(', ')}; '
+                'empty_labels=$emptyInteractiveLabelsObserved',
           );
           failures.add(
-            'Step 2 failed: the currently rendered first-launch onboarding actions did not expose complete descriptive semantics labels.\n'
-            'Missing labels: ${missingInteractiveLabels.join(', ')}\n'
-            'Empty labels: ${emptyInteractiveLabels.join(', ')}\n'
-            'Observed labels: ${interactiveLabels.join(' | ')}',
+            'Step 2 failed: the onboarding semantics did not expose the ticket-required descriptive labels across the local and hosted forms.\n'
+            'Missing local-mode labels: ${missingLocalInteractiveLabels.join(', ')}\n'
+            'Observed local-mode labels: ${localInteractiveLabels.join(' | ')}\n'
+            'Missing hosted-mode labels: ${missingHostedInteractiveLabels.join(', ')}\n'
+            'Observed hosted-mode labels: ${hostedInteractiveLabels.join(' | ')}\n'
+            'Empty labels: $emptyInteractiveLabelsObserved',
           );
         } else {
           _recordStep(
@@ -132,16 +199,23 @@ void main() {
             step: 2,
             status: 'passed',
             action: _requestSteps[1],
-            observed: 'interactive_labels=${interactiveLabels.join(' | ')}',
+            observed:
+                'local_labels=${localInteractiveLabels.join(' | ')}; '
+                'hosted_labels=${hostedInteractiveLabels.join(' | ')}',
           );
         }
 
-        final forwardFocusOrder = <String>[];
-        final backwardFocusOrder = <String>[];
-        result['forward_focus_order'] = forwardFocusOrder;
-        result['backward_focus_order'] = backwardFocusOrder;
+        var localForwardFocusOrder = <String>[];
+        var localBackwardFocusOrder = <String>[];
+        var hostedForwardFocusOrder = <String>[];
+        var hostedBackwardFocusOrder = <String>[];
+        result['local_forward_focus_order'] = localForwardFocusOrder;
+        result['local_backward_focus_order'] = localBackwardFocusOrder;
+        result['hosted_forward_focus_order'] = hostedForwardFocusOrder;
+        result['hosted_backward_focus_order'] = hostedBackwardFocusOrder;
 
-        if (missingTicketVisibleTexts.isNotEmpty) {
+        if (missingLocalVisibleTexts.isNotEmpty ||
+            missingHostedVisibleTexts.isNotEmpty) {
           _recordStep(
             result,
             step: 3,
@@ -149,40 +223,78 @@ void main() {
             action: _requestSteps[2],
             observed:
                 'ticket_required_keyboard_path_unavailable=true; '
-                'observed_visible_texts=${visibleTexts.join(' | ')}',
+                'local_visible_texts=${localVisibleTexts.join(' | ')}; '
+                'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}',
           );
           failures.add(
-            'Step 3 failed: the ticket-required keyboard path could not be exercised because the first-launch onboarding screen does not render the required local-folder/hosted-repository controls.\n'
-            'Observed visible texts: ${visibleTexts.join(' | ')}',
+            'Step 3 failed: the ticket-required keyboard path could not be exercised because the first-launch onboarding screen did not render the required local and hosted onboarding controls.\n'
+            'Observed local-mode texts: ${localVisibleTexts.join(' | ')}\n'
+            'Observed hosted-mode texts: ${hostedVisibleTexts.join(' | ')}',
           );
         } else {
-          final currentForwardFocusOrder = await screen
-              .collectForwardFocusOrder();
-          final currentBackwardFocusOrder = await screen
-              .collectBackwardFocusOrder();
-          result['forward_focus_order'] = currentForwardFocusOrder;
-          result['backward_focus_order'] = currentBackwardFocusOrder;
+          localForwardFocusOrder = await screen.collectForwardFocusOrder(
+            hosted: false,
+          );
+          localBackwardFocusOrder = await screen.collectBackwardFocusOrder(
+            hosted: false,
+          );
+          hostedForwardFocusOrder = await screen.collectForwardFocusOrder(
+            hosted: true,
+          );
+          hostedBackwardFocusOrder = await screen.collectBackwardFocusOrder(
+            hosted: true,
+          );
+          result['local_forward_focus_order'] = localForwardFocusOrder;
+          result['local_backward_focus_order'] = localBackwardFocusOrder;
+          result['hosted_forward_focus_order'] = hostedForwardFocusOrder;
+          result['hosted_backward_focus_order'] = hostedBackwardFocusOrder;
 
-          if (!_sameOrder(currentForwardFocusOrder, _currentFocusOrder) ||
-              !_sameOrder(
-                currentBackwardFocusOrder,
-                _currentFocusOrder.reversed.toList(),
-              )) {
+          final focusFailures = <String>[];
+          if (!_sameOrder(localForwardFocusOrder, _expectedLocalFocusOrder)) {
+            focusFailures.add(
+              'Expected local forward: ${_expectedLocalFocusOrder.join(' -> ')}\n'
+              'Observed local forward: ${localForwardFocusOrder.join(' -> ')}',
+            );
+          }
+          if (!_sameOrder(
+            localBackwardFocusOrder,
+            _expectedLocalFocusOrder.reversed.toList(),
+          )) {
+            focusFailures.add(
+              'Expected local backward: ${_expectedLocalFocusOrder.reversed.join(' -> ')}\n'
+              'Observed local backward: ${localBackwardFocusOrder.join(' -> ')}',
+            );
+          }
+          if (!_sameOrder(hostedForwardFocusOrder, _expectedHostedFocusOrder)) {
+            focusFailures.add(
+              'Expected hosted forward: ${_expectedHostedFocusOrder.join(' -> ')}\n'
+              'Observed hosted forward: ${hostedForwardFocusOrder.join(' -> ')}',
+            );
+          }
+          if (!_sameOrder(
+            hostedBackwardFocusOrder,
+            _expectedHostedFocusOrder.reversed.toList(),
+          )) {
+            focusFailures.add(
+              'Expected hosted backward: ${_expectedHostedFocusOrder.reversed.join(' -> ')}\n'
+              'Observed hosted backward: ${hostedBackwardFocusOrder.join(' -> ')}',
+            );
+          }
+
+          if (focusFailures.isNotEmpty) {
             _recordStep(
               result,
               step: 3,
               status: 'failed',
               action: _requestSteps[2],
               observed:
-                  'forward_focus=${currentForwardFocusOrder.join(' -> ')}; '
-                  'backward_focus=${currentBackwardFocusOrder.join(' -> ')}',
+                  'local_forward=${localForwardFocusOrder.join(' -> ')}; '
+                  'local_backward=${localBackwardFocusOrder.join(' -> ')}; '
+                  'hosted_forward=${hostedForwardFocusOrder.join(' -> ')}; '
+                  'hosted_backward=${hostedBackwardFocusOrder.join(' -> ')}',
             );
             failures.add(
-              'Step 3 failed: keyboard traversal on the currently rendered first-launch onboarding actions did not stay in logical order.\n'
-              'Expected forward order: ${_currentFocusOrder.join(' -> ')}\n'
-              'Observed forward order: ${currentForwardFocusOrder.join(' -> ')}\n'
-              'Expected backward order: ${_currentFocusOrder.reversed.join(' -> ')}\n'
-              'Observed backward order: ${currentBackwardFocusOrder.join(' -> ')}',
+              'Step 3 failed: keyboard traversal on the onboarding screen did not stay in the ticket-required logical order.\n${focusFailures.join('\n')}',
             );
           } else {
             _recordStep(
@@ -191,24 +303,33 @@ void main() {
               status: 'passed',
               action: _requestSteps[2],
               observed:
-                  'forward_focus=${currentForwardFocusOrder.join(' -> ')}; '
-                  'backward_focus=${currentBackwardFocusOrder.join(' -> ')}',
+                  'local_forward=${localForwardFocusOrder.join(' -> ')}; '
+                  'local_backward=${localBackwardFocusOrder.join(' -> ')}; '
+                  'hosted_forward=${hostedForwardFocusOrder.join(' -> ')}; '
+                  'hosted_backward=${hostedBackwardFocusOrder.join(' -> ')}',
             );
           }
         }
 
-        final contrast = screen.observeContrastSet();
-        final placeholderVisible = screen.hasVisiblePlaceholderText();
-        final iconVisible = screen.hasVisibleIcons();
+        final localContrast = await screen.observeContrastSet(hosted: false);
+        final hostedContrast = await screen.observeContrastSet(hosted: true);
+        final placeholderVisible =
+            await screen.hasVisiblePlaceholderText(hosted: false) ||
+            await screen.hasVisiblePlaceholderText(hosted: true);
+        final iconVisible =
+            await screen.hasVisibleIcons(hosted: false) ||
+            await screen.hasVisibleIcons(hosted: true);
         final tokenCheck = await _runThemeTokenCheck();
-        result['contrast'] = contrast.map(_contrastAsMap).toList();
+        result['local_contrast'] = localContrast.map(_contrastAsMap).toList();
+        result['hosted_contrast'] = hostedContrast.map(_contrastAsMap).toList();
         result['placeholder_text_visible'] = placeholderVisible;
         result['icon_visible'] = iconVisible;
         result['theme_token_check'] = tokenCheck;
 
-        final failingContrast = contrast
-            .where((observation) => !observation.passes)
-            .toList(growable: false);
+        final failingContrast = <WorkspaceOnboardingContrastObservation>[
+          ...localContrast,
+          ...hostedContrast,
+        ].where((observation) => !observation.passes).toList(growable: false);
         if (failingContrast.isNotEmpty ||
             tokenCheck['exit_code'] != 0 ||
             (tokenCheck['output'] != null &&
@@ -219,14 +340,15 @@ void main() {
             status: 'failed',
             action: _requestSteps[3],
             observed:
-                'contrast=${contrast.join(' || ')}; '
+                'local_contrast=${localContrast.join(' || ')}; '
+                'hosted_contrast=${hostedContrast.join(' || ')}; '
                 'placeholder_visible=$placeholderVisible; '
                 'icon_visible=$iconVisible; '
                 'theme_token_exit=${tokenCheck['exit_code']}; '
                 'theme_token_output=${_singleLine(tokenCheck['output'])}',
           );
           failures.add(
-            'Step 4 failed: the currently rendered first-launch onboarding screen did not satisfy the requested contrast/token expectations.\n'
+            'Step 4 failed: the onboarding screen did not satisfy the requested contrast/token expectations.\n'
             'Failing contrast observations: ${failingContrast.join(' || ')}\n'
             'Visible placeholder text present: $placeholderVisible\n'
             'Visible icons present: $iconVisible\n'
@@ -240,7 +362,8 @@ void main() {
             status: 'passed',
             action: _requestSteps[3],
             observed:
-                'contrast=${contrast.join(' || ')}; '
+                'local_contrast=${localContrast.join(' || ')}; '
+                'hosted_contrast=${hostedContrast.join(' || ')}; '
                 'placeholder_visible=$placeholderVisible; '
                 'icon_visible=$iconVisible; '
                 'theme_token_output=${_singleLine(tokenCheck['output'])}',
@@ -250,29 +373,45 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Viewed the first-launch onboarding screen exactly as a user would see it before any workspace is saved.',
-          observed: 'visible_texts=${visibleTexts.join(' | ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Verified the visible actions users can currently reach on that first-launch screen and inspected the semantics labels exposed for them.',
-          observed: 'interactive_labels=${interactiveLabels.join(' | ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Checked the keyboard experience from a user perspective by tabbing forward and backward across the currently rendered first-launch actions.',
-          observed: forwardFocusOrder.isEmpty && backwardFocusOrder.isEmpty
-              ? 'ticket_required_keyboard_path_unavailable=true; observed_visible_texts=${visibleTexts.join(' | ')}'
-              : 'forward_focus=${forwardFocusOrder.join(' -> ')}; backward_focus=${backwardFocusOrder.join(' -> ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Checked the rendered heading, subtitle, visible action labels, visible action icons, and AC4 theme-token output for the first-launch onboarding screen.',
+              'Viewed the first-launch onboarding screen exactly as a user would see it before any workspace is saved, in both the local-folder and hosted-repository modes.',
           observed:
-              'placeholder_visible=$placeholderVisible; icon_visible=$iconVisible; contrast=${contrast.join(' || ')}',
+              'local_visible_texts=${localVisibleTexts.join(' | ')}; '
+              'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Verified the visible controls and semantics labels users interact with in each mode: segmented choices, form fields, and the Open action.',
+          observed:
+              'local_labels=${localInteractiveLabels.join(' | ')}; '
+              'hosted_labels=${hostedInteractiveLabels.join(' | ')}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Checked the keyboard experience from a user perspective by tabbing forward and backward through both onboarding modes.',
+          observed:
+              localForwardFocusOrder.isEmpty &&
+                  localBackwardFocusOrder.isEmpty &&
+                  hostedForwardFocusOrder.isEmpty &&
+                  hostedBackwardFocusOrder.isEmpty
+              ? 'ticket_required_keyboard_path_unavailable=true; '
+                    'local_visible_texts=${localVisibleTexts.join(' | ')}; '
+                    'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}'
+              : 'local_forward=${localForwardFocusOrder.join(' -> ')}; '
+                    'local_backward=${localBackwardFocusOrder.join(' -> ')}; '
+                    'hosted_forward=${hostedForwardFocusOrder.join(' -> ')}; '
+                    'hosted_backward=${hostedBackwardFocusOrder.join(' -> ')}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Checked the rendered low-emphasis onboarding text and selected controls users actually see in both modes, and verified the AC4 theme-token policy output.',
+          observed:
+              'placeholder_visible=$placeholderVisible; '
+              'icon_visible=$iconVisible; '
+              'local_contrast=${localContrast.join(' || ')}; '
+              'hosted_contrast=${hostedContrast.join(' || ')}',
         );
 
         if (failures.isNotEmpty) {
@@ -407,14 +546,15 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production first-launch onboarding screen with no saved workspace profiles.',
-    '* Checked whether that first-launch screen still exposed the ticket-required {noformat}Local folder{noformat} and {noformat}Hosted repository{noformat} onboarding choices.',
-    '* Inspected the semantics labels exposed for the currently rendered first-launch actions.',
-    '* Tabbed forward and backward through the currently rendered first-launch actions to confirm logical keyboard focus order.',
-    '* Checked rendered contrast for the visible heading, subtitle, action labels, action icons, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
+    '* Checked the local-folder onboarding mode for the required heading, segmented choices, form fields, helper copy, and Open action.',
+    '* Switched to the hosted-repository onboarding mode and checked the required heading, segmented choices, form fields, helper copy, hosted hint, and Open action.',
+    '* Inspected the semantics labels exposed for segmented choices, text inputs, and the Open action in both modes.',
+    '* Tabbed forward and backward through both onboarding modes to confirm logical keyboard focus order.',
+    '* Checked rendered contrast for the visible heading, subtitle, selected mode control, helper text, Open action, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the first-launch onboarding screen exposed the requested onboarding choices, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
+        ? '* Matched the expected result: first-launch onboarding exposed both local-folder and hosted-repository paths, surfaced descriptive semantics, kept keyboard traversal logical in both modes, met the requested contrast thresholds, and passed the AC4 theme-token policy gate.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Placeholder text visible: {noformat}${result['placeholder_text_visible']}{noformat}',
@@ -473,14 +613,15 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production first-launch onboarding screen with no saved workspace profiles.',
-    '- Checked whether that first-launch screen still exposed the ticket-required `Local folder` and `Hosted repository` onboarding choices.',
-    '- Inspected the semantics labels exposed for the currently rendered first-launch actions.',
-    '- Tabbed forward and backward through the currently rendered first-launch actions to confirm logical keyboard focus order.',
-    '- Checked rendered contrast for the visible heading, subtitle, action labels, action icons, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
+    '- Checked the local-folder onboarding mode for the required heading, segmented choices, form fields, helper copy, and Open action.',
+    '- Switched to the hosted-repository onboarding mode and checked the required heading, segmented choices, form fields, helper copy, hosted hint, and Open action.',
+    '- Inspected the semantics labels exposed for segmented choices, text inputs, and the Open action in both modes.',
+    '- Tabbed forward and backward through both onboarding modes to confirm logical keyboard focus order.',
+    '- Checked rendered contrast for the visible heading, subtitle, selected mode control, helper text, Open action, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
     '',
     '### Result',
     passed
-        ? '- Matched the expected result: the first-launch onboarding screen exposed the requested onboarding choices, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
+        ? '- Matched the expected result: first-launch onboarding exposed both local-folder and hosted-repository paths, surfaced descriptive semantics, kept keyboard traversal logical in both modes, met the requested contrast thresholds, and passed the AC4 theme-token policy gate.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '- Environment: `flutter test` / `${Platform.operatingSystem}`',
     '- Placeholder text visible: `${result['placeholder_text_visible']}`',
@@ -562,6 +703,29 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _bugDescription(Map<String, Object?> result) {
+  final localVisibleTexts =
+      ((result['local_visible_texts'] as List?) ?? const []).join(' | ');
+  final hostedVisibleTexts =
+      ((result['hosted_visible_texts'] as List?) ?? const []).join(' | ');
+  final localLabels =
+      ((result['local_interactive_semantics_labels'] as List?) ?? const [])
+          .join(' | ');
+  final hostedLabels =
+      ((result['hosted_interactive_semantics_labels'] as List?) ?? const [])
+          .join(' | ');
+  final localForward = _joinedOrUnavailable(
+    result['local_forward_focus_order'] as List?,
+  );
+  final localBackward = _joinedOrUnavailable(
+    result['local_backward_focus_order'] as List?,
+  );
+  final hostedForward = _joinedOrUnavailable(
+    result['hosted_forward_focus_order'] as List?,
+  );
+  final hostedBackward = _joinedOrUnavailable(
+    result['hosted_backward_focus_order'] as List?,
+  );
+
   final lines = <String>[
     '# $_ticketKey - $_ticketSummary',
     '',
@@ -575,14 +739,9 @@ String _bugDescription(Map<String, Object?> result) {
     '4. ${_requestSteps[3]}',
     '   - ${_stepOutcome(result, 4)}',
     '',
-    '## Expected result',
-    'With no saved workspace profiles, the first-launch onboarding screen should expose the ticket-required `Local folder` and `Hosted repository` choices, give all interactive elements non-empty semantics labels, keep keyboard focus order logical in both directions, meet the requested contrast thresholds, and pass the AC4 theme-token policy check without warnings.',
-    '',
-    '## Actual result',
-    '${result['error'] ?? '<missing>'}',
-    '',
-    '## Missing/broken production capability',
-    'The first-launch onboarding screen no longer exposes the ticket-required hosted-repository onboarding path. In the required no-profile entry state, users only see `Open existing folder` and `Initialize folder`, so the hosted-repository onboarding form cannot be exercised from the production UI.',
+    '## Actual vs Expected',
+    '- **Expected:** With no saved workspace profiles, the first-launch onboarding screen should expose `Local folder` and `Hosted repository` as equal first-class choices, show the local `Repository Path` / `Branch` form, switch to the hosted `Repository` / `Branch` form with the hosted helper text, expose descriptive semantics for those controls, keep keyboard traversal logical in both directions, and meet the requested contrast thresholds without theme-token warnings.',
+    '- **Actual:** `${localVisibleTexts}` was rendered in local mode and `${hostedVisibleTexts}` was rendered after attempting to switch to hosted mode. The required dual-choice onboarding copy, semantics labels, and keyboard path were not fully available. Local labels: `${localLabels}`. Hosted labels: `${hostedLabels}`. Local keyboard order: `${localForward}` / `${localBackward}`. Hosted keyboard order: `${hostedForward}` / `${hostedBackward}`.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -596,15 +755,20 @@ String _bugDescription(Map<String, Object?> result) {
     '- OS: `${Platform.operatingSystem}`',
     '- Runtime: `flutter test`',
     '- Repository path: `${Directory.current.path}`',
+    '- Viewport: `1440x900`',
     '- Placeholder text visible: `${result['placeholder_text_visible']}`',
     '- Icons visible: `${result['icon_visible']}`',
     '',
     '## Relevant logs',
     '```',
-    'Visible texts: ${((result['visible_texts'] as List?) ?? const []).join(' | ')}',
-    'Interactive semantics labels: ${((result['interactive_semantics_labels'] as List?) ?? const []).join(' | ')}',
-    'Forward focus: ${((result['forward_focus_order'] as List?) ?? const []).join(' -> ')}',
-    'Backward focus: ${((result['backward_focus_order'] as List?) ?? const []).join(' -> ')}',
+    'Local visible texts: $localVisibleTexts',
+    'Hosted visible texts: $hostedVisibleTexts',
+    'Local semantics labels: $localLabels',
+    'Hosted semantics labels: $hostedLabels',
+    'Local forward focus: $localForward',
+    'Local backward focus: $localBackward',
+    'Hosted forward focus: $hostedForward',
+    'Hosted backward focus: $hostedBackward',
     'Theme token check: ${_singleLine((result['theme_token_check'] as Map?)?['output'])}',
     '```',
   ];
@@ -674,4 +838,12 @@ String _stepOutcome(Map<String, Object?> result, int stepNumber) {
 
 String _singleLine(Object? value) {
   return '${value ?? ''}'.replaceAll('\n', ' ').trim();
+}
+
+String _joinedOrUnavailable(List? values) {
+  final items = (values ?? const <Object?>[]).whereType<Object?>().toList();
+  if (items.isEmpty) {
+    return '<unavailable>';
+  }
+  return items.join(' -> ');
 }
