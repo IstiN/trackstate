@@ -617,6 +617,8 @@ def main() -> None:
                 )
 
             if failures:
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 raise AssertionError("\n\n".join(failures))
 
             tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))

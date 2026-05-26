@@ -1604,6 +1604,10 @@ Future<void> _expectBlockedCreateIssueGate(WidgetTester tester) async {
   await tester.pumpAndSettle();
   expect(find.text('GitHub write access is not connected'), findsWidgets);
   expect(
+    find.text('Current session flags: canWrite=false, canCreateBranch=false.'),
+    findsWidgets,
+  );
+  expect(
     find.byWidgetPredicate(
       (widget) =>
           widget is TextField && widget.decoration?.labelText == 'Summary',
