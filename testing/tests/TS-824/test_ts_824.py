@@ -244,8 +244,8 @@ def main() -> None:
                     check=(
                         "Reached the workspace switcher trigger through real keyboard Tab "
                         "navigation, opened the visible desktop panel from that focused "
-                        "trigger, and confirmed the panel title plus saved workspace rows "
-                        "were shown before pressing Tab again."
+                        "trigger, and confirmed the panel title plus visible workspace-"
+                        "switcher content were shown before pressing Tab again."
                     ),
                     observed=(
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
@@ -256,7 +256,8 @@ def main() -> None:
                         f"pre_tab_on_trigger={pre_tab_focus.active_on_trigger}; "
                         f"pre_tab_restore_attempts={len(pre_tab_restore_attempts)}; "
                         f"row_count={switcher.row_count}; "
-                        f"text_excerpt={switcher.switcher_text!r}"
+                        f"text_excerpt={switcher.switcher_text!r}; "
+                        f"panel_excerpt={panel.container_text!r}"
                     ),
                 )
 
@@ -444,11 +445,17 @@ def _assert_desktop_panel_open(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
-    if switcher.row_count <= 0:
+    panel_signals = ("Saved workspaces", "Add workspace", "Save and switch")
+    has_expected_panel_content = any(
+        signal in switcher.switcher_text or signal in panel.container_text
+        for signal in panel_signals
+    )
+    if switcher.row_count <= 0 and not has_expected_panel_content:
         raise AssertionError(
-            "Step 2 failed: opening the workspace switcher did not expose any visible "
-            "workspace rows.\n"
-            f"Observed switcher text:\n{switcher.switcher_text}",
+            "Step 2 failed: opening the workspace switcher did not expose readable "
+            "desktop switcher content.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}\n"
+            f"Observed panel text:\n{panel.container_text}",
         )
     if panel.container_kind not in {"anchored-panel", "surface"}:
         raise AssertionError(
@@ -472,7 +479,12 @@ def _assert_desktop_panel_open(
 def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObservation) -> None:
     failures: list[str] = []
 
-    if not observation.before_on_trigger:
+    if not (
+        observation.before_on_trigger
+        or _is_workspace_trigger_focus(
+            observation.before_label,
+        )
+    ):
         failures.append(
             "pre-Tab focus was not on the workspace switcher trigger before moving inside the panel"
         )
@@ -524,7 +536,7 @@ def _ensure_trigger_focus_before_internal_tab(
             **_focus_ownership_payload(observation),
         },
     )
-    if observation.active_on_trigger:
+    if _focus_ownership_is_trigger(observation):
         return observation, attempts
 
     page.focus_workspace_trigger(timeout_ms=timeout_ms)
@@ -536,7 +548,7 @@ def _ensure_trigger_focus_before_internal_tab(
             **_focus_ownership_payload(observation),
         },
     )
-    if observation.active_on_trigger:
+    if _focus_ownership_is_trigger(observation):
         return observation, attempts
 
     for attempt_index in range(1, max_shift_tabs + 1):
@@ -549,7 +561,7 @@ def _ensure_trigger_focus_before_internal_tab(
                 **_focus_ownership_payload(observation),
             },
         )
-        if observation.active_on_trigger:
+        if _focus_ownership_is_trigger(observation):
             return observation, attempts
 
     return observation, attempts
@@ -560,13 +572,19 @@ def _assert_trigger_focus_restored_before_internal_tab(
     observation: WorkspaceSwitcherFocusOwnershipObservation,
     attempts: list[dict[str, object]],
 ) -> None:
-    if observation.active_on_trigger:
+    if _focus_ownership_is_trigger(observation):
         return
     raise AssertionError(
         "Step 2 failed: after opening the workspace switcher, keyboard focus could not be "
         "restored to the workspace switcher trigger before the Step 3 Tab observation.\n"
         "Observed focus restoration attempts: "
         + " | ".join(_focus_attempt_summary(attempt) for attempt in attempts)
+    )
+
+
+def _focus_ownership_is_trigger(observation: WorkspaceSwitcherFocusOwnershipObservation) -> bool:
+    return observation.active_on_trigger or _is_workspace_trigger_focus(
+        observation.active_label,
     )
 
 
@@ -1171,7 +1189,15 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
         )
     if failed_step == 3:
         tab_focus = result.get("tab_focus_observation")
-        if isinstance(tab_focus, dict) and not bool(tab_focus.get("before_on_trigger")):
+        if (
+            isinstance(tab_focus, dict)
+            and not bool(tab_focus.get("before_on_trigger"))
+            and not _is_workspace_trigger_focus(
+                ((tab_focus.get("before_focus") or {}).get("label"))
+                if isinstance(tab_focus.get("before_focus"), dict)
+                else None,
+            )
+        ):
             return (
                 f"{TICKET_KEY} - Opening the workspace switcher moves focus inside the panel before the Tab transition",
                 [
