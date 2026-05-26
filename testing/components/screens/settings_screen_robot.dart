@@ -530,7 +530,6 @@ class SettingsScreenRobot {
 
   bool showsAttachmentStorageModeSetting() =>
       isVisibleText('Attachment storage mode');
-
   bool statusSummaryVisible({
     required String name,
     required String id,

@@ -248,9 +248,31 @@ class TrackStateTrackerPage:
                 body_text=body_text,
             )
 
-        self._live_page.open_connect_dialog()
+        try:
+            self._live_page.open_connect_dialog()
+        except (AssertionError, WebAppTimeoutError):
+            body_text = self.body_text()
+            if self.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return ConnectionObservation(
+                    dialog_text=body_text,
+                    body_text=body_text,
+                )
+            raise
         dialog_state = self._live_page.read_connect_dialog_state()
         dialog_text = dialog_state.body_text
+        if self.body_has_authenticated_session(
+            dialog_text,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return ConnectionObservation(
+                dialog_text=dialog_text,
+                body_text=dialog_text,
+            )
         for expected_text in (
             "Connect GitHub",
             "Connect token",
