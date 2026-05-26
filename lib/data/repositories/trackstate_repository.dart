@@ -476,8 +476,15 @@ class ProviderBackedTrackStateRepository
                 : currentIssue.comments,
           )
         : _CommentHydrationResult(comments: currentIssue.comments);
+    final repositoryIndexEntry = currentSnapshot.repositoryIndex.entryForKey(
+      currentIssue.key,
+    );
     final links = shouldLoadDetail
-        ? await _loadLinks(blobPaths: _snapshotBlobPaths, issueRoot: issueRoot)
+        ? await _loadLinks(
+            blobPaths: _snapshotBlobPaths,
+            issueRoot: issueRoot,
+            repositoryIndexEntry: repositoryIndexEntry,
+          )
         : currentIssue.links;
     final attachments = shouldLoadAttachments
         ? await _loadAttachments(tree: _snapshotTree, issueRoot: issueRoot)
@@ -490,9 +497,7 @@ class ProviderBackedTrackStateRepository
           comments: commentsResult.comments,
           links: links,
           attachments: attachments,
-          repositoryIndexEntry: currentSnapshot.repositoryIndex.entryForKey(
-            currentIssue.key,
-          ),
+          repositoryIndexEntry: repositoryIndexEntry,
           issueTypeDefinitions: currentSnapshot.project.issueTypeDefinitions,
           statusDefinitions: currentSnapshot.project.statusDefinitions,
           priorityDefinitions: currentSnapshot.project.priorityDefinitions,
@@ -1889,6 +1894,7 @@ class ProviderBackedTrackStateRepository
       final links = await _loadLinks(
         blobPaths: blobPaths,
         issueRoot: issueRoot,
+        repositoryIndexEntry: indexEntriesByPath[path],
       );
       final attachments = await _loadAttachments(
         tree: tree,
@@ -3059,29 +3065,17 @@ class ProviderBackedTrackStateRepository
   Future<List<IssueLink>> _loadLinks({
     required Set<String> blobPaths,
     required String issueRoot,
+    RepositoryIssueIndexEntry? repositoryIndexEntry,
   }) async {
     final linksPath = _joinPath(issueRoot, 'links.json');
-    if (!blobPaths.contains(linksPath)) return const [];
+    if (!blobPaths.contains(linksPath)) {
+      return repositoryIndexEntry?.links ?? const [];
+    }
     final json = await _getRepositoryJson(linksPath);
     if (json is! List) return const [];
     return json
         .whereType<Map>()
-        .map((entry) {
-          final link = IssueLink(
-            type: entry['type']?.toString() ?? 'relates-to',
-            targetKey:
-                entry['target']?.toString() ??
-                entry['targetKey']?.toString() ??
-                '',
-            direction: entry['direction']?.toString() ?? 'outward',
-          );
-          final warning = nonCanonicalIssueLinkMetadataWarning(link);
-          if (warning != null) {
-            // ignore: avoid_print
-            print(warning);
-          }
-          return link;
-        })
+        .map(_issueLinkFromStoredJsonMap)
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
   }
@@ -5218,6 +5212,7 @@ bool _isTrackStateMetadataPath(String path) =>
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   final childKeys = entry['children'];
   final labels = entry['labels'];
+  final links = entry['links'];
   return RepositoryIssueIndexEntry(
     key: entry['key']?.toString() ?? '',
     path: entry['path']?.toString() ?? '',
@@ -5247,7 +5242,29 @@ RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
       _ => null,
     },
     resolutionId: _nullable(entry['resolution']?.toString()),
+    links: links is List
+        ? links
+              .whereType<Map>()
+              .map(_issueLinkFromStoredJsonMap)
+              .where((link) => link.targetKey.isNotEmpty)
+              .toList(growable: false)
+        : const [],
   );
+}
+
+IssueLink _issueLinkFromStoredJsonMap(Map entry) {
+  final link = IssueLink(
+    type: entry['type']?.toString() ?? 'relates-to',
+    targetKey:
+        entry['target']?.toString() ?? entry['targetKey']?.toString() ?? '',
+    direction: entry['direction']?.toString() ?? 'outward',
+  );
+  final warning = nonCanonicalIssueLinkMetadataWarning(link);
+  if (warning != null) {
+    // ignore: avoid_print
+    print(warning);
+  }
+  return link;
 }
 
 DeletedIssueTombstone _deletedIssueTombstone(
@@ -5301,6 +5318,15 @@ List<Map<String, Object?>> _repositoryIndexEntriesJson(
       'updated': entry.updatedLabel,
       'revision': entry.revision,
       'progress': entry.progress,
+      if (entry.links.isNotEmpty)
+        'links': [
+          for (final link in entry.links)
+            {
+              'type': link.type,
+              'target': link.targetKey,
+              'direction': link.direction,
+            },
+        ],
       'resolution': entry.resolutionId,
       'children': entry.childKeys,
       'archived': entry.isArchived,
@@ -5363,6 +5389,9 @@ RepositoryIndex _deriveRepositoryIndex(
         progress: issue.progress,
         resolutionId: issue.resolutionId,
         revision: null,
+        links: issue.links
+            .where((link) => link.direction == 'outward')
+            .toList(growable: false),
       ),
   ]..sort((a, b) => a.key.compareTo(b.key));
   return RepositoryIndex(entries: entries, deleted: deleted);
@@ -5373,18 +5402,33 @@ RepositoryIndex _normalizeRepositoryIndex(
   List<TrackStateIssue> issues,
 ) {
   final issueByKey = {for (final issue in issues) issue.key: issue};
-  final entriesByKey = {
-    for (final entry in index.entries) entry.key: entry,
-    for (final issue in issues)
-      issue.key: RepositoryIssueIndexEntry(
-        key: issue.key,
-        path: issue.storagePath,
-        parentKey: issue.parentKey,
-        epicKey: issue.epicKey,
-        childKeys: const [],
-        isArchived: issue.isArchived,
-      ),
-  };
+  final entriesByKey = {for (final entry in index.entries) entry.key: entry};
+  for (final issue in issues) {
+    final existingEntry = entriesByKey[issue.key];
+    entriesByKey[issue.key] = RepositoryIssueIndexEntry(
+      key: issue.key,
+      path: issue.storagePath,
+      parentKey: issue.parentKey,
+      epicKey: issue.epicKey,
+      childKeys: const [],
+      isArchived: existingEntry?.isArchived ?? issue.isArchived,
+      summary: existingEntry?.summary ?? issue.summary,
+      issueTypeId: existingEntry?.issueTypeId ?? issue.issueTypeId,
+      statusId: existingEntry?.statusId ?? issue.statusId,
+      priorityId: existingEntry?.priorityId ?? issue.priorityId,
+      assignee: existingEntry?.assignee ?? _nullable(issue.assignee),
+      labels: existingEntry?.labels ?? issue.labels,
+      updatedLabel: existingEntry?.updatedLabel ?? issue.updatedLabel,
+      progress: existingEntry?.progress ?? issue.progress,
+      resolutionId: existingEntry?.resolutionId ?? issue.resolutionId,
+      revision: existingEntry?.revision,
+      links:
+          existingEntry?.links ??
+          issue.links
+              .where((link) => link.direction == 'outward')
+              .toList(growable: false),
+    );
+  }
   final pathByKey = {
     for (final entry in entriesByKey.values) entry.key: entry.path,
   };

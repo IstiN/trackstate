@@ -395,6 +395,7 @@
   "workspaceStateLocal": "Local",
   "workspaceStateConnected": "Connected",
   "workspaceStateReadOnly": "Read-only",
+  "workspaceStateSyncIssue": "Sync issue",
   "workspaceStateNeedsSignIn": "Needs sign-in",
   "workspaceStateSavedHostedWorkspace": "Saved hosted workspace",
   "workspaceStateUnavailable": "Unavailable",

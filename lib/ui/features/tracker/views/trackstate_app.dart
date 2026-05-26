@@ -5631,6 +5631,12 @@ String _activeWorkspaceStateLabel(
     }
     return l10n.workspaceStateLocalGit;
   }
+  if (_shouldShowHostedWorkspaceSyncIssue(
+    viewModel,
+    activeWorkspace: activeWorkspace,
+  )) {
+    return l10n.workspaceStateSyncIssue;
+  }
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected => l10n.workspaceStateNeedsSignIn,
     HostedRepositoryAccessMode.readOnly => l10n.workspaceStateReadOnly,
@@ -5638,6 +5644,20 @@ String _activeWorkspaceStateLabel(
     HostedRepositoryAccessMode.attachmentRestricted =>
       l10n.repositoryAccessAttachmentsRestricted,
   };
+}
+
+bool _shouldShowHostedWorkspaceSyncIssue(
+  TrackerViewModel viewModel, {
+  WorkspaceProfile? activeWorkspace,
+}) {
+  final isHostedWorkspace =
+      !(activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence);
+  if (!isHostedWorkspace) {
+    return false;
+  }
+  final status = viewModel.workspaceSyncStatus;
+  return status.health == WorkspaceSyncHealth.attentionNeeded &&
+      !status.hasPendingRefresh;
 }
 
 HostedWorkspaceAccessMode _hostedWorkspaceAccessModeForViewModel(
