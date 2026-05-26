@@ -17,7 +17,6 @@ from testing.tests.support.trackstate_cli_attachment_discovery_probe_factory imp
 
 class TrackStateCliAttachmentDiscoveryTest(unittest.TestCase):
     maxDiff = None
-
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
         self.config = TrackStateCliAttachmentDiscoveryConfig.from_env()

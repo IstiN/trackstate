@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/issue_edit_accessibility_screen.dart';
+import '../../core/models/issue_edit_layout_observation.dart';
 import '../../core/models/issue_edit_text_contrast_observation.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
@@ -46,6 +47,9 @@ class IssueEditAccessibilityScreen
   }
 
   @override
+  Finder get goldenTarget => _app.goldenTarget;
+
+  @override
   bool showsText(String text) => _robot.showsText(text);
 
   @override
@@ -53,10 +57,6 @@ class IssueEditAccessibilityScreen
 
   @override
   List<String> visibleSemanticsLabels() => _robot.visibleSemanticsLabels();
-
-  @override
-  List<String> accessibilityFeedbackTexts() =>
-      _robot.accessibilityFeedbackTexts();
 
   @override
   List<String> semanticsTraversal() => _robot.semanticsTraversal();
@@ -76,8 +76,20 @@ class IssueEditAccessibilityScreen
       _robot.readLabeledTextFieldValue(label);
 
   @override
+  IssueEditLayoutObservation observeLayout() => _robot.observeLayout();
+
+  @override
   IssueEditTextContrastObservation observeSummaryPlaceholderContrast() =>
       _robot.observeSummaryPlaceholderContrast();
+
+  @override
+  Future<void> resizeToViewport({
+    required double width,
+    required double height,
+  }) async {
+    await _robot.resizeToViewport(width: width, height: height);
+    _robot.expectEditIssueSurfaceVisible();
+  }
 
   @override
   Future<void> submit() => _robot.submit();
