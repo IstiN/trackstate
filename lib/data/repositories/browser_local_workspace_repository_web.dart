@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
 import 'package:web/web.dart' as web;
 
 import '../../domain/models/trackstate_models.dart';
@@ -35,9 +36,12 @@ extension type _FileSystemPermissionDescriptor._(JSObject _value)
 
 final Map<String, web.FileSystemDirectoryHandle> _selectedDirectoriesByPath =
     <String, web.FileSystemDirectoryHandle>{};
-const _browserLocalWorkspaceHandleDatabaseName =
-    'trackstate.browserLocalWorkspaceHandles';
-const _browserLocalWorkspaceHandleStoreName = 'directoryHandles';
+final _BrowserLocalWorkspaceSelectionsPersistence
+_browserLocalWorkspaceSelectionsPersistence =
+    _BrowserLocalWorkspaceSelectionsPersistence();
+
+@JS('window.indexedDB')
+external web.IDBFactory? get _indexedDbFactory;
 final _readWritePermissionDescriptor = _FileSystemPermissionDescriptor(
   mode: 'readwrite',
 );
@@ -68,10 +72,10 @@ Future<TrackStateRepository?> requestBrowserLocalWorkspaceRepositoryAccess({
   );
 }
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
-}) {
+}) async {
   final normalizedPath = _normalizeWorkspacePath(workspacePath);
   if (normalizedPath.isEmpty) {
     return;
@@ -81,7 +85,281 @@ void rememberBrowserLocalWorkspaceSelection({
     return;
   }
   _selectedDirectoriesByPath[normalizedPath] = handle;
-  unawaited(_persistRememberedDirectoryHandle(normalizedPath, handle));
+  await _browserLocalWorkspaceSelectionsPersistence.save(
+    workspacePath: normalizedPath,
+    handle: handle,
+  );
+}
+
+@visibleForTesting
+Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
+  bool clearPersisted = false,
+}) async {
+  _selectedDirectoriesByPath.clear();
+  if (clearPersisted) {
+    await _browserLocalWorkspaceSelectionsPersistence.clear();
+  }
+}
+
+class _BrowserLocalWorkspaceSelectionsPersistence {
+  static const String _storeName = 'directoryHandles';
+  static const int _databaseVersion = 1;
+
+  String get _databaseName {
+    final location = web.window.location;
+    return 'trackstate.browserLocalWorkspaceSelections:${location.pathname}${location.search}';
+  }
+
+  String get _storageMarkerPrefix {
+    final location = web.window.location;
+    return 'trackstate.browserLocalWorkspaceSelections.marker:${location.pathname}${location.search}:';
+  }
+
+  bool hasPersistedSelection({required String workspacePath}) {
+    return web.window.localStorage.getItem(_markerKey(workspacePath)) == '1';
+  }
+
+  Future<void> save({
+    required String workspacePath,
+    required web.FileSystemDirectoryHandle handle,
+  }) async {
+    final database = await _openDatabase();
+    if (database == null) {
+      return;
+    }
+    try {
+      final transaction = database.transaction(_storeName.toJS, 'readwrite');
+      final request = transaction
+          .objectStore(_storeName)
+          .put(handle, workspacePath.toJS);
+      await Future.wait<void>([
+        _awaitRequestCompletion(
+          request,
+          operation: 'persist browser local workspace access',
+        ),
+        _awaitTransactionCompletion(
+          transaction,
+          operation: 'commit browser local workspace access',
+        ),
+      ]);
+      _markPersistedSelection(workspacePath);
+    } finally {
+      database.close();
+    }
+  }
+
+  Future<web.FileSystemDirectoryHandle?> restore({
+    required String workspacePath,
+  }) async {
+    final database = await _openDatabase();
+    if (database == null) {
+      return null;
+    }
+    try {
+      final transaction = database.transaction(_storeName.toJS, 'readonly');
+      final request = transaction
+          .objectStore(_storeName)
+          .get(workspacePath.toJS);
+      final result = await _awaitRequestResult(
+        request,
+        operation: 'restore browser local workspace access',
+      );
+      if (result == null || result.dartify() == null) {
+        _clearPersistedSelectionMarker(workspacePath);
+        return null;
+      }
+      final handle = result as web.FileSystemDirectoryHandle;
+      if (handle.kind != 'directory') {
+        await delete(workspacePath: workspacePath);
+        return null;
+      }
+      _selectedDirectoriesByPath[workspacePath] = handle;
+      return handle;
+    } finally {
+      database.close();
+    }
+  }
+
+  Future<void> delete({required String workspacePath}) async {
+    final database = await _openDatabase();
+    if (database == null) {
+      _clearPersistedSelectionMarker(workspacePath);
+      return;
+    }
+    try {
+      final transaction = database.transaction(_storeName.toJS, 'readwrite');
+      final request = transaction
+          .objectStore(_storeName)
+          .delete(workspacePath.toJS);
+      await Future.wait<void>([
+        _awaitRequestCompletion(
+          request,
+          operation: 'delete browser local workspace access',
+        ),
+        _awaitTransactionCompletion(
+          transaction,
+          operation: 'commit browser local workspace access deletion',
+        ),
+      ]);
+    } finally {
+      _clearPersistedSelectionMarker(workspacePath);
+      database.close();
+    }
+  }
+
+  Future<void> clear() async {
+    final database = await _openDatabase();
+    if (database == null) {
+      _clearPersistedSelectionMarkers();
+      return;
+    }
+    try {
+      final transaction = database.transaction(_storeName.toJS, 'readwrite');
+      final request = transaction.objectStore(_storeName).clear();
+      await Future.wait<void>([
+        _awaitRequestCompletion(
+          request,
+          operation: 'clear browser local workspace access',
+        ),
+        _awaitTransactionCompletion(
+          transaction,
+          operation: 'commit browser local workspace access reset',
+        ),
+      ]);
+    } finally {
+      _clearPersistedSelectionMarkers();
+      database.close();
+    }
+  }
+
+  String _markerKey(String workspacePath) {
+    return '$_storageMarkerPrefix$workspacePath';
+  }
+
+  void _markPersistedSelection(String workspacePath) {
+    web.window.localStorage.setItem(_markerKey(workspacePath), '1');
+  }
+
+  void _clearPersistedSelectionMarker(String workspacePath) {
+    web.window.localStorage.removeItem(_markerKey(workspacePath));
+  }
+
+  void _clearPersistedSelectionMarkers() {
+    final keys = <String>[
+      for (var index = 0; index < web.window.localStorage.length; index += 1)
+        web.window.localStorage.key(index) ?? '',
+    ];
+    for (final key in keys) {
+      if (key.startsWith(_storageMarkerPrefix)) {
+        web.window.localStorage.removeItem(key);
+      }
+    }
+  }
+
+  Future<web.IDBDatabase?> _openDatabase() async {
+    final factory = _indexedDbFactory;
+    if (factory == null) {
+      return null;
+    }
+    final request = factory.open(_databaseName, _databaseVersion);
+    request.onupgradeneeded = ((web.Event _) {
+      final database = request.result as web.IDBDatabase;
+      if (!database.objectStoreNames.contains(_storeName)) {
+        database.createObjectStore(_storeName);
+      }
+    }).toJS;
+    final result = await _awaitOpenDatabaseRequest(
+      request,
+      operation: 'open browser local workspace access storage',
+    );
+    return result as web.IDBDatabase;
+  }
+
+  Future<JSAny?> _awaitRequestResult(
+    web.IDBRequest request, {
+    required String operation,
+  }) {
+    final completer = Completer<JSAny?>();
+    request.onsuccess = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.complete(request.result);
+      }
+    }).toJS;
+    request.onerror = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.completeError(_requestError(request, operation: operation));
+      }
+    }).toJS;
+    return completer.future;
+  }
+
+  Future<void> _awaitRequestCompletion(
+    web.IDBRequest request, {
+    required String operation,
+  }) async {
+    await _awaitRequestResult(request, operation: operation);
+  }
+
+  Future<void> _awaitTransactionCompletion(
+    web.IDBTransaction transaction, {
+    required String operation,
+  }) {
+    final completer = Completer<void>();
+    transaction.oncomplete = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }).toJS;
+    transaction.onabort = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError('Failed to $operation: ${transaction.error ?? 'abort'}'),
+        );
+      }
+    }).toJS;
+    transaction.onerror = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError('Failed to $operation: ${transaction.error ?? 'error'}'),
+        );
+      }
+    }).toJS;
+    return completer.future;
+  }
+
+  Future<JSAny?> _awaitOpenDatabaseRequest(
+    web.IDBOpenDBRequest request, {
+    required String operation,
+  }) {
+    final completer = Completer<JSAny?>();
+    request.onsuccess = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.complete(request.result);
+      }
+    }).toJS;
+    request.onerror = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.completeError(_requestError(request, operation: operation));
+      }
+    }).toJS;
+    request.onblocked = ((web.Event _) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError('Failed to $operation: IndexedDB request was blocked.'),
+        );
+      }
+    }).toJS;
+    return completer.future;
+  }
+
+  StateError _requestError(
+    web.IDBRequest request, {
+    required String operation,
+  }) {
+    return StateError(
+      'Failed to $operation: ${request.error ?? 'unknown error'}',
+    );
+  }
 }
 
 String _normalizeWorkspacePath(String path) => path.trim();
@@ -122,12 +400,14 @@ Future<web.FileSystemDirectoryHandle?> _resolveRememberedDirectoryHandle(
   if (rememberedHandle != null) {
     return rememberedHandle;
   }
-  final persistedHandle = await _loadPersistedDirectoryHandle(normalizedPath);
-  if (persistedHandle == null) {
+  if (!_browserLocalWorkspaceSelectionsPersistence.hasPersistedSelection(
+    workspacePath: normalizedPath,
+  )) {
     return null;
   }
-  _selectedDirectoriesByPath[normalizedPath] = persistedHandle;
-  return persistedHandle;
+  return _browserLocalWorkspaceSelectionsPersistence.restore(
+    workspacePath: normalizedPath,
+  );
 }
 
 Future<bool> _hasGrantedDirectoryPermission(
@@ -163,132 +443,8 @@ Future<String?> _queryDirectoryPermissionState(
         .toDart;
     return state.toDart;
   } on Object {
-    return null;
+    return 'granted';
   }
-}
-
-Future<void> _persistRememberedDirectoryHandle(
-  String normalizedPath,
-  web.FileSystemDirectoryHandle handle,
-) async {
-  final database = await _openRememberedDirectoryHandleDatabase();
-  if (database == null) {
-    return;
-  }
-  try {
-    final transaction = database.transaction(
-      _browserLocalWorkspaceHandleStoreName.toJS,
-      'readwrite',
-    );
-    final store = transaction.objectStore(_browserLocalWorkspaceHandleStoreName);
-    await _awaitIdbRequest<void>(
-      store.put(handle, normalizedPath.toJS),
-      (_) {},
-    );
-    await _awaitIdbTransactionComplete(transaction);
-  } on Object {
-    // Ignore persistence failures so in-memory browser access still works.
-  } finally {
-    database.close();
-  }
-}
-
-Future<web.FileSystemDirectoryHandle?> _loadPersistedDirectoryHandle(
-  String normalizedPath,
-) async {
-  final database = await _openRememberedDirectoryHandleDatabase();
-  if (database == null) {
-    return null;
-  }
-  try {
-    final transaction = database.transaction(
-      _browserLocalWorkspaceHandleStoreName.toJS,
-      'readonly',
-    );
-    final store = transaction.objectStore(_browserLocalWorkspaceHandleStoreName);
-    final result = await _awaitIdbRequest<JSAny?>(
-      store.get(normalizedPath.toJS),
-      (value) => value,
-    );
-    await _awaitIdbTransactionComplete(transaction);
-    if (result == null) {
-      return null;
-    }
-    return result as web.FileSystemDirectoryHandle;
-  } on Object {
-    return null;
-  } finally {
-    database.close();
-  }
-}
-
-Future<web.IDBDatabase?> _openRememberedDirectoryHandleDatabase() async {
-  final openRequest = web.window.indexedDB.open(
-    _browserLocalWorkspaceHandleDatabaseName,
-    1,
-  );
-  openRequest.onupgradeneeded = ((web.Event _) {
-    final database = openRequest.result as web.IDBDatabase;
-    if (!database.objectStoreNames.contains(
-      _browserLocalWorkspaceHandleStoreName,
-    )) {
-      database.createObjectStore(_browserLocalWorkspaceHandleStoreName);
-    }
-  }).toJS;
-  try {
-    return await _awaitIdbRequest<web.IDBDatabase>(
-      openRequest,
-      (value) => value as web.IDBDatabase,
-    );
-  } on Object {
-    return null;
-  }
-}
-
-Future<T> _awaitIdbRequest<T>(
-  web.IDBRequest request,
-  T Function(JSAny? value) convert,
-) {
-  final completer = Completer<T>();
-  request.onsuccess = ((web.Event _) {
-    if (completer.isCompleted) {
-      return;
-    }
-    completer.complete(convert(request.result));
-  }).toJS;
-  request.onerror = ((web.Event _) {
-    if (completer.isCompleted) {
-      return;
-    }
-    completer.completeError(
-      request.error ?? StateError('IndexedDB request failed.'),
-    );
-  }).toJS;
-  return completer.future;
-}
-
-Future<void> _awaitIdbTransactionComplete(web.IDBTransaction transaction) {
-  final completer = Completer<void>();
-  transaction.oncomplete = ((web.Event _) {
-    if (!completer.isCompleted) {
-      completer.complete();
-    }
-  }).toJS;
-  transaction.onerror = ((web.Event _) {
-    if (!completer.isCompleted) {
-      completer.completeError(
-        transaction.error ?? StateError('IndexedDB transaction failed.'),
-      );
-    }
-  }).toJS;
-  transaction.onabort = ((web.Event _) {
-    if (!completer.isCompleted) {
-      completer.completeError(
-        transaction.error ?? StateError('IndexedDB transaction was aborted.'),
-      );
-    }
-  }).toJS;
-  return completer.future;
 }
 
 class _BrowserLocalTrackStateRepository

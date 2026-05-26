@@ -12,7 +12,11 @@ Future<TrackStateRepository?> requestBrowserLocalWorkspaceRepositoryAccess({
   required String writeBranch,
 }) async => null;
 
-void rememberBrowserLocalWorkspaceSelection({
+Future<void> rememberBrowserLocalWorkspaceSelection({
   required String workspacePath,
   required Object selection,
-}) {}
+}) async {}
+
+Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
+  bool clearPersisted = false,
+}) async {}
