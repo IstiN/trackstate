@@ -1,6 +1,7 @@
 @JS()
 library;
 
+import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -17,27 +18,53 @@ extension type _DirectoryValuesAccessor._(JSObject _value) implements JSObject {
   external JSAny values();
 }
 
+extension type _FileSystemPermissionHandle._(JSObject _value)
+    implements JSObject {
+  external JSPromise<JSString> queryPermission([
+    _FileSystemPermissionDescriptor descriptor,
+  ]);
+  external JSPromise<JSString> requestPermission([
+    _FileSystemPermissionDescriptor descriptor,
+  ]);
+}
+
+extension type _FileSystemPermissionDescriptor._(JSObject _value)
+    implements JSObject {
+  external factory _FileSystemPermissionDescriptor({String mode});
+}
+
 final Map<String, web.FileSystemDirectoryHandle> _selectedDirectoriesByPath =
     <String, web.FileSystemDirectoryHandle>{};
+const _browserLocalWorkspaceHandleDatabaseName =
+    'trackstate.browserLocalWorkspaceHandles';
+const _browserLocalWorkspaceHandleStoreName = 'directoryHandles';
+final _readWritePermissionDescriptor = _FileSystemPermissionDescriptor(
+  mode: 'readwrite',
+);
 
 Future<TrackStateRepository?> openBrowserLocalWorkspaceRepository({
   required String repositoryPath,
   required String defaultBranch,
   required String writeBranch,
 }) async {
-  final normalizedPath = _normalizeWorkspacePath(repositoryPath);
-  if (normalizedPath.isEmpty) {
-    return null;
-  }
-  final handle = _selectedDirectoriesByPath[normalizedPath];
-  if (handle == null) {
-    return null;
-  }
-  return _BrowserLocalTrackStateRepository(
-    directoryHandle: handle,
-    repositoryPath: normalizedPath,
-    dataRef: defaultBranch,
+  return _openRememberedBrowserLocalWorkspaceRepository(
+    repositoryPath: repositoryPath,
+    defaultBranch: defaultBranch,
     writeBranch: writeBranch,
+    requestPermissionIfNeeded: false,
+  );
+}
+
+Future<TrackStateRepository?> requestBrowserLocalWorkspaceRepositoryAccess({
+  required String repositoryPath,
+  required String defaultBranch,
+  required String writeBranch,
+}) {
+  return _openRememberedBrowserLocalWorkspaceRepository(
+    repositoryPath: repositoryPath,
+    defaultBranch: defaultBranch,
+    writeBranch: writeBranch,
+    requestPermissionIfNeeded: true,
   );
 }
 
@@ -54,9 +81,215 @@ void rememberBrowserLocalWorkspaceSelection({
     return;
   }
   _selectedDirectoriesByPath[normalizedPath] = handle;
+  unawaited(_persistRememberedDirectoryHandle(normalizedPath, handle));
 }
 
 String _normalizeWorkspacePath(String path) => path.trim();
+
+Future<TrackStateRepository?> _openRememberedBrowserLocalWorkspaceRepository({
+  required String repositoryPath,
+  required String defaultBranch,
+  required String writeBranch,
+  required bool requestPermissionIfNeeded,
+}) async {
+  final normalizedPath = _normalizeWorkspacePath(repositoryPath);
+  if (normalizedPath.isEmpty) {
+    return null;
+  }
+  final handle = await _resolveRememberedDirectoryHandle(normalizedPath);
+  if (handle == null) {
+    return null;
+  }
+  final hasPermission =
+      requestPermissionIfNeeded
+      ? await _requestDirectoryPermission(handle)
+      : await _hasGrantedDirectoryPermission(handle);
+  if (!hasPermission) {
+    return null;
+  }
+  return _BrowserLocalTrackStateRepository(
+    directoryHandle: handle,
+    repositoryPath: normalizedPath,
+    dataRef: defaultBranch,
+    writeBranch: writeBranch,
+  );
+}
+
+Future<web.FileSystemDirectoryHandle?> _resolveRememberedDirectoryHandle(
+  String normalizedPath,
+) async {
+  final rememberedHandle = _selectedDirectoriesByPath[normalizedPath];
+  if (rememberedHandle != null) {
+    return rememberedHandle;
+  }
+  final persistedHandle = await _loadPersistedDirectoryHandle(normalizedPath);
+  if (persistedHandle == null) {
+    return null;
+  }
+  _selectedDirectoriesByPath[normalizedPath] = persistedHandle;
+  return persistedHandle;
+}
+
+Future<bool> _hasGrantedDirectoryPermission(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final state = await _queryDirectoryPermissionState(handle);
+  return state == 'granted';
+}
+
+Future<bool> _requestDirectoryPermission(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final currentState = await _queryDirectoryPermissionState(handle);
+  if (currentState == 'granted') {
+    return true;
+  }
+  try {
+    final nextState = await _FileSystemPermissionHandle._(handle as JSObject)
+        .requestPermission(_readWritePermissionDescriptor)
+        .toDart;
+    return nextState.toDart == 'granted';
+  } on Object {
+    return false;
+  }
+}
+
+Future<String?> _queryDirectoryPermissionState(
+  web.FileSystemDirectoryHandle handle,
+) async {
+  try {
+    final state = await _FileSystemPermissionHandle._(handle as JSObject)
+        .queryPermission(_readWritePermissionDescriptor)
+        .toDart;
+    return state.toDart;
+  } on Object {
+    return null;
+  }
+}
+
+Future<void> _persistRememberedDirectoryHandle(
+  String normalizedPath,
+  web.FileSystemDirectoryHandle handle,
+) async {
+  final database = await _openRememberedDirectoryHandleDatabase();
+  if (database == null) {
+    return;
+  }
+  try {
+    final transaction = database.transaction(
+      _browserLocalWorkspaceHandleStoreName.toJS,
+      'readwrite',
+    );
+    final store = transaction.objectStore(_browserLocalWorkspaceHandleStoreName);
+    await _awaitIdbRequest<void>(
+      store.put(handle, normalizedPath.toJS),
+      (_) {},
+    );
+    await _awaitIdbTransactionComplete(transaction);
+  } on Object {
+    // Ignore persistence failures so in-memory browser access still works.
+  } finally {
+    database.close();
+  }
+}
+
+Future<web.FileSystemDirectoryHandle?> _loadPersistedDirectoryHandle(
+  String normalizedPath,
+) async {
+  final database = await _openRememberedDirectoryHandleDatabase();
+  if (database == null) {
+    return null;
+  }
+  try {
+    final transaction = database.transaction(
+      _browserLocalWorkspaceHandleStoreName.toJS,
+      'readonly',
+    );
+    final store = transaction.objectStore(_browserLocalWorkspaceHandleStoreName);
+    final result = await _awaitIdbRequest<JSAny?>(
+      store.get(normalizedPath.toJS),
+      (value) => value,
+    );
+    await _awaitIdbTransactionComplete(transaction);
+    if (result == null) {
+      return null;
+    }
+    return result as web.FileSystemDirectoryHandle;
+  } on Object {
+    return null;
+  } finally {
+    database.close();
+  }
+}
+
+Future<web.IDBDatabase?> _openRememberedDirectoryHandleDatabase() async {
+  final openRequest = web.window.indexedDB.open(
+    _browserLocalWorkspaceHandleDatabaseName,
+    1,
+  );
+  openRequest.onupgradeneeded = ((web.Event _) {
+    final database = openRequest.result as web.IDBDatabase;
+    if (!database.objectStoreNames.contains(
+      _browserLocalWorkspaceHandleStoreName,
+    )) {
+      database.createObjectStore(_browserLocalWorkspaceHandleStoreName);
+    }
+  }).toJS;
+  try {
+    return await _awaitIdbRequest<web.IDBDatabase>(
+      openRequest,
+      (value) => value as web.IDBDatabase,
+    );
+  } on Object {
+    return null;
+  }
+}
+
+Future<T> _awaitIdbRequest<T>(
+  web.IDBRequest request,
+  T Function(JSAny? value) convert,
+) {
+  final completer = Completer<T>();
+  request.onsuccess = ((web.Event _) {
+    if (completer.isCompleted) {
+      return;
+    }
+    completer.complete(convert(request.result));
+  }).toJS;
+  request.onerror = ((web.Event _) {
+    if (completer.isCompleted) {
+      return;
+    }
+    completer.completeError(
+      request.error ?? StateError('IndexedDB request failed.'),
+    );
+  }).toJS;
+  return completer.future;
+}
+
+Future<void> _awaitIdbTransactionComplete(web.IDBTransaction transaction) {
+  final completer = Completer<void>();
+  transaction.oncomplete = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.complete();
+    }
+  }).toJS;
+  transaction.onerror = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        transaction.error ?? StateError('IndexedDB transaction failed.'),
+      );
+    }
+  }).toJS;
+  transaction.onabort = ((web.Event _) {
+    if (!completer.isCompleted) {
+      completer.completeError(
+        transaction.error ?? StateError('IndexedDB transaction was aborted.'),
+      );
+    }
+  }).toJS;
+  return completer.future;
+}
 
 class _BrowserLocalTrackStateRepository
     extends ProviderBackedTrackStateRepository {
