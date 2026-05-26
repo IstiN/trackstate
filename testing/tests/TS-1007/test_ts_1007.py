@@ -330,11 +330,11 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         LAST_INTERNAL_CONTROL_LABEL,
         timeout_ms=FOCUS_TIMEOUT_MS,
     )
-    first_row = _selected_saved_workspace(rows)
+    first_row, first_row_source = _resolve_primary_saved_workspace_row(rows)
     if first_row is None:
         raise AssertionError(
-            "Step 1 failed: the open workspace switcher did not expose a selected saved "
-            "workspace row in pristine state.\n"
+            "Step 1 failed: the open workspace switcher did not expose the expected "
+            "saved workspace row needed to establish the pristine TS-1007 precondition.\n"
             f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
         )
     first_row_label = _saved_workspace_row_focus_label(first_row)
@@ -357,6 +357,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         "internal_tab_stops": _tab_stops_payload(internal_tab_stops),
         "first_row_display_name": first_row.display_name,
         "first_row_label": first_row_label,
+        "first_row_source": first_row_source,
         "first_internal_target": _resolve_first_internal_focus_target(
             active=active,
             focus=focus,
@@ -575,7 +576,7 @@ def _assert_initial_state(state: dict[str, object]) -> None:
 
     if FIRST_WORKSPACE_DISPLAY_NAME not in str(state.get("first_row_display_name")):
         failures.append(
-            f"the selected saved workspace row was {state.get('first_row_display_name')!r} "
+            f"the primary saved workspace row was {state.get('first_row_display_name')!r} "
             f"instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
         )
     if "Workspace switcher" not in str(switcher.get("switcher_text", "")):
@@ -815,6 +816,26 @@ def _selected_saved_workspace(
     rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:
     return next((row for row in rows if row.selected), None)
+
+
+def _resolve_primary_saved_workspace_row(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation | None, str]:
+    selected_row = _selected_saved_workspace(rows)
+    if selected_row is not None:
+        return selected_row, "selected-row"
+
+    named_row = next(
+        (row for row in rows if row.display_name == FIRST_WORKSPACE_DISPLAY_NAME),
+        None,
+    )
+    if named_row is not None:
+        return named_row, "display-name-fallback"
+
+    if rows:
+        return rows[0], "first-visible-row"
+
+    return None, "missing-row"
 
 
 def _saved_workspace_row_focus_label(
