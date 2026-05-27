@@ -618,6 +618,7 @@ class LiveWorkspaceSwitcherPage:
     _trigger_selector = (
         'button[aria-label^="Workspace switcher:"],'
         'flt-semantics[aria-label^="Workspace switcher:"],'
+        'flt-semantics[role="button"][aria-label^="Workspace switcher:"],'
         '[role="button"][aria-label^="Workspace switcher:"]'
     )
     _button_selector = 'button, flt-semantics[role="button"], [role="button"]'
@@ -1050,7 +1051,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         try:
             self._session.focus(
-                self._workspace_trigger_selector,
+                self._trigger_selector,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -6331,13 +6332,25 @@ class LiveWorkspaceSwitcherPage:
                   && style.display !== 'none';
               };
               const labelFor = (element) =>
-                normalize(element.getAttribute('aria-label') || element.innerText || element.textContent || '');
+                normalize(
+                  element.getAttribute('aria-label')
+                  || element.innerText
+                  || element.textContent
+                  || '',
+                );
               const visibleText = (element) =>
                 normalize(element.innerText || element.textContent || '');
               const buttons = Array.from(
                 document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
               ).filter(isVisible);
-              const triggerCandidates = Array.from(document.querySelectorAll('*'))
+              const triggerCandidates = Array.from(
+                document.querySelectorAll(
+                  'button[aria-label^="Workspace switcher:"],'
+                  + 'flt-semantics[aria-label^="Workspace switcher:"],'
+                  + 'flt-semantics[role="button"][aria-label^="Workspace switcher:"],'
+                  + '[role="button"][aria-label^="Workspace switcher:"]',
+                ),
+              )
                 .filter(isVisible)
                 .filter((element) => {
                   const label = labelFor(element);
