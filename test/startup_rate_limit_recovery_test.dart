@@ -97,6 +97,106 @@ void main() {
   );
 
   testWidgets(
+    'blocking hosted startup shows retry recovery when the hosted issue index is missing',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      const missingIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
+      );
+      final repository = _WidgetStartupRecoveryRepository(
+        loadResults: const [missingIndexError, missingIndexError],
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Hosted issue index needs regeneration'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('Regenerate the tracker indexes and retry.'),
+          findsWidgets,
+        );
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('TrackState data was not found'),
+          findsNothing,
+        );
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
+        await tester.pumpAndSettle();
+
+        expect(repository.loadCount, 2);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'blocking hosted startup shows retry recovery when the hosted issue index paths are inconsistent',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      const inconsistentIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
+      );
+      final repository = _WidgetStartupRecoveryRepository(
+        loadResults: const [inconsistentIndexError, inconsistentIndexError],
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Hosted issue index needs regeneration'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('inconsistent with repository issue paths'),
+          findsWidgets,
+        );
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('TrackState data was not found'),
+          findsNothing,
+        );
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
+        await tester.pumpAndSettle();
+
+        expect(repository.loadCount, 2);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Retry startup'),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'retrying blocking hosted startup migrates the recovered repository into the workspace switcher',
     (tester) async {
       if (!kIsWeb) {

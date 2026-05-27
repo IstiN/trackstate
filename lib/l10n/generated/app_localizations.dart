@@ -1639,6 +1639,18 @@ abstract class AppLocalizations {
   /// **'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.'**
   String get startupRateLimitRecoveryShellMessage;
 
+  /// No description provided for @startupHostedBootstrapIndexRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted issue index needs regeneration'**
+  String get startupHostedBootstrapIndexRecoveryTitle;
+
+  /// No description provided for @startupHostedBootstrapIndexRecoveryMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.'**
+  String get startupHostedBootstrapIndexRecoveryMessage;
+
   /// No description provided for @repositoryPath.
   ///
   /// In en, this message translates to:
