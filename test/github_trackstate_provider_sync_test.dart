@@ -128,9 +128,10 @@ void main() {
   );
 
   test(
-    'GitHub provider disables caching for hosted sync revision checks',
+    'GitHub provider cache-busts hosted sync revision checks without extra headers',
     () async {
-      final branchRequestHeaders = <Map<String, String>>[];
+      Uri? branchRequestUri;
+      Map<String, String>? branchRequestHeaders;
       final provider = GitHubTrackStateProvider(
         client: MockClient((request) async {
           switch (request.url.path) {
@@ -155,7 +156,8 @@ void main() {
                 200,
               );
             case '/repos/owner/current/branches/main':
-              branchRequestHeaders.add(Map<String, String>.from(request.headers));
+              branchRequestUri = request.url;
+              branchRequestHeaders = Map<String, String>.from(request.headers);
               return http.Response(
                 jsonEncode({
                   'commit': <String, Object?>{'sha': 'new-revision'},
@@ -168,6 +170,8 @@ void main() {
         repositoryName: 'owner/current',
         dataRef: 'main',
         sourceRef: 'main',
+        disableHostedSyncRequestCaching: true,
+        hostedSyncCacheBustTokenFactory: () => 'fixed-cache-bust-token',
       );
 
       await provider.authenticate(
@@ -180,10 +184,27 @@ void main() {
 
       await provider.checkSync();
 
-      expect(branchRequestHeaders, hasLength(1));
-      expect(branchRequestHeaders.single['cache-control'], contains('no-cache'));
-      expect(branchRequestHeaders.single['cache-control'], contains('no-store'));
-      expect(branchRequestHeaders.single['pragma'], 'no-cache');
+      expect(branchRequestUri, isNotNull);
+      expect(
+        branchRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
+      );
+      expect(branchRequestHeaders, isNotNull);
+      expect(branchRequestHeaders, isNot(contains('cache-control')));
+      expect(branchRequestHeaders, isNot(contains('pragma')));
+    },
+  );
+
+  test(
+    'Hosted sync revision query parameters stay empty when cache busting is disabled',
+    () {
+      expect(
+        hostedSyncRevisionQueryParametersForTesting(
+          disableCache: false,
+          cacheBustTokenFactory: () => 'unused',
+        ),
+        isNull,
+      );
     },
   );
 
