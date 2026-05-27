@@ -3529,6 +3529,7 @@ class TrackStateCli {
         branch: branch,
         credential: credential,
         repository: repository,
+        attachmentStorage: snapshot.project.attachmentStorage,
         issue: issue,
         attachmentName: attachmentName,
       );
@@ -3565,9 +3566,13 @@ class TrackStateCli {
     required String branch,
     required TrackStateCliCredential credential,
     required TrackStateRepository repository,
+    required ProjectAttachmentStorageSettings attachmentStorage,
     required TrackStateIssue issue,
     required String attachmentName,
   }) async {
+    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
+      return;
+    }
     final attachmentPath = repository.resolveIssueAttachmentPath(
       issue,
       attachmentName,
