@@ -206,6 +206,64 @@ class Ts911RegressionsTest(unittest.TestCase):
 
         self.assertEqual(target["label"], "Save and switch")
 
+    def test_best_available_reverse_wrap_target_prefers_focusable_footer_button(self) -> None:
+        target = _LIVE_TEST_MODULE._best_available_reverse_wrap_target(
+            {
+                "internal_tab_stops": [
+                    {
+                        "label": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+                        "visible_text": "",
+                        "role": None,
+                        "tag_name": "BUTTON",
+                        "tabindex": "0",
+                        "tab_index_value": 0,
+                        "dom_index": 0,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<button></button>",
+                    },
+                    {
+                        "label": "Branch",
+                        "visible_text": "",
+                        "role": None,
+                        "tag_name": "INPUT",
+                        "tabindex": None,
+                        "tab_index_value": 0,
+                        "dom_index": 1,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<input aria-label='Branch'>",
+                    },
+                    {
+                        "label": "Save and switch",
+                        "visible_text": "Save and switch",
+                        "role": None,
+                        "tag_name": "BUTTON",
+                        "tabindex": "0",
+                        "tab_index_value": 0,
+                        "dom_index": 2,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<button aria-label='Save and switch' aria-disabled='true'></button>",
+                    },
+                ],
+                "button_focusability": {
+                    "label": "Save and switch",
+                    "visible_text": "Save and switch",
+                    "role": None,
+                    "tag_name": "BUTTON",
+                    "tabindex": "0",
+                    "keyboard_focusable": True,
+                    "outer_html": "<button aria-label='Save and switch' aria-disabled='true'></button>",
+                },
+                "expected_target": {
+                    "label": "Save and switch",
+                },
+            },
+        )
+
+        self.assertEqual(target["label"], "Save and switch")
+
     def test_supporting_wrap_target_proof_derives_last_reachable_in_panel_target(self) -> None:
         context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
             {
