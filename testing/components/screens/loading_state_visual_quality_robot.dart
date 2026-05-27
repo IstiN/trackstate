@@ -189,6 +189,15 @@ class LoadingStateVisualQualityRobot {
     await tester.pump();
 
     final visits = <String>[];
+    if (jqlSearchField.evaluate().isNotEmpty) {
+      await tester.tap(jqlSearchField);
+      await tester.pump();
+      final initialLabel = _focusedCandidate(candidates);
+      if (initialLabel != null) {
+        visits.add(initialLabel);
+      }
+    }
+
     for (var index = 0; index < tabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump(const Duration(milliseconds: 60));

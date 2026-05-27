@@ -5261,7 +5261,11 @@ class _TopBar extends StatelessWidget {
               compact ||
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1180 : 1040);
           final actionGap = iconOnlyActions ? 8.0 : 12.0;
-          final createIssueOrder = compact ? 2.0 : 1.0;
+          final createIssueOrder = compact
+              ? 2.0
+              : showHostedConnectAction
+              ? 10.5
+              : 1.0;
           final addWorkspaceOrder = compact ? 3.0 : 1.5;
           final workspaceSwitcherOrder = compact ? 5.0 : 7.0;
           final searchOrder = compact ? 2.0 : 8.0;
@@ -12372,102 +12376,112 @@ class _IssueList extends StatelessWidget {
         ? bootstrapResults
         : searchResults;
     final showSearchBootstrapLoading = viewModel.isInitialSearchLoading;
-    return _SurfaceCard(
-      semanticLabel: l10n.jqlSearch,
-      explicitChildNodes: true,
-      child: FocusTraversalGroup(
-        policy: OrderedTraversalPolicy(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    final searchFieldFocusOrder = showSearchBootstrapLoading ? 1.25 : 1.0;
+    final searchResultFocusOrderBase = showSearchBootstrapLoading ? 1.75 : 2.0;
+    final searchResultFocusOrderStep = showSearchBootstrapLoading ? 0.5 : 1.0;
+    final listContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FocusTraversalOrder(
+          order: NumericFocusOrder(searchFieldFocusOrder),
+          child: Shortcuts(
+            shortcuts: const <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
+              SingleActivator(LogicalKeyboardKey.tab, shift: true):
+                  PreviousFocusIntent(),
+            },
+            child: TextField(
+              controller: TextEditingController(text: viewModel.jql),
+              onSubmitted: viewModel.updateQuery,
+              decoration: InputDecoration(
+                labelText: l10n.searchIssues,
+                hintText: l10n.jqlPlaceholder,
+                hintStyle: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (showSearchBootstrapLoading) ...[
+          _SectionLoadingBanner(
+            semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
+            label: l10n.loading,
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (visibleResults.isEmpty)
+          Text(l10n.noResults)
+        else ...[
+          if (!showSearchBootstrapLoading &&
+              searchResults.length < viewModel.totalSearchResults)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                l10n.showingResults(
+                  searchResults.length,
+                  viewModel.totalSearchResults,
+                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: colors.muted),
+              ),
+            ),
+          for (var index = 0; index < visibleResults.length; index += 1)
             FocusTraversalOrder(
-              order: const NumericFocusOrder(1),
-              child: Shortcuts(
-                shortcuts: const <ShortcutActivator, Intent>{
-                  SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
-                  SingleActivator(LogicalKeyboardKey.tab, shift: true):
-                      PreviousFocusIntent(),
-                },
-                child: TextField(
-                  controller: TextEditingController(text: viewModel.jql),
-                  onSubmitted: viewModel.updateQuery,
-                  decoration: InputDecoration(
-                    labelText: l10n.searchIssues,
-                    hintText: l10n.jqlPlaceholder,
-                    hintStyle: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+              order: NumericFocusOrder(
+                searchResultFocusOrderBase +
+                    (index * searchResultFocusOrderStep),
+              ),
+              child: _IssueListRow(
+                issue: visibleResults[index],
+                selected: visibleResults[index].key == viewModel.selectedIssue?.key,
+                project: viewModel.project,
+                onSelect: viewModel.selectIssue,
+                trailingAction: showSearchBootstrapLoading
+                    ? _LoadingPill(
+                        semanticLabel:
+                            'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
+                        label: l10n.loading,
+                      )
+                    : null,
+              ),
+            ),
+          if (viewModel.hasMoreSearchResults)
+            FocusTraversalOrder(
+              order: NumericFocusOrder(
+                searchResultFocusOrderBase +
+                    (searchResults.length * searchResultFocusOrderStep),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Semantics(
+                  container: true,
+                  button: true,
+                  label: l10n.loadMoreIssues,
+                  child: OutlinedButton(
+                    onPressed: viewModel.isLoadingMoreSearchResults
+                        ? null
+                        : viewModel.loadMoreSearchResults,
+                    style: _searchLoadMoreButtonStyle(colors),
+                    child: ExcludeSemantics(child: Text(l10n.loadMore)),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            if (showSearchBootstrapLoading) ...[
-              _SectionLoadingBanner(
-                semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
-                label: l10n.loading,
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (visibleResults.isEmpty)
-              Text(l10n.noResults)
-            else ...[
-              if (!showSearchBootstrapLoading &&
-                  searchResults.length < viewModel.totalSearchResults)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    l10n.showingResults(
-                      searchResults.length,
-                      viewModel.totalSearchResults,
-                    ),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelMedium?.copyWith(color: colors.muted),
-                  ),
-                ),
-              for (var index = 0; index < visibleResults.length; index += 1)
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(index + 2.0),
-                  child: _IssueListRow(
-                    issue: visibleResults[index],
-                    selected:
-                        visibleResults[index].key ==
-                        viewModel.selectedIssue?.key,
-                    project: viewModel.project,
-                    onSelect: viewModel.selectIssue,
-                    trailingAction: showSearchBootstrapLoading
-                        ? _LoadingPill(
-                            semanticLabel:
-                                'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
-                            label: l10n.loading,
-                          )
-                        : null,
-                  ),
-                ),
-              if (viewModel.hasMoreSearchResults)
-                FocusTraversalOrder(
-                  order: NumericFocusOrder(searchResults.length + 2.0),
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Semantics(
-                      container: true,
-                      button: true,
-                      label: l10n.loadMoreIssues,
-                      child: OutlinedButton(
-                        onPressed: viewModel.isLoadingMoreSearchResults
-                            ? null
-                            : viewModel.loadMoreSearchResults,
-                        style: _searchLoadMoreButtonStyle(colors),
-                        child: ExcludeSemantics(child: Text(l10n.loadMore)),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
+        ],
+      ],
+    );
+    return _SurfaceCard(
+      semanticLabel: l10n.jqlSearch,
+      explicitChildNodes: true,
+      child: showSearchBootstrapLoading
+          ? listContent
+          : FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: listContent,
+            ),
     );
   }
 }
