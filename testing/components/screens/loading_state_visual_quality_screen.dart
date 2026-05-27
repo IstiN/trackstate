@@ -4,6 +4,7 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/loading_state_visual_quality_screen.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../fixtures/repositories/ts453_bootstrap_loading_repository.dart';
 import 'loading_state_visual_quality_robot.dart';
 
 class LoadingStateVisualQualityScreen
@@ -77,6 +78,9 @@ class LoadingStateVisualQualityScreen
 
   @override
   void dispose() {
+    if (_repository case final CancellableLoadingStateRepository repository) {
+      repository.cancelPendingLoadingWork();
+    }
     _app.resetView();
   }
 }

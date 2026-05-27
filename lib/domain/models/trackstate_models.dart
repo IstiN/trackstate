@@ -17,6 +17,31 @@ enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
 enum TrackerStartupRecoveryKind { githubRateLimit }
 
+enum WorkspaceSyncDomain {
+  projectMeta,
+  issueSummaries,
+  issueDetails,
+  comments,
+  attachments,
+  repositoryIndex,
+}
+
+enum WorkspaceSyncSignal {
+  localHead,
+  localWorktree,
+  hostedRepository,
+  hostedSnapshotReload,
+  hostedSession,
+}
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
+
+enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
+
+enum WorkspaceSyncHealth { synced, checking, attentionNeeded, unavailable }
+
+const _unsetWorkspaceSyncStatusValue = Object();
+
 class TrackerStartupRecovery {
   const TrackerStartupRecovery({
     required this.kind,
@@ -27,6 +52,99 @@ class TrackerStartupRecovery {
   final TrackerStartupRecoveryKind kind;
   final String? failedPath;
   final DateTime? retryAfter;
+}
+
+class WorkspaceSyncDomainChange {
+  const WorkspaceSyncDomainChange({
+    required this.domain,
+    this.issueKeys = const <String>{},
+    this.paths = const <String>{},
+    this.isGlobal = false,
+  });
+
+  final WorkspaceSyncDomain domain;
+  final Set<String> issueKeys;
+  final Set<String> paths;
+  final bool isGlobal;
+
+  WorkspaceSyncDomainChange merge(WorkspaceSyncDomainChange other) {
+    if (domain != other.domain) {
+      throw ArgumentError('Cannot merge sync changes for different domains.');
+    }
+    return WorkspaceSyncDomainChange(
+      domain: domain,
+      issueKeys: {...issueKeys, ...other.issueKeys},
+      paths: {...paths, ...other.paths},
+      isGlobal: isGlobal || other.isGlobal,
+    );
+  }
+}
+
+class WorkspaceSyncResult {
+  const WorkspaceSyncResult({
+    this.trigger = WorkspaceSyncTrigger.automatic,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.domains = const <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{},
+  });
+
+  final WorkspaceSyncTrigger trigger;
+  final Set<WorkspaceSyncSignal> signals;
+  final Map<WorkspaceSyncDomain, WorkspaceSyncDomainChange> domains;
+
+  bool get hasChanges => domains.isNotEmpty;
+
+  Set<WorkspaceSyncDomain> get changedDomains => domains.keys.toSet();
+}
+
+class WorkspaceSyncStatus {
+  const WorkspaceSyncStatus({
+    this.health = WorkspaceSyncHealth.synced,
+    this.hasPendingRefresh = false,
+    this.lastCheckAt,
+    this.lastSuccessfulCheckAt,
+    this.nextRetryAt,
+    this.latestError,
+    this.lastResult,
+  });
+
+  final WorkspaceSyncHealth health;
+  final bool hasPendingRefresh;
+  final DateTime? lastCheckAt;
+  final DateTime? lastSuccessfulCheckAt;
+  final DateTime? nextRetryAt;
+  final String? latestError;
+  final WorkspaceSyncResult? lastResult;
+
+  WorkspaceSyncStatus copyWith({
+    WorkspaceSyncHealth? health,
+    bool? hasPendingRefresh,
+    Object? lastCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? lastSuccessfulCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? nextRetryAt = _unsetWorkspaceSyncStatusValue,
+    Object? latestError = _unsetWorkspaceSyncStatusValue,
+    Object? lastResult = _unsetWorkspaceSyncStatusValue,
+  }) {
+    return WorkspaceSyncStatus(
+      health: health ?? this.health,
+      hasPendingRefresh: hasPendingRefresh ?? this.hasPendingRefresh,
+      lastCheckAt: identical(lastCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastCheckAt
+          : lastCheckAt as DateTime?,
+      lastSuccessfulCheckAt:
+          identical(lastSuccessfulCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastSuccessfulCheckAt
+          : lastSuccessfulCheckAt as DateTime?,
+      nextRetryAt: identical(nextRetryAt, _unsetWorkspaceSyncStatusValue)
+          ? this.nextRetryAt
+          : nextRetryAt as DateTime?,
+      latestError: identical(latestError, _unsetWorkspaceSyncStatusValue)
+          ? this.latestError
+          : latestError as String?,
+      lastResult: identical(lastResult, _unsetWorkspaceSyncStatusValue)
+          ? this.lastResult
+          : lastResult as WorkspaceSyncResult?,
+    );
+  }
 }
 
 class TrackerBootstrapReadiness {
@@ -132,6 +250,7 @@ class TrackStateIssue {
     bool? hasCommentsLoaded,
     bool? hasAttachmentsLoaded,
     List<IssueComment>? comments,
+    List<IssueLink>? links,
     List<IssueAttachment>? attachments,
   }) {
     return TrackStateIssue(
@@ -160,7 +279,7 @@ class TrackStateIssue {
       updatedLabel: updatedLabel ?? this.updatedLabel,
       acceptanceCriteria: acceptanceCriteria,
       comments: comments ?? this.comments,
-      links: links,
+      links: links ?? this.links,
       attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
       hasDetailLoaded: hasDetailLoaded ?? this.hasDetailLoaded,
@@ -820,6 +939,7 @@ class RepositoryIssueIndexEntry {
     this.progress,
     this.resolutionId,
     this.revision,
+    this.links = const [],
   });
 
   final String key;
@@ -840,6 +960,7 @@ class RepositoryIssueIndexEntry {
   final double? progress;
   final String? resolutionId;
   final String? revision;
+  final List<IssueLink> links;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
@@ -856,6 +977,7 @@ class RepositoryIssueIndexEntry {
     double? progress,
     String? resolutionId,
     String? revision,
+    List<IssueLink>? links,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -876,6 +998,7 @@ class RepositoryIssueIndexEntry {
       progress: progress ?? this.progress,
       resolutionId: resolutionId ?? this.resolutionId,
       revision: revision ?? this.revision,
+      links: links ?? this.links,
     );
   }
 }
@@ -1225,6 +1348,16 @@ class GitHubConnection extends RepositoryConnection {
     required super.branch,
     required super.token,
   });
+}
+
+class HostedRepositoryReference {
+  const HostedRepositoryReference({
+    required this.fullName,
+    required this.defaultBranch,
+  });
+
+  final String fullName;
+  final String defaultBranch;
 }
 
 class RepositoryUser {

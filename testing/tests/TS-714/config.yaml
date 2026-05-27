@@ -1,0 +1,13 @@
+test_id: TS-714
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Uses a mutable hosted provider-backed repository so the production issue edit dialog, top bar sync pill, and deferred refresh handling run unchanged.
+  - Triggers an external change while the Description editor has unsaved text, then verifies the visible deferred-sync state before and after Save.
+runtime_inputs:
+  issue_key: TRACK-12
+  pending_label: Updates pending
+  run_command: flutter test testing/tests/TS-714/test_ts_714.dart --reporter expanded

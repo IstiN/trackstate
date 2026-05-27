@@ -463,9 +463,8 @@ class Ts593ReleaseUnpushedBranchScenario:
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    scenario = Ts593ReleaseUnpushedBranchScenario()
-
     try:
+        scenario = Ts593ReleaseUnpushedBranchScenario()
         result, failures = scenario.execute()
         if failures:
             raise AssertionError("\n".join(failures))
@@ -480,6 +479,7 @@ def main() -> None:
                 "ticket_summary": TICKET_SUMMARY,
                 "error": f"{type(error).__name__}: {error}",
                 "traceback": traceback.format_exc(),
+                "failures": list(failures) if isinstance(locals().get("failures"), list) else [],
             }
         )
         _write_failure_outputs(failure_result)
@@ -591,6 +591,94 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
+    if _is_validated_product_failure(result):
+        _write_validated_product_failure_outputs(result)
+        return
+    _write_generic_failure_outputs(result)
+
+
+def _is_validated_product_failure(result: dict[str, object]) -> bool:
+    return _as_text(result.get("failure_mode")) == "missing_explicit_target_commitish_error"
+
+
+def _write_generic_failure_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error_message,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stdout = _as_text(result.get("stdout"))
+    stderr = _as_text(result.get("stderr"))
+    observed_output = _observed_command_output(stdout=stdout, stderr=stderr)
+    failure_details = _generic_failure_details(result)
+
+    jira_lines = [
+        "h3. Test Automation Result",
+        "",
+        "*Status:* ❌ FAILED",
+        f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "h4. Result",
+        "* The TS-593 automation run failed before it safely proved the ticket-specific product defect.",
+        "* No product bug artifact was written because the validated `missing_explicit_target_commitish_error` path was not established.",
+        f"* Failure: {_jira_inline(error_message)}",
+        *([f"* Details: {_jira_inline(detail)}" for detail in failure_details]),
+        "",
+        "h4. Observed command output",
+        "{code}",
+        observed_output,
+        "{code}",
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        RUN_COMMAND,
+        "{code}",
+    ]
+    markdown_lines = [
+        "## Test Automation Result",
+        "",
+        "**Status:** ❌ FAILED",
+        f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## Result",
+        "- The TS-593 automation run failed before it safely proved the ticket-specific product defect.",
+        "- No product bug artifact was written because the validated `missing_explicit_target_commitish_error` path was not established.",
+        f"- Failure: `{error_message}`",
+        *([f"- Details: {detail}" for detail in failure_details]),
+        "",
+        "## Observed command output",
+        "```text",
+        observed_output,
+        "```",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
+    ]
+    JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+    PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+
+
+def _write_validated_product_failure_outputs(result: dict[str, object]) -> None:
     error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
     RESULT_PATH.write_text(
         json.dumps(
@@ -819,6 +907,18 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
+
+
+def _generic_failure_details(result: dict[str, object]) -> list[str]:
+    failures = result.get("failures")
+    if not isinstance(failures, list):
+        return []
+    details: list[str] = []
+    for failure in failures:
+        detail = _compact_text(_as_text(failure))
+        if detail:
+            details.append(detail)
+    return details
 
 
 def _record_step(

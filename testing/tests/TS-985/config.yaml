@@ -1,0 +1,11 @@
+test_id: TS-985
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored signed-in GitHub token and a preloaded active local workspace plus hosted fallback workspace.
+  - Delays the initial GitHub /user startup probe by 2 seconds to reproduce the short successful-probe timing from the ticket precondition.
+  - Verifies the live app reaches shell_ready and exposes the top bar workspace trigger plus TrackState branding shortly after the probe completes, without waiting for the full 11-second synchronization timeout window.

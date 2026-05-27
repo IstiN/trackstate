@@ -19,6 +19,9 @@ from testing.core.interfaces.trackstate_cli_release_replacement_probe import (
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
+from testing.core.models.trackstate_cli_http_request_observation import (
+    TrackStateCliHttpRequestObservation,
+)
 from testing.core.models.trackstate_cli_release_replacement_result import (
     TrackStateCliReleaseReplacementCleanupResult,
     TrackStateCliReleaseReplacementManifestObservation,
@@ -75,6 +78,7 @@ class PythonTrackStateCliReleaseReplacementFramework(
                 prefix="trackstate-release-replacement-repo-",
             ) as temp_dir:
                 repository_path = Path(temp_dir)
+                request_log_path = repository_path / ".trackstate-cli-request-log.json"
                 seeded_release = self._seed_release_container(
                     config=config,
                     expected_release_tag=expected_release_tag,
@@ -92,11 +96,14 @@ class PythonTrackStateCliReleaseReplacementFramework(
                     expected_release_tag=expected_release_tag,
                 )
                 observation = self._observe_command(
+                    config=config,
                     requested_command=config.requested_command,
                     repository_path=repository_path,
                     executable_path=executable_path,
                     access_token=self._repository_client.token,
+                    request_log_path=request_log_path,
                 )
+                api_requests = self._read_api_requests(request_log_path)
                 final_state = self._capture_repository_state(
                     repository_path=repository_path,
                     config=config,
@@ -149,6 +156,7 @@ class PythonTrackStateCliReleaseReplacementFramework(
             initial_state=initial_state,
             final_state=final_state,
             observation=observation,
+            api_requests=api_requests,
             expected_release_tag=expected_release_tag,
             release_tag_prefix=release_tag_prefix,
             remote_origin_url=remote_origin_url,
@@ -303,10 +311,12 @@ Release replacement fixture.
     def _observe_command(
         self,
         *,
+        config: TrackStateCliReleaseReplacementConfig,
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
         access_token: str,
+        request_log_path: Path,
     ) -> TrackStateCliCommandObservation:
         executed_command = (str(executable_path), *requested_command[1:])
         env = os.environ.copy()
@@ -323,6 +333,15 @@ Release replacement fixture.
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
         env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
         env["GIT_TERMINAL_PROMPT"] = "0"
+        env["TRACKSTATE_CLI_REQUEST_LOG_FILE"] = str(request_log_path)
+        if config.delete_release_asset_override_status_code is not None:
+            env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_DELETE_STATUS"] = str(
+                config.delete_release_asset_override_status_code,
+            )
+            if config.delete_release_asset_override_body is not None:
+                env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_DELETE_BODY"] = (
+                    config.delete_release_asset_override_body
+                )
         result = self._run(executed_command, cwd=repository_path, env=env)
         return TrackStateCliCommandObservation(
             requested_command=requested_command,
@@ -336,6 +355,39 @@ Release replacement fixture.
             compiled_binary_path=str(executable_path),
             result=result,
         )
+
+    def _read_api_requests(
+        self,
+        request_log_path: Path,
+    ) -> tuple[TrackStateCliHttpRequestObservation, ...]:
+        if not request_log_path.is_file():
+            return ()
+        payload = json.loads(request_log_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "TrackState CLI request log must deserialize to a JSON list.\n"
+                f"Path: {request_log_path}\n"
+                f"Observed payload: {payload!r}"
+            )
+        requests: list[TrackStateCliHttpRequestObservation] = []
+        for index, entry in enumerate(payload):
+            if not isinstance(entry, dict):
+                raise AssertionError(
+                    "TrackState CLI request log entries must deserialize to JSON objects.\n"
+                    f"Path: {request_log_path}\n"
+                    f"Entry {index}: {entry!r}"
+                )
+            requests.append(
+                TrackStateCliHttpRequestObservation(
+                    method=str(entry.get("method", "")).strip(),
+                    url=str(entry.get("url", "")).strip(),
+                    host=str(entry.get("host", "")).strip(),
+                    path=str(entry.get("path", "")).strip(),
+                    query=_optional_request_string(entry.get("query")),
+                    rewritten_url=_optional_request_string(entry.get("rewrittenUrl")),
+                ),
+            )
+        return tuple(requests)
 
     def _capture_repository_state(
         self,
@@ -395,7 +447,6 @@ Release replacement fixture.
             head_commit_subject=self._git_head_subject(repository_path),
             head_commit_count=self._git_head_count(repository_path),
         )
-
     def _observe_manifest_state(
         self,
         *,
@@ -561,3 +612,10 @@ Release replacement fixture.
     def _git_head_count(self, repository_path: Path) -> int:
         output = self._git_output(repository_path, "rev-list", "--count", "HEAD").strip()
         return int(output) if output else 0
+
+
+def _optional_request_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

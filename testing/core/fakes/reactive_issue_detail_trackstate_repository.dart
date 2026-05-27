@@ -142,10 +142,26 @@ class MutableIssueDetailTrackStateProvider
        };
 
   RepositoryPermission _permission;
+  ProviderConnectionState _connectionState =
+      ProviderConnectionState.disconnected;
   final Set<String> _lfsTrackedPaths;
   final Set<String> _failingTextPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: _revision,
+      sessionRevision:
+          '${_connectionState.name}:${_permission.canRead}:${_permission.canWrite}:${_permission.supportsReleaseAttachmentWrites}',
+      connectionState: _connectionState,
+      permission: _permission,
+    ),
+  );
 
   static const Map<String, String> _textFixtures = {
     'project.json': '''
@@ -338,11 +354,13 @@ Read and write tracker files through GitHub Contents API.
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override
-  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(
-        login: 'write-enabled-user',
-        displayName: 'Write Enabled User',
-      );
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connectionState = ProviderConnectionState.connected;
+    return const RepositoryUser(
+      login: 'write-enabled-user',
+      displayName: 'Write Enabled User',
+    );
+  }
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>

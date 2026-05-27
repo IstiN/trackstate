@@ -274,38 +274,70 @@ def main() -> None:
                     result["manifest_after_replacement"] = manifest_entry["manifest_text"]
                     result["matching_manifest_entries"] = manifest_entry["matching_entries"]
                     result["release_asset_names_after_upload"] = manifest_entry["release_asset_names"]
+                    refresh_error: str | None = None
+                    refreshed_body = ""
+                    refreshed_download_count = 0
+                    try:
+                        refresh_runtime = tracker_page.open()
+                        result["runtime_after_refresh"] = refresh_runtime.kind
+                        result["runtime_after_refresh_body_text"] = refresh_runtime.body_text
+                        if refresh_runtime.kind != "ready":
+                            raise AssertionError(
+                                "The deployed app did not return to the ready tracker shell "
+                                "after confirming the replacement.\n"
+                                f"Observed body text:\n{refresh_runtime.body_text}",
+                            )
+                        page.search_and_select_issue(
+                            issue_key=ISSUE_KEY,
+                            issue_summary=ISSUE_SUMMARY,
+                            query=ISSUE_KEY,
+                        )
+                        page.open_collaboration_tab("Attachments")
+                        refreshed_body = page.wait_for_text(
+                            ATTACHMENT_NAME,
+                            timeout_ms=60_000,
+                        )
+                        refreshed_download_count = page.attachment_download_button_count(
+                            ATTACHMENT_NAME,
+                        )
+                    except Exception as error:
+                        refresh_error = f"{type(error).__name__}: {error}"
+                        result["refresh_error"] = refresh_error
+                        refreshed_body = page.current_body_text()
+                    result["attachments_body_text_after_refresh"] = refreshed_body
+                    result["download_count_after_refresh"] = refreshed_download_count
                     if not matched_manifest:
                         raise AssertionError(
                             "Step 4 failed: the live replacement did not update "
                             "`attachments.json` so that `manual.pdf` had exactly one "
                             "`github-releases` entry within the timeout.\n"
                             f"Observed manifest text:\n{manifest_entry['manifest_text']}\n"
-                            f"Observed matching entries: {manifest_entry['matching_entries']}",
+                            f"Observed matching entries: {manifest_entry['matching_entries']}\n"
+                            f"Observed release assets: {manifest_entry['release_asset_names']}\n"
+                            f"Observed refreshed download control count: {refreshed_download_count}\n"
+                            + (
+                                f"Observed refresh error: {refresh_error}\n"
+                                if refresh_error
+                                else ""
+                            )
+                            + f"Observed refreshed body text:\n{refreshed_body}",
+                        )
+                    if refresh_error is not None:
+                        raise AssertionError(
+                            "Step 4 failed: the live replacement updated the manifest, but "
+                            "the hosted Attachments tab could not be re-opened to verify the "
+                            "user-visible result.\n"
+                            f"Observed refresh error: {refresh_error}\n"
+                            f"Observed manifest text:\n{manifest_entry['manifest_text']}",
                         )
 
-                    refresh_runtime = tracker_page.open()
-                    result["runtime_after_refresh"] = refresh_runtime.kind
-                    page.search_and_select_issue(
-                        issue_key=ISSUE_KEY,
-                        issue_summary=ISSUE_SUMMARY,
-                        query=ISSUE_KEY,
-                    )
-                    page.open_collaboration_tab("Attachments")
-                    refreshed_body = page.wait_for_text(
-                        ATTACHMENT_NAME,
-                        timeout_ms=60_000,
-                    )
-                    refreshed_download_count = page.attachment_download_button_count(
-                        ATTACHMENT_NAME,
-                    )
-                    result["attachments_body_text_after_refresh"] = refreshed_body
-                    result["download_count_after_refresh"] = refreshed_download_count
                     if refreshed_download_count != 1:
                         raise AssertionError(
                             "Step 4 failed: refreshing the Attachments tab showed duplicate "
                             "or missing `manual.pdf` rows instead of exactly one active "
                             "entry.\n"
                             f"Observed download control count: {refreshed_download_count}\n"
+                            f"Observed release assets: {manifest_entry['release_asset_names']}\n"
                             f"Observed body text:\n{refreshed_body}",
                         )
                     _record_step(
@@ -817,7 +849,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-510 - Hosted legacy attachment replacement is blocked in the Attachments tab",
+            f"# {_bug_title(result)}",
             "",
             "## Steps to reproduce",
             "1. Open 'TS-477' in the Issue Detail Attachments tab.",
@@ -837,10 +869,7 @@ def _bug_description(result: dict[str, object]) -> str:
             ),
             (
                 "- Actual: "
-                + str(
-                    result.get("error")
-                    or "the hosted replacement flow did not converge to one active github-releases attachment entry."
-                )
+                + _actual_failure_summary(result)
             ),
             "",
             "## Exact error message or assertion failure",
@@ -865,6 +894,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "### Matching manifest entries",
             "```json",
             json.dumps(result.get("matching_manifest_entries", []), indent=2, sort_keys=True),
+            "```",
+            "### Release assets after replacement attempt",
+            "```json",
+            json.dumps(result.get("release_asset_names_after_upload", []), indent=2, sort_keys=True),
             "```",
             "### Replace dialog text",
             "```text",
@@ -959,6 +992,32 @@ def _ticket_step_action(step_number: int) -> str:
         3: "Confirm the replacement in the dialog.",
         4: "Refresh or observe the attachment list in the tab.",
     }.get(step_number, "Ticket step")
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    failed_step = _extract_failed_step_number(str(result.get("error", "")))
+    if failed_step == 2:
+        return "TS-510 - Hosted legacy attachment replacement cannot be started from the Attachments tab"
+    if failed_step == 4:
+        return "TS-510 - Hosted legacy attachment replacement leaves the repository-path entry active"
+    return "TS-510 - Hosted legacy attachment replacement does not match the expected result"
+
+
+def _actual_failure_summary(result: dict[str, object]) -> str:
+    error = str(result.get("error", "")).strip()
+    refreshed_body = str(result.get("attachments_body_text_after_refresh", "")).strip()
+    release_assets = result.get("release_asset_names_after_upload", [])
+    if error and refreshed_body:
+        return (
+            f"{error}\nObserved Attachments tab after refresh:\n{refreshed_body}\n"
+            f"Observed release assets: {release_assets}"
+        )
+    if error:
+        return f"{error}\nObserved release assets: {release_assets}"
+    return (
+        "the hosted replacement flow did not converge to one active github-releases "
+        f"attachment entry. Observed release assets: {release_assets}"
+    )
 
 
 if __name__ == "__main__":
