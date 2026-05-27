@@ -65,25 +65,31 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + POST_RELEASE_STABILITY_SECONDS + 20
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-971"]
+LINKED_BUGS = ["TS-996", "TS-992", "TS-971"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-971. Its fix makes shell_ready non-blocking after the 11-second "
-    "startup timeout, so this test intentionally waits past that timeout while the "
-    "delayed GitHub `/user` probe is still pending and then keeps observing until "
-    "the late probe resolution completes."
+    "Reviewed TS-996, TS-992, and TS-971. Their fixes require the startup GitHub "
+    "`/user` probe to begin normally, the shell to remain interactive once the "
+    "11-second timeout fallback is available, and the late probe resolution to "
+    "avoid resetting visible hosted-workspace state. This test therefore waits "
+    "past the timeout and continues observing through the delayed release."
 )
 REWORK_SUMMARY = (
-    "Added a live Playwright startup regression that delays the initial GitHub "
-    "`/user` probe beyond the 11-second synchronization window and verifies the "
-    "visible shell stays stable when the late probe finally resolves."
+    "Removed the Step 2 early-pass shortcut so the timeout assertion stays "
+    "bound to the recorded post-timeout shell observation while preserving the "
+    "delayed startup probe stability coverage."
 )
 REWORK_FIXES = (
-    "Made the hosted workspace the active startup workspace and seeded its "
-    "workspace-scoped GitHub token.",
-    "Applied the required 1440x900 viewport before opening the app so startup "
-    "runs under the ticket dimensions.",
-    "Only write `bug_description.md` for confirmed product failures and emit "
-    "per-thread review replies.",
+    "Removed the Step 2 shortcut that could pass from the initial startup surface "
+    "without proving the post-timeout `shell_ready=true` condition.",
+    "Kept Step 2 tied to the timeout-window observation while preserving the "
+    "linked TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
+    "Updated review-thread replies so the current PR feedback is answered with the "
+    "exact Step 2 fix and rerun result.",
+)
+REWORK_RESPONSE_SUMMARY = (
+    "Removed the Step 2 early-pass shortcut, kept the timeout assertion bound to "
+    "the recorded post-timeout observation, and updated the review reply for the "
+    "current thread."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -230,6 +236,11 @@ def main() -> None:
                 result["initial_trigger_observation"] = (
                     _trigger_payload(initial_trigger) if initial_trigger is not None else None
                 )
+                initial_shell_interactive = _startup_surface_shows_interactive_shell(
+                    startup_surface,
+                    initial_trigger=initial_trigger,
+                )
+                result["initial_shell_interactive"] = initial_shell_interactive
                 _record_step(
                     result,
                     step=1,
@@ -275,6 +286,21 @@ def main() -> None:
                     step_two_error = (
                         "Step 2 failed: the test never reached the post-timeout "
                         "observation window while watching the delayed startup probe.\n"
+                        f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
+                    )
+                elif (
+                    not bool(timeout_window["auth_pending"])
+                    and timeout_window["shell_ready_after_start_seconds"] is not None
+                    and timeout_window["auth_probe_released_after_start_seconds"] is not None
+                    and float(timeout_window["shell_ready_after_start_seconds"])
+                    > TIMEOUT_ASSERTION_SECONDS
+                    and float(timeout_window["shell_ready_after_probe_release_seconds"] or 0)
+                    <= 1.0
+                ):
+                    step_two_error = (
+                        "Step 2 failed: the shell did not become interactive within the "
+                        f"{SYNC_TIMEOUT_SECONDS}-second timeout window. It only reported "
+                        "shell_ready after the delayed GitHub `/user` probe released.\n"
                         f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
                     )
                 elif not bool(timeout_window["auth_pending"]):
@@ -406,6 +432,9 @@ def main() -> None:
                 step_four_failures = _stability_failures(
                     stability_samples=stability_samples,
                     required_navigation_labels=SHELL_NAVIGATION_LABELS,
+                    initial_trigger_signature=_trigger_signature(
+                        {"trigger": result.get("initial_trigger_observation")},
+                    ),
                 )
                 if step_two_error is not None and not step_four_failures:
                     step_four_failures.append(
@@ -453,27 +482,27 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the app after the synchronization timeout like a user and "
-                        "confirmed the page already showed the real shell instead of a reset "
-                        "or startup fallback."
+                        "Viewed the hosted shell as soon as the app rendered and confirmed "
+                        "the user-facing navigation, branding, and workspace trigger were "
+                        "visible before the delayed probe finished."
                     ),
                     observed=(
-                        f"body_excerpt={_snippet(timeout_window['shell_observation']['body_text'])!r}; "
-                        f"trigger_label={(timeout_window['trigger'] or {}).get('semantic_label')!r}; "
-                        f"branding_visible={timeout_window['branding_visible']!r}; "
-                        "visible_navigation_labels="
-                        f"{timeout_window['shell_observation']['visible_navigation_labels']!r}"
+                        f"initial_body_excerpt={_snippet(str(startup_surface.get('body_text', '')))!r}; "
+                        f"initial_trigger_label={(result.get('initial_trigger_observation') or {}).get('semantic_label')!r}; "
+                        f"initial_shell_interactive={initial_shell_interactive!r}; "
+                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Kept watching the live page through the delayed probe release and "
-                        "confirmed the top bar, branding text, and current route did not "
-                        "flicker or reset."
+                        "checked whether the hosted-workspace state stayed the same from the "
+                        "user's perspective."
                     ),
                     observed=(
                         f"final_route={_route_signature(final_window)!r}; "
+                        f"initial_trigger_signature={_trigger_signature({'trigger': result.get('initial_trigger_observation')})!r}; "
                         f"stable_trigger_signature={_trigger_signature(final_window)!r}; "
                         f"shell_ready_after_start_seconds={final_window['shell_ready_after_start_seconds']!r}; "
                         f"auth_probe_released_after_start_seconds={release_after_start_seconds!r}; "
@@ -610,6 +639,7 @@ def _stability_failures(
     *,
     stability_samples: list[dict[str, Any]],
     required_navigation_labels: tuple[str, ...],
+    initial_trigger_signature: tuple[str, str, str, str] | None = None,
 ) -> list[str]:
     failures: list[str] = []
     if len(stability_samples) < 3:
@@ -686,6 +716,8 @@ def _stability_failures(
         for signature in (_trigger_signature(sample) for sample in stability_samples)
         if signature is not None
     }
+    if initial_trigger_signature is not None:
+        trigger_signatures.add(initial_trigger_signature)
     if len(trigger_signatures) > 1:
         failures.append(
             "The visible TopBar workspace trigger changed during post-timeout monitoring, "
@@ -778,6 +810,21 @@ def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
     title = str(observation.get("title", "")).strip()
     button_labels = observation.get("button_labels", [])
     return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
+
+
+def _startup_surface_shows_interactive_shell(
+    observation: dict[str, Any],
+    *,
+    initial_trigger: Any | None,
+) -> bool:
+    body_text = str(observation.get("body_text", ""))
+    button_labels = {str(label) for label in observation.get("button_labels", [])}
+    return (
+        all(label in body_text for label in SHELL_NAVIGATION_LABELS)
+        and BRANDING_TEXT in body_text
+        and initial_trigger is not None
+        and "Connect GitHub" not in button_labels
+    )
 
 
 def _safe_trigger_payload(
@@ -952,11 +999,7 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
             [
                 "h3. PR Rework Result",
                 "",
-                (
-                    "*Fixed:* Made the hosted workspace active for startup, applied the "
-                    "1440x900 viewport before opening the app, and only emit "
-                    "`bug_description.md` for confirmed product failures."
-                ),
+                f"*Fixed:* {REWORK_RESPONSE_SUMMARY}",
                 f"*Test Run:* `{RUN_COMMAND}`",
                 "*Result:* ✅ PASSED",
                 "*Summary:* 1 passed, 0 failed.",
@@ -972,11 +1015,7 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         [
             "h3. PR Rework Result",
             "",
-            (
-                "*Fixed:* Made the hosted workspace active for startup, applied the "
-                "1440x900 viewport before opening the app, and only emit "
-                "`bug_description.md` for confirmed product failures."
-            ),
+            f"*Fixed:* {REWORK_RESPONSE_SUMMARY}",
             f"*Test Run:* `{RUN_COMMAND}`",
             "*Result:* ❌ FAILED",
             "*Summary:* 0 passed, 1 failed.",
@@ -1057,10 +1096,17 @@ def _review_reply_text(
             "shell, never resolving the delayed probe, or destabilizing the shell after the "
             f"late release). {rerun_summary}"
         )
+    if comment_id == 3308990191:
+        return (
+            "Fixed: removed the `startup_shell_ready_before_timeout` shortcut, so Step 2 "
+            "now passes only from the recorded timeout-window observation after the "
+            "11-second mark while the delayed `/user` probe is still pending. "
+            f"{rerun_summary}"
+        )
     return (
-        "Fixed: updated TS-990 to start from the hosted workspace, set the required "
-        "viewport before launch, gate `bug_description.md` to confirmed product "
-        f"failures, and emit per-thread review replies. {rerun_summary}"
+        "Fixed: updated TS-990 to keep the timeout assertion tied to the recorded "
+        "post-timeout shell observation and emit per-thread review replies. "
+        f"{rerun_summary}"
     )
 
 
@@ -1178,6 +1224,15 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 
 def _missing_capability_summary(result: dict[str, Any]) -> str:
     error = str(result.get("error", ""))
+    if "visible TopBar workspace trigger changed during post-timeout monitoring" in error:
+        return (
+            "After the delayed GitHub `/user` startup probe resolves, the deployed "
+            "hosted shell applies a late visible state change to the TopBar workspace "
+            "trigger (`Needs sign-in` -> `Attachments limited`). The timeout fallback "
+            "path should keep the rendered shell stable after it becomes interactive, "
+            "without resetting or mutating the visible workspace state when the late "
+            "probe result arrives."
+        )
     if (
         "delayed GitHub `/user` startup probe never started" in error
         and "Needs sign-in" in error
