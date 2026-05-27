@@ -53,7 +53,7 @@ class IssueDetailPage {
       driver.getActionAvailability('Edit', within: issueDetailLabel(issueKey));
 
   ActionAvailability commentAction(String issueKey) =>
-      driver.getActionAvailability('Comment', within: issueDetailLabel(issueKey));
+      _firstVisibleAction(issueKey, const ['Comments', 'Comment']);
 
   bool hasReadOnlyExplanation(String issueKey) => driver.hasAnyMessage([
     RegExp('permission required', caseSensitive: false),
@@ -68,4 +68,19 @@ class IssueDetailPage {
     commentAction(issueKey).describe(),
     'readOnlyExplanationVisible=${hasReadOnlyExplanation(issueKey)}',
   ].join(', ');
+
+  ActionAvailability _firstVisibleAction(String issueKey, List<String> labels) {
+    ActionAvailability? fallback;
+    for (final label in labels) {
+      final availability = driver.getActionAvailability(
+        label,
+        within: issueDetailLabel(issueKey),
+      );
+      if (availability.visible) {
+        return availability;
+      }
+      fallback ??= availability;
+    }
+    return fallback!;
+  }
 }
