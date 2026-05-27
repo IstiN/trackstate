@@ -1,0 +1,48 @@
+test_id: TS-950
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: .github/workflows/unit-tests.yml
+  probe_render_host_path: .github/workflows/unit-tests.yml
+  branch_prefix: ts950-log-validation-step-presence
+  commit_message: "TS-950 probe: remove mandatory log-validation workflow step"
+  pull_request_title: "TS-950 disposable probe: verify missing log-validation step blocks merge"
+  pull_request_body: "Disposable PR created by TS-950 automation to remove the mandatory `log-validation` step from the accessibility job and verify that the live CI schema/contract check fails and blocks merge."
+  expected_accessibility_markers:
+    - Flutter checks
+    - Flutter Required Checks
+    - log-validation
+    - workflow
+  contrast_evidence_markers:
+    - log-validation
+    - missing
+    - contributor-visible
+    - unit-tests.yml
+    - workflow configuration
+  semantic_evidence_markers:
+    - log-validation
+    - Run unit and golden tests
+    - unit-tests.yml
+  accessibility_job_markers:
+    - Flutter checks
+    - flutter-checks
+    - Accessibility checks
+    - accessibility
+  downstream_job_markers:
+    - Deploy preview
+    - deploy-preview
+    - publish
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only .github/workflows/unit-tests.yml to remove the log-validation step from the accessibility job.
+  - Expects the live CI surface to fail with a missing-step workflow/schema contract message and block merge on the disposable PR.

@@ -1,0 +1,21 @@
+test_id: TS-981
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Runs in the supported Flutter widget runtime at 1440x900.
+  - Seeds a hosted active workspace plus a saved local workspace flagged as unavailable.
+  - Simulates already-granted browser folder access by reopening the saved local directory through the browser-local repository loader.
+  - Fails if the retry action re-prompts for directory access or if the workspace does not settle to Local Git.
+runtime_inputs:
+  active_workspace_kind: hosted
+  retry_workspace_kind: local unavailable
+  viewport: 1440x900
+  expected_retry_actions:
+    - Retry
+    - Re-authenticate
+  expected_directory_picker_calls: 0
+  expected_final_state: saved local workspace restored as active Local Git
+  run_command: flutter test testing/tests/TS-981/test_ts_981.dart --reporter expanded

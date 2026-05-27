@@ -35,6 +35,13 @@ class FocusedElementObservation:
     outer_html: str
 
 
+@dataclass(frozen=True)
+class NewPageObservation:
+    url: str
+    page_count_before: int
+    page_count_after: int
+
+
 class WebAppSession(Protocol):
     def set_viewport_size(self, *, width: int, height: int) -> None: ...
 
@@ -77,6 +84,17 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
+    def type_text(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+        delay_ms: int = 50,
+    ) -> None: ...
+
     def press(
         self,
         selector: str,
@@ -91,6 +109,16 @@ class WebAppSession(Protocol):
         self,
         key: str,
         *,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
         timeout_ms: int = 30_000,
     ) -> None: ...
 
@@ -115,6 +143,16 @@ class WebAppSession(Protocol):
         selector: str,
         expected_count: int,
         *,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
         timeout_ms: int = 30_000,
     ) -> None: ...
 
@@ -182,7 +220,6 @@ class WebAppSession(Protocol):
         arg: object | None = None,
         timeout_ms: int = 30_000,
     ) -> object: ...
-
     def active_element(self) -> FocusedElementObservation: ...
 
     def wait_for_download_after_keypress(
@@ -192,7 +229,39 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> str: ...
 
-    def screenshot(self, path: str) -> None: ...
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
+    def wait_for_new_page_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation: ...
+
+    def wait_for_new_page_after_active_element_click(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation: ...
+
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None: ...
 
     def bounding_box(
         self,

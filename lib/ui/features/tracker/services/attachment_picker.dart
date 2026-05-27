@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:file_selector/file_selector.dart';
+import 'attachment_picker_impl.dart'
+    if (dart.library.js_interop) 'attachment_picker_web.dart' as impl;
 
 class PickedAttachment {
   const PickedAttachment({required this.name, required this.bytes});
@@ -13,19 +14,5 @@ class PickedAttachment {
 
 typedef AttachmentPicker = Future<PickedAttachment?> Function();
 
-Future<PickedAttachment?> pickAttachmentWithFileSelector() async {
-  final file = await openFile();
-  if (file == null) {
-    return null;
-  }
-
-  final normalizedName = file.name.trim();
-  if (normalizedName.isEmpty) {
-    return null;
-  }
-
-  return PickedAttachment(
-    name: normalizedName,
-    bytes: await file.readAsBytes(),
-  );
-}
+Future<PickedAttachment?> pickAttachmentWithFileSelector() =>
+    impl.pickAttachment();
