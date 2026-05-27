@@ -138,8 +138,8 @@ class LoadingStateVisualQualityRobot {
 
   Future<List<String>> collectLoadingFocusVisits({required int tabs}) async {
     return collectFocusVisits(<String, Finder>{
-      'Create issue': _focusableSemanticsLabel('Create issue'),
-      'Connect GitHub': _focusableSemanticsLabel('Connect GitHub'),
+      'Create issue': topBarButton('Create issue'),
+      'Connect GitHub': topBarButton('Connect GitHub'),
       'JQL Search navigation': navigationItem('JQL Search'),
       'Search issues field': jqlSearchField,
       'First loading result': _firstLoadingResultAction(),
@@ -307,33 +307,40 @@ class LoadingStateVisualQualityRobot {
   }
 
   String? _focusedCandidate(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
-      return null;
-    }
-
     for (final entry in candidates.entries) {
-      final matches = entry.value.evaluate().length;
-      if (matches == 0) {
-        continue;
-      }
-
-      for (var index = 0; index < matches; index += 1) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
-          return entry.key;
-        }
+      if (_ownsFocusedNode(entry.value)) {
+        return entry.key;
       }
     }
     return null;
+  }
+
+  bool _ownsFocusedNode(Finder finder) {
+    if (finder.evaluate().isEmpty) {
+      return false;
+    }
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext == null) {
+      return false;
+    }
+
+    for (final element in finder.evaluate()) {
+      if (element == focusedContext) {
+        return true;
+      }
+      var containsFocusedContext = false;
+      focusedContext.visitAncestorElements((ancestor) {
+        if (ancestor == element) {
+          containsFocusedContext = true;
+          return false;
+        }
+        return true;
+      });
+      if (containsFocusedContext) {
+        return true;
+      }
+    }
+    return false;
   }
 
   Finder _filteredByGeometry(
@@ -406,18 +413,6 @@ class LoadingStateVisualQualityRobot {
       }
     }
     return candidates.at(bestIndex);
-  }
-
-  Finder _focusableSemanticsLabel(String label) {
-    return _topMost(find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')));
-  }
-
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {
