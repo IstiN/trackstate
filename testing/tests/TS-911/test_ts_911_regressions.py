@@ -101,6 +101,8 @@ class Ts911RegressionsTest(unittest.TestCase):
             },
             "active": {
                 "accessible_name": "Workspace switcher: Hosted main workspace, Hosted, Attachments limited",
+                "role": "button",
+                "tag_name": "BUTTON",
             },
             "focus": {
                 "focus_owned_by_switcher": True,
@@ -125,6 +127,44 @@ class Ts911RegressionsTest(unittest.TestCase):
             "focus moved to the workspace-switcher trigger instead of wrapping inside the panel",
         ):
             _LIVE_TEST_MODULE._assert_reverse_wrap(state)
+
+    def test_reverse_wrap_assertion_does_not_treat_body_fallback_as_trigger(self) -> None:
+        state = {
+            "before": {
+                "accessible_name": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+            },
+            "active": {
+                "accessible_name": "Workspace switcher: Hosted main workspace, Hosted, Attachments limited",
+                "tag_name": "BODY",
+                "role": None,
+            },
+            "focus": {
+                "focus_owned_by_switcher": False,
+                "active_within_switcher": False,
+                "active_on_trigger": False,
+            },
+            "expected_target": {
+                "label": "Save and switch",
+            },
+            "first_internal_target": {
+                "label": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+            },
+            "row_focus": {},
+            "monitor": {
+                "ever_hidden_after_visible": False,
+            },
+            "switcher": {},
+        }
+
+        with self.assertRaises(AssertionError) as context:
+            _LIVE_TEST_MODULE._assert_reverse_wrap(state)
+
+        message = str(context.exception)
+        self.assertIn("focus escaped the workspace switcher after Shift+Tab", message)
+        self.assertNotIn(
+            "focus moved to the workspace-switcher trigger instead of wrapping inside the panel",
+            message,
+        )
 
     def test_visible_footer_target_prefers_live_save_and_switch_control(self) -> None:
         target = _LIVE_TEST_MODULE._visible_footer_target(
@@ -154,17 +194,106 @@ class Ts911RegressionsTest(unittest.TestCase):
         self.assertEqual(target["label"], "Save and switch")
         self.assertEqual(target["tag_name"], "FLT-SEMANTICS")
 
-    def test_supporting_wrap_target_context_marks_non_footer_target_as_fallback(self) -> None:
-        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+    def test_best_available_reverse_wrap_target_falls_back_when_tab_stops_missing(self) -> None:
+        target = _LIVE_TEST_MODULE._best_available_reverse_wrap_target(
             {
+                "internal_tab_stops": [],
                 "expected_target": {
-                    "label": "Branch",
+                    "label": "Save and switch",
                 },
             },
         )
 
-        self.assertEqual(context["status"], "fallback")
-        self.assertIn("best available reverse-wrap target", context["note"])
+        self.assertEqual(target["label"], "Save and switch")
+
+    def test_best_available_reverse_wrap_target_prefers_focusable_footer_button(self) -> None:
+        target = _LIVE_TEST_MODULE._best_available_reverse_wrap_target(
+            {
+                "internal_tab_stops": [
+                    {
+                        "label": "Hosted main workspace, Hosted, Attachments limited, istin/trackstate-setup • Branch: main",
+                        "visible_text": "",
+                        "role": None,
+                        "tag_name": "BUTTON",
+                        "tabindex": "0",
+                        "tab_index_value": 0,
+                        "dom_index": 0,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<button></button>",
+                    },
+                    {
+                        "label": "Branch",
+                        "visible_text": "",
+                        "role": None,
+                        "tag_name": "INPUT",
+                        "tabindex": None,
+                        "tab_index_value": 0,
+                        "dom_index": 1,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<input aria-label='Branch'>",
+                    },
+                    {
+                        "label": "Save and switch",
+                        "visible_text": "Save and switch",
+                        "role": None,
+                        "tag_name": "BUTTON",
+                        "tabindex": "0",
+                        "tab_index_value": 0,
+                        "dom_index": 2,
+                        "keyboard_focusable": True,
+                        "disabled": False,
+                        "outer_html": "<button aria-label='Save and switch' aria-disabled='true'></button>",
+                    },
+                ],
+                "button_focusability": {
+                    "label": "Save and switch",
+                    "visible_text": "Save and switch",
+                    "role": None,
+                    "tag_name": "BUTTON",
+                    "tabindex": "0",
+                    "keyboard_focusable": True,
+                    "outer_html": "<button aria-label='Save and switch' aria-disabled='true'></button>",
+                },
+                "expected_target": {
+                    "label": "Save and switch",
+                },
+            },
+        )
+
+        self.assertEqual(target["label"], "Save and switch")
+
+    def test_supporting_wrap_target_proof_derives_last_reachable_in_panel_target(self) -> None:
+        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+            {
+                "status": "derived",
+                "expected_target": {
+                    "label": "Branch",
+                },
+                "note": (
+                    "Forward Tab did not prove 'Save and switch' as the terminal reachable "
+                    "control; the last reachable in-panel control in this run was 'Branch'."
+                ),
+            },
+        )
+
+        self.assertEqual(context["status"], "derived")
+        self.assertIn("last reachable in-panel control", context["note"])
+
+    def test_supporting_wrap_target_context_uses_inconclusive_proof_note(self) -> None:
+        context = _LIVE_TEST_MODULE._supporting_wrap_target_context(
+            {
+                "status": "inconclusive",
+                "expected_target": {
+                    "label": "Branch",
+                },
+                "note": "Forward Tab evidence was inconclusive; using the best available in-panel target 'Branch'.",
+            },
+        )
+
+        self.assertEqual(context["status"], "inconclusive")
+        self.assertIn("best available in-panel target", context["note"])
 
 
 if __name__ == "__main__":

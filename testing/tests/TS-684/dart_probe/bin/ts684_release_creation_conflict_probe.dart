@@ -440,6 +440,7 @@ class _CliProbeRepository extends ProviderBackedTrackStateRepository {
         issue: issue,
         name: name,
         bytes: bytes,
+        sourceName: sourceName,
       );
     } finally {
       replaceCachedState(

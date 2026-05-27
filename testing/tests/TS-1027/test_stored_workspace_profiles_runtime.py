@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
@@ -20,9 +22,13 @@ from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 class _FakeScriptTarget:
     def __init__(self) -> None:
         self.scripts: list[str] = []
+        self.events: list[tuple[str, object]] = []
 
     def add_init_script(self, *, script: str) -> None:
         self.scripts.append(script)
+
+    def on(self, event: str, callback: object) -> None:
+        self.events.append((event, callback))
 
 
 class _FakeRuntimeSession:
@@ -143,6 +149,39 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
             "browser tests miss saved workspace state during the first load.",
         )
 
+    def test_preload_script_seeds_restorable_local_workspace_fixture_for_existing_path(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            workspace_path = Path(workspace_dir)
+            project_dir = workspace_path / "DEMO" / "config"
+            project_dir.mkdir(parents=True, exist_ok=True)
+            (workspace_path / "project.json").write_text(
+                '{"key":"DEMO","name":"Demo","repository":"local/demo","branch":"main"}\n',
+                encoding="utf-8",
+            )
+            (project_dir / "statuses.json").write_text("[]\n", encoding="utf-8")
+
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+            )
+
+        self.assertIn("localWorkspaceFixtures", script)
+        self.assertIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertIn("IDBObjectStore.prototype.get", script)
+        self.assertIn(workspace_dir, script)
+
     def test_delayed_auth_runtime_wait_polls_page_until_probe_event_arrives(self) -> None:
         runtime = DelayedAuthWorkspaceProfilesRuntime(
             repository="IstiN/trackstate-setup",
@@ -161,6 +200,38 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
         self.assertTrue(started)
         self.assertGreaterEqual(len(runtime._page.wait_calls), 1)
         self.assertTrue(runtime._auth_request_started.is_set())
+
+    def test_delayed_auth_runtime_applies_fetch_delay_script_to_existing_page(self) -> None:
+        runtime = DelayedAuthWorkspaceProfilesRuntime(
+            repository="IstiN/trackstate-setup",
+            token="token",
+            workspace_state={"activeWorkspaceId": None, "profiles": []},
+            auth_delay_seconds=5,
+            delayed_paths=("/user", "/viewer"),
+        )
+        runtime._context = _FakeScriptTarget()
+        runtime._page = _FakeScriptTarget()
+
+        with patch(
+            "testing.tests.support.delayed_auth_workspace_profiles_runtime.StoredWorkspaceProfilesRuntime.__enter__",
+            return_value=_FakeRuntimeSession(),
+        ):
+            session = runtime.__enter__()
+
+        self.assertIsInstance(session, _FakeRuntimeSession)
+        self.assertEqual(len(runtime._context.scripts), 1)
+        self.assertEqual(runtime._context.scripts, runtime._page.scripts)
+        delayed_script = runtime._context.scripts[0]
+        self.assertIn("__trackstateDelayedAuthStart__", delayed_script)
+        self.assertIn("__trackstateDelayedAuthRelease__", delayed_script)
+        self.assertIn("/user", delayed_script)
+        self.assertIn("/viewer", delayed_script)
+        self.assertEqual(
+            runtime._page.events,
+            [("console", runtime._handle_console_message)],
+            "The delayed auth runtime must subscribe the live page to console "
+            "events so delayed fetch start/release signals update the runtime state.",
+        )
 
 
 if __name__ == "__main__":

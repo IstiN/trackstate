@@ -128,6 +128,87 @@ void main() {
   );
 
   test(
+    'GitHub provider cache-busts hosted sync revision checks without extra headers',
+    () async {
+      Uri? branchRequestUri;
+      Map<String, String>? branchRequestHeaders;
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/branches/main':
+              branchRequestUri = request.url;
+              branchRequestHeaders = Map<String, String>.from(request.headers);
+              return http.Response(
+                jsonEncode({
+                  'commit': <String, Object?>{'sha': 'new-revision'},
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+        disableHostedSyncRequestCaching: true,
+        hostedSyncCacheBustTokenFactory: () => 'fixed-cache-bust-token',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await provider.checkSync();
+
+      expect(branchRequestUri, isNotNull);
+      expect(
+        branchRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
+      );
+      expect(branchRequestHeaders, isNotNull);
+      expect(branchRequestHeaders, isNot(contains('cache-control')));
+      expect(branchRequestHeaders, isNot(contains('pragma')));
+    },
+  );
+
+  test(
+    'Hosted sync revision query parameters stay empty when cache busting is disabled',
+    () {
+      expect(
+        hostedSyncRevisionQueryParametersForTesting(
+          disableCache: false,
+          cacheBustTokenFactory: () => 'unused',
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
     'GitHub provider preserves explicit load_snapshot_delta=0 as a public bypass directive',
     () async {
       final provider = await _createAuthenticatedProvider(
