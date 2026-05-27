@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import 'trackstate_repository.dart';
 import 'browser_local_workspace_repository_stub.dart'
     if (dart.library.js_interop) 'browser_local_workspace_repository_web.dart'
@@ -37,6 +39,16 @@ Future<void> rememberBrowserLocalWorkspaceSelection({
   );
 }
 
+@visibleForTesting
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) {
+  return platform.clearRememberedBrowserLocalWorkspaceSelections(
+    clearPersisted: clearPersisted,
+  );
+}
+
+@visibleForTesting
 Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
   bool clearPersisted = false,
 }) {

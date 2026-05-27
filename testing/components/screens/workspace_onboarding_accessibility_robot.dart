@@ -209,11 +209,10 @@ class WorkspaceOnboardingAccessibilityRobot
     await tester.pump();
 
     final order = <String>[];
-    final expectedLabels = candidates.keys.toList(growable: false);
     for (var index = 0; index < candidates.length; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      final label = _focusedLabel(expectedLabels);
+      final label = _focusedLabel(candidates);
       if (label != null && (order.isEmpty || order.last != label)) {
         order.add(label);
       }
@@ -231,10 +230,8 @@ class WorkspaceOnboardingAccessibilityRobot
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
     }
-
     final order = <String>[];
-    final expectedLabels = candidates.keys.toList(growable: false);
-    final initialLabel = _focusedLabel(expectedLabels);
+    final initialLabel = _focusedLabel(candidates);
     if (initialLabel != null) {
       order.add(initialLabel);
     }
@@ -244,7 +241,7 @@ class WorkspaceOnboardingAccessibilityRobot
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      final label = _focusedLabel(expectedLabels);
+      final label = _focusedLabel(candidates);
       if (label != null && order.last != label) {
         order.add(label);
       }
@@ -253,21 +250,49 @@ class WorkspaceOnboardingAccessibilityRobot
     return order;
   }
 
-  String? _focusedLabel(List<String> expectedLabels) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+  String? _focusedLabel(Map<String, Finder> candidates) {
+    final focusNode = FocusManager.instance.primaryFocus;
+    final focusedContext = focusNode?.context;
+    if (focusedContext is! Element) {
       return null;
     }
-    for (final node in focusedSemantics.evaluate()) {
-      final label = _normalizedLabel(node.label);
-      if (expectedLabels.contains(label)) {
-        return label;
+    for (final entry in candidates.entries) {
+      if (_isFocusedWithinCandidate(focusedContext, entry.value)) {
+        return entry.key;
       }
     }
     return null;
+  }
+
+  bool _isFocusedWithinCandidate(Element focusedContext, Finder candidate) {
+    for (final element in candidate.evaluate()) {
+      if (_isDescendantOfFocusedContext(
+        focusedContext: focusedContext,
+        candidate: element,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isDescendantOfFocusedContext({
+    required Element focusedContext,
+    required Element candidate,
+  }) {
+    if (focusedContext == candidate) {
+      return true;
+    }
+
+    var foundCandidate = false;
+    focusedContext.visitAncestorElements((ancestor) {
+      if (ancestor == candidate) {
+        foundCandidate = true;
+        return false;
+      }
+      return true;
+    });
+    return foundCandidate;
   }
 
   WorkspaceOnboardingContrastObservation _observeTextContrast({
