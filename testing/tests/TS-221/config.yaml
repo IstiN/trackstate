@@ -1,0 +1,10 @@
+test_id: TS-221
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Starts in the hosted runtime, verifies Dashboard exposes the hosted-mode Connect GitHub top-bar control, then switches Settings to Local Git with a temporary repository fixture.
+  - Proves the Settings apply boundary by using a visible Save action when one exists or, when the product exposes no Save control, asserting that Local Git is already applied while still on Settings.
+  - Returns to Dashboard immediately without a manual refresh and verifies Connect GitHub disappears while the top bar exposes the Local Git state instead.
+  - Opens the Local Git runtime dialog after the switch to confirm the user-facing repository path and write branch match the saved settings.

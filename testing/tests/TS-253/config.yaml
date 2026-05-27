@@ -1,0 +1,8 @@
+test_id: TS-253
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - python3
+  - gh CLI authenticated to a fork of IstiN/trackstate-setup
+  - network access to the GitHub API for README and contents reads

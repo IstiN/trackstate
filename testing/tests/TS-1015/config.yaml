@@ -1,0 +1,11 @@
+test_id: TS-1015
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+  - Playwright for Python with Chromium installed
+notes:
+  - Opens the deployed TrackState desktop app with preloaded hosted workspace profiles.
+  - Targets an unauthorized saved workspace row whose row surface is non-focusable with tabindex=-1.
+  - Verifies that clicking the non-focusable row keeps the workspace switcher open and stable for 1000 ms.

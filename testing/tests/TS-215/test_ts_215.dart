@@ -180,7 +180,6 @@ void main() {
               'Expected result mismatch: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletionArtifacts.worktreeStatusLines.join(' | ')}.',
         );
       });
-
       for (final key
           in Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys) {
         final target = afterDeletionArtifacts.target(key);
