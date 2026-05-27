@@ -15,7 +15,7 @@ enum TrackerDataDomain {
 
 enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
-enum TrackerStartupRecoveryKind { githubRateLimit }
+enum TrackerStartupRecoveryKind { githubRateLimit, hostedBootstrapIndex }
 
 enum WorkspaceSyncDomain {
   projectMeta,
@@ -47,11 +47,13 @@ class TrackerStartupRecovery {
     required this.kind,
     this.failedPath,
     this.retryAfter,
+    this.detail,
   });
 
   final TrackerStartupRecoveryKind kind;
   final String? failedPath;
   final DateTime? retryAfter;
+  final String? detail;
 }
 
 class WorkspaceSyncDomainChange {

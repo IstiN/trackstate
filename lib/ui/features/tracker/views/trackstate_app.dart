@@ -6556,6 +6556,8 @@ String _startupRecoveryTitle(
   return switch (recovery.kind) {
     TrackerStartupRecoveryKind.githubRateLimit =>
       l10n.startupRateLimitRecoveryTitle,
+    TrackerStartupRecoveryKind.hostedBootstrapIndex =>
+      l10n.startupHostedBootstrapIndexRecoveryTitle,
   };
 }
 
@@ -6567,9 +6569,16 @@ String _startupRecoveryMessage(
   if (recovery == null) {
     return '';
   }
-  return viewModel.snapshot == null
-      ? l10n.startupRateLimitRecoveryBlockingMessage
-      : l10n.startupRateLimitRecoveryShellMessage;
+  return switch (recovery.kind) {
+    TrackerStartupRecoveryKind.githubRateLimit =>
+      viewModel.snapshot == null
+          ? l10n.startupRateLimitRecoveryBlockingMessage
+          : l10n.startupRateLimitRecoveryShellMessage,
+    TrackerStartupRecoveryKind.hostedBootstrapIndex =>
+      recovery.detail?.trim().isNotEmpty == true
+          ? recovery.detail!
+          : l10n.startupHostedBootstrapIndexRecoveryMessage,
+  };
 }
 
 class _MessageBanner extends StatelessWidget {
