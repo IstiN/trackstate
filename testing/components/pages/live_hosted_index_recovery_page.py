@@ -19,6 +19,8 @@ class HostedIndexRecoveryObservation:
 
 class LiveHostedIndexRecoveryPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _legacy_failure_title = "TrackState data was not found"
+    _current_failure_title = "Hosted issue index needs regeneration"
     _regenerate_guidance = "Regenerate the tracker indexes and retry."
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
@@ -42,9 +44,15 @@ class LiveHostedIndexRecoveryPage:
                 """
                 (guidance) => {
                   const bodyText = document.body?.innerText ?? '';
+                  const hasRetryAction = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  ).some((candidate) =>
+                    ((candidate.innerText ?? '').trim()).startsWith('Retry'),
+                  );
                   return bodyText.includes(guidance)
                     || bodyText.includes('TrackState data was not found')
-                    || bodyText.includes('Retry');
+                    || bodyText.includes('Hosted issue index needs regeneration')
+                    || hasRetryAction;
                 }
                 """,
                 arg=self._regenerate_guidance,
@@ -67,13 +75,18 @@ class LiveHostedIndexRecoveryPage:
                 document.querySelectorAll('flt-semantics[role="button"]'),
               )
                 .map((candidate) => (candidate.innerText ?? '').trim())
-                .filter((label) => label.length > 0);
+                .filter((label) => label.length > 0)
+                .filter(
+                  (label, index, labels) => labels.findIndex((item) => item === label) === index,
+                );
               return {
                 bodyText,
-                retryVisible: bodyText.includes('Retry'),
+                retryVisible: visibleButtonLabels.some((label) => label.startsWith('Retry')),
                 connectGitHubVisible: bodyText.includes('Connect GitHub'),
                 regenerateGuidanceVisible: bodyText.includes(guidance),
-                trackerDataNotFoundVisible: bodyText.includes('TrackState data was not found'),
+                trackerDataNotFoundVisible:
+                  bodyText.includes('TrackState data was not found')
+                  || bodyText.includes('Hosted issue index needs regeneration'),
                 appTitleVisible: bodyText.includes('TrackState.AI'),
                 visibleButtonLabels,
               };
