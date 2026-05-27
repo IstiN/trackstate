@@ -36,6 +36,7 @@ RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 600
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
@@ -196,28 +197,47 @@ def main() -> None:
                     observed=failure_section_text,
                 )
 
-                first_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    timeout_seconds=60,
-                )
-                second_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    previous_request=first_failed_request,
-                    minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
-                    timeout_seconds=360,
-                )
-                retry_interval_seconds = (
-                    second_failed_request.observed_at_monotonic
-                    - first_failed_request.observed_at_monotonic
-                )
-                result["failed_sync_requests"] = [
-                    asdict(request) for request in sync_observation.failed_sync_requests
-                ]
-                result["post_revocation_request_urls"] = list(
-                    sync_observation.post_revocation_request_urls,
-                )
-                result["retry_interval_seconds"] = retry_interval_seconds
-                _assert_retry_interval(retry_interval_seconds)
+                try:
+                    first_failed_request = _wait_for_failed_request(
+                        sync_observation,
+                        timeout_seconds=60,
+                    )
+                    second_failed_request = _wait_for_failed_request(
+                        sync_observation,
+                        previous_request=first_failed_request,
+                        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+                        timeout_seconds=FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS,
+                    )
+                    retry_interval_seconds = (
+                        second_failed_request.observed_at_monotonic
+                        - first_failed_request.observed_at_monotonic
+                    )
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    result["retry_interval_seconds"] = retry_interval_seconds
+                    _assert_retry_interval(retry_interval_seconds)
+                except Exception as step5_error:
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    _record_step(
+                        result,
+                        step=5,
+                        status="failed",
+                        action="Verify the time of the next scheduled check in the logs.",
+                        observed=_step5_failure_observation(
+                            sync_observation,
+                            step5_error,
+                        ),
+                    )
+                    raise
                 _record_step(
                     result,
                     step=5,
@@ -413,6 +433,24 @@ def _record_human_verification(
     verifications = result.setdefault("human_verification", [])
     assert isinstance(verifications, list)
     verifications.append({"check": check, "observed": observed})
+
+
+def _step5_failure_observation(
+    observation: HostedSyncAuthFailureObservation,
+    error: Exception,
+) -> str:
+    requests = tuple(observation.failed_sync_requests)
+    if len(requests) >= 2:
+        retry_interval_seconds = (
+            requests[1].observed_at_monotonic - requests[0].observed_at_monotonic
+        )
+        return (
+            f"first_failed_sync_request={requests[0].url}; "
+            f"second_failed_sync_request={requests[1].url}; "
+            f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+            f"error={type(error).__name__}: {error}"
+        )
+    return f"error={type(error).__name__}: {error}"
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
