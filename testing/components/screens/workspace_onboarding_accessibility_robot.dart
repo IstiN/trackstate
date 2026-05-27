@@ -20,8 +20,18 @@ class WorkspaceOnboardingAccessibilityRobot
       'Choose a local folder or hosted repository to get started.';
   static const _localFolder = 'Local folder';
   static const _hostedRepository = 'Hosted repository';
+  static const _repositoryPath = 'Repository Path';
+  static const _repository = 'Repository';
+  static const _branch = 'Branch';
   static const _openExistingFolder = 'Open existing folder';
   static const _initializeFolder = 'Initialize folder';
+  static const _localHelper = 'Enter the local Git folder path.';
+  static const _hostedHelper = 'Enter the repository as owner/repo.';
+  static const _browseUnavailableHint =
+      'Connect GitHub in an existing hosted workspace to browse accessible '
+      'repositories. You can still enter owner/repo manually here.';
+  static const _manualFallbackHint =
+      'Select a repository from the current GitHub session or enter owner/repo manually.';
 
   Finder _buttonWithText(String text) => find.ancestor(
     of: find.text(text),
@@ -177,6 +187,38 @@ class WorkspaceOnboardingAccessibilityRobot
         minimumContrast: 4.5,
       ),
       _observeButtonTextContrast(
+        label: 'Local folder segmented choice',
+        buttonFinder: _localFolderButton,
+        text: _localFolder,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Hosted repository segmented choice',
+        buttonFinder: _hostedRepositoryButton,
+        text: _hostedRepository,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository Path label',
+        textFinder: find.text(_repositoryPath),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Local path helper',
+        textFinder: find.text(_localHelper),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Branch label',
+        textFinder: find.text(_branch),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
         label: 'Open existing folder action',
         buttonFinder: _openExistingFolderButton,
         text: _openExistingFolder,
@@ -214,7 +256,39 @@ class WorkspaceOnboardingAccessibilityRobot
       throw StateError('The hosted onboarding action is not visible.');
     }
     final colors = this.colors();
-    return <WorkspaceOnboardingContrastObservation>[
+    final observations = <WorkspaceOnboardingContrastObservation>[
+      _observeButtonTextContrast(
+        label: 'Local folder segmented choice',
+        buttonFinder: _localFolderButton,
+        text: _localFolder,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Hosted repository segmented choice',
+        buttonFinder: _hostedRepositoryButton,
+        text: _hostedRepository,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository label',
+        textFinder: find.text(_repository),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository helper',
+        textFinder: find.text(_hostedHelper),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Branch label',
+        textFinder: find.text(_branch),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
       _observeButtonTextContrast(
         label: 'Hosted Open action',
         buttonFinder: _hostedOpenButton,
@@ -223,6 +297,20 @@ class WorkspaceOnboardingAccessibilityRobot
         minimumContrast: 4.5,
       ),
     ];
+    final hostedHintFinder = _visibleHostedHintFinder();
+    if (hostedHintFinder != null) {
+      observations.add(
+        _observeTextContrast(
+          label: _finderText(hostedHintFinder) == _browseUnavailableHint
+              ? 'Browse unavailable hint'
+              : 'Manual fallback hint',
+          textFinder: hostedHintFinder,
+          background: colors.surface,
+          minimumContrast: 4.5,
+        ),
+      );
+    }
+    return observations;
   }
 
   @override
@@ -393,6 +481,16 @@ class WorkspaceOnboardingAccessibilityRobot
       return true;
     });
     return foundCandidate;
+  }
+
+  Finder? _visibleHostedHintFinder() {
+    for (final hint in <String>[_browseUnavailableHint, _manualFallbackHint]) {
+      final finder = find.text(hint);
+      if (finder.evaluate().isNotEmpty) {
+        return finder;
+      }
+    }
+    return null;
   }
 
   WorkspaceOnboardingContrastObservation _observeTextContrast({

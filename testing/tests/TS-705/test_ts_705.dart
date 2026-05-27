@@ -383,7 +383,7 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Checked the rendered heading, subtitle, visible local and hosted action labels, visible action icons, and AC4 theme-token output for the first-launch onboarding screen.',
+              'Checked the rendered heading, subtitle, visible provider choices, field labels/helper text, action labels/icons, and AC4 theme-token output for the first-launch onboarding screen.',
           observed:
               'placeholder_visible=$placeholderVisible; icon_visible=$iconVisible; contrast=${contrast.join(' || ')}; hosted_contrast=${hostedContrast.join(' || ')}',
         );
@@ -524,7 +524,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '* Switched into the hosted repository path and checked the hosted {noformat}Repository{noformat} / {noformat}Branch{noformat} fields plus the {noformat}Open{noformat} action.',
     '* Inspected the semantics labels exposed for both the initial local surface and the hosted repository flow.',
     '* Tabbed forward and backward through both flows to confirm logical keyboard focus order.',
-    '* Checked rendered contrast for the visible heading, subtitle, local actions, the hosted {noformat}Open{noformat} action, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
+    '* Checked rendered contrast for the visible heading, subtitle, provider choices, field label/helper text, local actions, hosted {noformat}Open{noformat} action, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
     '',
     'h4. Result',
     passed
@@ -591,7 +591,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '- Switched into the hosted repository path and checked the hosted `Repository` / `Branch` fields plus the `Open` action.',
     '- Inspected the semantics labels exposed for both the initial local surface and the hosted repository flow.',
     '- Tabbed forward and backward through both flows to confirm logical keyboard focus order.',
-    '- Checked rendered contrast for the visible heading, subtitle, local actions, the hosted `Open` action, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
+    '- Checked rendered contrast for the visible heading, subtitle, provider choices, field label/helper text, local actions, hosted `Open` action, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
     '',
     '### Result',
     passed
