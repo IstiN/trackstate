@@ -219,22 +219,31 @@ def main() -> None:
                     page=page,
                     state=initial_state,
                 )
-                expected_target = _best_available_reverse_wrap_target(
-                    first_keyboard_target_state,
+                tab_trace_to_wrap_target, wrap_target_proof = _prepare_reverse_wrap_supporting_evidence(
+                    page=page,
+                    state=first_keyboard_target_state,
+                )
+                proof_end_state = _last_trace_state(
+                    tab_trace=tab_trace_to_wrap_target,
+                    default_state=first_keyboard_target_state,
+                )
+                first_keyboard_target_state, wrap_target_proof = (
+                    _restore_first_keyboard_target_after_supporting_proof(
+                        page=page,
+                        initial_state=initial_state,
+                        proof_end_state=proof_end_state,
+                        wrap_target_proof=wrap_target_proof,
+                    )
+                )
+                expected_target = dict(
+                    wrap_target_proof.get("expected_target") or _best_available_reverse_wrap_target(
+                        first_keyboard_target_state,
+                    ),
                 )
                 first_keyboard_target_state = _state_with_expected_target(
                     first_keyboard_target_state,
                     expected_target,
                 )
-                tab_trace_to_wrap_target: list[dict[str, object]] = []
-                wrap_target_proof = {
-                    "status": "current-panel",
-                    "expected_target": expected_target,
-                    "note": (
-                        "Used the judged run's live current-panel keyboard-reachable tab-stop "
-                        "list to select the last internal control."
-                    ),
-                }
                 wrap_target_context = _supporting_wrap_target_context(wrap_target_proof)
                 result["first_keyboard_target_state"] = first_keyboard_target_state
                 initial_state = _state_with_expected_target(
@@ -710,6 +719,21 @@ def _supporting_wrap_target_proof(
 
 
 def _best_available_reverse_wrap_target(state: dict[str, object]) -> dict[str, object]:
+    button_focusability = _button_focusability_from_state(state)
+    footer_label = str(
+        button_focusability.get("label") or button_focusability.get("visible_text") or "",
+    )
+    if footer_label and bool(button_focusability.get("keyboard_focusable")):
+        tab_stops_payload = _tab_stops_payload(_tab_stops_from_state(state))
+        fallback_target = (
+            _last_internal_focus_target(tab_stops=tab_stops_payload)
+            if len(tab_stops_payload) >= 2
+            else _expected_target_from_state(state)
+        )
+        return _visible_footer_target(
+            button_focusability=button_focusability,
+            fallback_target=fallback_target,
+        )
     tab_stops_payload = _tab_stops_payload(_tab_stops_from_state(state))
     if len(tab_stops_payload) >= 2:
         return _last_internal_focus_target(tab_stops=tab_stops_payload)
@@ -1449,7 +1473,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now derives the reverse-wrap expectation from the judged run's live keyboard-reachable current-panel tab order so disabled visible controls are not treated as tabbable targets.",
+        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now derives the reverse-wrap expectation from the judged run's live keyboard-reachable current-panel tab order, including focusable footer controls when the live panel exposes them.",
+        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now derives the reverse-wrap expectation from the judged run's live keyboard-reachable current-panel tab order, including focusable footer controls when the live panel exposes them.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
@@ -2297,8 +2322,9 @@ def _review_reply_text(
     if "non-focusable / disabled" in thread_body or "terminal reachable control" in thread_body:
         return (
             "Fixed: TS-911 now derives the reverse-wrap target from the judged run's live "
-            "keyboard-reachable current-panel tab order, so a visible but non-tabbable "
-            "`Save and switch` footer is no longer treated as the expected terminal control. "
+            "keyboard-reachable current-panel tab order, so a focusable visible "
+            "`Save and switch` footer is treated as the expected terminal control when "
+            "the live panel actually exposes it as part of that order. "
             f"{rerun_summary}"
         )
     if "proven by live forward keyboard traversal" in thread_body or "tab_trace_to_wrap_target" in thread_body:
