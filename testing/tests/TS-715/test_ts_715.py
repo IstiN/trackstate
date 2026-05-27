@@ -197,11 +197,11 @@ def main() -> None:
                     observed=failure_section_text,
                 )
 
+                first_failed_request = _wait_for_failed_request(
+                    sync_observation,
+                    timeout_seconds=60,
+                )
                 try:
-                    first_failed_request = _wait_for_failed_request(
-                        sync_observation,
-                        timeout_seconds=60,
-                    )
                     second_failed_request = _wait_for_failed_request(
                         sync_observation,
                         previous_request=first_failed_request,
