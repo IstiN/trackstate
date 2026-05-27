@@ -191,6 +191,7 @@ def main() -> None:
                     title="Edit component",
                 )
                 result["component_editor_before_input"] = _editor_payload(component_editor)
+                _assert_drawer_pattern(step=3, editor=component_editor)
                 if component_editor.id_value != target_component["id"]:
                     raise AssertionError(
                         "Step 3 failed: the Edit component drawer did not preserve the "

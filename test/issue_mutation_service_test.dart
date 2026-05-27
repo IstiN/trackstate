@@ -270,15 +270,143 @@ void main() {
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
       );
+      expect(
+        File('${repo.path}/DEMO/DEMO-10/links.json').existsSync(),
+        isFalse,
+      );
       final links =
-          jsonDecode(
-                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
-              )
+          jsonDecode(File('${repo.path}/links.json').readAsStringSync())
               as List<dynamic>;
       expect(links, hasLength(1));
       expect(links.single['type'], 'blocks');
       expect(links.single['direction'], 'outward');
       expect(links.single['target'], 'DEMO-2');
+    },
+  );
+
+  test(
+    'service writes repository-root links.json without leaking hierarchy relationships',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final childResult = await service.createIssue(
+        summary: 'Nested sub-task',
+        issueTypeId: 'sub-task',
+        parentKey: 'DEMO-2',
+      );
+      expect(childResult.isSuccess, isTrue);
+      final commitCountBefore = int.parse(
+        await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD']),
+      );
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+
+      expect(linkResult.isSuccess, isTrue);
+      expect(
+        int.parse(await _gitOutput(repo.path, ['rev-list', '--count', 'HEAD'])),
+        commitCountBefore + 1,
+      );
+
+      final rootLinksContent = File(
+        '${repo.path}/links.json',
+      ).readAsStringSync();
+      final rootLinks = jsonDecode(rootLinksContent) as List<dynamic>;
+      expect(rootLinks, [
+        {'type': 'blocks', 'target': 'DEMO-10', 'direction': 'outward'},
+      ]);
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
+      expect(rootLinksContent, isNot(contains('DEMO-11')));
+      expect(rootLinksContent, isNot(contains('parent')));
+      expect(
+        File(
+          '${repo.path}/DEMO/DEMO-1/DEMO-2/DEMO-11/main.md',
+        ).readAsStringSync(),
+        contains('parent: DEMO-2'),
+      );
+
+      final reloadedRepository = LocalTrackStateRepository(
+        repositoryPath: repo.path,
+      );
+      final reloadedSnapshot = await reloadedRepository.loadSnapshot();
+      final reloadedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-2',
+      );
+      expect(
+        reloadedIssue.links,
+        contains(
+          predicate<IssueLink>(
+            (link) =>
+                link.type == 'blocks' &&
+                link.direction == 'outward' &&
+                link.targetKey == 'DEMO-10',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'service preserves repository-index links after archive and reload',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+      expect(linkResult.isSuccess, isTrue);
+
+      final archiveResult = await service.archiveIssue('DEMO-10');
+
+      expect(archiveResult.isSuccess, isTrue);
+
+      final reloadedRepository = LocalTrackStateRepository(
+        repositoryPath: repo.path,
+      );
+      final reloadedSnapshot = await reloadedRepository.loadSnapshot();
+      final linkedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-2',
+      );
+      final archivedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-10',
+      );
+
+      expect(archivedIssue.isArchived, isTrue);
+      expect(
+        linkedIssue.links,
+        contains(
+          predicate<IssueLink>(
+            (link) =>
+                link.type == 'blocks' &&
+                link.direction == 'outward' &&
+                link.targetKey == 'DEMO-10',
+          ),
+        ),
+      );
     },
   );
 
@@ -305,6 +433,38 @@ void main() {
       expect(result.failure?.category, IssueMutationErrorCategory.validation);
       expect(result.failure?.message, contains('DEMO-2'));
       expect(result.failure?.message, contains('itself'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'service rejects mixed-case self-referencing links without writing metadata',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'demo-2',
+        type: 'relates to',
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure?.category, IssueMutationErrorCategory.validation);
+      expect(result.failure?.message, contains('DEMO-2'));
+      expect(result.failure?.message, contains('demo-2'));
+      expect(result.failure?.message, contains('itself'));
+      expect(result.failure?.details, containsPair('targetKey', 'demo-2'));
       expect(
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
@@ -355,13 +515,64 @@ void main() {
 
     expect(result.isSuccess, isTrue);
     expect(result.value!.isArchived, isTrue);
+    expect(File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(), isTrue);
     expect(
-      File(
-        '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
-      ).existsSync(),
-      isTrue,
+      File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
+      contains('archived: true'),
     );
   });
+
+  test(
+    'service preserves repository-index links after delete and reload',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final createdIssue = await service.createIssue(
+        summary: 'Disposable story',
+        description: 'Deleted after link persistence regression coverage.',
+      );
+      expect(createdIssue.isSuccess, isTrue);
+
+      final linkResult = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-10',
+        type: 'blocks',
+      );
+      expect(linkResult.isSuccess, isTrue);
+
+      final deleteResult = await service.deleteIssue(createdIssue.value!.key);
+
+      expect(deleteResult.isSuccess, isTrue);
+
+      final reloadedRepository = LocalTrackStateRepository(
+        repositoryPath: repo.path,
+      );
+      final reloadedSnapshot = await reloadedRepository.loadSnapshot();
+      final linkedIssue = reloadedSnapshot.issues.firstWhere(
+        (candidate) => candidate.key == 'DEMO-2',
+      );
+
+      expect(
+        linkedIssue.links,
+        contains(
+          predicate<IssueLink>(
+            (link) =>
+                link.type == 'blocks' &&
+                link.direction == 'outward' &&
+                link.targetKey == 'DEMO-10',
+          ),
+        ),
+      );
+    },
+  );
 
   test('service blocks delete when child issues would be orphaned', () async {
     final repo = await _createMutationRepository();
@@ -583,11 +794,11 @@ void main() {
     final result = await harness.service.archiveIssue('DEMO-10');
 
     expect(result.isSuccess, isTrue);
+    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isTrue);
     expect(
-      harness.backend.exists('DEMO/.trackstate/archive/DEMO-10/main.md'),
-      isTrue,
+      harness.backend.readText('DEMO/DEMO-10/main.md'),
+      contains('archived: true'),
     );
-    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isFalse);
   });
 
   test('service deletes issues through the hosted GitHub provider', () async {
@@ -743,7 +954,23 @@ Future<void> _deleteDirectoryIfPresent(Directory directory) async {
   if (!directory.existsSync()) {
     return;
   }
-  await directory.delete(recursive: true);
+  for (var attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await directory.delete(recursive: true);
+      return;
+    } on PathNotFoundException {
+      // Another cleanup path may have already removed the temp fixture directory.
+      return;
+    } on FileSystemException catch (error) {
+      final isDirectoryNotEmpty =
+          error.osError?.errorCode == 39 ||
+          error.message.contains('Directory not empty');
+      if (!isDirectoryNotEmpty || attempt == 2) {
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
 }
 
 Map<String, String> _mutationFixtureFiles() {
@@ -989,10 +1216,15 @@ Future<void> _writeFile(
 }
 
 Future<void> _git(String repositoryPath, List<String> args) async {
+  await _gitOutput(repositoryPath, args);
+}
+
+Future<String> _gitOutput(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
   }
+  return result.stdout.toString().trim();
 }
 
 class _HostedMutationHarness {

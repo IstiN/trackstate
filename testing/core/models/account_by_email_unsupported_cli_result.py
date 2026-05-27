@@ -10,6 +10,7 @@ class AccountByEmailUnsupportedCliObservation:
     requested_command: tuple[str, ...]
     executed_command: tuple[str, ...]
     fallback_reason: str | None
+    repository_path: str
     result: CliCommandResult
 
     @property

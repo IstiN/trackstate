@@ -408,11 +408,13 @@ class RepositoryCommitResult {
     required this.branch,
     required this.message,
     this.revision,
+    this.createdCommit = true,
   });
 
   final String branch;
   final String message;
   final String? revision;
+  final bool createdCommit;
 }
 
 class RepositoryFileChangeRequest {
@@ -654,9 +656,10 @@ class RepositoryHistoryCommit {
 }
 
 class TrackStateProviderException implements Exception {
-  const TrackStateProviderException(this.message);
+  const TrackStateProviderException(this.message, {this.details = const {}});
 
   final String message;
+  final Map<String, Object?> details;
 
   @override
   String toString() => message;

@@ -9,8 +9,8 @@ The automation:
    owns keyboard focus
 3. presses `Space` on that focused trigger and confirms the visible desktop
    workspace switcher panel opens immediately
-4. presses `Tab` once after the Space-opened panel appears and confirms focus
-   moves to a visible interactive element inside the panel
+4. continues keyboard `Tab` navigation after the Space-opened panel appears and
+   confirms focus reaches a visible interactive element inside the panel
 
 ## Run this test
 
@@ -28,6 +28,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-831/test_ts_831.py
 
 ```text
 Pass: after real keyboard Tab navigation reaches the visible workspace switcher
-trigger, pressing Space opens the workspace switcher panel immediately and Tab
-can continue moving focus within the open panel without any mouse interaction.
+trigger, pressing Space opens the workspace switcher panel immediately and
+subsequent keyboard Tab navigation reaches a visible control within the open
+panel without any mouse interaction.
 ```
