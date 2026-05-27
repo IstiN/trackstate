@@ -237,7 +237,7 @@ class LiveProjectSettingsPage:
             repository=repository,
         )
         current_body = self.body_text()
-        if TrackStateTrackerPage.body_has_connected_banner(
+        if TrackStateTrackerPage.body_has_authenticated_session(
             current_body,
             user_login=user_login,
             repository=repository,
