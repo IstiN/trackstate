@@ -53,7 +53,7 @@ Future<String?> pickWorkspaceDirectory({
     if (normalizedSelection != null &&
         selection != null &&
         selection is! String) {
-      _rememberBrowserWorkspaceSelection(
+      await _rememberBrowserWorkspaceSelection(
         workspacePath: normalizedSelection,
         selection: selection,
       );
@@ -67,27 +67,27 @@ Future<String?> pickWorkspaceDirectory({
   }
 }
 
-void _rememberBrowserWorkspaceSelection({
+Future<void> _rememberBrowserWorkspaceSelection({
   required String workspacePath,
   required Object selection,
-}) {
-  unawaited(
-    browserWorkspaceSelectionPersister(
+}) async {
+  try {
+    await browserWorkspaceSelectionPersister(
       workspacePath: workspacePath,
       selection: selection,
-    ).catchError((Object error, StackTrace stackTrace) {
-      FlutterError.reportError(
-        FlutterErrorDetails(
-          exception: error,
-          stack: stackTrace,
-          library: 'workspace_directory_picker_web',
-          context: ErrorDescription(
-            'while persisting browser local workspace access',
-          ),
+    );
+  } on Object catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'workspace_directory_picker_web',
+        context: ErrorDescription(
+          'while persisting browser local workspace access',
         ),
-      );
-    }),
-  );
+      ),
+    );
+  }
 }
 
 Future<Object?> _requestBrowserDirectoryAccess({
