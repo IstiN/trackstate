@@ -201,8 +201,15 @@ def main() -> None:
             status_name=status_name,
             transition_name=transition_name,
         )
-        new_head_sha = persistence_observation.head_sha
-        commit_observation = _matching_settings_commit(persistence_observation)
+        commit_snapshot_cache: dict[str, tuple[str, str]] = {}
+        commit_observation = _matching_settings_commit(
+            repository_service=repository_service,
+            observation=persistence_observation,
+            status_id=status_id,
+            status_name=status_name,
+            transition_name=transition_name,
+            commit_snapshot_cache=commit_snapshot_cache,
+        )
         if commit_observation is None:
             raise AssertionError(
                 "Step 4 failed: the repository eventually exposed the saved status and "
@@ -211,7 +218,8 @@ def main() -> None:
                 f"Observed commits: {json.dumps([_commit_observation_to_dict(commit) for commit in persistence_observation.commits_since_baseline], indent=2)}",
             )
         result["commit_observation"] = _commit_observation_to_dict(commit_observation)
-        result["new_head_sha"] = new_head_sha
+        result["observed_head_sha"] = persistence_observation.head_sha
+        result["new_head_sha"] = commit_observation.sha
         _assert_commit_observation(commit_observation=commit_observation)
         _record_step(
             result,
@@ -233,7 +241,7 @@ def main() -> None:
 
         file_page_observations = _verify_files_in_github_ui(
             repository=config.repository,
-            commit_sha=new_head_sha,
+            commit_sha=commit_observation.sha,
             status_name=status_name,
             transition_name=transition_name,
         )
@@ -407,6 +415,7 @@ def _wait_for_atomic_settings_persistence(
     interval_seconds: float = 5.0,
 ) -> HostedSettingsPersistenceObservation:
     commit_cache: dict[str, HostedCommitObservation] = {}
+    commit_snapshot_cache: dict[str, tuple[str, str]] = {}
     matched, observation = poll_until(
         probe=lambda: _observe_settings_persistence(
             repository_service=repository_service,
@@ -420,7 +429,15 @@ def _wait_for_atomic_settings_persistence(
                 status_name=status_name,
                 transition_name=transition_name,
             )
-            and _matching_settings_commit(current) is not None
+            and _matching_settings_commit(
+                repository_service=repository_service,
+                observation=current,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+                commit_snapshot_cache=commit_snapshot_cache,
+            )
+            is not None
         ),
         timeout_seconds=attempts * interval_seconds,
         interval_seconds=interval_seconds,
@@ -446,8 +463,8 @@ def _observe_settings_persistence(
     commit_cache: dict[str, HostedCommitObservation],
 ) -> HostedSettingsPersistenceObservation:
     head_sha = repository_service.branch_head_sha()
-    statuses_content = repository_service.fetch_file(STATUSES_PATH).content
-    workflows_content = repository_service.fetch_file(WORKFLOWS_PATH).content
+    statuses_content = repository_service.fetch_file(STATUSES_PATH, ref=head_sha).content
+    workflows_content = repository_service.fetch_file(WORKFLOWS_PATH, ref=head_sha).content
     commit_shas = repository_service.compare_commits(
         base_sha=baseline_head_sha,
         head_sha=head_sha,
@@ -482,13 +499,48 @@ def _settings_state_has_expected_markers(
 
 
 def _matching_settings_commit(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
     observation: HostedSettingsPersistenceObservation,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+    commit_snapshot_cache: dict[str, tuple[str, str]],
 ) -> HostedCommitObservation | None:
     expected_files = {STATUSES_PATH, WORKFLOWS_PATH}
     for commit in observation.commits_since_baseline:
-        if expected_files.issubset(set(commit.changed_files)):
+        if not expected_files.issubset(set(commit.changed_files)):
+            continue
+        candidate_statuses, candidate_workflows = _fetch_commit_catalog_snapshots(
+            repository_service=repository_service,
+            commit_sha=commit.sha,
+            commit_snapshot_cache=commit_snapshot_cache,
+        )
+        if (
+            status_id in candidate_statuses
+            and status_name in candidate_statuses
+            and transition_name in candidate_workflows
+        ):
             return commit
     return None
+
+
+def _fetch_commit_catalog_snapshots(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    commit_sha: str,
+    commit_snapshot_cache: dict[str, tuple[str, str]],
+) -> tuple[str, str]:
+    snapshot = commit_snapshot_cache.get(commit_sha)
+    if snapshot is not None:
+        return snapshot
+
+    snapshot = (
+        repository_service.fetch_file(STATUSES_PATH, ref=commit_sha).content,
+        repository_service.fetch_file(WORKFLOWS_PATH, ref=commit_sha).content,
+    )
+    commit_snapshot_cache[commit_sha] = snapshot
+    return snapshot
 
 
 def _assert_commit_observation(

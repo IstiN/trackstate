@@ -25,8 +25,8 @@ python testing/tests/TS-409/test_ts_409.py
   against the hosted setup repository
 - `TRACKSTATE_LIVE_APP_URL` pointing at the deployed hosted TrackState app
 - Defaults come from `testing/core/config/live_setup_test_config.py`
-- The test uses the installed `trackstate` CLI when available and otherwise falls
-  back to `dart run bin/trackstate.dart` from this repository for the CLI parity step
+- The test requires the installed `trackstate` CLI on `PATH` for the hosted CLI
+  parity step and fails the precondition if it is unavailable
 
 ## Scenario notes
 
