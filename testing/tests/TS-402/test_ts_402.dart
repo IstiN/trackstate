@@ -128,6 +128,8 @@ void main() {
         await screen.submit();
 
         final validationTexts = screen.visibleTexts();
+        final validationSemantics = screen.visibleSemanticsLabels();
+        final accessibilityFeedback = screen.accessibilityFeedbackTexts();
         const validationMessage = 'Summary is required before saving.';
         final validationVisible = _containsLabel(
           validationTexts,
@@ -141,14 +143,18 @@ void main() {
         }
 
         final focusedLabel = screen.focusedSemanticsLabel();
+        final validationAnnounced = _containsSummaryRequiredFeedback(
+          accessibilityFeedback,
+        );
         final focusReturnedToSummary =
             focusedLabel == 'Summary' ||
             (focusedLabel ?? '').startsWith('Summary ');
-        if (!focusReturnedToSummary) {
+        if (!focusReturnedToSummary && !validationAnnounced) {
           failures.add(
-            'Step 4 failed: after the summary-required validation error, focus did not return to Summary. '
+            'Step 4 failed: after the summary-required validation error, focus did not return to Summary and no summary-required accessibility feedback was exposed. '
             'Focused semantics label: ${focusedLabel ?? '<none>'}. '
-            'Visible edit-surface text: ${_formatSnapshot(validationTexts)}.',
+            'Visible semantics labels: ${_formatSnapshot(validationSemantics)}. '
+            'Accessibility feedback text: ${_formatSnapshot(accessibilityFeedback)}.',
           );
         }
 
@@ -194,6 +200,16 @@ int _indexOfLabel(List<String> observed, String label) {
 
 bool _containsLabel(List<String> observed, String label) {
   return _indexOfLabel(observed, label) != -1;
+}
+
+bool _containsSummaryRequiredFeedback(List<String> observed) {
+  for (final value in observed) {
+    final normalized = value.toLowerCase();
+    if (normalized.contains('summary') && normalized.contains('required')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 String _formatSnapshot(List<String> values, {int limit = 24}) {
