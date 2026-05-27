@@ -851,6 +851,94 @@ void main() {
   );
 
   testWidgets(
+    'web startup keeps the hosted fallback workspace trigger stable after delayed /user probe completion',
+    (tester) async {
+      const fallbackTriggerLabel =
+          'Workspace switcher: Hosted setup workspace, Hosted, Needs sign-in';
+      const connectedTriggerLabel =
+          'Workspace switcher: Hosted setup workspace, Hosted, Connected';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _BrowserStartupAuthProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+      final browserHarness = _BrowserStartupAuthProbeHarness()..install();
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        browserHarness.dispose();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      _expectRuntimeStartupFallbackSignal(
+        authPending: browserHarness.userProbePending,
+        consoleMessages: browserHarness.consoleMessages,
+      );
+      _expectRestrictedFallbackShell(delayedRepository);
+      _expectHostedFallbackTrigger();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      expect(
+        find.descendant(of: trigger, matching: find.bySemanticsLabel(fallbackTriggerLabel)),
+        findsWidgets,
+      );
+
+      browserHarness.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: trigger, matching: find.bySemanticsLabel(fallbackTriggerLabel)),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: trigger, matching: find.bySemanticsLabel(connectedTriggerLabel)),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'web startup commits the preserved local shell before the initial hosted search finishes',
     (tester) async {
       const authStore = SharedPreferencesTrackStateAuthStore();

@@ -359,6 +359,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
   bool _startupTimeoutFallbackAwaitingShellReady = false;
+  HostedRepositoryAccessMode? _startupHostedAccessModeOverride;
   WorkspaceSyncService? _workspaceSyncService;
   WorkspaceSyncStatus _workspaceSyncStatus = const WorkspaceSyncStatus();
   WorkspaceSyncRefresh? _pendingWorkspaceSyncRefresh;
@@ -413,8 +414,10 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerStartupRecovery? get startupRecovery =>
       _snapshot?.startupRecovery ?? _startupRecovery;
   bool get hasStartupRecovery => startupRecovery != null;
-  bool get isConnected => _isConnected;
-  RepositoryUser? get connectedUser => _connectedUser;
+  bool get isConnected =>
+      _startupHostedAccessModeOverride == null ? _isConnected : false;
+  RepositoryUser? get connectedUser =>
+      _startupHostedAccessModeOverride == null ? _connectedUser : null;
   bool get hasLocalHostedAccessSession => _hasLocalHostedAccessSession;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
@@ -452,6 +455,10 @@ class TrackerViewModel extends ChangeNotifier {
   HostedRepositoryAccessMode get hostedRepositoryAccessMode {
     if (usesLocalPersistence) {
       return HostedRepositoryAccessMode.writable;
+    }
+    final startupOverride = _startupHostedAccessModeOverride;
+    if (startupOverride != null) {
+      return startupOverride;
     }
     final session = providerSession;
     if (session == null ||
@@ -557,6 +564,7 @@ class TrackerViewModel extends ChangeNotifier {
     _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     _startupTimeoutFallbackAwaitingShellReady = false;
+    _startupHostedAccessModeOverride = null;
     notifyListeners();
     Future<void> Function()? deferredAccessRestore;
     var startedDeferredAccessRestore = false;
@@ -2184,6 +2192,7 @@ class TrackerViewModel extends ChangeNotifier {
     );
     if (repository is ProviderBackedTrackStateRepository &&
         repository.usesHostedStartupShellFallback(snapshot)) {
+      _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
       startupAuthProbeDiagnostics.recordFallbackShellReady(
         timeout: _startupAccessRestoreTimeout,
       );
@@ -2221,6 +2230,7 @@ class TrackerViewModel extends ChangeNotifier {
       previousSelectedIssue: _selectedIssue,
       preferredSelectedIssueKey: _selectedIssue?.key,
     );
+    _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
     if (_message == null && snapshot.loadWarnings.isNotEmpty) {
       _message = TrackerMessage.repositoryConfigFallback(
         snapshot.loadWarnings.first,
@@ -2350,6 +2360,7 @@ class TrackerViewModel extends ChangeNotifier {
   Future<void> _reloadHostedStartupShellFallbackIfNeeded() async {
     final repository = _repository;
     if (repository is! ProviderBackedTrackStateRepository ||
+        _startupHostedAccessModeOverride != null ||
         !repository.usesHostedStartupShellFallback(_snapshot)) {
       return;
     }
