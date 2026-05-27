@@ -780,6 +780,129 @@ void main() {
   );
 
   testWidgets(
+    'web retry waits for browser local access persistence before exposing the restored workspace across a reload with an inactive broken workspace',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const inactiveLocalWorkspaceId = 'local:/tmp/trackstate-broken@main';
+      const activeLocalWorkspacePath = '/tmp/trackstate-demo';
+      const inactiveLocalWorkspacePath = '/tmp/trackstate-broken';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: activeLocalWorkspacePath,
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      final localAccess = _DelayedBrowserLocalWorkspacePersistence(
+        workspacePath: activeLocalWorkspacePath,
+        snapshot: await _snapshotForRepository(activeLocalWorkspacePath),
+      );
+      addTearDown(localAccess.completePersistence);
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository: localAccess.openBrowserLocalRepository,
+          requestBrowserLocalRepositoryAccess:
+              localAccess.requestBrowserLocalRepositoryAccess,
+          workspaceDirectoryPicker: localAccess.pickWorkspaceDirectory,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final initialLocalRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(initialLocalRow, findsOneWidget);
+      final retryButton = find.descendant(
+        of: initialLocalRow,
+        matching: find.text('Retry'),
+      );
+      expect(retryButton, findsWidgets);
+
+      await tester.tap(retryButton.first);
+      await tester.pump();
+      await localAccess.waitForPersistenceStart();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(localAccess.persistencePending, isTrue);
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'Workspace switcher: Active local workspace, .*Local Git'),
+        ),
+        findsNothing,
+        reason:
+            'The restored local workspace must not be exposed as active until '
+            'the browser access persistence needed for a reload has completed.',
+      );
+      final stateBeforePersistence = await workspaceProfiles.loadState();
+      expect(stateBeforePersistence.activeWorkspaceId, isNull);
+
+      localAccess.completePersistence();
+      await tester.pumpAndSettle();
+
+      final restoredState = await workspaceProfiles.loadState();
+      expect(restoredState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        restoredState.unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: inactiveLocalWorkspacePath,
+          defaultBranch: 'main',
+          displayName: 'Broken inactive workspace',
+        ),
+        select: false,
+      );
+
+      localAccess.simulateReload();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository: localAccess.openBrowserLocalRepository,
+          requestBrowserLocalRepositoryAccess:
+              localAccess.requestBrowserLocalRepositoryAccess,
+          workspaceDirectoryPicker: localAccess.pickWorkspaceDirectory,
+        ),
+      );
+      await tester.pump();
+      for (var index = 0; index < 20; index += 1) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      final savedStateAfterReload = await workspaceProfiles.loadState();
+      expect(savedStateAfterReload.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateAfterReload.unavailableLocalWorkspaceIds,
+        contains(inactiveLocalWorkspaceId),
+      );
+      expect(
+        savedStateAfterReload.unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+    },
+  );
+
+  testWidgets(
     'web startup opens the preserved local shell within the timeout while the real delayed /user probe is still pending',
     (tester) async {
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -1619,6 +1742,81 @@ class _DelayedGitHubProbeHarness {
       return;
     }
     _userProbeCompleter.complete();
+  }
+}
+
+class _DelayedBrowserLocalWorkspacePersistence {
+  _DelayedBrowserLocalWorkspacePersistence({
+    required this.workspacePath,
+    required this.snapshot,
+  });
+
+  final String workspacePath;
+  final TrackerSnapshot snapshot;
+  final Set<String> _sessionSelections = <String>{};
+  final Set<String> _persistedSelections = <String>{};
+  final Completer<void> _persistenceStarted = Completer<void>();
+  final Completer<void> _persistenceCompleter = Completer<void>();
+
+  bool get persistencePending =>
+      _persistenceStarted.isCompleted && !_persistenceCompleter.isCompleted;
+
+  Future<void> waitForPersistenceStart() => _persistenceStarted.future;
+
+  Future<String?> pickWorkspaceDirectory({
+    String? confirmButtonText,
+    String? initialDirectory,
+  }) async {
+    if (initialDirectory != workspacePath) {
+      return initialDirectory;
+    }
+    _sessionSelections.add(workspacePath);
+    if (!_persistenceStarted.isCompleted) {
+      _persistenceStarted.complete();
+      unawaited(
+        _persistenceCompleter.future.then((_) {
+          _persistedSelections.add(workspacePath);
+        }),
+      );
+    }
+    await _persistenceCompleter.future;
+    return workspacePath;
+  }
+
+  Future<TrackStateRepository?> openBrowserLocalRepository({
+    required String repositoryPath,
+    required String defaultBranch,
+    required String writeBranch,
+  }) async {
+    if (repositoryPath == workspacePath &&
+        (_sessionSelections.contains(repositoryPath) ||
+            _persistedSelections.contains(repositoryPath))) {
+      return DemoTrackStateRepository(snapshot: snapshot);
+    }
+    if (repositoryPath == '/tmp/trackstate-broken') {
+      throw StateError(
+        'Saved workspace path no longer matches the expected TrackState repository.',
+      );
+    }
+    return null;
+  }
+
+  Future<TrackStateRepository?> requestBrowserLocalRepositoryAccess({
+    required String repositoryPath,
+    required String defaultBranch,
+    required String writeBranch,
+  }) async => null;
+
+  void completePersistence() {
+    if (_persistenceCompleter.isCompleted) {
+      return;
+    }
+    _persistedSelections.add(workspacePath);
+    _persistenceCompleter.complete();
+  }
+
+  void simulateReload() {
+    _sessionSelections.clear();
   }
 }
 

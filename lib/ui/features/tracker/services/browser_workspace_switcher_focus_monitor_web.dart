@@ -112,6 +112,7 @@ BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
   required VoidCallback onBrowserFocusOutside,
+  VoidCallback? onBrowserEscape,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
   final pointerdownListener = ((web.Event event) {
@@ -139,6 +140,16 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
         onBrowserFocusOutside();
       }
       onBrowserTab();
+      return;
+    }
+
+    if (keyboardEvent.key == 'Escape') {
+      if (!isBrowserFocusWithinWorkspaceSwitcher()) {
+        return;
+      }
+      keyboardEvent.preventDefault();
+      keyboardEvent.stopImmediatePropagation();
+      onBrowserEscape?.call();
       return;
     }
 
