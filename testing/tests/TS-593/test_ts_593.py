@@ -65,6 +65,11 @@ class Ts593ReleaseUnpushedBranchScenario:
         failures.extend(self._validate_repository_state(validation, result))
         failures.extend(self._validate_remote_state(validation, result))
         failures.extend(self._validate_cleanup(validation))
+        result["completed_assertion_path"] = True
+        result["validated_product_failure"] = _is_proven_ticket_defect(
+            result,
+            failures,
+        )
 
         return result, failures
 
@@ -598,7 +603,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _is_validated_product_failure(result: dict[str, object]) -> bool:
-    return _as_text(result.get("failure_mode")) == "missing_explicit_target_commitish_error"
+    return result.get("validated_product_failure") is True
 
 
 def _write_generic_failure_outputs(result: dict[str, object]) -> None:
@@ -919,6 +924,39 @@ def _generic_failure_details(result: dict[str, object]) -> list[str]:
         if detail:
             details.append(detail)
     return details
+
+
+def _is_proven_ticket_defect(
+    result: dict[str, object],
+    failures: list[str],
+) -> bool:
+    if _as_text(result.get("failure_mode")) != "missing_explicit_target_commitish_error":
+        return False
+    if result.get("completed_assertion_path") is not True or not failures:
+        return False
+    if any(not _as_text(failure).startswith("Step 1 failed:") for failure in failures):
+        return False
+    return _has_required_passed_steps(result, required_steps=(0, 2, 3))
+
+
+def _has_required_passed_steps(
+    result: dict[str, object],
+    *,
+    required_steps: tuple[int, ...],
+) -> bool:
+    steps = result.get("steps")
+    if not isinstance(steps, list):
+        return False
+    passed_steps: set[int] = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if _as_text(step.get("status")) != "passed":
+            continue
+        step_number = step.get("step")
+        if isinstance(step_number, int):
+            passed_steps.add(step_number)
+    return all(step in passed_steps for step in required_steps)
 
 
 def _record_step(
