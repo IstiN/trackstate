@@ -1,0 +1,8 @@
+test_id: TS-198
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Verifies the top-bar Create issue action behaves as a singleton while the create overlay is already open in Local Git mode.
+  - Confirms the current Summary draft survives a repeated top-bar Create issue click and no duplicate overlay is rendered.

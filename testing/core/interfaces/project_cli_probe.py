@@ -14,7 +14,18 @@ class ProjectCliProbe(Protocol):
 
     def repository_metadata(self, repository: str) -> CliCommandResult: ...
 
-    def run_documented_command(self, command: str) -> CliCommandResult: ...
+    def community_profile(self, repository: str) -> CliCommandResult: ...
+
+    def list_branches(self, repository: str) -> CliCommandResult: ...
+
+    def pull_requests(
+        self,
+        repository: str,
+        *,
+        state: str = "open",
+    ) -> CliCommandResult: ...
+
+    def pull_request_templates(self, repository: str) -> CliCommandResult: ...
 
     def get_contents(
         self,

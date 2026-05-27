@@ -10,6 +10,7 @@ from testing.core.models.cli_command_result import CliCommandResult
 class ProjectCliValidationResult:
     target_repository: str
     upstream_repository: str
+    documentation_repository: str
     project_path: str
     readme_text: str
     quick_start_section: str
@@ -50,6 +51,10 @@ class ProjectCliValidationResult:
     @property
     def repository_is_fork(self) -> bool:
         return self.repository_metadata.get("fork") is True
+
+    @property
+    def readme_repository(self) -> str:
+        return self.documentation_repository
 
     @property
     def actual_project(self) -> dict[str, object] | None:

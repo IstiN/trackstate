@@ -39,95 +39,64 @@ void main() {
       );
 
       final afterArchival = await fixture.archiveIssueViaRepositoryService();
-      final failures = <String>[];
-      final errorMessage = afterArchival.errorMessage ?? '<null>';
-      final visibleIssueKeys = afterArchival.visibleIssueSearchResults
-          .map((issue) => issue.key)
-          .toList(growable: false);
 
-      if (afterArchival.forcedArchiveCommitAttempts != 1) {
-        failures.add(
-          'Step 1 failed: expected exactly one forced archive commit failure, '
-          'but observed ${afterArchival.forcedArchiveCommitAttempts}.',
-        );
-      }
-      if (afterArchival.errorType != 'TrackStateRepositoryException') {
-        failures.add(
-          'Step 3 failed: expected TrackStateRepositoryException, but the caller '
-          'received ${afterArchival.errorType}. Visible message: $errorMessage. '
-          'Worktree status: ${afterArchival.worktreeStatusLines.join(' | ')}.',
-        );
-      }
-      if (errorMessage.contains('Git command failed')) {
-        failures.add(
-          'Expected-result mismatch: the caller-visible message leaked the raw '
-          'Git/provider command: $errorMessage',
-        );
-      }
-      if (errorMessage.contains('fatal:')) {
-        failures.add(
-          'Expected-result mismatch: the caller-visible message leaked raw Git '
-          'stderr: $errorMessage',
-        );
-      }
-      if (errorMessage.contains('.git/index.lock')) {
-        failures.add(
-          'Expected-result mismatch: the caller-visible message leaked internal '
-          'Git filesystem details: $errorMessage',
-        );
-      }
-      if (!_listsEqual(
-        visibleIssueKeys,
-        const [Ts163ArchiveProviderFailureFixture.issueKey],
-      )) {
-        failures.add(
-          'Repository-state regression: expected search to keep returning '
-          '${Ts163ArchiveProviderFailureFixture.issueKey} after the archive '
-          'failure, but observed $visibleIssueKeys.',
-        );
-      }
-      if (afterArchival.visibleIssueSearchResults.length != 1) {
-        failures.add(
-          'Repository-state regression: expected exactly one visible issue after '
-          'the failed archive, but observed '
-          '${afterArchival.visibleIssueSearchResults.length}.',
-        );
-      } else if (afterArchival.visibleIssueSearchResults.single.isArchived) {
-        failures.add(
-          'Repository-state regression: expected '
-          '${Ts163ArchiveProviderFailureFixture.issueKey} to remain active after '
-          'the archive failure, but it was marked archived.',
-        );
-      }
-      if (afterArchival.headIssueMarkdown != beforeArchival.headIssueMarkdown) {
-        failures.add(
-          'Commit-history regression: the failed archive rewrote committed '
-          'content at ${Ts163ArchiveProviderFailureFixture.issuePath}.',
-        );
-      }
-      if (afterArchival.headRevision != beforeArchival.headRevision) {
-        failures.add(
-          'Commit-history regression: the failed archive created a new Git '
-          'revision (${afterArchival.headRevision}) instead of preserving '
-          '${beforeArchival.headRevision}.',
-        );
-      }
-
-      if (failures.isNotEmpty) {
-        fail(failures.join('\n'));
-      }
+      expect(
+        afterArchival.forcedArchiveCommitAttempts,
+        1,
+        reason:
+            'TS-163 must force exactly one low-level archive commit failure to reproduce the provider error path.',
+      );
+      expect(
+        afterArchival.errorType,
+        'TrackStateRepositoryException',
+        reason:
+            'Archiving an existing issue in ${afterArchival.repositoryPath} must surface a repository-domain exception instead of ${afterArchival.errorType}. '
+            'Actual message: ${afterArchival.errorMessage}. '
+            'Worktree status: ${afterArchival.worktreeStatusLines.join(' | ')}.',
+      );
+      expect(
+        afterArchival.errorMessage,
+        isNot(contains('Git command failed')),
+        reason:
+            'Archive failures must not leak raw provider command details to repository-service consumers.',
+      );
+      expect(
+        afterArchival.errorMessage,
+        isNot(contains('fatal:')),
+        reason: 'Archive failures must not expose Git stderr to callers.',
+      );
+      expect(
+        afterArchival.errorMessage,
+        isNot(contains('.git/index.lock')),
+        reason:
+            'Archive failures must hide internal Git filesystem details from callers.',
+      );
+      expect(
+        afterArchival.visibleIssueSearchResults
+            .map((issue) => issue.key)
+            .toList(),
+        [Ts163ArchiveProviderFailureFixture.issueKey],
+        reason:
+            'From a caller perspective, repository search should still show TRACK-122 after the archive failure.',
+      );
+      expect(
+        afterArchival.visibleIssueSearchResults.single.isArchived,
+        isFalse,
+        reason:
+            'From a caller perspective, TRACK-122 should still appear active after the archive failure.',
+      );
+      expect(
+        afterArchival.headIssueMarkdown,
+        beforeArchival.headIssueMarkdown,
+        reason:
+            'The failed archive must not change the committed version of ${Ts163ArchiveProviderFailureFixture.issuePath}.',
+      );
+      expect(
+        afterArchival.headRevision,
+        beforeArchival.headRevision,
+        reason:
+            'The failed archive must not create a Git commit when the provider write fails.',
+      );
     },
   );
-}
-
-bool _listsEqual<T>(List<T> actual, List<T> expected) {
-  if (actual.length != expected.length) {
-    return false;
-  }
-  for (var index = 0; index < actual.length; index += 1) {
-    if (actual[index] != expected[index]) {
-      return false;
-    }
-  }
-  return true;
 }
