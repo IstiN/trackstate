@@ -1379,6 +1379,102 @@ void main() {
   );
 
   testWidgets(
+    'web startup keeps the hosted fallback trigger stable after delayed /user completion',
+    (tester) async {
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', workspaceId: hostedWorkspaceId);
+
+      final browserHarness = _RealHostedBrowserFetchHarness()..install();
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        browserHarness.dispose();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      expect(browserHarness.userProbePending, isTrue);
+      _expectBrowserObservedShellReady(
+        authPending: browserHarness.userProbePending,
+        consoleMessages: browserHarness.consoleMessages,
+      );
+      _expectHostedFallbackTrigger();
+
+      await tester.pump(const Duration(seconds: 24));
+      _expectHostedFallbackTrigger();
+
+      browserHarness.completeUserProbe();
+      final observedTriggerLabels = <String>{};
+      for (var sample = 0; sample < 20; sample += 1) {
+        await tester.pump(const Duration(milliseconds: 500));
+        if (find.bySemanticsLabel(
+              RegExp(
+                r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+              ),
+            ).evaluate().isNotEmpty) {
+          observedTriggerLabels.add('Needs sign-in');
+        }
+        if (find.bySemanticsLabel(
+              RegExp(
+                r'Workspace switcher: Hosted setup workspace, .*Attachments limited',
+              ),
+            ).evaluate().isNotEmpty) {
+          observedTriggerLabels.add('Attachments limited');
+        }
+      }
+
+      expect(
+        observedTriggerLabels,
+        contains('Needs sign-in'),
+        reason:
+            'The hosted fallback trigger should remain visible throughout the post-timeout observation window.',
+      );
+      expect(
+        observedTriggerLabels,
+        isNot(contains('Attachments limited')),
+        reason:
+            'The late /user resolution must not flip the visible trigger into the post-auth attachment-restricted state until the user explicitly reconnects.',
+      );
+      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+      for (final label in _shellNavigationLabels) {
+        expect(find.text(label), findsWidgets);
+      }
+    },
+  );
+
+  testWidgets(
     'web startup keeps a signed-in saved local workspace in Local Git state while deferred local auth restore is still pending',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
@@ -2248,6 +2344,10 @@ class _RealHostedStartupDelayedAuthHarness {
             'key': 'DEMO',
             'name': 'Demo Project',
             'defaultLocale': 'en',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'ts510-attachments-demo-'},
+            },
           }),
         );
       case '/repos/stable/repo/contents/DEMO/config/statuses.json':
