@@ -47,7 +47,7 @@ class ReadinessStateAccessibilityRobot {
     return LoadingBannerThemeObservation(
       semanticLabel: semanticLabel,
       renderedForegroundHex: _rgbHex(foreground),
-      expectedForegroundHex: _rgbHex(colors.muted),
+      expectedForegroundHex: _rgbHex(colors.text),
       renderedBackgroundHex: _rgbHex(background),
       expectedBackgroundHex: _rgbHex(colors.surfaceAlt),
       contrastRatio: contrastRatio(foreground, background),
