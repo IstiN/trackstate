@@ -8439,6 +8439,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                     order: NumericFocusOrder(addWorkspaceOrderBase),
                     child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeHosted,
+                      identifier: _workspaceSwitcherTargetTypeHostedFocusId,
                       child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeHosted,
                         onPressed: () => setState(
@@ -8466,6 +8467,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                     order: NumericFocusOrder(addWorkspaceOrderBase + 1),
                     child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeLocal,
+                      identifier: _workspaceSwitcherTargetTypeLocalFocusId,
                       child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeLocal,
                         onPressed: () => setState(
@@ -8514,6 +8516,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 child: _WorkspaceSwitcherExplicitControlSemantics(
                   label: l10n.workspaceSaveAndSwitch,
                   enabled: _canSaveWorkspace || _hasPendingWorkspaceSwitch,
+                  identifier: _workspaceSwitcherSaveFocusId,
                   child: browser_focusable_control.BrowserFocusableControl(
                     label: l10n.workspaceSaveAndSwitch,
                     onPressed: _canSaveWorkspace
@@ -8531,6 +8534,36 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           : _hasPendingWorkspaceSwitch
                           ? _saveAndSwitchSelectedWorkspace
                           : null,
+                      style: ButtonStyle(
+                        backgroundColor: WidgetStateProperty.resolveWith((
+                          states,
+                        ) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return colors.surfaceAlt;
+                          }
+                          return colors.primary;
+                        }),
+                        foregroundColor: WidgetStateProperty.resolveWith((
+                          states,
+                        ) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return colors.muted;
+                          }
+                          return Theme.of(context).colorScheme.onPrimary;
+                        }),
+                        side: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return BorderSide(color: colors.border);
+                          }
+                          if (states.contains(WidgetState.focused)) {
+                            return BorderSide(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              width: 2,
+                            );
+                          }
+                          return BorderSide(color: colors.primary);
+                        }),
+                      ),
                       child: Text(l10n.workspaceSaveAndSwitch),
                     ),
                   ),
@@ -8589,11 +8622,13 @@ class _WorkspaceSwitcherExplicitControlSemantics extends StatelessWidget {
     required this.label,
     required this.child,
     this.enabled = true,
+    this.identifier,
   });
 
   final String label;
   final Widget child;
   final bool enabled;
+  final String? identifier;
 
   @override
   Widget build(BuildContext context) {
@@ -8603,6 +8638,7 @@ class _WorkspaceSwitcherExplicitControlSemantics extends StatelessWidget {
       label: label,
       button: true,
       enabled: enabled,
+      identifier: identifier,
       child: child,
     );
   }
@@ -8680,6 +8716,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         );
     final browserSummaryLabel =
         '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
+    final rowSemanticsIdentifier =
+        browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id);
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -8751,8 +8789,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
+            focusTargetId: rowSemanticsIdentifier,
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-            rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
+            rowId: rowSemanticsIdentifier,
             selectedRow: isActive,
             tabIndex: isActive ? 0 : -1,
             child: summaryButton,
@@ -8764,9 +8803,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             focusable: isActive,
             focused: isActive,
             selected: isActive,
-            identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
-              workspace.id,
-            ),
+            identifier: rowSemanticsIdentifier,
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
             child: ExcludeSemantics(child: summaryButton),
@@ -9075,6 +9112,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
       explicitChildNodes: true,
       button: true,
       enabled: onPressed != null,
+      identifier: focusTargetId,
       label: semanticsLabel,
       child: ExcludeSemantics(
         child: browser_focusable_control.BrowserFocusableControl(
