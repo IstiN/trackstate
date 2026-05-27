@@ -756,7 +756,5 @@ def _bug_actual_result(result: dict[str, object]) -> str:
         f"{{{{{body_text}}}}} and visible buttons {{{{{visible_buttons}}}}}. "
         f"{_failure_summary(result)}"
     )
-
-
 if __name__ == "__main__":
     main()

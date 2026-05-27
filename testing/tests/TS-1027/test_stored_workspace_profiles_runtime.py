@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
@@ -146,6 +148,63 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
             "Stored workspace preload must be injected into the current page or "
             "browser tests miss saved workspace state during the first load.",
         )
+
+    def test_preload_script_seeds_restorable_local_workspace_fixture_for_existing_path(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            workspace_path = Path(workspace_dir)
+            project_dir = workspace_path / "DEMO" / "config"
+            project_dir.mkdir(parents=True, exist_ok=True)
+            (workspace_path / "project.json").write_text(
+                '{"key":"DEMO","name":"Demo","repository":"local/demo","branch":"main"}\n',
+                encoding="utf-8",
+            )
+            (project_dir / "statuses.json").write_text("[]\n", encoding="utf-8")
+
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+            )
+
+        self.assertIn("localWorkspaceFixtures", script)
+        self.assertIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertIn("IDBObjectStore.prototype.get", script)
+        self.assertIn(workspace_dir, script)
+
+    def test_preload_script_skips_local_workspace_fixture_when_restore_is_disabled(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+                restore_local_workspace_handles=False,
+            )
+
+        self.assertNotIn("localWorkspaceFixtures", script)
+        self.assertNotIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertNotIn("IDBObjectStore.prototype.get", script)
 
     def test_delayed_auth_runtime_wait_polls_page_until_probe_event_arrives(self) -> None:
         runtime = DelayedAuthWorkspaceProfilesRuntime(
