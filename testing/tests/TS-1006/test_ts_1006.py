@@ -63,6 +63,8 @@ BROKEN_LOCAL_TARGET = "/tmp/trackstate-ts1006-workspace-b"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
 LINKED_BUGS = [
+    "TS-1212",
+    "TS-1209",
     "TS-1146",
     "TS-1143",
     "TS-1142",
@@ -72,12 +74,12 @@ LINKED_BUGS = [
     "TS-994",
 ]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, TS-995, and TS-994. "
-    "The linked fixes span the visible Retry/Re-authenticate recovery path, the "
-    "reload persistence path, and the follow-up startup hydration selection logic, "
-    "so this test waits for the visible restore callback, the restored Local Git "
-    "precondition, the post-reload shell, and the final Workspace switcher row "
-    "state before asserting."
+    "Reviewed TS-1212, TS-1209, TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, "
+    "TS-995, and TS-994. The linked fixes span the visible Retry/Re-authenticate "
+    "recovery path, browser-persisted local directory access across reload, and "
+    "the follow-up startup hydration selection logic, so this test waits for the "
+    "visible restore callback, the restored Local Git precondition, the post-"
+    "reload shell, and the final Workspace switcher row state before asserting."
 )
 PRECONDITION_WAIT_SECONDS = 60
 STARTUP_WAIT_SECONDS = 90
@@ -286,6 +288,7 @@ def main() -> None:
                 accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
                 timeout_ms=ROW_STATE_WAIT_MS,
             )
+            refreshed_trigger = page.observe_trigger(timeout_ms=5_000)
             active_row = _find_switcher_row(
                 refreshed_switcher,
                 display_name=ACTIVE_LOCAL_DISPLAY_NAME,
@@ -299,6 +302,7 @@ def main() -> None:
             selected_row = _find_selected_row(refreshed_switcher)
             result["broken_row_initial"] = _row_payload(broken_row)
             result["refreshed_switcher_observation"] = _switcher_payload(refreshed_switcher)
+            result["refreshed_trigger"] = _trigger_payload(refreshed_trigger)
             result["active_row"] = _row_payload(active_row)
             result["broken_row"] = _row_payload(broken_row_refreshed)
             result["selected_row"] = _row_payload(selected_row)
@@ -306,6 +310,7 @@ def main() -> None:
             _assert_startup_selection_preserved(
                 active_row=active_row,
                 broken_row=broken_row_refreshed,
+                current_trigger=refreshed_trigger,
                 selected_row=selected_row,
                 switcher=refreshed_switcher,
             )
@@ -318,6 +323,7 @@ def main() -> None:
                     "Opened Workspace switcher after startup and confirmed Workspace A "
                     "remained active while Workspace B showed `Unavailable` without "
                     "taking the active selection.\n"
+                    f"trigger={json.dumps(result['refreshed_trigger'], indent=2)}\n"
                     f"active_row={json.dumps(result['active_row'], indent=2)}\n"
                     f"broken_row={json.dumps(result['broken_row'], indent=2)}\n"
                     f"selected_row={json.dumps(result['selected_row'], indent=2)}"
@@ -330,6 +336,7 @@ def main() -> None:
                     "a user would."
                 ),
                 observed=(
+                    f"trigger_label={refreshed_trigger.semantic_label!r}; "
                     f"active_row_visible_text={repr(active_row.visible_text) if active_row else None}; "
                     f"broken_row_visible_text={repr(broken_row_refreshed.visible_text) if broken_row_refreshed else None}; "
                     f"switcher_text={refreshed_switcher.switcher_text!r}"
@@ -1077,6 +1084,7 @@ def _assert_startup_selection_preserved(
     *,
     active_row: WorkspaceSwitcherRowObservation | None,
     broken_row: WorkspaceSwitcherRowObservation | None,
+    current_trigger: WorkspaceSwitcherTriggerObservation,
     selected_row: WorkspaceSwitcherRowObservation | None,
     switcher: WorkspaceSwitcherObservation,
 ) -> None:
@@ -1090,11 +1098,28 @@ def _assert_startup_selection_preserved(
             "Step 4 failed: Workspace A was no longer shown as `Local Git` in the switcher.\n"
             f"Observed active row: {json.dumps(_row_payload(active_row), indent=2)}"
         )
-    if selected_row is None or selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME:
+    trigger_matches_active_workspace = (
+        current_trigger.display_name == ACTIVE_LOCAL_DISPLAY_NAME
+        and current_trigger.workspace_type == "Local"
+        and current_trigger.state_label == "Local Git"
+    )
+    if (
+        selected_row is not None
+        and selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME
+    ):
         raise AssertionError(
             "Step 4 failed: Workspace A did not remain the selected active workspace in the "
             "Workspace switcher after startup.\n"
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2) if selected_row else 'null'}\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(current_trigger), indent=2)}\n"
+            f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
+        )
+    if selected_row is None and not trigger_matches_active_workspace:
+        raise AssertionError(
+            "Step 4 failed: Workspace A did not remain the selected active workspace in the "
+            "Workspace switcher after startup.\n"
+            f"Observed selected row: null\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(current_trigger), indent=2)}\n"
             f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
         )
     if broken_row is None:
@@ -1119,7 +1144,8 @@ def _assert_startup_selection_preserved(
             f"Observed broken row: {json.dumps(_row_payload(broken_row), indent=2)}"
         )
     if not any(
-        label in ACCEPTED_RECOVERY_ACTION_LABELS for label in broken_row.action_labels
+        any(label.startswith(f"{accepted}:") or label == accepted for accepted in ACCEPTED_RECOVERY_ACTION_LABELS)
+        for label in broken_row.action_labels
     ):
         raise AssertionError(
             "Step 4 failed: Workspace B did not expose a visible recovery action such as "
@@ -1385,9 +1411,10 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         "Workspace B inactive and broken.",
         "",
         "## Files Modified",
+        "- `testing/tests/TS-1006/test_ts_1006.py`",
         "- `testing/tests/TS-1006/config.yaml`",
         "- `testing/tests/TS-1006/README.md`",
-        "- `testing/tests/TS-1006/test_ts_1006.py`",
+        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
         "",
         "## Test Coverage",
         "- Visible restore flow for Workspace A before the startup scenario begins.",
