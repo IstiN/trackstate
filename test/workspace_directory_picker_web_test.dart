@@ -2,8 +2,6 @@
 library;
 
 import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
@@ -29,22 +27,27 @@ void main() {
     'browser workspace picker preserves the saved target after browser access is granted',
     () async {
       var calls = 0;
+      String? persistedWorkspacePath;
       browserDirectoryAccessRequester =
           ({String? confirmButtonText, String? initialDirectory}) async {
             calls += 1;
             expect(confirmButtonText, isNull);
             expect(initialDirectory, '/tmp/demo');
-            return JSObject()
-              ..['kind'] = 'directory'.toJS
-              ..['name'] = 'demo'.toJS;
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
+          };
+      browserWorkspaceSelectionPersister =
+          ({required String workspacePath, required Object selection}) async {
+            persistedWorkspacePath = workspacePath;
           };
 
       final selectedPath = await pickWorkspaceDirectory(
         initialDirectory: '/tmp/demo',
       );
+      await Future<void>.delayed(Duration.zero);
 
       expect(calls, 1);
       expect(selectedPath, '/tmp/demo');
+      expect(persistedWorkspacePath, '/tmp/demo');
     },
   );
 
@@ -60,9 +63,7 @@ void main() {
       browserDirectoryAccessRequester =
           ({String? confirmButtonText, String? initialDirectory}) async {
             expect(initialDirectory, '/tmp/demo');
-            return JSObject()
-              ..['kind'] = 'directory'.toJS
-              ..['name'] = 'demo'.toJS;
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
           };
       browserWorkspaceSelectionPersister =
           ({required String workspacePath, required Object selection}) async =>
@@ -122,9 +123,10 @@ void main() {
   test(
     'browser local repository restores a saved directory handle after a reload',
     () async {
-      final directoryHandle = JSObject()
-        ..['kind'] = 'directory'.toJS
-        ..['name'] = 'trackstate-demo'.toJS;
+      final directoryHandle = _FakeDirectoryHandle(
+        kind: 'directory',
+        name: 'trackstate-demo',
+      );
 
       await rememberBrowserLocalWorkspaceSelection(
         workspacePath: '/tmp/trackstate-demo',
@@ -175,4 +177,8 @@ class _AbortError implements Exception {
 
 class _Timeout {
   const _Timeout();
+}
+
+extension type _FakeDirectoryHandle._(JSObject _) implements JSObject {
+  external factory _FakeDirectoryHandle({String kind, String name});
 }

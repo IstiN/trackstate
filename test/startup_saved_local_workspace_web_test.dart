@@ -10,9 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
-import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
@@ -275,7 +275,9 @@ void main() {
       );
       expect(
         find.bySemanticsLabel(
-          RegExp(r'Workspace switcher: Hosted setup workspace, .*Needs sign-in'),
+          RegExp(
+            r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+          ),
         ),
         findsNothing,
       );

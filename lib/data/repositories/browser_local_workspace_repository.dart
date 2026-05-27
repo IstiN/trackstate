@@ -47,3 +47,12 @@ Future<void> clearRememberedBrowserLocalWorkspaceSelections({
     clearPersisted: clearPersisted,
   );
 }
+
+@visibleForTesting
+Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
+  bool clearPersisted = false,
+}) {
+  return platform.debugResetBrowserLocalWorkspaceSelectionCache(
+    clearPersisted: clearPersisted,
+  );
+}
