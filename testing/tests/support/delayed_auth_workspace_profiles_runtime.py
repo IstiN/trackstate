@@ -30,12 +30,14 @@ class DelayedAuthWorkspaceProfilesRuntime(StoredWorkspaceProfilesRuntime):
         auth_delay_seconds: float,
         delayed_paths: tuple[str, ...] = ("/user",),
         workspace_token_profile_ids: tuple[str, ...] = (),
+        restore_local_workspace_handles: bool = True,
     ) -> None:
         super().__init__(
             repository=repository,
             token=token,
             workspace_state=workspace_state,
             workspace_token_profile_ids=workspace_token_profile_ids,
+            restore_local_workspace_handles=restore_local_workspace_handles,
         )
         self._auth_delay_seconds = float(auth_delay_seconds)
         self._delayed_paths = delayed_paths
