@@ -1,0 +1,8 @@
+test_id: TS-767
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the TS-734 mutable hosted repository fixture to drive the production workspace-sync path.
+  - Verifies a comments-only Issue-C refresh updates the visible Comments tab without triggering issue-level non-comments hydration or a hosted snapshot reload.
