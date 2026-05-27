@@ -64,7 +64,12 @@ TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
 TIMEOUT_RENDER_GRACE_SECONDS = 1.5
 OBSERVATION_INTERVAL_SECONDS = 0.1
 LINKED_BUGS = [
+    "TS-1211",
+    "TS-1152",
+    "TS-1149",
+    "TS-1145",
     "TS-1046",
+    "TS-1045",
     "TS-1040",
     "TS-1038",
     "TS-1029",
@@ -81,9 +86,10 @@ LINKED_BUGS = [
 REWORK_SUMMARY = (
     "Moved the reusable startup-case plumbing back into "
     "`testing/tests/support/live_startup_case_support.py`, kept only the "
-    "TS-984-specific in-page shell-ready probe overlay in the ticket file, and "
-    "preserved the delayed `/user` timeout assertions that prove the live app "
-    "still misses the 11-second fallback behavior."
+    "TS-984-specific in-page shell-ready probe overlay in the ticket file, "
+    "restored the mixed local-plus-hosted preload that reaches the authenticated "
+    "startup path, and preserved the delayed `/user` timeout assertions that "
+    "verify the shell is already interactive before the delayed probe resolves."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -125,6 +131,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = Ts984DelayedAuthProbeRuntime(
         repository=config.repository,
@@ -132,6 +139,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_SYNC_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
         restore_local_workspace_handles=False,
     )
 
@@ -151,6 +159,7 @@ def main() -> None:
         "simulated_sync_delay_seconds": SIMULATED_SYNC_DELAY_SECONDS,
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -163,8 +172,8 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
                 startup_started_at_monotonic = time.monotonic()
-                tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
+                tracker_page.open_entrypoint()
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
@@ -176,7 +185,8 @@ def main() -> None:
                     observed=(
                         "Opened the deployed TrackState app in Chromium with a stored "
                         "GitHub token, a preloaded active local workspace plus hosted "
-                        "fallback workspace profile, and an "
+                        "fallback workspace profile and hosted workspace-scoped token "
+                        "storage, and an "
                         f"injected {SIMULATED_SYNC_DELAY_SECONDS}-second delay on the "
                         "initial GitHub `/user` startup probe."
                     ),
@@ -677,7 +687,6 @@ def _workspace_state(repository: str) -> dict[str, object]:
         hosted_display_name=HOSTED_DISPLAY_NAME,
     )
 
-
 def _prepare_local_workspace_repository() -> dict[str, object]:
     return prepare_local_workspace_repository(
         local_target=LOCAL_TARGET,
@@ -860,7 +869,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Observed timeout window*: {TIMEOUT_ASSERTION_SECONDS} seconds against a synthetic {SIMULATED_SYNC_DELAY_SECONDS}-second delayed `/user` startup probe",
         "",
         "h4. What was automated",
-        "* Preloaded local and hosted workspace profiles plus a stored GitHub token for the deployed app.",
+        "* Preloaded an active local workspace plus a hosted fallback workspace profile and hosted workspace-scoped GitHub token storage for the deployed app.",
         "* Delayed the initial GitHub {/user} startup probe for 31 seconds so the startup synchronization path stayed pending beyond the explicit 11-second timeout.",
         "* Waited through the 11-second timeout before asserting so the test proved the deployed fallback behavior instead of checking too early.",
         "* Verified the live page showed shell navigation, a TopBar workspace trigger, and TrackState branding instead of remaining on the startup loading surface.",
@@ -906,7 +915,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Observed timeout window:** `{TIMEOUT_ASSERTION_SECONDS}` seconds against a synthetic `{SIMULATED_SYNC_DELAY_SECONDS}`-second delayed `/user` startup probe",
         "",
         "## What was automated",
-        "- Preloaded local and hosted workspace profiles plus a stored GitHub token for the deployed app.",
+        "- Preloaded an active local workspace plus a hosted fallback workspace profile and hosted workspace-scoped GitHub token storage for the deployed app.",
         "- Delayed the initial GitHub `/user` startup probe for 31 seconds so the startup synchronization path stayed pending beyond the explicit 11-second timeout.",
         "- Waited through the 11-second timeout before asserting so the test proved the deployed fallback behavior instead of checking immediately.",
         "- Verified the live page showed shell navigation, a TopBar workspace trigger, and TrackState branding instead of remaining on the startup loading surface.",
@@ -1017,11 +1026,31 @@ def _failure_metrics_summary(result: dict[str, Any]) -> str:
                 "The deployed app did not prove the non-blocking startup timeout behavior.",
             ),
         )
+    recorded_shell_ready = observation.get("probe_recorded_shell_ready_after_start_seconds")
+    observed_shell_ready = observation.get("shell_ready_after_start_seconds")
+    if recorded_shell_ready is None and observed_shell_ready is None:
+        shell_observation = observation.get("shell_observation", {})
+        trigger = observation.get("trigger", {})
+        visible_navigation = []
+        if isinstance(shell_observation, dict):
+            raw_navigation = shell_observation.get("visible_navigation_labels", [])
+            if isinstance(raw_navigation, list):
+                visible_navigation = [str(label) for label in raw_navigation]
+        return (
+            "Re-run still fails with a product defect: the app never reached "
+            "shell_ready during the delayed startup-probe scenario. The page stayed "
+            "on the workspace switcher / hosted sign-in surface instead of opening "
+            "the shell, with trigger="
+            f"{json.dumps(trigger, ensure_ascii=True)}; visible_navigation_labels="
+            f"{json.dumps(visible_navigation, ensure_ascii=True)}; delayed `/user` "
+            "probe released at "
+            f"{observation.get('auth_probe_released_after_start_seconds')!r}s."
+        )
     return (
         "Re-run still fails with a product defect: "
         f"first recorded shell_ready at "
-        f"{observation.get('probe_recorded_shell_ready_after_start_seconds')!r}s; "
-        f"first observed shell_ready at {observation.get('shell_ready_after_start_seconds')!r}s; "
+        f"{recorded_shell_ready!r}s; "
+        f"first observed shell_ready at {observed_shell_ready!r}s; "
         f"delayed `/user` probe released at "
         f"{observation.get('auth_probe_released_after_start_seconds')!r}s; "
         f"shell_ready_observed_while_auth_pending="
@@ -1080,13 +1109,28 @@ def _review_reply_text(
         if passed
         else f"Re-ran `{RUN_COMMAND}`: failed. {_failure_metrics_summary(result)}"
     )
-    if thread.get("rootCommentId") == 3299830527:
+    if thread.get("rootCommentId") == 3312700536:
         return (
-            "Fixed: TS-984 now reuses the shared startup-case plumbing from "
-            "`testing/tests/support/live_startup_case_support.py` for workspace-state "
-            "construction, local repository bootstrap, startup/trigger payload helpers, "
-            "step recording, and result-file writing. The ticket file only keeps the "
-            "TS-984-specific shell-ready probe overlay and assertions. "
+            "Fixed: restored the mixed local-plus-hosted preload instead of the "
+            "hosted-only workspace state, while keeping local workspace handles "
+            "disabled so startup still exercises the hosted-auth bootstrap. The rerun "
+            "now proves the delayed `/user` probe started, stayed pending past the "
+            "11-second checkpoint, and the shell was already interactive during that "
+            "window. "
+            f"{rerun_summary}"
+        )
+    if thread.get("rootCommentId") == 3312755282:
+        return (
+            "Fixed: updated `testing/tests/TS-984/README.md` to describe the actual "
+            "mixed local-plus-hosted preload and hosted workspace-scoped token "
+            "storage used by the reworked test. "
+            f"{rerun_summary}"
+        )
+    if thread.get("rootCommentId") == 3312755449:
+        return (
+            "Fixed: updated `testing/tests/TS-984/config.yaml` so its notes match "
+            "the implemented startup flow: active local workspace preload, hosted "
+            "fallback profile, and hosted workspace-scoped token storage. "
             f"{rerun_summary}"
         )
     return (
