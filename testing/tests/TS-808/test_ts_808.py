@@ -670,15 +670,6 @@ def _find_active_local_row(
             and row.state_label == "Local Git"
         ):
             return row
-    for row in switcher.rows:
-        if (
-            row.display_name == trigger.display_name
-            and row.target_type_label == trigger.workspace_type
-            and row.state_label == trigger.state_label
-            and row.target_type_label == "Local"
-            and row.state_label == "Local Git"
-        ):
-            return row
     raise AssertionError(
         "Step 2 failed: the workspace switcher did not show a selected active local "
         "workspace row in the `Local Git` state after startup.\n"
