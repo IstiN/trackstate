@@ -1,0 +1,47 @@
+test_id: TS-551
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with access to manage releases in the live setup repository
+  - Network access to GitHub APIs
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage and pointed at the live setup repository as origin.
+  - Ensures the expected GitHub Release tag exists with a mismatched title before running the exact local CLI upload command.
+  - Passes only when the CLI fails deterministically with the release identity conflict, the local repository is not mutated, and the live release is not reused for the wrong issue.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-123 --file data.csv --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-123
+    - --file
+    - data.csv
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-551 Project
+  issue_key: TS-123
+  issue_summary: Release identity mismatch local upload fixture
+  release_tag_prefix: ts-attachments-
+  conflicting_release_title: Attachments for TS-999
+  expected_release_title: Attachments for TS-123
+  source_file_name: data.csv
+  source_file_text: |-
+    id,value
+    1,ts-551
+  expected_attachment_relative_path: TS/TS-123/attachments/data.csv
+  expected_exit_code: 4
+  expected_error_code: REPOSITORY_OPEN_FAILED
+  expected_error_category: repository
+  required_reason_fragments:
+    - GitHub release ts-attachments-TS-123 does not match issue TS-123
+    - requires manual cleanup
+  required_stdout_fragments:
+    - '"ok": false'
+    - '"code": "REPOSITORY_OPEN_FAILED"'
+    - '"reason": "GitHub release ts-attachments-TS-123 does not match issue TS-123 and requires manual cleanup."'

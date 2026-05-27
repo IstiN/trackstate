@@ -34,7 +34,11 @@ migrate_working_dir/
 /coverage/
 /cacheBasicJiraClient/
 /input/
+/node_modules/
 /outputs/
+/playwright-report/
+/test/failures/
+/test-results/
 
 # Symbolication related
 app.*.symbols
