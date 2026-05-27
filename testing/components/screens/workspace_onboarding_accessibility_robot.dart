@@ -20,8 +20,18 @@ class WorkspaceOnboardingAccessibilityRobot
       'Choose a local folder or hosted repository to get started.';
   static const _localFolder = 'Local folder';
   static const _hostedRepository = 'Hosted repository';
+  static const _repositoryPath = 'Repository Path';
+  static const _repository = 'Repository';
+  static const _branch = 'Branch';
   static const _openExistingFolder = 'Open existing folder';
   static const _initializeFolder = 'Initialize folder';
+  static const _localHelper = 'Enter the local Git folder path.';
+  static const _hostedHelper = 'Enter the repository as owner/repo.';
+  static const _browseUnavailableHint =
+      'Connect GitHub in an existing hosted workspace to browse accessible '
+      'repositories. You can still enter owner/repo manually here.';
+  static const _manualFallbackHint =
+      'Select a repository from the current GitHub session or enter owner/repo manually.';
 
   Finder _buttonWithText(String text) => find.ancestor(
     of: find.text(text),
@@ -38,6 +48,15 @@ class WorkspaceOnboardingAccessibilityRobot
   Finder get _initializeFolderButton => find.byKey(
     const ValueKey('local-workspace-onboarding-initialize-folder'),
   );
+
+  Finder get _hostedRepositoryField =>
+      find.byKey(const ValueKey('workspace-onboarding-hosted-repository'));
+
+  Finder get _hostedBranchField =>
+      find.byKey(const ValueKey('workspace-onboarding-hosted-branch'));
+
+  Finder get _hostedOpenButton =>
+      find.byKey(const ValueKey('workspace-onboarding-open'));
 
   Finder get _titleText => find.text(_title);
 
@@ -94,13 +113,60 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
+  Future<void> chooseHostedRepository() async {
+    _expectOnboardingVisible();
+    await tester.ensureVisible(_hostedRepositoryButton.first);
+    await tester.tap(_hostedRepositoryButton.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    if (_hostedRepositoryField.evaluate().isEmpty ||
+        _hostedBranchField.evaluate().isEmpty ||
+        _hostedOpenButton.evaluate().isEmpty) {
+      throw StateError(
+        'Hosted repository onboarding controls were not visible after selecting hosted mode.',
+      );
+    }
+  }
+
+  @override
   Future<List<String>> collectForwardFocusOrder() async {
-    return _collectForwardFocusOrder(_focusCandidates());
+    return _collectForwardFocusOrder(
+      _localFocusCandidates(),
+      stopAt: _initializeFolder,
+      maxTabs: 8,
+    );
   }
 
   @override
   Future<List<String>> collectBackwardFocusOrder() async {
-    return _collectBackwardFocusOrder(_focusCandidates());
+    return _collectBackwardFocusOrder(
+      _localFocusCandidates(),
+      startAt: _initializeFolder,
+      stopAt: _localFolder,
+      maxTabs: 8,
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedForwardFocusOrder({
+    int maxTabs = 16,
+  }) async {
+    return _collectForwardFocusOrder(
+      _hostedFocusCandidates(),
+      stopAt: 'Open',
+      maxTabs: maxTabs,
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedBackwardFocusOrder({
+    int maxTabs = 16,
+  }) async {
+    return _collectBackwardFocusOrder(
+      _hostedFocusCandidates(),
+      startAt: 'Open',
+      stopAt: _localFolder,
+      maxTabs: maxTabs,
+    );
   }
 
   @override
@@ -118,6 +184,38 @@ class WorkspaceOnboardingAccessibilityRobot
         label: 'Subtitle',
         textFinder: _subtitleText,
         background: colors.page,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Local folder segmented choice',
+        buttonFinder: _localFolderButton,
+        text: _localFolder,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Hosted repository segmented choice',
+        buttonFinder: _hostedRepositoryButton,
+        text: _hostedRepository,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository Path label',
+        textFinder: find.text(_repositoryPath),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Local path helper',
+        textFinder: find.text(_localHelper),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Branch label',
+        textFinder: find.text(_branch),
+        background: colors.surface,
         minimumContrast: 4.5,
       ),
       _observeButtonTextContrast(
@@ -149,6 +247,70 @@ class WorkspaceOnboardingAccessibilityRobot
         minimumContrast: 3.0,
       ),
     ];
+  }
+
+  @override
+  List<WorkspaceOnboardingContrastObservation> observeHostedContrastSet() {
+    _expectOnboardingVisible();
+    if (_hostedOpenButton.evaluate().isEmpty) {
+      throw StateError('The hosted onboarding action is not visible.');
+    }
+    final colors = this.colors();
+    final observations = <WorkspaceOnboardingContrastObservation>[
+      _observeButtonTextContrast(
+        label: 'Local folder segmented choice',
+        buttonFinder: _localFolderButton,
+        text: _localFolder,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Hosted repository segmented choice',
+        buttonFinder: _hostedRepositoryButton,
+        text: _hostedRepository,
+        backgroundFallback: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository label',
+        textFinder: find.text(_repository),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Repository helper',
+        textFinder: find.text(_hostedHelper),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeTextContrast(
+        label: 'Branch label',
+        textFinder: find.text(_branch),
+        background: colors.surface,
+        minimumContrast: 4.5,
+      ),
+      _observeButtonTextContrast(
+        label: 'Hosted Open action',
+        buttonFinder: _hostedOpenButton,
+        text: 'Open',
+        backgroundFallback: colors.primary,
+        minimumContrast: 4.5,
+      ),
+    ];
+    final hostedHintFinder = _visibleHostedHintFinder();
+    if (hostedHintFinder != null) {
+      observations.add(
+        _observeTextContrast(
+          label: _finderText(hostedHintFinder) == _browseUnavailableHint
+              ? 'Browse unavailable hint'
+              : 'Manual fallback hint',
+          textFinder: hostedHintFinder,
+          background: colors.surface,
+          minimumContrast: 4.5,
+        ),
+      );
+    }
+    return observations;
   }
 
   @override
@@ -193,7 +355,7 @@ class WorkspaceOnboardingAccessibilityRobot
     }
   }
 
-  Map<String, Finder> _focusCandidates() {
+  Map<String, Finder> _localFocusCandidates() {
     return <String, Finder>{
       _localFolder: _localFolderButton,
       _hostedRepository: _hostedRepositoryButton,
@@ -202,23 +364,133 @@ class WorkspaceOnboardingAccessibilityRobot
     };
   }
 
+  Map<String, Finder> _hostedFocusCandidates() {
+    return <String, Finder>{
+      _localFolder: _localFolderButton,
+      _hostedRepository: _hostedRepositoryButton,
+      'Repository': _hostedRepositoryField,
+      'Branch': _hostedBranchField,
+      'Open': _hostedOpenButton,
+    };
+  }
+
   Future<List<String>> _collectForwardFocusOrder(
-    Map<String, Finder> candidates,
-  ) async {
-    final semanticsOrder = interactiveSemanticsLabels();
-    return _candidateTraversalOrder(
-      candidates.keys.toList(growable: false),
-      semanticsOrder,
-    );
+    Map<String, Finder> candidates, {
+    required String stopAt,
+    required int maxTabs,
+  }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    final order = <String>[];
+    for (var index = 0; index < maxTabs; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null && (order.isEmpty || order.last != label)) {
+        order.add(label);
+        if (label == stopAt) {
+          break;
+        }
+      }
+    }
+    return order;
   }
 
   Future<List<String>> _collectBackwardFocusOrder(
-    Map<String, Finder> candidates,
-  ) async {
-    return _candidateTraversalOrder(
-      candidates.keys.toList(growable: false).reversed.toList(growable: false),
-      interactiveSemanticsLabels().reversed.toList(growable: false),
-    );
+    Map<String, Finder> candidates, {
+    required String startAt,
+    required String stopAt,
+    required int maxTabs,
+  }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    final order = <String>[];
+    for (var index = 0; index < maxTabs; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label == startAt) {
+        order.add(label!);
+        break;
+      }
+    }
+
+    if (order.isEmpty) {
+      return order;
+    }
+
+    for (var index = 0; index < maxTabs; index += 1) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null && order.last != label) {
+        order.add(label);
+        if (label == stopAt) {
+          break;
+        }
+      }
+    }
+
+    return order;
+  }
+
+  String? _focusedLabel(Map<String, Finder> candidates) {
+    final focusNode = FocusManager.instance.primaryFocus;
+    final focusedContext = focusNode?.context;
+    if (focusedContext is! Element) {
+      return null;
+    }
+    for (final entry in candidates.entries) {
+      if (_isFocusedWithinCandidate(focusedContext, entry.value)) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  bool _isFocusedWithinCandidate(Element focusedContext, Finder candidate) {
+    for (final element in candidate.evaluate()) {
+      if (_isDescendantOfFocusedContext(
+        focusedContext: focusedContext,
+        candidate: element,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isDescendantOfFocusedContext({
+    required Element focusedContext,
+    required Element candidate,
+  }) {
+    if (focusedContext == candidate) {
+      return true;
+    }
+
+    var foundCandidate = false;
+    focusedContext.visitAncestorElements((ancestor) {
+      if (ancestor == candidate) {
+        foundCandidate = true;
+        return false;
+      }
+      return true;
+    });
+    return foundCandidate;
+  }
+
+  Finder? _visibleHostedHintFinder() {
+    for (final hint in <String>[_browseUnavailableHint, _manualFallbackHint]) {
+      final finder = find.text(hint);
+      if (finder.evaluate().isNotEmpty) {
+        return finder;
+      }
+    }
+    return null;
   }
 
   WorkspaceOnboardingContrastObservation _observeTextContrast({
@@ -229,10 +501,14 @@ class WorkspaceOnboardingAccessibilityRobot
   }) {
     final text = _finderText(textFinder);
     final foreground = _renderedTextColor(textFinder);
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: text,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
@@ -257,10 +533,14 @@ class WorkspaceOnboardingAccessibilityRobot
         resolvedBackground == null || resolvedBackground.alpha == 0
         ? backgroundFallback
         : resolvedBackground;
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: text,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
@@ -283,10 +563,14 @@ class WorkspaceOnboardingAccessibilityRobot
         ? backgroundFallback
         : resolvedBackground;
     final foreground = _renderedIconColorWithin(buttonFinder.first);
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: iconLabel,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
@@ -416,21 +700,6 @@ class WorkspaceOnboardingAccessibilityRobot
 
   String _normalizedLabel(String? label) {
     return label?.replaceAll('\n', ' ').trim() ?? '';
-  }
-
-  List<String> _candidateTraversalOrder(
-    List<String> expectedOrder,
-    List<String> observedLabels,
-  ) {
-    final remaining = expectedOrder.toSet();
-    final ordered = <String>[];
-    for (final label in observedLabels) {
-      if (!remaining.remove(label)) {
-        continue;
-      }
-      ordered.add(label);
-    }
-    return ordered;
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {
