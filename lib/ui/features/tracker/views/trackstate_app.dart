@@ -412,7 +412,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
-  Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitchWithLoader(
+  Future<_PreparedWorkspaceSwitch?>
+  _prepareBrowserLocalWorkspaceSwitchWithLoader(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
     required BrowserLocalRepositoryLoader repositoryLoader,
@@ -509,6 +510,12 @@ class _TrackStateAppState extends State<TrackStateApp>
           hostedWorkspaceAccessModes[workspace.id] = accessMode;
         }
         continue;
+      }
+      final localToken = await widget.authStore.readToken(
+        workspaceId: workspace.id,
+      );
+      if (localToken != null && localToken.trim().isNotEmpty) {
+        authenticatedWorkspaceIds.add(workspace.id);
       }
       if (activeWorkspace != null &&
           activeWorkspace.isLocal &&
@@ -1939,11 +1946,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final browserReauthenticated = await _prepareBrowserLocalWorkspaceSwitchWithLoader(
-      nextWorkspace,
-      previousViewModel: previousViewModel,
-      repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
-    );
+    final browserReauthenticated =
+        await _prepareBrowserLocalWorkspaceSwitchWithLoader(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
+        );
     if (browserReauthenticated != null) {
       var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
@@ -2772,6 +2780,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
                   localWorkspaceAvailability: _localWorkspaceAvailability,
                   workspaceSwitcherTriggerKey:
                       _workspaceSwitcherTriggerAnchorKey,
@@ -2822,6 +2831,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -2852,6 +2862,7 @@ class _TrackerHome extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -2957,6 +2968,7 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          authenticatedWorkspaceIds: authenticatedWorkspaceIds,
                           localWorkspaceAvailability:
                               localWorkspaceAvailability,
                           workspaceSwitcherTriggerKey:
@@ -3039,6 +3051,8 @@ class _TrackerHome extends StatelessWidget {
                           child: _DesktopShell(
                             viewModel: viewModel,
                             workspaces: workspaces,
+                            authenticatedWorkspaceIds:
+                                authenticatedWorkspaceIds,
                             localWorkspaceAvailability:
                                 localWorkspaceAvailability,
                             workspaceSwitcherTriggerKey:
@@ -3923,7 +3937,9 @@ class _LocalWorkspaceOnboardingPanelState
           ),
           const SizedBox(height: 12),
           _SettingsTextField(
-            fieldKey: const ValueKey('local-workspace-onboarding-initial-branch'),
+            fieldKey: const ValueKey(
+              'local-workspace-onboarding-initial-branch',
+            ),
             label: l10n.branch,
             initialValue: 'main',
             enabled: false,
@@ -4076,10 +4092,7 @@ class _LocalWorkspaceOnboardingPanelState
     if (order == null) {
       return child;
     }
-    return FocusTraversalOrder(
-      order: NumericFocusOrder(order),
-      child: child,
-    );
+    return FocusTraversalOrder(order: NumericFocusOrder(order), child: child);
   }
 }
 
@@ -4352,7 +4365,9 @@ class _WorkspaceOnboardingScreenState
                             Align(
                               alignment: Alignment.centerRight,
                               child: FilledButton(
-                                key: const ValueKey('workspace-onboarding-open'),
+                                key: const ValueKey(
+                                  'workspace-onboarding-open',
+                                ),
                                 onPressed: _isSubmitting ? null : _submit,
                                 child: Text(l10n.openWorkspace),
                               ),
@@ -4624,6 +4639,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4654,6 +4670,7 @@ class _DesktopShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4698,6 +4715,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            authenticatedWorkspaceIds: authenticatedWorkspaceIds,
             localWorkspaceAvailability: localWorkspaceAvailability,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             workspaceSwitcherTriggerFocusNode:
@@ -4740,6 +4758,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4770,6 +4789,7 @@ class _MobileShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4802,6 +4822,7 @@ class _MobileShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      authenticatedWorkspaceIds: authenticatedWorkspaceIds,
       localWorkspaceAvailability: localWorkspaceAvailability,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
@@ -4837,6 +4858,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4868,6 +4890,7 @@ class _TrackerMainPane extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4940,6 +4963,7 @@ class _TrackerMainPane extends StatelessWidget {
                   onOpenCreateIssue: onOpenCreateIssue,
                   onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
                   workspaces: workspaces,
+                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
                   onSelectWorkspace: onSelectWorkspace,
                   onDeleteWorkspace: onDeleteWorkspace,
                   workspaceRestoreFailure: workspaceRestoreFailure,
@@ -5763,6 +5787,15 @@ bool _shouldShowHostedWorkspaceSyncIssue(
       !status.hasPendingRefresh;
 }
 
+bool _hasStoredOrLiveLocalHostedAccess(
+  TrackerViewModel viewModel, {
+  required Set<String> authenticatedWorkspaceIds,
+  String? workspaceId,
+}) {
+  return viewModel.hasLocalHostedAccessSession ||
+      (workspaceId != null && authenticatedWorkspaceIds.contains(workspaceId));
+}
+
 HostedWorkspaceAccessMode _hostedWorkspaceAccessModeForViewModel(
   TrackerViewModel viewModel,
 ) {
@@ -5812,6 +5845,7 @@ Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel, {
   bool allowLocalGitHubConnection = false,
+  bool hasLocalHostedAccess = false,
 }) async {
   final l10n = AppLocalizations.of(context)!;
   if (viewModel.usesLocalPersistence) {
@@ -5819,7 +5853,9 @@ Future<void> _showRepositoryAccessDialog(
     if (allowLocalGitHubConnection) {
       final controller = TextEditingController();
       var rememberToken = true;
-      final dialogTitle = viewModel.hasLocalHostedAccessSession
+      final localHostedAccessConnected =
+          viewModel.hasLocalHostedAccessSession || hasLocalHostedAccess;
+      final dialogTitle = localHostedAccessConnected
           ? l10n.manageGitHubAccess
           : l10n.connectGitHub;
       final connectionRequest = await showDialog<({String token, bool remember})?>(
@@ -5834,8 +5870,7 @@ Future<void> _showRepositoryAccessDialog(
               }
 
               final connectionMessage =
-                  viewModel.hasLocalHostedAccessSession &&
-                      viewModel.connectedUser != null
+                  localHostedAccessConnected && viewModel.connectedUser != null
                   ? l10n.githubConnected(
                       viewModel.connectedUser!.login,
                       project?.repository ?? l10n.configuredRepositoryFallback,
@@ -6911,6 +6946,7 @@ class _SectionBody extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onApplyLocalGitConfiguration,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
@@ -6924,6 +6960,7 @@ class _SectionBody extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
@@ -6953,6 +6990,7 @@ class _SectionBody extends StatelessWidget {
         viewModel: viewModel,
         onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
         workspaces: workspaces,
+        authenticatedWorkspaceIds: authenticatedWorkspaceIds,
         onSelectWorkspace: onSelectWorkspace,
         onDeleteWorkspace: onDeleteWorkspace,
         workspaceRestoreFailure: workspaceRestoreFailure,
@@ -7518,6 +7556,7 @@ class _Settings extends StatefulWidget {
     required this.viewModel,
     required this.onApplyLocalGitConfiguration,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
@@ -7528,6 +7567,7 @@ class _Settings extends StatefulWidget {
   final TrackerViewModel viewModel;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
@@ -7660,9 +7700,18 @@ class _SettingsState extends State<_Settings> {
     final project = widget.viewModel.project!;
     final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
     final workspaceRestoreFailure = widget.workspaceRestoreFailure;
+    final activeLocalWorkspaceId =
+        widget.workspaces.selectedWorkspace?.isLocal == true
+        ? widget.workspaces.selectedWorkspace!.id
+        : null;
+    final hasLocalHostedAccess = _hasStoredOrLiveLocalHostedAccess(
+      widget.viewModel,
+      authenticatedWorkspaceIds: widget.authenticatedWorkspaceIds,
+      workspaceId: activeLocalWorkspaceId,
+    );
     final showLocalGitHubAccess =
         widget.workspaces.profiles.any((profile) => profile.isHosted) ||
-        widget.viewModel.hasLocalHostedAccessSession;
+        hasLocalHostedAccess;
     final selectorChildren = <Widget>[
       if (widget.viewModel.supportsGitHubAuth) ...[
         _SettingsProviderButton(
@@ -7691,6 +7740,7 @@ class _SettingsState extends State<_Settings> {
         _LocalGitConfiguration(
           viewModel: widget.viewModel,
           showGitHubAccess: showLocalGitHubAccess,
+          hasGitHubAccessSession: hasLocalHostedAccess,
           repositoryPathController: _repositoryPathController,
           writeBranchController: _writeBranchController,
           repositoryPathFocusNode: _repositoryPathFocusNode,
@@ -8286,6 +8336,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                 workspace.isLocal &&
                                 widget.localWorkspaceAvailability[workspaceId] ==
                                     false;
+                            final hasLocalHostedAccess =
+                                _hasStoredOrLiveLocalHostedAccess(
+                                  widget.viewModel,
+                                  authenticatedWorkspaceIds:
+                                      widget.authenticatedWorkspaceIds,
+                                  workspaceId: workspaceId,
+                                );
                             final showLocalHostedAccessAction =
                                 workspace.isLocal &&
                                 widget.viewModel.usesLocalPersistence;
@@ -8309,9 +8366,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                               primaryActionLabel: isUnavailableLocal
                                   ? l10n.retry
                                   : showLocalHostedAccessAction
-                                  ? (widget
-                                            .viewModel
-                                            .hasLocalHostedAccessSession
+                                  ? (hasLocalHostedAccess
                                         ? l10n.manageGitHubAccess
                                         : l10n.connectGitHub)
                                   : null,
@@ -8328,6 +8383,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                       context,
                                       widget.viewModel,
                                       allowLocalGitHubConnection: true,
+                                      hasLocalHostedAccess:
+                                          hasLocalHostedAccess,
                                     )
                                   : null,
                               showOpenAction:
@@ -13262,6 +13319,7 @@ class _LocalGitConfiguration extends StatelessWidget {
   const _LocalGitConfiguration({
     required this.viewModel,
     required this.showGitHubAccess,
+    required this.hasGitHubAccessSession,
     required this.repositoryPathController,
     required this.writeBranchController,
     required this.repositoryPathFocusNode,
@@ -13270,6 +13328,7 @@ class _LocalGitConfiguration extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final bool showGitHubAccess;
+  final bool hasGitHubAccessSession;
   final TextEditingController repositoryPathController;
   final TextEditingController writeBranchController;
   final FocusNode repositoryPathFocusNode;
@@ -13279,11 +13338,11 @@ class _LocalGitConfiguration extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = viewModel.project;
-    final accessTitle = viewModel.hasLocalHostedAccessSession
+    final accessTitle = hasGitHubAccessSession
         ? l10n.repositoryAccessConnected
         : l10n.localGitRuntimeTitle;
     final accessMessage =
-        viewModel.hasLocalHostedAccessSession && viewModel.connectedUser != null
+        hasGitHubAccessSession && viewModel.connectedUser != null
         ? l10n.githubConnected(
             viewModel.connectedUser!.login,
             project?.repository ?? l10n.configuredRepositoryFallback,
@@ -13297,16 +13356,17 @@ class _LocalGitConfiguration extends StatelessWidget {
             semanticLabel: accessTitle,
             title: accessTitle,
             message: accessMessage,
-            tone: viewModel.hasLocalHostedAccessSession
+            tone: hasGitHubAccessSession
                 ? _AccessCalloutTone.success
                 : _AccessCalloutTone.warning,
-            primaryActionLabel: viewModel.hasLocalHostedAccessSession
+            primaryActionLabel: hasGitHubAccessSession
                 ? l10n.manageGitHubAccess
                 : l10n.connectGitHub,
             onPrimaryAction: () => _showRepositoryAccessDialog(
               context,
               viewModel,
               allowLocalGitHubConnection: true,
+              hasLocalHostedAccess: hasGitHubAccessSession,
             ),
           ),
           const SizedBox(height: 12),

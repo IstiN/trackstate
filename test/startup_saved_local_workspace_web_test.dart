@@ -1254,6 +1254,98 @@ void main() {
       _expectHostedFallbackTrigger();
     },
   );
+
+  testWidgets(
+    'web startup keeps a signed-in saved local workspace in Local Git state while deferred local auth restore is still pending',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await authStore.saveToken(
+        'workspace-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final localRepository = _DelayedLocalHostedAccessRepository(
+        snapshot: await _snapshotForRepository('trackstate/trackstate'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => localRepository,
+        ),
+      );
+      await tester.pump();
+      for (
+        var index = 0;
+        index < 10 && !localRepository.connectPending;
+        index += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(localRepository.connectPending, isTrue);
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Connect GitHub')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: activeRow,
+          matching: find.text('Manage GitHub access'),
+        ),
+        findsWidgets,
+      );
+
+      localRepository.completeConnect();
+      await tester.pump();
+      await tester.pumpAndSettle();
+    },
+  );
 }
 
 Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
@@ -1339,6 +1431,44 @@ class _DelayedGitHubProbeRepository extends ProviderBackedTrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() async {
     replaceCachedState(snapshot: _snapshotOverride);
     return _snapshotOverride;
+  }
+}
+
+class _DelayedLocalHostedAccessRepository extends DemoTrackStateRepository {
+  _DelayedLocalHostedAccessRepository({required super.snapshot});
+
+  final Completer<RepositoryUser> _hostedAccessConnectCompleter =
+      Completer<RepositoryUser>();
+  bool _hostedAccessConnectStarted = false;
+
+  bool get connectPending =>
+      _hostedAccessConnectStarted && !_hostedAccessConnectCompleter.isCompleted;
+
+  void completeConnect() {
+    if (_hostedAccessConnectCompleter.isCompleted) {
+      return;
+    }
+    _hostedAccessConnectCompleter.complete(
+      const RepositoryUser(login: 'demo-user', displayName: 'Demo User'),
+    );
+  }
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    if (connection.token.trim().isEmpty) {
+      return const RepositoryUser(
+        login: 'local-user',
+        displayName: 'Local User',
+      );
+    }
+    _hostedAccessConnectStarted = true;
+    return _hostedAccessConnectCompleter.future;
   }
 }
 
