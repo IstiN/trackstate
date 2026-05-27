@@ -29,6 +29,41 @@ class Ts667ProbeWorkspaceProfileService implements WorkspaceProfileService {
                 ?.id
           : _state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: _state.unavailableLocalWorkspaceIds
+          .difference({workspaceId}),
+    );
+    return _state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) async {
+    _state = WorkspaceProfilesState(
+      profiles: [
+        for (final profile in _state.profiles)
+          if (profile.id == workspaceId && profile.isHosted)
+            profile.copyWith(hostedAccessMode: accessMode)
+          else
+            profile,
+      ],
+      activeWorkspaceId: _state.activeWorkspaceId,
+      migrationComplete: _state.migrationComplete,
+      unavailableLocalWorkspaceIds: _state.unavailableLocalWorkspaceIds,
+    );
+    return _state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    _state = _state.copyWith(
+      unavailableLocalWorkspaceIds: isAvailable
+          ? _state.unavailableLocalWorkspaceIds.difference({workspaceId})
+          : <String>{..._state.unavailableLocalWorkspaceIds, workspaceId},
     );
     return _state;
   }

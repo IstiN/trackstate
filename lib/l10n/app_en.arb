@@ -22,7 +22,8 @@
   "syncStatus": "Synced with Git",
   "workspaceSyncSettings": "Workspace sync",
   "workspaceSyncChecking": "Syncing",
-  "workspaceSyncAttentionNeeded": "Attention needed",
+  "workspaceSyncAttentionNeededVisibleLabel": "Attention needed",
+  "workspaceSyncAttentionNeededSemanticLabel": "Sync error, attention needed",
   "workspaceSyncUnavailable": "Sync unavailable",
   "workspaceSyncPending": "Updates pending",
   "workspaceSyncPendingTitle": "Updates pending",
@@ -83,9 +84,10 @@
   "inReview": "In Review",
   "done": "Done",
   "detail": "Detail",
+  "comment": "Comment",
   "comments": "Comments",
   "attachments": "Attachments",
-  "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
+  "attachmentsDownloadOnlyMessage": "This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.",
   "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
@@ -122,6 +124,7 @@
       }
     }
   },
+  "commentPlaceholder": "Add a comment...",
   "postComment": "Post comment",
   "editedAt": "Edited {timestamp}",
   "@editedAt": {
@@ -316,6 +319,17 @@
   "repositoryAccessDisconnectedMessage": "Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.",
   "repositoryAccessReadOnlyTitle": "This repository session is read-only",
   "repositoryAccessReadOnlyMessage": "This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.",
+  "repositoryAccessCapabilitySummary": "Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.",
+  "@repositoryAccessCapabilitySummary": {
+    "placeholders": {
+      "canWrite": {
+        "type": "String"
+      },
+      "canCreateBranch": {
+        "type": "String"
+      }
+    }
+  },
   "repositoryAccessAttachmentRestrictedTitle": "Attachments stay download-only in the browser",
   "repositoryAccessAttachmentRestrictedMessage": "Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.",
   "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
@@ -324,11 +338,14 @@
   "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
   "savedWorkspaces": "Saved workspaces",
+  "workspaceSwitcher": "Workspace switcher",
+  "workspaceSwitcherEmptyState": "No saved workspaces yet. Add one to switch between repositories faster.",
   "addWorkspace": "Add workspace",
   "localFolder": "Local folder",
   "hostedRepository": "Hosted repository",
   "workspaceOnboardingDescription": "Choose how TrackState should open the next workspace.",
   "workspaceOnboardingFirstRunDescription": "Choose a local folder to open an existing workspace or initialize TrackState in a new one.",
+  "workspaceOnboardingFirstLaunchDescription": "Choose a local folder or hosted repository to get started.",
   "localWorkspaceOnboardingOpenExisting": "Open existing folder",
   "localWorkspaceOnboardingInitializeFolder": "Initialize folder",
   "localWorkspaceOnboardingFolderLabel": "Selected folder",
@@ -373,6 +390,16 @@
   "workspaceTargetTypeLocal": "Local",
   "activeWorkspace": "Active",
   "openWorkspace": "Open",
+  "addWorkspace": "Add workspace",
+  "workspaceSaveAndSwitch": "Save and switch",
+  "workspaceStateLocalGit": "Local Git",
+  "workspaceStateLocal": "Local",
+  "workspaceStateConnected": "Connected",
+  "workspaceStateReadOnly": "Read-only",
+  "workspaceStateSyncIssue": "Sync issue",
+  "workspaceStateNeedsSignIn": "Needs sign-in",
+  "workspaceStateSavedHostedWorkspace": "Saved hosted workspace",
+  "workspaceStateUnavailable": "Unavailable",
   "workspaceDeleteConfirmationTitle": "Delete saved workspace",
   "workspaceDeleteConfirmationMessage": "Delete {workspaceName} and remove its stored credentials? This action cannot be undone.",
   "@workspaceDeleteConfirmationMessage": {
@@ -405,10 +432,51 @@
       }
     }
   },
-  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "repositoryConfigFallback": "TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}",
   "@repositoryConfigFallback": {
     "placeholders": {
       "error": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSwitchFailed": "Could not open {workspaceName}. {reason}",
+  "@workspaceSwitchFailed": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceRestoreSkipped": "Skipped {workspaceName} during restore. {reason}",
+  "@workspaceRestoreSkipped": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceRestoreFailed": "No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}",
+  "@workspaceRestoreFailed": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "selectedIssueUnavailable": "{issueKey} is no longer available in this workspace.",
+  "@selectedIssueUnavailable": {
+    "placeholders": {
+      "issueKey": {
         "type": "String"
       }
     }
@@ -542,9 +610,11 @@
   "configuredRepositoryFallback": "configured repository",
   "currentBranchFallback": "current branch",
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
+  "localGitHostedAccessDescription": "Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
   "retry": "Retry",
+  "retryStartup": "Retry startup",
   "editIssue": "Edit issue",
   "optional": "Optional",
   "unassigned": "Unassigned",
@@ -555,11 +625,28 @@
   "noTransitionsAvailable": "No workflow transitions available.",
   "resolutionRequired": "Resolution is required for this transition.",
   "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
-  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
   "@hierarchyChangeConfirmationMessage": {
     "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
       "descendantCount": {
         "type": "int"
+      }
+    }
+  },
+  "hierarchyChangeConfirmationDestinationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.",
+  "@hierarchyChangeConfirmationDestinationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      },
+      "destinationLabel": {
+        "type": "String"
       }
     }
   },

@@ -18,60 +18,35 @@ class WorkspaceOnboardingAccessibilityRobot
   static const _title = 'Add workspace';
   static const _firstRunDescription =
       'Choose a local folder or hosted repository to get started.';
-  static const _legacyFirstRunDescription =
-      'Choose a local folder to open an existing workspace or initialize '
-      'TrackState in a new one.';
   static const _localFolder = 'Local folder';
   static const _hostedRepository = 'Hosted repository';
-  static const _repositoryPath = 'Repository Path';
-  static const _repository = 'Repository';
-  static const _branch = 'Branch';
-  static const _open = 'Open';
-  static const _localHelper = 'Enter the local Git folder path.';
-  static const _hostedHelper = 'Enter the repository as owner/repo.';
-  static const _browseUnavailableHint =
-      'Connect GitHub in an existing hosted workspace to browse accessible '
-      'repositories. You can still enter owner/repo manually here.';
-  static const _manualFallbackHint =
-      'Select a repository from the current GitHub session or enter owner/repo manually.';
-  static const _legacyOpenExistingFolder = 'Open existing folder';
-  static const _legacyInitializeFolder = 'Initialize folder';
+  static const _openExistingFolder = 'Open existing folder';
+  static const _initializeFolder = 'Initialize folder';
 
-  Finder get _titleText => find.text(_title);
+  Finder _buttonWithText(String text) => find.ancestor(
+    of: find.text(text),
+    matching: find.bySubtype<ButtonStyleButton>(),
+  );
 
-  Finder get _subtitleText =>
-      find.text(_firstRunDescription, skipOffstage: false);
+  Finder get _localFolderButton => _buttonWithText(_localFolder);
 
-  Finder get _legacySubtitleText =>
-      find.text(_legacyFirstRunDescription, skipOffstage: false);
+  Finder get _hostedRepositoryButton => _buttonWithText(_hostedRepository);
 
-  Finder get _onboardingSurface => find.byType(Scaffold);
-
-  Finder get _modernOpenButton =>
-      find.byKey(const ValueKey('workspace-onboarding-open'));
-
-  Finder get _localPathField =>
-      find.byKey(const ValueKey('workspace-onboarding-local-path'));
-
-  Finder get _localBranchField =>
-      find.byKey(const ValueKey('workspace-onboarding-local-branch'));
-
-  Finder get _hostedRepositoryField =>
-      find.byKey(const ValueKey('workspace-onboarding-hosted-repository'));
-
-  Finder get _hostedBranchField =>
-      find.byKey(const ValueKey('workspace-onboarding-hosted-branch'));
-
-  Finder get _legacyOpenExistingFolderButton =>
+  Finder get _openExistingFolderButton =>
       find.byKey(const ValueKey('local-workspace-onboarding-open-existing'));
 
-  Finder get _legacyInitializeFolderButton => find.byKey(
+  Finder get _initializeFolderButton => find.byKey(
     const ValueKey('local-workspace-onboarding-initialize-folder'),
   );
 
+  Finder get _titleText => find.text(_title);
+
+  Finder get _subtitleText => find.text(_firstRunDescription);
+
+  Finder get _onboardingSurface => find.byType(Scaffold);
+
   @override
-  Future<List<String>> visibleTexts({required bool hosted}) async {
-    await _selectTargetIfVisible(hosted: hosted);
+  List<String> visibleTexts() {
     _expectOnboardingVisible();
     final texts = <String>[];
     for (final widget in tester.widgetList<Text>(
@@ -81,19 +56,18 @@ class WorkspaceOnboardingAccessibilityRobot
       ),
     )) {
       final value = widget.data?.trim();
-      if (value == null || value.isEmpty || texts.contains(value)) {
+      if (value == null || value.isEmpty) {
         continue;
       }
-      texts.add(value);
+      if (!texts.contains(value)) {
+        texts.add(value);
+      }
     }
     return texts;
   }
 
   @override
-  Future<List<String>> interactiveSemanticsLabels({
-    required bool hosted,
-  }) async {
-    await _selectTargetIfVisible(hosted: hosted);
+  List<String> interactiveSemanticsLabels() {
     _expectOnboardingVisible();
     final rootNode = tester.getSemantics(_onboardingSurface.first);
     final labels = <String>[];
@@ -120,97 +94,19 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
-  Future<List<String>> collectForwardFocusOrder({required bool hosted}) async {
-    await _selectTargetIfVisible(hosted: hosted);
-    return _collectForwardFocusOrder(_focusCandidates(hosted: hosted));
+  Future<List<String>> collectForwardFocusOrder() async {
+    return _collectForwardFocusOrder(_focusCandidates());
   }
 
   @override
-  Future<List<String>> collectBackwardFocusOrder({required bool hosted}) async {
-    await _selectTargetIfVisible(hosted: hosted);
-    return _collectBackwardFocusOrder(_focusCandidates(hosted: hosted));
+  Future<List<String>> collectBackwardFocusOrder() async {
+    return _collectBackwardFocusOrder(_focusCandidates());
   }
 
   @override
-  Future<List<WorkspaceOnboardingContrastObservation>> observeContrastSet({
-    required bool hosted,
-  }) async {
-    await _selectTargetIfVisible(hosted: hosted);
+  List<WorkspaceOnboardingContrastObservation> observeContrastSet() {
     _expectOnboardingVisible();
     final colors = this.colors();
-
-    if (_hasModernOnboardingToggle) {
-      final observations = <WorkspaceOnboardingContrastObservation>[
-        _observeTextContrast(
-          label: 'Heading',
-          textFinder: _titleText,
-          background: colors.page,
-          minimumContrast: 3.0,
-        ),
-        _observeTextContrast(
-          label: 'Subtitle',
-          textFinder: _subtitleText,
-          background: colors.page,
-          minimumContrast: 4.5,
-        ),
-        _observeButtonTextContrast(
-          label: hosted
-              ? 'Hosted repository segmented choice'
-              : 'Local folder segmented choice',
-          buttonFinder: _buttonForText(
-            hosted ? _hostedRepository : _localFolder,
-          ),
-          text: hosted ? _hostedRepository : _localFolder,
-          backgroundFallback: colors.primary,
-          minimumContrast: 4.5,
-        ),
-      ];
-
-      if (hosted) {
-        observations.add(
-          _observeTextContrast(
-            label: 'Repository helper',
-            textFinder: find.text(_hostedHelper),
-            background: colors.surface,
-            minimumContrast: 4.5,
-          ),
-        );
-        final hostedHintFinder = _visibleHostedHintFinder();
-        if (hostedHintFinder != null) {
-          observations.add(
-            _observeTextContrast(
-              label: _finderText(hostedHintFinder) == _browseUnavailableHint
-                  ? 'Browse unavailable hint'
-                  : 'Manual fallback hint',
-              textFinder: hostedHintFinder,
-              background: colors.surface,
-              minimumContrast: 4.5,
-            ),
-          );
-        }
-      } else {
-        observations.add(
-          _observeTextContrast(
-            label: 'Local path helper',
-            textFinder: find.text(_localHelper),
-            background: colors.surface,
-            minimumContrast: 4.5,
-          ),
-        );
-      }
-
-      observations.add(
-        _observeButtonTextContrast(
-          label: 'Open action',
-          buttonFinder: _modernOpenButton,
-          text: _open,
-          backgroundFallback: colors.primary,
-          minimumContrast: 4.5,
-        ),
-      );
-      return observations;
-    }
-
     return <WorkspaceOnboardingContrastObservation>[
       _observeTextContrast(
         label: 'Heading',
@@ -220,34 +116,34 @@ class WorkspaceOnboardingAccessibilityRobot
       ),
       _observeTextContrast(
         label: 'Subtitle',
-        textFinder: _legacySubtitleText,
+        textFinder: _subtitleText,
         background: colors.page,
         minimumContrast: 4.5,
       ),
       _observeButtonTextContrast(
         label: 'Open existing folder action',
-        buttonFinder: _legacyOpenExistingFolderButton,
-        text: _legacyOpenExistingFolder,
+        buttonFinder: _openExistingFolderButton,
+        text: _openExistingFolder,
         backgroundFallback: colors.primary,
         minimumContrast: 4.5,
       ),
       _observeButtonIconContrast(
         label: 'Open existing folder icon',
-        buttonFinder: _legacyOpenExistingFolderButton,
+        buttonFinder: _openExistingFolderButton,
         iconLabel: 'folder',
         backgroundFallback: colors.primary,
         minimumContrast: 3.0,
       ),
       _observeButtonTextContrast(
         label: 'Initialize folder action',
-        buttonFinder: _legacyInitializeFolderButton,
-        text: _legacyInitializeFolder,
+        buttonFinder: _initializeFolderButton,
+        text: _initializeFolder,
         backgroundFallback: colors.surface,
         minimumContrast: 4.5,
       ),
       _observeButtonIconContrast(
         label: 'Initialize folder icon',
-        buttonFinder: _legacyInitializeFolderButton,
+        buttonFinder: _initializeFolderButton,
         iconLabel: 'plus',
         backgroundFallback: colors.surface,
         minimumContrast: 3.0,
@@ -256,8 +152,7 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
-  Future<bool> hasVisiblePlaceholderText({required bool hosted}) async {
-    await _selectTargetIfVisible(hosted: hosted);
+  bool hasVisiblePlaceholderText() {
     final textFields = find.descendant(
       of: _onboardingSurface.first,
       matching: find.byType(TextField),
@@ -276,8 +171,7 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
-  Future<bool> hasVisibleIcons({required bool hosted}) async {
-    await _selectTargetIfVisible(hosted: hosted);
+  bool hasVisibleIcons() {
     return find
         .descendant(
           of: _onboardingSurface.first,
@@ -292,11 +186,6 @@ class WorkspaceOnboardingAccessibilityRobot
     return context.ts;
   }
 
-  bool get _hasModernOnboardingToggle =>
-      _buttonForTextOrNull(_localFolder) != null &&
-      _buttonForTextOrNull(_hostedRepository) != null &&
-      _modernOpenButton.evaluate().isNotEmpty;
-
   void _expectOnboardingVisible() {
     if (_titleText.evaluate().isEmpty ||
         _onboardingSurface.evaluate().isEmpty) {
@@ -304,71 +193,13 @@ class WorkspaceOnboardingAccessibilityRobot
     }
   }
 
-  Future<void> _selectTargetIfVisible({required bool hosted}) async {
-    _expectOnboardingVisible();
-    if (!_hasModernOnboardingToggle) {
-      return;
-    }
-    final targetButton = hosted
-        ? _buttonForText(_hostedRepository)
-        : _buttonForText(_localFolder);
-    await tester.ensureVisible(targetButton);
-    await tester.tap(targetButton, warnIfMissed: false);
-    await tester.pumpAndSettle();
-  }
-
-  Map<String, Finder> _focusCandidates({required bool hosted}) {
-    if (_hasModernOnboardingToggle) {
-      return <String, Finder>{
-        _localFolder: _buttonForText(_localFolder),
-        _hostedRepository: _buttonForText(_hostedRepository),
-        (hosted ? _repository : _repositoryPath): hosted
-            ? _hostedRepositoryField
-            : _localPathField,
-        _branch: hosted ? _hostedBranchField : _localBranchField,
-        _open: _modernOpenButton,
-      };
-    }
+  Map<String, Finder> _focusCandidates() {
     return <String, Finder>{
-      _legacyOpenExistingFolder: _legacyOpenExistingFolderButton,
-      _legacyInitializeFolder: _legacyInitializeFolderButton,
+      _localFolder: _localFolderButton,
+      _hostedRepository: _hostedRepositoryButton,
+      _openExistingFolder: _openExistingFolderButton,
+      _initializeFolder: _initializeFolderButton,
     };
-  }
-
-  Finder? _visibleHostedHintFinder() {
-    for (final candidate in <String>[
-      _browseUnavailableHint,
-      _manualFallbackHint,
-    ]) {
-      final finder = find.text(candidate);
-      if (finder.evaluate().isNotEmpty) {
-        return finder;
-      }
-    }
-    return null;
-  }
-
-  Finder _buttonForText(String text) {
-    final finder = _buttonForTextOrNull(text);
-    if (finder == null) {
-      throw StateError('No button found for "$text".');
-    }
-    return finder;
-  }
-
-  Finder? _buttonForTextOrNull(String text) {
-    final label = find.text(text);
-    if (label.evaluate().isEmpty) {
-      return null;
-    }
-    final button = find.ancestor(
-      of: label.first,
-      matching: find.bySubtype<ButtonStyleButton>(),
-    );
-    if (button.evaluate().isEmpty) {
-      return null;
-    }
-    return button.first;
   }
 
   Future<List<String>> _collectForwardFocusOrder(
@@ -378,11 +209,12 @@ class WorkspaceOnboardingAccessibilityRobot
     await tester.pump();
 
     final order = <String>[];
+    final expectedLabels = candidates.keys.toList(growable: false);
     for (var index = 0; index < candidates.length; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      final label = _focusedLabel(candidates);
-      if (label != null) {
+      final label = _focusedLabel(expectedLabels);
+      if (label != null && (order.isEmpty || order.last != label)) {
         order.add(label);
       }
     }
@@ -401,7 +233,8 @@ class WorkspaceOnboardingAccessibilityRobot
     }
 
     final order = <String>[];
-    final initialLabel = _focusedLabel(candidates);
+    final expectedLabels = candidates.keys.toList(growable: false);
+    final initialLabel = _focusedLabel(expectedLabels);
     if (initialLabel != null) {
       order.add(initialLabel);
     }
@@ -411,8 +244,8 @@ class WorkspaceOnboardingAccessibilityRobot
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      final label = _focusedLabel(candidates);
-      if (label != null) {
+      final label = _focusedLabel(expectedLabels);
+      if (label != null && order.last != label) {
         order.add(label);
       }
     }
@@ -420,7 +253,7 @@ class WorkspaceOnboardingAccessibilityRobot
     return order;
   }
 
-  String? _focusedLabel(Map<String, Finder> candidates) {
+  String? _focusedLabel(List<String> expectedLabels) {
     final focusedSemantics = find.semantics.byPredicate(
       (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
@@ -428,22 +261,10 @@ class WorkspaceOnboardingAccessibilityRobot
     if (focusedSemantics.evaluate().isEmpty) {
       return null;
     }
-
-    for (final entry in candidates.entries) {
-      final matches = entry.value.evaluate().length;
-      if (matches == 0) {
-        continue;
-      }
-      for (var index = 0; index < matches; index += 1) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
-          return entry.key;
-        }
+    for (final node in focusedSemantics.evaluate()) {
+      final label = _normalizedLabel(node.label);
+      if (expectedLabels.contains(label)) {
+        return label;
       }
     }
     return null;
@@ -644,14 +465,6 @@ class WorkspaceOnboardingAccessibilityRobot
 
   String _normalizedLabel(String? label) {
     return label?.replaceAll('\n', ' ').trim() ?? '';
-  }
-
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {

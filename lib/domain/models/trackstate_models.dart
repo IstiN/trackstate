@@ -30,8 +30,11 @@ enum WorkspaceSyncSignal {
   localHead,
   localWorktree,
   hostedRepository,
+  hostedSnapshotReload,
   hostedSession,
 }
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
 
 enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
 
@@ -936,6 +939,7 @@ class RepositoryIssueIndexEntry {
     this.progress,
     this.resolutionId,
     this.revision,
+    this.links = const [],
   });
 
   final String key;
@@ -956,6 +960,7 @@ class RepositoryIssueIndexEntry {
   final double? progress;
   final String? resolutionId;
   final String? revision;
+  final List<IssueLink> links;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
@@ -972,6 +977,7 @@ class RepositoryIssueIndexEntry {
     double? progress,
     String? resolutionId,
     String? revision,
+    List<IssueLink>? links,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -992,6 +998,7 @@ class RepositoryIssueIndexEntry {
       progress: progress ?? this.progress,
       resolutionId: resolutionId ?? this.resolutionId,
       revision: revision ?? this.revision,
+      links: links ?? this.links,
     );
   }
 }

@@ -208,11 +208,17 @@ abstract class AppLocalizations {
   /// **'Syncing'**
   String get workspaceSyncChecking;
 
-  /// No description provided for @workspaceSyncAttentionNeeded.
+  /// No description provided for @workspaceSyncAttentionNeededVisibleLabel.
   ///
   /// In en, this message translates to:
   /// **'Attention needed'**
-  String get workspaceSyncAttentionNeeded;
+  String get workspaceSyncAttentionNeededVisibleLabel;
+
+  /// No description provided for @workspaceSyncAttentionNeededSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync error, attention needed'**
+  String get workspaceSyncAttentionNeededSemanticLabel;
 
   /// No description provided for @workspaceSyncUnavailable.
   ///
@@ -388,6 +394,12 @@ abstract class AppLocalizations {
   /// **'Detail'**
   String get detail;
 
+  /// No description provided for @comment.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment'**
+  String get comment;
+
   /// No description provided for @comments.
   ///
   /// In en, this message translates to:
@@ -403,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
+  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
@@ -477,6 +489,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download {fileName}'**
   String downloadAttachment(String fileName);
+
+  /// No description provided for @commentPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a comment...'**
+  String get commentPlaceholder;
 
   /// No description provided for @postComment.
   ///
@@ -1246,6 +1264,15 @@ abstract class AppLocalizations {
   /// **'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.'**
   String get repositoryAccessReadOnlyMessage;
 
+  /// No description provided for @repositoryAccessCapabilitySummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.'**
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  );
+
   /// No description provided for @repositoryAccessAttachmentRestrictedTitle.
   ///
   /// In en, this message translates to:
@@ -1294,6 +1321,18 @@ abstract class AppLocalizations {
   /// **'Saved workspaces'**
   String get savedWorkspaces;
 
+  /// No description provided for @workspaceSwitcher.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace switcher'**
+  String get workspaceSwitcher;
+
+  /// No description provided for @workspaceSwitcherEmptyState.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved workspaces yet. Add one to switch between repositories faster.'**
+  String get workspaceSwitcherEmptyState;
+
   /// No description provided for @addWorkspace.
   ///
   /// In en, this message translates to:
@@ -1323,6 +1362,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Choose a local folder to open an existing workspace or initialize TrackState in a new one.'**
   String get workspaceOnboardingFirstRunDescription;
+
+  /// No description provided for @workspaceOnboardingFirstLaunchDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a local folder or hosted repository to get started.'**
+  String get workspaceOnboardingFirstLaunchDescription;
 
   /// No description provided for @localWorkspaceOnboardingOpenExisting.
   ///
@@ -1504,6 +1549,60 @@ abstract class AppLocalizations {
   /// **'Open'**
   String get openWorkspace;
 
+  /// No description provided for @workspaceSaveAndSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Save and switch'**
+  String get workspaceSaveAndSwitch;
+
+  /// No description provided for @workspaceStateLocalGit.
+  ///
+  /// In en, this message translates to:
+  /// **'Local Git'**
+  String get workspaceStateLocalGit;
+
+  /// No description provided for @workspaceStateLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get workspaceStateLocal;
+
+  /// No description provided for @workspaceStateConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get workspaceStateConnected;
+
+  /// No description provided for @workspaceStateReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only'**
+  String get workspaceStateReadOnly;
+
+  /// No description provided for @workspaceStateSyncIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync issue'**
+  String get workspaceStateSyncIssue;
+
+  /// No description provided for @workspaceStateNeedsSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs sign-in'**
+  String get workspaceStateNeedsSignIn;
+
+  /// No description provided for @workspaceStateSavedHostedWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved hosted workspace'**
+  String get workspaceStateSavedHostedWorkspace;
+
+  /// No description provided for @workspaceStateUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get workspaceStateUnavailable;
+
   /// No description provided for @workspaceDeleteConfirmationTitle.
   ///
   /// In en, this message translates to:
@@ -1573,8 +1672,32 @@ abstract class AppLocalizations {
   /// No description provided for @repositoryConfigFallback.
   ///
   /// In en, this message translates to:
-  /// **'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}'**
+  /// **'TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}'**
   String repositoryConfigFallback(String error);
+
+  /// No description provided for @workspaceSwitchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open {workspaceName}. {reason}'**
+  String workspaceSwitchFailed(String workspaceName, String reason);
+
+  /// No description provided for @workspaceRestoreSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped {workspaceName} during restore. {reason}'**
+  String workspaceRestoreSkipped(String workspaceName, String reason);
+
+  /// No description provided for @workspaceRestoreFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}'**
+  String workspaceRestoreFailed(String workspaceName, String reason);
+
+  /// No description provided for @selectedIssueUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'{issueKey} is no longer available in this workspace.'**
+  String selectedIssueUnavailable(String issueKey);
 
   /// No description provided for @localGitTokensNotNeeded.
   ///
@@ -1713,6 +1836,12 @@ abstract class AppLocalizations {
   /// **'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.'**
   String get localGitRuntimeDescription;
 
+  /// No description provided for @localGitHostedAccessDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.'**
+  String get localGitHostedAccessDescription;
+
   /// No description provided for @close.
   ///
   /// In en, this message translates to:
@@ -1730,6 +1859,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retry'**
   String get retry;
+
+  /// No description provided for @retryStartup.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry startup'**
+  String get retryStartup;
 
   /// No description provided for @editIssue.
   ///
@@ -1794,8 +1929,21 @@ abstract class AppLocalizations {
   /// No description provided for @hierarchyChangeConfirmationMessage.
   ///
   /// In en, this message translates to:
-  /// **'Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
-  String hierarchyChangeConfirmationMessage(int descendantCount);
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
+  String hierarchyChangeConfirmationMessage(
+    String issueLabel,
+    int descendantCount,
+  );
+
+  /// No description provided for @hierarchyChangeConfirmationDestinationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.'**
+  String hierarchyChangeConfirmationDestinationMessage(
+    String issueLabel,
+    int descendantCount,
+    String destinationLabel,
+  );
 
   /// No description provided for @confirmMove.
   ///
