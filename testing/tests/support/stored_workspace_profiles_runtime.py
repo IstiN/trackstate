@@ -37,9 +37,11 @@ class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
         self,
         *,
         workspace_state: dict[str, object],
+        restore_local_workspace_handles: bool = True,
     ) -> None:
         super().__init__()
         self._workspace_state = workspace_state
+        self._restore_local_workspace_handles = restore_local_workspace_handles
 
     def __enter__(self) -> PlaywrightWebAppSession:
         session = super().__enter__()
@@ -47,7 +49,10 @@ class WorkspaceProfilesRuntime(PlaywrightWebAppRuntime):
             raise RuntimeError(
                 "WorkspaceProfilesRuntime expected a browser context.",
             )
-        script = _build_preload_script(self._workspace_state)
+        script = _build_preload_script(
+            self._workspace_state,
+            restore_local_workspace_handles=self._restore_local_workspace_handles,
+        )
         self._context.add_init_script(script=script)
         if self._page is not None:
             self._page.add_init_script(script=script)
@@ -62,10 +67,12 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
         token: str,
         workspace_state: dict[str, object],
         workspace_token_profile_ids: tuple[str, ...] = (),
+        restore_local_workspace_handles: bool = True,
     ) -> None:
         super().__init__(repository=repository, token=token)
         self._workspace_state = workspace_state
         self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
+        self._restore_local_workspace_handles = restore_local_workspace_handles
 
     def __enter__(self) -> PlaywrightWebAppSession:
         session = super().__enter__()
@@ -78,6 +85,7 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
             repository=self._repository,
             token=self._token,
             workspace_token_profile_ids=self._workspace_token_profile_ids,
+            restore_local_workspace_handles=self._restore_local_workspace_handles,
         )
         self._context.add_init_script(script=script)
         if self._page is not None:
@@ -91,9 +99,14 @@ def _build_preload_script(
     repository: str | None = None,
     token: str | None = None,
     workspace_token_profile_ids: tuple[str, ...] = (),
+    restore_local_workspace_handles: bool = True,
 ) -> str:
     serialized_state = json.dumps(workspace_state)
-    local_workspace_fixtures = _local_workspace_restore_fixtures(workspace_state)
+    local_workspace_fixtures = (
+        _local_workspace_restore_fixtures(workspace_state)
+        if restore_local_workspace_handles
+        else []
+    )
     scripts = [
         "(() => {",
         f"const state = {json.dumps(serialized_state)};",

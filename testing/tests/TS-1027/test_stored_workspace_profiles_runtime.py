@@ -182,6 +182,30 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
         self.assertIn("IDBObjectStore.prototype.get", script)
         self.assertIn(workspace_dir, script)
 
+    def test_preload_script_skips_local_workspace_fixture_when_restore_is_disabled(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+                restore_local_workspace_handles=False,
+            )
+
+        self.assertNotIn("localWorkspaceFixtures", script)
+        self.assertNotIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertNotIn("IDBObjectStore.prototype.get", script)
+
     def test_delayed_auth_runtime_wait_polls_page_until_probe_event_arrives(self) -> None:
         runtime = DelayedAuthWorkspaceProfilesRuntime(
             repository="IstiN/trackstate-setup",
