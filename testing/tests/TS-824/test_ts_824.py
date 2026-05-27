@@ -39,7 +39,7 @@ TEST_CASE_TITLE = (
 INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-824/test_ts_824.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 TAB_FOCUS_TIMEOUT_MS = 4_000
 ESCAPE_DISMISS_TIMEOUT_MS = 4_000
 PRE_TAB_TRIGGER_SHIFT_TAB_LIMIT = 3

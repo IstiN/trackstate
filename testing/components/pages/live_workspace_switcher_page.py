@@ -7039,10 +7039,14 @@ class LiveWorkspaceSwitcherPage:
                   && (text.includes('Open') || text.includes('Active'));
                 const isPanelSignal = (text) =>
                   text.includes(heading)
-                  || text.includes('Saved workspaces')
-                  || text.includes('Add workspace')
-                  || text.includes('Save and switch')
-                  || isWorkspaceRow(text);
+                  && (
+                    text.includes('Saved workspaces')
+                    || text.includes('Add workspace')
+                    || text.includes('Save and switch')
+                    || text.includes('Hosted Local')
+                    || isWorkspaceRow(text)
+                    || (text.includes('Repository') && text.includes('Branch'))
+                  );
                 const buttons = Array.from(
                   document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
                 ).filter(isVisible);
