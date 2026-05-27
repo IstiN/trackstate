@@ -1363,6 +1363,12 @@ abstract class AppLocalizations {
   /// **'Choose a local folder to open an existing workspace or initialize TrackState in a new one.'**
   String get workspaceOnboardingFirstRunDescription;
 
+  /// No description provided for @workspaceOnboardingFirstLaunchDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a local folder or hosted repository to get started.'**
+  String get workspaceOnboardingFirstLaunchDescription;
+
   /// No description provided for @localWorkspaceOnboardingOpenExisting.
   ///
   /// In en, this message translates to:
@@ -1572,6 +1578,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Read-only'**
   String get workspaceStateReadOnly;
+
+  /// No description provided for @workspaceStateSyncIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync issue'**
+  String get workspaceStateSyncIssue;
 
   /// No description provided for @workspaceStateNeedsSignIn.
   ///

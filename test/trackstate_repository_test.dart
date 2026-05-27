@@ -794,6 +794,59 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'provider-backed repository detail hydration keeps index-backed links when no issue-local links.json exists',
+    () async {
+      final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
+      files.remove('DEMO/DEMO-1/DEMO-2/links.json');
+      final issuesIndex =
+          jsonDecode(files['DEMO/.trackstate/index/issues.json']!)
+              as List<dynamic>;
+      final sourceEntry = issuesIndex
+          .whereType<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['key'] == 'DEMO-2');
+      sourceEntry['links'] = [
+        {'type': 'blocks', 'target': 'DEMO-4', 'direction': 'outward'},
+      ];
+      files['DEMO/.trackstate/index/issues.json'] = jsonEncode(issuesIndex);
+
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: files,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      final indexEntry = snapshot.repositoryIndex.entryForKey('DEMO-2');
+      final summaryIssue = snapshot.issues.firstWhere(
+        (issue) => issue.key == 'DEMO-2',
+      );
+
+      expect(indexEntry, isNotNull);
+      expect(indexEntry!.links, hasLength(1));
+      expect(indexEntry.links.single.targetKey, 'DEMO-4');
+      expect(summaryIssue.links, isEmpty);
+
+      final hydrated = await repository.hydrateIssue(
+        summaryIssue,
+        scopes: const {IssueHydrationScope.detail},
+      );
+
+      expect(hydrated.hasDetailLoaded, isTrue);
+      expect(hydrated.links, hasLength(1));
+      expect(hydrated.links.single.type, 'blocks');
+      expect(hydrated.links.single.direction, 'outward');
+      expect(hydrated.links.single.targetKey, 'DEMO-4');
+    },
+  );
+
+  test(
     'provider-backed repository force refresh reloads updated comment content',
     () async {
       final provider = _FakeReleaseAttachmentProvider(

@@ -486,4 +486,123 @@ void main() {
       );
     },
   );
+
+  test('Shift+Tab from the trigger wraps to the last in-panel control', () {
+    expect(
+      browserWorkspaceSwitcherTabHandoffIndex(
+        focusStops: const [
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: true,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: true,
+            isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+        ],
+        currentIndex: 0,
+        backwards: true,
+      ),
+      3,
+    );
+  });
+
+  test(
+    'Shift+Tab from the trigger wraps to the selected row when no post-row controls exist',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: true,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+          ],
+          currentIndex: 0,
+          backwards: true,
+        ),
+        1,
+      );
+    },
+  );
+
+  test(
+    'Tab from the last post-row control wraps to selected row when no trigger exists',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+            ),
+          ],
+          currentIndex: 1,
+          backwards: false,
+        ),
+        0,
+      );
+    },
+  );
 }

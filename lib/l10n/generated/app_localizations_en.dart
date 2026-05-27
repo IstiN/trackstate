@@ -716,6 +716,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Choose a local folder to open an existing workspace or initialize TrackState in a new one.';
 
   @override
+  String get workspaceOnboardingFirstLaunchDescription =>
+      'Choose a local folder or hosted repository to get started.';
+
+  @override
   String get localWorkspaceOnboardingOpenExisting => 'Open existing folder';
 
   @override
@@ -837,6 +841,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get workspaceStateReadOnly => 'Read-only';
+
+  @override
+  String get workspaceStateSyncIssue => 'Sync issue';
 
   @override
   String get workspaceStateNeedsSignIn => 'Needs sign-in';

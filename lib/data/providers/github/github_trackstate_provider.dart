@@ -40,7 +40,12 @@ class GitHubTrackStateProvider
     this.repositoryName = defaultRepositoryName,
     this.sourceRef = defaultSourceRef,
     this.dataRef = defaultDataRef,
-  }) : _client = client;
+    bool disableHostedSyncRequestCaching = kIsWeb,
+    String Function()? hostedSyncCacheBustTokenFactory,
+  }) : _client = client,
+       _disableHostedSyncRequestCaching = disableHostedSyncRequestCaching,
+       _hostedSyncCacheBustTokenFactory =
+           hostedSyncCacheBustTokenFactory ?? _defaultHostedSyncCacheBustToken;
 
   static const defaultRepositoryName = String.fromEnvironment(
     'TRACKSTATE_REPOSITORY',
@@ -61,6 +66,8 @@ class GitHubTrackStateProvider
       <String, Future<Map<String, Object?>>>{};
   final String repositoryName;
   final String sourceRef;
+  final bool _disableHostedSyncRequestCaching;
+  final String Function() _hostedSyncCacheBustTokenFactory;
 
   RepositoryConnection? _connection;
 
@@ -587,6 +594,10 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repository/branches/$branch',
+              queryParameters: _hostedSyncRevisionQueryParameters(
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
               token: _connection?.token,
             )
             as Map<String, Object?>;
@@ -1675,6 +1686,28 @@ Map<String, String> _githubHeaders(String? token) => {
   'X-GitHub-Api-Version': '2022-11-28',
   if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
 };
+
+@visibleForTesting
+Map<String, String>? hostedSyncRevisionQueryParametersForTesting({
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) => _hostedSyncRevisionQueryParameters(
+  disableCache: disableCache,
+  cacheBustTokenFactory: cacheBustTokenFactory,
+);
+
+Map<String, String>? _hostedSyncRevisionQueryParameters({
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) {
+  if (!disableCache) {
+    return null;
+  }
+  return <String, String>{'_trackstate_refresh': cacheBustTokenFactory()};
+}
+
+String _defaultHostedSyncCacheBustToken() =>
+    DateTime.now().toUtc().microsecondsSinceEpoch.toString();
 
 Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
     Uri.https('api.github.com', path, queryParameters);

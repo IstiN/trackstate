@@ -44,6 +44,12 @@ typedef BrowserLocalRepositoryLoader =
       required String defaultBranch,
       required String writeBranch,
     });
+typedef BrowserLocalRepositoryAccessRequester =
+    Future<TrackStateRepository?> Function({
+      required String repositoryPath,
+      required String defaultBranch,
+      required String writeBranch,
+    });
 typedef HostedRepositoryLoader =
     Future<TrackStateRepository> Function({
       required String repository,
@@ -146,6 +152,8 @@ class TrackStateApp extends StatefulWidget {
     this.repositoryFactory,
     this.openLocalRepository,
     this.openBrowserLocalRepository = openBrowserLocalWorkspaceRepository,
+    this.requestBrowserLocalRepositoryAccess =
+        requestBrowserLocalWorkspaceRepositoryAccess,
     this.openHostedRepository,
     this.workspaceProfileService =
         const SharedPreferencesWorkspaceProfileService(),
@@ -159,6 +167,8 @@ class TrackStateApp extends StatefulWidget {
   final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
   final BrowserLocalRepositoryLoader openBrowserLocalRepository;
+  final BrowserLocalRepositoryAccessRequester
+  requestBrowserLocalRepositoryAccess;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
   final TrackStateAuthStore authStore;
@@ -395,8 +405,21 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
   }) async {
+    return _prepareBrowserLocalWorkspaceSwitchWithLoader(
+      workspace,
+      previousViewModel: previousViewModel,
+      repositoryLoader: widget.openBrowserLocalRepository,
+    );
+  }
+
+  Future<_PreparedWorkspaceSwitch?>
+  _prepareBrowserLocalWorkspaceSwitchWithLoader(
+    WorkspaceProfile workspace, {
+    required TrackerViewModel previousViewModel,
+    required BrowserLocalRepositoryLoader repositoryLoader,
+  }) async {
     try {
-      final repository = await widget.openBrowserLocalRepository(
+      final repository = await repositoryLoader(
         repositoryPath: workspace.target,
         defaultBranch: workspace.defaultBranch,
         writeBranch: workspace.writeBranch,
@@ -488,6 +511,12 @@ class _TrackStateAppState extends State<TrackStateApp>
         }
         continue;
       }
+      final localToken = await widget.authStore.readToken(
+        workspaceId: workspace.id,
+      );
+      if (localToken != null && localToken.trim().isNotEmpty) {
+        authenticatedWorkspaceIds.add(workspace.id);
+      }
       if (activeWorkspace != null &&
           activeWorkspace.isLocal &&
           workspace.id == activeWorkspace.id &&
@@ -511,11 +540,39 @@ class _TrackStateAppState extends State<TrackStateApp>
             .contains(workspace.id);
         continue;
       }
+      if (kIsWeb &&
+          activeWorkspace?.isLocal == true &&
+          workspace.id == activeWorkspace!.id) {
+        localWorkspaceAvailability[workspace.id] = !workspaceState
+            .unavailableLocalWorkspaceIds
+            .contains(workspace.id);
+        continue;
+      }
       if (workspaceState.unavailableLocalWorkspaceIds.contains(workspace.id)) {
         localWorkspaceAvailability[workspace.id] = false;
+        if (activeWorkspace?.id == workspace.id &&
+            _shouldSwitchStartupUnavailableLocalWorkspace(
+              workspace,
+              workspaceState,
+            )) {
+          startupUnavailableLocalWorkspace = workspace;
+        }
         continue;
       }
       final isAvailable = await _validateLocalWorkspaceAvailability(workspace);
+      if (!isAvailable) {
+        workspaceState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: false,
+        );
+        if (activeWorkspace?.id == workspace.id &&
+            _shouldSwitchStartupUnavailableLocalWorkspace(
+              workspace,
+              workspaceState,
+            )) {
+          startupUnavailableLocalWorkspace = workspace;
+        }
+      }
       localWorkspaceAvailability[workspace.id] = isAvailable;
     }
     if (!mounted) {
@@ -664,9 +721,8 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel: previousViewModel,
             workspaceState: optimisticState,
           );
-          var selectedState = await widget.workspaceProfileService.selectProfile(
-            restoredWorkspaceId,
-          );
+          var selectedState = await widget.workspaceProfileService
+              .selectProfile(restoredWorkspaceId);
           selectedState =
               await _persistPreparedHostedWorkspaceState(
                 prepared,
@@ -723,6 +779,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfilesState state,
     WorkspaceProfile workspace,
   ) {
+    if (kIsWeb &&
+        widget.repository == null &&
+        workspace.id == state.activeWorkspaceId) {
+      return false;
+    }
     return workspace.isLocal &&
         state.unavailableLocalWorkspaceIds.contains(workspace.id);
   }
@@ -810,6 +871,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       if (deferAccessRestore && kIsWeb) {
         unawaited(loadFuture);
+        await Future<void>.microtask(() {});
         final publishedFallback = await fallbackViewModel
             .publishHostedStartupFallbackShell();
         if (!publishedFallback) {
@@ -849,7 +911,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     bool deferAccessRestore = false,
   }) async {
     try {
-      final repository = await _openWorkspaceRepository(workspace);
+      final repositoryOpen = _openWorkspaceRepository(workspace);
+      final repository =
+          preserveActiveLocalSelectionOnStartupFailure &&
+              workspace.isLocal &&
+              kIsWeb
+          ? await repositoryOpen.timeout(
+              const Duration(seconds: 2),
+              onTimeout: () => throw StateError(
+                'Saved local workspace access is unavailable until the folder is reselected in this browser.',
+              ),
+            )
+          : await repositoryOpen;
       final nextViewModel = _createViewModel(
         repository: repository,
         previous: previousViewModel,
@@ -880,6 +953,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
             markUnavailable: requiresBrowserReselection,
+            requireAuthenticatedHostedFallback: true,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -910,6 +984,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             previousViewModel,
             deferAccessRestore: deferAccessRestore,
             markUnavailable: requiresBrowserReselection,
+            requireAuthenticatedHostedFallback: true,
           );
         }
         _rememberWorkspaceValidationFailure(workspace, reason);
@@ -929,16 +1004,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
   }
 
-  Future<_PreparedWorkspaceSwitch> _preserveActiveLocalWorkspaceSelection(
+  Future<_PreparedWorkspaceSwitch?> _preserveActiveLocalWorkspaceSelection(
     WorkspaceProfile workspace,
     TrackerViewModel previousViewModel, {
     bool deferAccessRestore = false,
     bool markUnavailable = false,
+    bool requireAuthenticatedHostedFallback = false,
   }) async {
     final hostedFallbackSwitch =
         await _preparePreservedLocalHostedFallbackSwitch(
           previousViewModel,
           deferAccessRestore: deferAccessRestore,
+          requireAuthenticatedWorkspace: requireAuthenticatedHostedFallback,
         );
     if (hostedFallbackSwitch != null) {
       if (markUnavailable) {
@@ -947,6 +1024,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         _workspaceValidationFailures.remove(workspace.id);
       }
       return hostedFallbackSwitch;
+    }
+    if (requireAuthenticatedHostedFallback) {
+      return null;
     }
     previousViewModel.updateWorkspaceScope(workspace.id);
     if (previousViewModel.snapshot == null) {
@@ -1023,8 +1103,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       // Commit the UI immediately with an optimistic workspace state so the
       // hosted restricted shell is visible before the persistence writes
       // complete (which may require the /user auth probe to finish).
-      final optimisticHostedAccessMode =
-          _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+      final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
+        prepared.viewModel,
+      );
       final optimisticState = _workspaceState.copyWith(
         profiles: [
           for (final profile in _workspaceState.profiles)
@@ -1191,9 +1272,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       _workspaceState = loadedState;
     });
     await _awaitActiveLocalWorkspaceRevalidation(loadedState);
-    await _refreshWorkspaceSwitcherState(loadedState);
+    if (!mounted) {
+      return;
+    }
+    var startupState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _workspaceState = startupState;
+    });
+    await _refreshWorkspaceSwitcherState(startupState);
     if (widget.repository != null) {
-      if (loadedState.selectedWorkspace case final activeWorkspace?) {
+      if (startupState.selectedWorkspace case final activeWorkspace?) {
         viewModel.updateWorkspaceScope(activeWorkspace.id);
       }
       setState(() {
@@ -1203,10 +1294,20 @@ class _TrackStateAppState extends State<TrackStateApp>
       await viewModel.load(deferAccessRestore: true);
       return;
     }
-    if (loadedState.hasProfiles) {
+    if (_workspaceProfilesReady &&
+        _workspaceState.activeWorkspaceId != null &&
+        viewModel.workspaceId == _workspaceState.activeWorkspaceId) {
+      _scheduleWebStartupRefresh();
+      return;
+    }
+    startupState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    if (startupState.hasProfiles) {
       if (kIsWeb) {
         final restored = await _restoreWorkspaceFromSavedState(
-          loadedState,
+          startupState,
           allowFallbackFromActive: false,
           deferAccessRestore: true,
           preserveActiveLocalSelectionOnUnsupportedAccess: true,
@@ -1215,19 +1316,19 @@ class _TrackStateAppState extends State<TrackStateApp>
         if (restored || !mounted) {
           return;
         }
-        await _handleStartupWorkspaceRestoreFailure(loadedState);
+        await _handleStartupWorkspaceRestoreFailure(startupState);
         return;
       }
       final restored = await _restoreWorkspaceFromSavedState(
-        loadedState,
+        startupState,
         allowFallbackFromActive: false,
       );
       if (!restored) {
-        await _handleStartupWorkspaceRestoreFailure(loadedState);
+        await _handleStartupWorkspaceRestoreFailure(startupState);
       }
       return;
     }
-    if (_shouldShowWorkspaceOnboarding(loadedState)) {
+    if (_shouldShowWorkspaceOnboarding(startupState)) {
       setState(() {
         _showsWorkspaceOnboarding = true;
         _workspaceProfilesReady = true;
@@ -1296,7 +1397,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<void> _awaitActiveLocalWorkspaceRevalidation(
     WorkspaceProfilesState state,
   ) async {
-    if (widget.repository != null) {
+    if (widget.repository != null || kIsWeb) {
       return;
     }
     final activeWorkspace = state.selectedWorkspace;
@@ -1839,6 +1940,28 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       await _commitPreparedWorkspaceSwitch(
         browserPrepared,
+        previousViewModel: previousViewModel,
+        workspaceState: selectedState,
+      );
+      return;
+    }
+
+    final browserReauthenticated =
+        await _prepareBrowserLocalWorkspaceSwitchWithLoader(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
+        );
+    if (browserReauthenticated != null) {
+      var selectedState = await widget.workspaceProfileService.selectProfile(
+        nextWorkspace.id,
+      );
+      selectedState = await _saveLocalWorkspaceAvailability(
+        nextWorkspace.id,
+        isAvailable: true,
+      );
+      await _commitPreparedWorkspaceSwitch(
+        browserReauthenticated,
         previousViewModel: previousViewModel,
         workspaceState: selectedState,
       );
@@ -2657,6 +2780,7 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
                   localWorkspaceAvailability: _localWorkspaceAvailability,
                   workspaceSwitcherTriggerKey:
                       _workspaceSwitcherTriggerAnchorKey,
@@ -2707,6 +2831,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -2737,6 +2862,7 @@ class _TrackerHome extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -2842,6 +2968,7 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          authenticatedWorkspaceIds: authenticatedWorkspaceIds,
                           localWorkspaceAvailability:
                               localWorkspaceAvailability,
                           workspaceSwitcherTriggerKey:
@@ -2924,6 +3051,8 @@ class _TrackerHome extends StatelessWidget {
                           child: _DesktopShell(
                             viewModel: viewModel,
                             workspaces: workspaces,
+                            authenticatedWorkspaceIds:
+                                authenticatedWorkspaceIds,
                             localWorkspaceAvailability:
                                 localWorkspaceAvailability,
                             workspaceSwitcherTriggerKey:
@@ -3538,11 +3667,17 @@ class _LocalWorkspaceOnboardingPanel extends StatefulWidget {
     required this.directoryPicker,
     required this.onboardingService,
     required this.onComplete,
+    this.showInitialFieldHints = false,
+    this.openExistingFocusOrder,
+    this.initializeFocusOrder,
   });
 
   final WorkspaceDirectoryPicker directoryPicker;
   final LocalWorkspaceOnboardingService onboardingService;
   final _LocalWorkspaceOnboardingOpener onComplete;
+  final bool showInitialFieldHints;
+  final double? openExistingFocusOrder;
+  final double? initializeFocusOrder;
 
   @override
   State<_LocalWorkspaceOnboardingPanel> createState() =>
@@ -3750,40 +3885,66 @@ class _LocalWorkspaceOnboardingPanelState
         Row(
           children: [
             Expanded(
-              child: _PrimaryButton(
-                buttonKey: const ValueKey(
-                  'local-workspace-onboarding-open-existing',
-                ),
-                label: l10n.localWorkspaceOnboardingOpenExisting,
-                icon: TrackStateIconGlyph.folder,
-                onPressed: _isSubmitting
-                    ? null
-                    : () => unawaited(
-                        _chooseFolder(
-                          _LocalWorkspaceOnboardingIntent.openExisting,
+              child: _withFocusOrder(
+                order: widget.openExistingFocusOrder,
+                child: _PrimaryButton(
+                  buttonKey: const ValueKey(
+                    'local-workspace-onboarding-open-existing',
+                  ),
+                  label: l10n.localWorkspaceOnboardingOpenExisting,
+                  icon: TrackStateIconGlyph.folder,
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => unawaited(
+                          _chooseFolder(
+                            _LocalWorkspaceOnboardingIntent.openExisting,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _SecondaryButton(
-                buttonKey: const ValueKey(
-                  'local-workspace-onboarding-initialize-folder',
-                ),
-                label: l10n.localWorkspaceOnboardingInitializeFolder,
-                icon: TrackStateIconGlyph.plus,
-                onPressed: _isSubmitting
-                    ? null
-                    : () => unawaited(
-                        _chooseFolder(
-                          _LocalWorkspaceOnboardingIntent.initialize,
+              child: _withFocusOrder(
+                order: widget.initializeFocusOrder,
+                child: _SecondaryButton(
+                  buttonKey: const ValueKey(
+                    'local-workspace-onboarding-initialize-folder',
+                  ),
+                  label: l10n.localWorkspaceOnboardingInitializeFolder,
+                  icon: TrackStateIconGlyph.plus,
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => unawaited(
+                          _chooseFolder(
+                            _LocalWorkspaceOnboardingIntent.initialize,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ],
         ),
+        if (widget.showInitialFieldHints && inspection == null) ...[
+          const SizedBox(height: 20),
+          _SettingsTextField(
+            fieldKey: const ValueKey(
+              'local-workspace-onboarding-initial-repository-path',
+            ),
+            label: l10n.repositoryPath,
+            helperText: l10n.workspaceOnboardingLocalFolderHelper,
+            enabled: false,
+          ),
+          const SizedBox(height: 12),
+          _SettingsTextField(
+            fieldKey: const ValueKey(
+              'local-workspace-onboarding-initial-branch',
+            ),
+            label: l10n.branch,
+            initialValue: 'main',
+            enabled: false,
+          ),
+        ],
         if (_isPickingFolder) ...[
           const SizedBox(height: 16),
           Row(
@@ -3926,6 +4087,13 @@ class _LocalWorkspaceOnboardingPanelState
       ],
     );
   }
+
+  Widget _withFocusOrder({required double? order, required Widget child}) {
+    if (order == null) {
+      return child;
+    }
+    return FocusTraversalOrder(order: NumericFocusOrder(order), child: child);
+  }
 }
 
 class _WorkspaceOnboardingScreen extends StatefulWidget {
@@ -4067,6 +4235,7 @@ class _WorkspaceOnboardingScreenState
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final isHosted = _selectedTarget == _WorkspaceOnboardingTarget.hosted;
+    final isFirstLaunch = !widget.canCancel;
     return Scaffold(
       backgroundColor: colors.page,
       body: SafeArea(
@@ -4085,7 +4254,7 @@ class _WorkspaceOnboardingScreenState
                           title: l10n.addWorkspace,
                           subtitle: widget.canCancel
                               ? l10n.workspaceOnboardingDescription
-                              : l10n.workspaceOnboardingFirstRunDescription,
+                              : l10n.workspaceOnboardingFirstLaunchDescription,
                         ),
                       ),
                       if (widget.canCancel && widget.onCancel != null)
@@ -4100,108 +4269,122 @@ class _WorkspaceOnboardingScreenState
                   _SurfaceCard(
                     semanticLabel: l10n.addWorkspace,
                     explicitChildNodes: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _SettingsProviderButton(
-                                label: l10n.localFolder,
-                                selected:
-                                    _selectedTarget ==
-                                    _WorkspaceOnboardingTarget.local,
-                                onPressed: () => unawaited(
-                                  _selectTarget(
-                                    _WorkspaceOnboardingTarget.local,
+                    child: FocusTraversalGroup(
+                      policy: OrderedTraversalPolicy(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(1),
+                                  child: _SettingsProviderButton(
+                                    label: l10n.localFolder,
+                                    selected:
+                                        _selectedTarget ==
+                                        _WorkspaceOnboardingTarget.local,
+                                    onPressed: () => unawaited(
+                                      _selectTarget(
+                                        _WorkspaceOnboardingTarget.local,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _SettingsProviderButton(
-                                label: l10n.hostedRepository,
-                                selected:
-                                    _selectedTarget ==
-                                    _WorkspaceOnboardingTarget.hosted,
-                                onPressed: () => unawaited(
-                                  _selectTarget(
-                                    _WorkspaceOnboardingTarget.hosted,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(2),
+                                  child: _SettingsProviderButton(
+                                    label: l10n.hostedRepository,
+                                    selected:
+                                        _selectedTarget ==
+                                        _WorkspaceOnboardingTarget.hosted,
+                                    onPressed: () => unawaited(
+                                      _selectTarget(
+                                        _WorkspaceOnboardingTarget.hosted,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        if (isHosted) ...[
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-hosted-repository',
-                            ),
-                            label: l10n.repository,
-                            controller: _hostedRepositoryController,
-                            helperText:
-                                l10n.workspaceOnboardingRepositoryHelper,
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-hosted-branch',
-                            ),
-                            label: l10n.branch,
-                            controller: _hostedBranchController,
-                          ),
-                          const SizedBox(height: 12),
-                          ListenableBuilder(
-                            listenable: Listenable.merge(<Listenable>[
-                              _hostedRepositoryController,
-                              _hostedBranchController,
-                            ]),
-                            builder: (context, _) {
-                              return _HostedWorkspaceIdentityPreview(
-                                repository: _hostedRepositoryController.text,
-                                branch: _hostedBranchController.text,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          _HostedRepositorySuggestions(
-                            repositories: _hostedRepositories,
-                            isLoading: _isLoadingHostedRepositories,
-                            loadError: _hostedRepositoryLoadError,
-                            canBrowseRepositories:
-                                widget.canBrowseHostedRepositories,
-                            onSelectRepository:
-                                _selectHostedRepositorySuggestion,
-                          ),
-                          if (_errorText != null) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              _errorText!,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: colors.error),
-                            ),
-                          ],
                           const SizedBox(height: 20),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton(
-                              key: const ValueKey('workspace-onboarding-open'),
-                              onPressed: _isSubmitting ? null : _submit,
-                              child: Text(l10n.openWorkspace),
+                          if (isHosted) ...[
+                            _SettingsTextField(
+                              fieldKey: const ValueKey(
+                                'workspace-onboarding-hosted-repository',
+                              ),
+                              label: l10n.repository,
+                              controller: _hostedRepositoryController,
+                              helperText:
+                                  l10n.workspaceOnboardingRepositoryHelper,
                             ),
-                          ),
-                        ] else ...[
-                          _LocalWorkspaceOnboardingPanel(
-                            directoryPicker: widget.directoryPicker,
-                            onboardingService:
-                                widget.localWorkspaceOnboardingService,
-                            onComplete: widget.onOpenLocalWorkspace,
-                          ),
+                            const SizedBox(height: 12),
+                            _SettingsTextField(
+                              fieldKey: const ValueKey(
+                                'workspace-onboarding-hosted-branch',
+                              ),
+                              label: l10n.branch,
+                              controller: _hostedBranchController,
+                            ),
+                            const SizedBox(height: 12),
+                            ListenableBuilder(
+                              listenable: Listenable.merge(<Listenable>[
+                                _hostedRepositoryController,
+                                _hostedBranchController,
+                              ]),
+                              builder: (context, _) {
+                                return _HostedWorkspaceIdentityPreview(
+                                  repository: _hostedRepositoryController.text,
+                                  branch: _hostedBranchController.text,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            _HostedRepositorySuggestions(
+                              repositories: _hostedRepositories,
+                              isLoading: _isLoadingHostedRepositories,
+                              loadError: _hostedRepositoryLoadError,
+                              canBrowseRepositories:
+                                  widget.canBrowseHostedRepositories,
+                              onSelectRepository:
+                                  _selectHostedRepositorySuggestion,
+                            ),
+                            if (_errorText != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _errorText!,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: colors.error),
+                              ),
+                            ],
+                            const SizedBox(height: 20),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton(
+                                key: const ValueKey(
+                                  'workspace-onboarding-open',
+                                ),
+                                onPressed: _isSubmitting ? null : _submit,
+                                child: Text(l10n.openWorkspace),
+                              ),
+                            ),
+                          ] else ...[
+                            _LocalWorkspaceOnboardingPanel(
+                              directoryPicker: widget.directoryPicker,
+                              onboardingService:
+                                  widget.localWorkspaceOnboardingService,
+                              onComplete: widget.onOpenLocalWorkspace,
+                              showInitialFieldHints: isFirstLaunch,
+                              openExistingFocusOrder: isFirstLaunch ? 3 : null,
+                              initializeFocusOrder: isFirstLaunch ? 4 : null,
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ],
@@ -4456,6 +4639,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4486,6 +4670,7 @@ class _DesktopShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4530,6 +4715,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            authenticatedWorkspaceIds: authenticatedWorkspaceIds,
             localWorkspaceAvailability: localWorkspaceAvailability,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             workspaceSwitcherTriggerFocusNode:
@@ -4572,6 +4758,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4602,6 +4789,7 @@ class _MobileShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4634,6 +4822,7 @@ class _MobileShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      authenticatedWorkspaceIds: authenticatedWorkspaceIds,
       localWorkspaceAvailability: localWorkspaceAvailability,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
@@ -4669,6 +4858,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.authenticatedWorkspaceIds,
     required this.localWorkspaceAvailability,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
@@ -4700,6 +4890,7 @@ class _TrackerMainPane extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
+  final Set<String> authenticatedWorkspaceIds;
   final Map<String, bool> localWorkspaceAvailability;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
@@ -4772,6 +4963,7 @@ class _TrackerMainPane extends StatelessWidget {
                   onOpenCreateIssue: onOpenCreateIssue,
                   onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
                   workspaces: workspaces,
+                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
                   onSelectWorkspace: onSelectWorkspace,
                   onDeleteWorkspace: onDeleteWorkspace,
                   workspaceRestoreFailure: workspaceRestoreFailure,
@@ -5566,6 +5758,12 @@ String _activeWorkspaceStateLabel(
     }
     return l10n.workspaceStateLocalGit;
   }
+  if (_shouldShowHostedWorkspaceSyncIssue(
+    viewModel,
+    activeWorkspace: activeWorkspace,
+  )) {
+    return l10n.workspaceStateSyncIssue;
+  }
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected => l10n.workspaceStateNeedsSignIn,
     HostedRepositoryAccessMode.readOnly => l10n.workspaceStateReadOnly,
@@ -5573,6 +5771,29 @@ String _activeWorkspaceStateLabel(
     HostedRepositoryAccessMode.attachmentRestricted =>
       l10n.repositoryAccessAttachmentsRestricted,
   };
+}
+
+bool _shouldShowHostedWorkspaceSyncIssue(
+  TrackerViewModel viewModel, {
+  WorkspaceProfile? activeWorkspace,
+}) {
+  final isHostedWorkspace =
+      !(activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence);
+  if (!isHostedWorkspace) {
+    return false;
+  }
+  final status = viewModel.workspaceSyncStatus;
+  return status.health == WorkspaceSyncHealth.attentionNeeded &&
+      !status.hasPendingRefresh;
+}
+
+bool _hasStoredOrLiveLocalHostedAccess(
+  TrackerViewModel viewModel, {
+  required Set<String> authenticatedWorkspaceIds,
+  String? workspaceId,
+}) {
+  return viewModel.hasLocalHostedAccessSession ||
+      (workspaceId != null && authenticatedWorkspaceIds.contains(workspaceId));
 }
 
 HostedWorkspaceAccessMode _hostedWorkspaceAccessModeForViewModel(
@@ -5624,6 +5845,7 @@ Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel, {
   bool allowLocalGitHubConnection = false,
+  bool hasLocalHostedAccess = false,
 }) async {
   final l10n = AppLocalizations.of(context)!;
   if (viewModel.usesLocalPersistence) {
@@ -5631,7 +5853,9 @@ Future<void> _showRepositoryAccessDialog(
     if (allowLocalGitHubConnection) {
       final controller = TextEditingController();
       var rememberToken = true;
-      final dialogTitle = viewModel.hasLocalHostedAccessSession
+      final localHostedAccessConnected =
+          viewModel.hasLocalHostedAccessSession || hasLocalHostedAccess;
+      final dialogTitle = localHostedAccessConnected
           ? l10n.manageGitHubAccess
           : l10n.connectGitHub;
       final connectionRequest = await showDialog<({String token, bool remember})?>(
@@ -5646,8 +5870,7 @@ Future<void> _showRepositoryAccessDialog(
               }
 
               final connectionMessage =
-                  viewModel.hasLocalHostedAccessSession &&
-                      viewModel.connectedUser != null
+                  localHostedAccessConnected && viewModel.connectedUser != null
                   ? l10n.githubConnected(
                       viewModel.connectedUser!.login,
                       project?.repository ?? l10n.configuredRepositoryFallback,
@@ -6096,10 +6319,7 @@ String? _repositoryAccessCapabilitySummary(
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected ||
     HostedRepositoryAccessMode.readOnly =>
-      l10n.repositoryAccessCapabilitySummary(
-        'false',
-        'false',
-      ),
+      l10n.repositoryAccessCapabilitySummary('false', 'false'),
     HostedRepositoryAccessMode.writable ||
     HostedRepositoryAccessMode.attachmentRestricted => null,
   };
@@ -6472,13 +6692,12 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label:
-          [
-            semanticLabel,
-            title,
-            message,
-            if (detailMessage != null) detailMessage!,
-          ].join(' '),
+      label: [
+        semanticLabel,
+        title,
+        message,
+        if (detailMessage != null) detailMessage!,
+      ].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -6727,6 +6946,7 @@ class _SectionBody extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onApplyLocalGitConfiguration,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
@@ -6740,6 +6960,7 @@ class _SectionBody extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
@@ -6769,6 +6990,7 @@ class _SectionBody extends StatelessWidget {
         viewModel: viewModel,
         onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
         workspaces: workspaces,
+        authenticatedWorkspaceIds: authenticatedWorkspaceIds,
         onSelectWorkspace: onSelectWorkspace,
         onDeleteWorkspace: onDeleteWorkspace,
         workspaceRestoreFailure: workspaceRestoreFailure,
@@ -7334,6 +7556,7 @@ class _Settings extends StatefulWidget {
     required this.viewModel,
     required this.onApplyLocalGitConfiguration,
     required this.workspaces,
+    required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.workspaceRestoreFailure,
@@ -7344,6 +7567,7 @@ class _Settings extends StatefulWidget {
   final TrackerViewModel viewModel;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final WorkspaceProfilesState workspaces;
+  final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
@@ -7476,9 +7700,18 @@ class _SettingsState extends State<_Settings> {
     final project = widget.viewModel.project!;
     final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
     final workspaceRestoreFailure = widget.workspaceRestoreFailure;
+    final activeLocalWorkspaceId =
+        widget.workspaces.selectedWorkspace?.isLocal == true
+        ? widget.workspaces.selectedWorkspace!.id
+        : null;
+    final hasLocalHostedAccess = _hasStoredOrLiveLocalHostedAccess(
+      widget.viewModel,
+      authenticatedWorkspaceIds: widget.authenticatedWorkspaceIds,
+      workspaceId: activeLocalWorkspaceId,
+    );
     final showLocalGitHubAccess =
         widget.workspaces.profiles.any((profile) => profile.isHosted) ||
-        widget.viewModel.hasLocalHostedAccessSession;
+        hasLocalHostedAccess;
     final selectorChildren = <Widget>[
       if (widget.viewModel.supportsGitHubAuth) ...[
         _SettingsProviderButton(
@@ -7507,6 +7740,7 @@ class _SettingsState extends State<_Settings> {
         _LocalGitConfiguration(
           viewModel: widget.viewModel,
           showGitHubAccess: showLocalGitHubAccess,
+          hasGitHubAccessSession: hasLocalHostedAccess,
           repositoryPathController: _repositoryPathController,
           writeBranchController: _writeBranchController,
           repositoryPathFocusNode: _repositoryPathFocusNode,
@@ -8102,6 +8336,13 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                 workspace.isLocal &&
                                 widget.localWorkspaceAvailability[workspaceId] ==
                                     false;
+                            final hasLocalHostedAccess =
+                                _hasStoredOrLiveLocalHostedAccess(
+                                  widget.viewModel,
+                                  authenticatedWorkspaceIds:
+                                      widget.authenticatedWorkspaceIds,
+                                  workspaceId: workspaceId,
+                                );
                             final showLocalHostedAccessAction =
                                 workspace.isLocal &&
                                 widget.viewModel.usesLocalPersistence;
@@ -8125,9 +8366,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                               primaryActionLabel: isUnavailableLocal
                                   ? l10n.retry
                                   : showLocalHostedAccessAction
-                                  ? (widget
-                                            .viewModel
-                                            .hasLocalHostedAccessSession
+                                  ? (hasLocalHostedAccess
                                         ? l10n.manageGitHubAccess
                                         : l10n.connectGitHub)
                                   : null,
@@ -8144,6 +8383,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                       context,
                                       widget.viewModel,
                                       allowLocalGitHubConnection: true,
+                                      hasLocalHostedAccess:
+                                          hasLocalHostedAccess,
                                     )
                                   : null,
                               showOpenAction:
@@ -8614,8 +8855,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                   order: NumericFocusOrder(
                     focusOrderBase +
                         (widget.showOpenAction ? 1 : 0) +
-                        ((primaryActionLabel != null &&
-                                onPrimaryAction != null)
+                        ((primaryActionLabel != null && onPrimaryAction != null)
                             ? 1
                             : 0),
                   ),
@@ -8646,7 +8886,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                       Text(primaryActionSemanticLabel),
                     if (widget.showOpenAction && onOpen != null)
                       Text('${l10n.openWorkspace}: ${workspace.displayName}'),
-                    if (!isActive) Text('${l10n.delete}: ${workspace.displayName}'),
+                    if (!isActive)
+                      Text('${l10n.delete}: ${workspace.displayName}'),
                   ],
                 ),
               ),
@@ -13078,6 +13319,7 @@ class _LocalGitConfiguration extends StatelessWidget {
   const _LocalGitConfiguration({
     required this.viewModel,
     required this.showGitHubAccess,
+    required this.hasGitHubAccessSession,
     required this.repositoryPathController,
     required this.writeBranchController,
     required this.repositoryPathFocusNode,
@@ -13086,6 +13328,7 @@ class _LocalGitConfiguration extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final bool showGitHubAccess;
+  final bool hasGitHubAccessSession;
   final TextEditingController repositoryPathController;
   final TextEditingController writeBranchController;
   final FocusNode repositoryPathFocusNode;
@@ -13095,11 +13338,11 @@ class _LocalGitConfiguration extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = viewModel.project;
-    final accessTitle = viewModel.hasLocalHostedAccessSession
+    final accessTitle = hasGitHubAccessSession
         ? l10n.repositoryAccessConnected
         : l10n.localGitRuntimeTitle;
     final accessMessage =
-        viewModel.hasLocalHostedAccessSession && viewModel.connectedUser != null
+        hasGitHubAccessSession && viewModel.connectedUser != null
         ? l10n.githubConnected(
             viewModel.connectedUser!.login,
             project?.repository ?? l10n.configuredRepositoryFallback,
@@ -13113,16 +13356,17 @@ class _LocalGitConfiguration extends StatelessWidget {
             semanticLabel: accessTitle,
             title: accessTitle,
             message: accessMessage,
-            tone: viewModel.hasLocalHostedAccessSession
+            tone: hasGitHubAccessSession
                 ? _AccessCalloutTone.success
                 : _AccessCalloutTone.warning,
-            primaryActionLabel: viewModel.hasLocalHostedAccessSession
+            primaryActionLabel: hasGitHubAccessSession
                 ? l10n.manageGitHubAccess
                 : l10n.connectGitHub,
             onPrimaryAction: () => _showRepositoryAccessDialog(
               context,
               viewModel,
               allowLocalGitHubConnection: true,
+              hasLocalHostedAccess: hasGitHubAccessSession,
             ),
           ),
           const SizedBox(height: 12),

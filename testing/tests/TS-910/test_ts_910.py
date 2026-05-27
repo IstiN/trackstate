@@ -77,9 +77,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts910_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts910_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 
 def main() -> None:
@@ -415,13 +417,13 @@ def main() -> None:
                         "watched focus move through the internal switcher fields until the "
                         "Save and switch footer button visibly owned focus."
                     ),
-                        observed=(
-                            f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
-                            f"footer_visible_label={_footer_focus_label_for_summary(footer_state)!r}; "
-                            f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}; "
-                            f"internal_tab_stops={_tab_stop_label_summary(internal_tab_stops)!r}"
-                        ),
-                    )
+                    observed=(
+                        f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
+                        f"footer_visible_label={_footer_focus_label_for_summary(footer_state)!r}; "
+                        f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}; "
+                        f"internal_tab_stops={_tab_stop_label_summary(internal_tab_stops)!r}"
+                    ),
+                )
 
                 try:
                     before_wrap = page.active_element()
@@ -1305,6 +1307,59 @@ def _failed_step_label(result: dict[str, object]) -> str:
     return f"Step {failed.get('step')} — {failed.get('action')}"
 
 
+def _failed_step_summary(result: dict[str, object]) -> str:
+    failed = _failed_step(result)
+    if failed is None:
+        return str(result.get("error", "unknown failure"))
+    return (
+        f"{_failed_step_label(result)}: "
+        f"{failed.get('observed') or result.get('error', 'unknown failure')}"
+    )
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+    )
+    return (
+        "Resolved the merge conflict in `testing/tests/TS-910/test_ts_910.py`, kept the "
+        "diagnostics that capture the live internal tab-stop order and the loop-before-footer "
+        "case, and regenerated the required `outputs/` artifacts. "
+        f"{rerun_summary}"
+    )
+
+
 def _runtime_body_text(result: dict[str, object]) -> str:
     runtime_body_text = result.get("runtime_body_text")
     if isinstance(runtime_body_text, str) and runtime_body_text.strip():
@@ -1483,6 +1538,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -1504,6 +1563,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
