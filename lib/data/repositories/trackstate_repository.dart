@@ -1811,21 +1811,7 @@ class ProviderBackedTrackStateRepository
           summaryIssues,
         ),
         loadWarnings: loadWarnings,
-        readiness: const TrackerBootstrapReadiness(
-          domainStates: {
-            TrackerDataDomain.projectMeta: TrackerLoadState.ready,
-            TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
-            TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
-            TrackerDataDomain.issueDetails: TrackerLoadState.partial,
-          },
-          sectionStates: {
-            TrackerSectionKey.dashboard: TrackerLoadState.ready,
-            TrackerSectionKey.board: TrackerLoadState.ready,
-            TrackerSectionKey.search: TrackerLoadState.partial,
-            TrackerSectionKey.hierarchy: TrackerLoadState.ready,
-            TrackerSectionKey.settings: TrackerLoadState.ready,
-          },
-        ),
+        readiness: _hostedBootstrapReadiness(),
         startupRecovery: _startupRecovery,
       );
     }
@@ -2032,6 +2018,8 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'project metadata',
         ),
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
     }
     final configRoot = projectJson == null
         ? _defaultConfigRoot(dataRoot)
@@ -2205,6 +2193,41 @@ class ProviderBackedTrackStateRepository
       for (final issue in issues)
         issue.withRepositoryIndex(repositoryIndex.entryForKey(issue.key)),
     ];
+  }
+
+  TrackerBootstrapReadiness _hostedBootstrapReadiness() {
+    if (_startupRecovery == null) {
+      return const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+          TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.ready,
+          TrackerSectionKey.board: TrackerLoadState.ready,
+          TrackerSectionKey.search: TrackerLoadState.partial,
+          TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      );
+    }
+    return const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.partial,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.loading,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.partial,
+        TrackerSectionKey.board: TrackerLoadState.partial,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.partial,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    );
   }
 
   void _validateHostedBootstrapIndex({
@@ -2529,6 +2552,9 @@ class ProviderBackedTrackStateRepository
           ),
         );
         continue;
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        continue;
       }
       if (json is! Map) {
         continue;
@@ -2596,6 +2622,9 @@ class ProviderBackedTrackStateRepository
         ),
       );
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
   }
 
@@ -2619,6 +2648,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: warningSubject,
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
   }
@@ -2709,6 +2741,12 @@ class ProviderBackedTrackStateRepository
         _fieldDefinitions,
         growable: false,
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
     }
   }
 
@@ -2734,6 +2772,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'workflows',
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
     if (json is! Map) {
@@ -2834,6 +2875,14 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'summary issue index',
           ),
         );
+        entries.addAll(
+          _fallbackHostedRepositoryIndexEntries(
+            blobPaths: blobPaths,
+            dataRoot: dataRoot,
+          ),
+        );
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
         entries.addAll(
           _fallbackHostedRepositoryIndexEntries(
             blobPaths: blobPaths,
