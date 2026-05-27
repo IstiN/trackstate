@@ -50,6 +50,28 @@ const List<String> _currentFocusOrder = <String>[
   'Initialize folder',
 ];
 
+const List<String> _hostedVisibleTexts = <String>[
+  'Repository',
+  'Branch',
+  'Open',
+];
+
+const List<String> _hostedInteractiveLabels = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository',
+  'Branch',
+  'Open',
+];
+
+const List<String> _hostedFocusOrder = <String>[
+  'Local folder',
+  'Hosted repository',
+  'Repository',
+  'Branch',
+  'Open',
+];
+
 void main() {
   testWidgets(
     'TS-705 onboarding screen exposes accessible semantics, logical keyboard order, and AA contrast',
@@ -106,6 +128,8 @@ void main() {
 
         final interactiveLabels = screen.interactiveSemanticsLabels();
         result['interactive_semantics_labels'] = interactiveLabels;
+        result['hosted_visible_texts'] = const <String>[];
+        result['hosted_interactive_semantics_labels'] = const <String>[];
         final missingInteractiveLabels = _missingExpectedLabels(
           expected: _currentInteractiveLabels,
           observed: interactiveLabels,
@@ -114,38 +138,20 @@ void main() {
             .where((label) => label.trim().isEmpty)
             .toList(growable: false);
 
-        if (missingInteractiveLabels.isNotEmpty ||
-            emptyInteractiveLabels.isNotEmpty) {
-          _recordStep(
-            result,
-            step: 2,
-            status: 'failed',
-            action: _requestSteps[1],
-            observed:
-                'interactive_labels=${interactiveLabels.join(' | ')}; '
-                'missing_labels=${missingInteractiveLabels.join(', ')}; '
-                'empty_labels=${emptyInteractiveLabels.join(', ')}',
-          );
-          failures.add(
-            'Step 2 failed: the currently rendered first-launch onboarding actions did not expose complete descriptive semantics labels.\n'
-            'Missing labels: ${missingInteractiveLabels.join(', ')}\n'
-            'Empty labels: ${emptyInteractiveLabels.join(', ')}\n'
-            'Observed labels: ${interactiveLabels.join(' | ')}',
-          );
-        } else {
-          _recordStep(
-            result,
-            step: 2,
-            status: 'passed',
-            action: _requestSteps[1],
-            observed: 'interactive_labels=${interactiveLabels.join(' | ')}',
-          );
-        }
-
         var forwardFocusOrder = <String>[];
         var backwardFocusOrder = <String>[];
+        var hostedForwardFocusOrder = <String>[];
+        var hostedBackwardFocusOrder = <String>[];
         result['forward_focus_order'] = forwardFocusOrder;
         result['backward_focus_order'] = backwardFocusOrder;
+        result['hosted_forward_focus_order'] = hostedForwardFocusOrder;
+        result['hosted_backward_focus_order'] = hostedBackwardFocusOrder;
+        final contrast = screen.observeContrastSet();
+        final placeholderVisible = screen.hasVisiblePlaceholderText();
+        final iconVisible = screen.hasVisibleIcons();
+        result['contrast'] = contrast.map(_contrastAsMap).toList();
+        result['placeholder_text_visible'] = placeholderVisible;
+        result['icon_visible'] = iconVisible;
 
         if (missingTicketVisibleTexts.isNotEmpty) {
           _recordStep(
@@ -170,11 +176,88 @@ void main() {
           backwardFocusOrder = currentBackwardFocusOrder;
           result['forward_focus_order'] = currentForwardFocusOrder;
           result['backward_focus_order'] = currentBackwardFocusOrder;
+        }
 
-          if (!_sameOrder(currentForwardFocusOrder, _currentFocusOrder) ||
+        await screen.chooseHostedRepository();
+        final hostedVisibleTexts = screen.visibleTexts();
+        final hostedInteractiveLabels = screen.interactiveSemanticsLabels();
+        result['hosted_visible_texts'] = hostedVisibleTexts;
+        result['hosted_interactive_semantics_labels'] = hostedInteractiveLabels;
+        final missingHostedVisibleTexts = _missingExpectedLabels(
+          expected: _hostedVisibleTexts,
+          observed: hostedVisibleTexts,
+        );
+        final missingHostedInteractiveLabels = _missingExpectedLabels(
+          expected: _hostedInteractiveLabels,
+          observed: hostedInteractiveLabels,
+        );
+        final emptyHostedInteractiveLabels = hostedInteractiveLabels
+            .where((label) => label.trim().isEmpty)
+            .toList(growable: false);
+        if (missingTicketVisibleTexts.isEmpty) {
+          hostedForwardFocusOrder = await screen
+              .collectHostedForwardFocusOrder();
+          hostedBackwardFocusOrder = await screen
+              .collectHostedBackwardFocusOrder();
+          result['hosted_forward_focus_order'] = hostedForwardFocusOrder;
+          result['hosted_backward_focus_order'] = hostedBackwardFocusOrder;
+        }
+        final hostedContrast = screen.observeHostedContrastSet();
+        result['hosted_contrast'] = hostedContrast.map(_contrastAsMap).toList();
+
+        if (missingInteractiveLabels.isNotEmpty ||
+            emptyInteractiveLabels.isNotEmpty ||
+            missingHostedVisibleTexts.isNotEmpty ||
+            missingHostedInteractiveLabels.isNotEmpty ||
+            emptyHostedInteractiveLabels.isNotEmpty) {
+          _recordStep(
+            result,
+            step: 2,
+            status: 'failed',
+            action: _requestSteps[1],
+            observed:
+                'local_interactive_labels=${interactiveLabels.join(' | ')}; '
+                'missing_labels=${missingInteractiveLabels.join(', ')}; '
+                'empty_labels=${emptyInteractiveLabels.join(', ')}; '
+                'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}; '
+                'missing_hosted_texts=${missingHostedVisibleTexts.join(', ')}; '
+                'hosted_interactive_labels=${hostedInteractiveLabels.join(' | ')}; '
+                'missing_hosted_labels=${missingHostedInteractiveLabels.join(', ')}; '
+                'empty_hosted_labels=${emptyHostedInteractiveLabels.join(', ')}',
+          );
+          failures.add(
+            'Step 2 failed: the onboarding UI did not expose complete descriptive semantics labels across both the initial local surface and the hosted repository flow.\n'
+            'Missing local labels: ${missingInteractiveLabels.join(', ')}\n'
+            'Empty local labels: ${emptyInteractiveLabels.join(', ')}\n'
+            'Observed local labels: ${interactiveLabels.join(' | ')}\n'
+            'Missing hosted visible texts: ${missingHostedVisibleTexts.join(', ')}\n'
+            'Missing hosted labels: ${missingHostedInteractiveLabels.join(', ')}\n'
+            'Empty hosted labels: ${emptyHostedInteractiveLabels.join(', ')}\n'
+            'Observed hosted labels: ${hostedInteractiveLabels.join(' | ')}',
+          );
+        } else {
+          _recordStep(
+            result,
+            step: 2,
+            status: 'passed',
+            action: _requestSteps[1],
+            observed:
+                'local_interactive_labels=${interactiveLabels.join(' | ')}; '
+                'hosted_visible_texts=${hostedVisibleTexts.join(' | ')}; '
+                'hosted_interactive_labels=${hostedInteractiveLabels.join(' | ')}',
+          );
+        }
+
+        if (missingTicketVisibleTexts.isEmpty) {
+          if (!_sameOrder(forwardFocusOrder, _currentFocusOrder) ||
               !_sameOrder(
-                currentBackwardFocusOrder,
+                backwardFocusOrder,
                 _currentFocusOrder.reversed.toList(),
+              ) ||
+              !_sameOrder(hostedForwardFocusOrder, _hostedFocusOrder) ||
+              !_sameOrder(
+                hostedBackwardFocusOrder,
+                _hostedFocusOrder.reversed.toList(),
               )) {
             _recordStep(
               result,
@@ -182,15 +265,21 @@ void main() {
               status: 'failed',
               action: _requestSteps[2],
               observed:
-                  'forward_focus=${currentForwardFocusOrder.join(' -> ')}; '
-                  'backward_focus=${currentBackwardFocusOrder.join(' -> ')}',
+                  'forward_focus=${forwardFocusOrder.join(' -> ')}; '
+                  'backward_focus=${backwardFocusOrder.join(' -> ')}; '
+                  'hosted_forward_focus=${hostedForwardFocusOrder.join(' -> ')}; '
+                  'hosted_backward_focus=${hostedBackwardFocusOrder.join(' -> ')}',
             );
             failures.add(
-              'Step 3 failed: keyboard traversal on the currently rendered first-launch onboarding actions did not stay in logical order.\n'
+              'Step 3 failed: keyboard traversal across the onboarding UI did not stay in logical order for both the initial local surface and the hosted repository flow.\n'
               'Expected forward order: ${_currentFocusOrder.join(' -> ')}\n'
-              'Observed forward order: ${currentForwardFocusOrder.join(' -> ')}\n'
+              'Observed forward order: ${forwardFocusOrder.join(' -> ')}\n'
               'Expected backward order: ${_currentFocusOrder.reversed.join(' -> ')}\n'
-              'Observed backward order: ${currentBackwardFocusOrder.join(' -> ')}',
+              'Observed backward order: ${backwardFocusOrder.join(' -> ')}\n'
+              'Expected hosted forward order: ${_hostedFocusOrder.join(' -> ')}\n'
+              'Observed hosted forward order: ${hostedForwardFocusOrder.join(' -> ')}\n'
+              'Expected hosted backward order: ${_hostedFocusOrder.reversed.join(' -> ')}\n'
+              'Observed hosted backward order: ${hostedBackwardFocusOrder.join(' -> ')}',
             );
           } else {
             _recordStep(
@@ -199,30 +288,32 @@ void main() {
               status: 'passed',
               action: _requestSteps[2],
               observed:
-                  'forward_focus=${currentForwardFocusOrder.join(' -> ')}; '
-                  'backward_focus=${currentBackwardFocusOrder.join(' -> ')}',
+                  'forward_focus=${forwardFocusOrder.join(' -> ')}; '
+                  'backward_focus=${backwardFocusOrder.join(' -> ')}; '
+                  'hosted_forward_focus=${hostedForwardFocusOrder.join(' -> ')}; '
+                  'hosted_backward_focus=${hostedBackwardFocusOrder.join(' -> ')}',
             );
           }
         }
 
-        final contrast = screen.observeContrastSet();
-        final placeholderVisible = screen.hasVisiblePlaceholderText();
-        final iconVisible = screen.hasVisibleIcons();
-        final tokenCheck = await tester.runAsync(_runThemeTokenCheck) ??
+        final tokenCheck =
+            await tester.runAsync(_runThemeTokenCheck) ??
             <String, Object?>{
-              'command': 'dart tool/check_theme_tokens.dart lib/ui/features/tracker/views/trackstate_app.dart',
+              'command':
+                  'dart tool/check_theme_tokens.dart lib/ui/features/tracker/views/trackstate_app.dart',
               'exit_code': 1,
               'output': 'Theme token policy probe did not return a result.',
             };
-        result['contrast'] = contrast.map(_contrastAsMap).toList();
-        result['placeholder_text_visible'] = placeholderVisible;
-        result['icon_visible'] = iconVisible;
         result['theme_token_check'] = tokenCheck;
 
         final failingContrast = contrast
             .where((observation) => !observation.passes)
             .toList(growable: false);
+        final failingHostedContrast = hostedContrast
+            .where((observation) => !observation.passes)
+            .toList(growable: false);
         if (failingContrast.isNotEmpty ||
+            failingHostedContrast.isNotEmpty ||
             tokenCheck['exit_code'] != 0 ||
             (tokenCheck['output'] != null &&
                 '${tokenCheck['output']}'.contains('warning •'))) {
@@ -233,14 +324,16 @@ void main() {
             action: _requestSteps[3],
             observed:
                 'contrast=${contrast.join(' || ')}; '
+                'hosted_contrast=${hostedContrast.join(' || ')}; '
                 'placeholder_visible=$placeholderVisible; '
                 'icon_visible=$iconVisible; '
                 'theme_token_exit=${tokenCheck['exit_code']}; '
                 'theme_token_output=${_singleLine(tokenCheck['output'])}',
           );
           failures.add(
-            'Step 4 failed: the currently rendered first-launch onboarding screen did not satisfy the requested contrast/token expectations.\n'
+            'Step 4 failed: the onboarding UI did not satisfy the requested contrast/token expectations across the visible local and hosted flows.\n'
             'Failing contrast observations: ${failingContrast.join(' || ')}\n'
+            'Failing hosted contrast observations: ${failingHostedContrast.join(' || ')}\n'
             'Visible placeholder text present: $placeholderVisible\n'
             'Visible icons present: $iconVisible\n'
             'Theme token check exit code: ${tokenCheck['exit_code']}\n'
@@ -254,6 +347,7 @@ void main() {
             action: _requestSteps[3],
             observed:
                 'contrast=${contrast.join(' || ')}; '
+                'hosted_contrast=${hostedContrast.join(' || ')}; '
                 'placeholder_visible=$placeholderVisible; '
                 'icon_visible=$iconVisible; '
                 'theme_token_output=${_singleLine(tokenCheck['output'])}',
@@ -269,23 +363,29 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Verified the visible actions users can currently reach on that first-launch screen and inspected the semantics labels exposed for them.',
-          observed: 'interactive_labels=${interactiveLabels.join(' | ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Checked the keyboard experience from a user perspective by tabbing forward and backward across the currently rendered first-launch actions.',
-          observed: forwardFocusOrder.isEmpty && backwardFocusOrder.isEmpty
-              ? 'keyboard_path_unavailable=true; observed_visible_texts=${visibleTexts.join(' | ')}'
-              : 'forward_focus=${forwardFocusOrder.join(' -> ')}; backward_focus=${backwardFocusOrder.join(' -> ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Checked the rendered heading, subtitle, visible action labels, visible action icons, and AC4 theme-token output for the first-launch onboarding screen.',
+              'Verified the visible actions users can reach on the initial local surface and after switching into the hosted repository flow, then inspected the semantics labels exposed for both.',
           observed:
-              'placeholder_visible=$placeholderVisible; icon_visible=$iconVisible; contrast=${contrast.join(' || ')}',
+              'local_interactive_labels=${interactiveLabels.join(' | ')}; '
+              'hosted_interactive_labels=${hostedInteractiveLabels.join(' | ')}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Checked the keyboard experience from a user perspective by tabbing forward and backward across both the initial first-launch actions and the hosted repository controls.',
+          observed:
+              forwardFocusOrder.isEmpty &&
+                  backwardFocusOrder.isEmpty &&
+                  hostedForwardFocusOrder.isEmpty &&
+                  hostedBackwardFocusOrder.isEmpty
+              ? 'keyboard_path_unavailable=true; observed_visible_texts=${visibleTexts.join(' | ')}'
+              : 'forward_focus=${forwardFocusOrder.join(' -> ')}; backward_focus=${backwardFocusOrder.join(' -> ')}; hosted_forward_focus=${hostedForwardFocusOrder.join(' -> ')}; hosted_backward_focus=${hostedBackwardFocusOrder.join(' -> ')}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Checked the rendered heading, subtitle, visible local and hosted action labels, visible action icons, and AC4 theme-token output for the first-launch onboarding screen.',
+          observed:
+              'placeholder_visible=$placeholderVisible; icon_visible=$iconVisible; contrast=${contrast.join(' || ')}; hosted_contrast=${hostedContrast.join(' || ')}',
         );
 
         if (failures.isNotEmpty) {
@@ -420,14 +520,15 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production first-launch onboarding screen with no saved workspace profiles.',
-    '* Checked the production-visible first-launch onboarding heading, choice controls, local helper fields, and primary actions.',
-    '* Inspected the semantics labels exposed for the currently rendered first-launch actions.',
-    '* Tabbed forward and backward through the currently rendered first-launch actions to confirm logical keyboard focus order.',
-    '* Checked rendered contrast for the visible heading, subtitle, action labels, action icons, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
+    '* Checked the production-visible first-launch onboarding heading, choice controls, local helper fields, and local primary actions.',
+    '* Switched into the hosted repository path and checked the hosted {noformat}Repository{noformat} / {noformat}Branch{noformat} fields plus the {noformat}Open{noformat} action.',
+    '* Inspected the semantics labels exposed for both the initial local surface and the hosted repository flow.',
+    '* Tabbed forward and backward through both flows to confirm logical keyboard focus order.',
+    '* Checked rendered contrast for the visible heading, subtitle, local actions, the hosted {noformat}Open{noformat} action, and ran the repository theme-token policy command against {noformat}lib/ui/features/tracker/views/trackstate_app.dart{noformat}.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the current first-launch onboarding screen exposed the visible onboarding choices and local actions, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
+        ? '* Matched the expected result: the current first-launch onboarding screen exposed the visible onboarding choices, local actions, hosted repository fields, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Placeholder text visible: {noformat}${result['placeholder_text_visible']}{noformat}',
@@ -486,14 +587,15 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production first-launch onboarding screen with no saved workspace profiles.',
-    '- Checked the production-visible first-launch onboarding heading, choice controls, local helper fields, and primary actions.',
-    '- Inspected the semantics labels exposed for the currently rendered first-launch actions.',
-    '- Tabbed forward and backward through the currently rendered first-launch actions to confirm logical keyboard focus order.',
-    '- Checked rendered contrast for the visible heading, subtitle, action labels, action icons, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
+    '- Checked the production-visible first-launch onboarding heading, choice controls, local helper fields, and local primary actions.',
+    '- Switched into the hosted repository path and checked the hosted `Repository` / `Branch` fields plus the `Open` action.',
+    '- Inspected the semantics labels exposed for both the initial local surface and the hosted repository flow.',
+    '- Tabbed forward and backward through both flows to confirm logical keyboard focus order.',
+    '- Checked rendered contrast for the visible heading, subtitle, local actions, the hosted `Open` action, and ran the repository theme-token policy command against `lib/ui/features/tracker/views/trackstate_app.dart`.',
     '',
     '### Result',
     passed
-        ? '- Matched the expected result: the current first-launch onboarding screen exposed the visible onboarding choices and local actions, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
+        ? '- Matched the expected result: the current first-launch onboarding screen exposed the visible onboarding choices, local actions, hosted repository fields, meaningful semantics labels, logical keyboard traversal, compliant contrast, and passed the AC4 theme-token policy gate.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '- Environment: `flutter test` / `${Platform.operatingSystem}`',
     '- Placeholder text visible: `${result['placeholder_text_visible']}`',
@@ -589,13 +691,13 @@ String _bugDescription(Map<String, Object?> result) {
     '   - ${_stepOutcome(result, 4)}',
     '',
     '## Expected result',
-    'With no saved workspace profiles, the first-launch onboarding screen should expose the production-visible heading, `Local folder` / `Hosted repository` choice controls, the local `Repository Path` and `Branch` helper fields, and the `Open existing folder` / `Initialize folder` actions; give those interactive elements non-empty semantics labels; keep keyboard focus order logical in both directions for the focusable controls; meet the requested contrast thresholds; and pass the AC4 theme-token policy check without warnings.',
+    'With no saved workspace profiles, the first-launch onboarding screen should expose the production-visible heading, `Local folder` / `Hosted repository` choice controls, the local `Repository Path` and `Branch` helper fields, the `Open existing folder` / `Initialize folder` actions, and the hosted `Repository` / `Branch` fields plus the `Open` action; give those interactive elements non-empty semantics labels; keep keyboard focus order logical in both directions for the focusable controls; meet the requested contrast thresholds; and pass the AC4 theme-token policy check without warnings.',
     '',
     '## Actual result',
     '${result['error'] ?? '<missing>'}',
     '',
     '## Missing/broken production capability',
-    'The production first-launch onboarding screen is missing one or more expected accessibility or visual-quality behaviors on the currently rendered onboarding choices, local helper fields, or local primary actions.',
+    'The production first-launch onboarding screen is missing one or more expected accessibility or visual-quality behaviors on the onboarding choice controls, local helper fields, local primary actions, or hosted repository controls.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -616,8 +718,12 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     'Visible texts: ${((result['visible_texts'] as List?) ?? const []).join(' | ')}',
     'Interactive semantics labels: ${((result['interactive_semantics_labels'] as List?) ?? const []).join(' | ')}',
+    'Hosted visible texts: ${((result['hosted_visible_texts'] as List?) ?? const []).join(' | ')}',
+    'Hosted interactive semantics labels: ${((result['hosted_interactive_semantics_labels'] as List?) ?? const []).join(' | ')}',
     'Forward focus: ${((result['forward_focus_order'] as List?) ?? const []).join(' -> ')}',
     'Backward focus: ${((result['backward_focus_order'] as List?) ?? const []).join(' -> ')}',
+    'Hosted forward focus: ${((result['hosted_forward_focus_order'] as List?) ?? const []).join(' -> ')}',
+    'Hosted backward focus: ${((result['hosted_backward_focus_order'] as List?) ?? const []).join(' -> ')}',
     'Theme token check: ${_singleLine((result['theme_token_check'] as Map?)?['output'])}',
     '```',
   ];

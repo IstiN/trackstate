@@ -39,6 +39,15 @@ class WorkspaceOnboardingAccessibilityRobot
     const ValueKey('local-workspace-onboarding-initialize-folder'),
   );
 
+  Finder get _hostedRepositoryField =>
+      find.byKey(const ValueKey('workspace-onboarding-hosted-repository'));
+
+  Finder get _hostedBranchField =>
+      find.byKey(const ValueKey('workspace-onboarding-hosted-branch'));
+
+  Finder get _hostedOpenButton =>
+      find.byKey(const ValueKey('workspace-onboarding-open'));
+
   Finder get _titleText => find.text(_title);
 
   Finder get _subtitleText => find.text(_firstRunDescription);
@@ -94,13 +103,60 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
+  Future<void> chooseHostedRepository() async {
+    _expectOnboardingVisible();
+    await tester.ensureVisible(_hostedRepositoryButton.first);
+    await tester.tap(_hostedRepositoryButton.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    if (_hostedRepositoryField.evaluate().isEmpty ||
+        _hostedBranchField.evaluate().isEmpty ||
+        _hostedOpenButton.evaluate().isEmpty) {
+      throw StateError(
+        'Hosted repository onboarding controls were not visible after selecting hosted mode.',
+      );
+    }
+  }
+
+  @override
   Future<List<String>> collectForwardFocusOrder() async {
-    return _collectForwardFocusOrder(_focusCandidates());
+    return _collectForwardFocusOrder(
+      _localFocusCandidates(),
+      stopAt: _initializeFolder,
+      maxTabs: 8,
+    );
   }
 
   @override
   Future<List<String>> collectBackwardFocusOrder() async {
-    return _collectBackwardFocusOrder(_focusCandidates());
+    return _collectBackwardFocusOrder(
+      _localFocusCandidates(),
+      startAt: _initializeFolder,
+      stopAt: _localFolder,
+      maxTabs: 8,
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedForwardFocusOrder({
+    int maxTabs = 16,
+  }) async {
+    return _collectForwardFocusOrder(
+      _hostedFocusCandidates(),
+      stopAt: 'Open',
+      maxTabs: maxTabs,
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedBackwardFocusOrder({
+    int maxTabs = 16,
+  }) async {
+    return _collectBackwardFocusOrder(
+      _hostedFocusCandidates(),
+      startAt: 'Open',
+      stopAt: _localFolder,
+      maxTabs: maxTabs,
+    );
   }
 
   @override
@@ -152,6 +208,24 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
+  List<WorkspaceOnboardingContrastObservation> observeHostedContrastSet() {
+    _expectOnboardingVisible();
+    if (_hostedOpenButton.evaluate().isEmpty) {
+      throw StateError('The hosted onboarding action is not visible.');
+    }
+    final colors = this.colors();
+    return <WorkspaceOnboardingContrastObservation>[
+      _observeButtonTextContrast(
+        label: 'Hosted Open action',
+        buttonFinder: _hostedOpenButton,
+        text: 'Open',
+        backgroundFallback: colors.primary,
+        minimumContrast: 4.5,
+      ),
+    ];
+  }
+
+  @override
   bool hasVisiblePlaceholderText() {
     final textFields = find.descendant(
       of: _onboardingSurface.first,
@@ -193,7 +267,7 @@ class WorkspaceOnboardingAccessibilityRobot
     }
   }
 
-  Map<String, Finder> _focusCandidates() {
+  Map<String, Finder> _localFocusCandidates() {
     return <String, Finder>{
       _localFolder: _localFolderButton,
       _hostedRepository: _hostedRepositoryButton,
@@ -202,41 +276,64 @@ class WorkspaceOnboardingAccessibilityRobot
     };
   }
 
+  Map<String, Finder> _hostedFocusCandidates() {
+    return <String, Finder>{
+      _localFolder: _localFolderButton,
+      _hostedRepository: _hostedRepositoryButton,
+      'Repository': _hostedRepositoryField,
+      'Branch': _hostedBranchField,
+      'Open': _hostedOpenButton,
+    };
+  }
+
   Future<List<String>> _collectForwardFocusOrder(
-    Map<String, Finder> candidates,
-  ) async {
+    Map<String, Finder> candidates, {
+    required String stopAt,
+    required int maxTabs,
+  }) async {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
 
     final order = <String>[];
-    for (var index = 0; index < candidates.length; index += 1) {
+    for (var index = 0; index < maxTabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       final label = _focusedLabel(candidates);
       if (label != null && (order.isEmpty || order.last != label)) {
         order.add(label);
+        if (label == stopAt) {
+          break;
+        }
       }
     }
     return order;
   }
 
   Future<List<String>> _collectBackwardFocusOrder(
-    Map<String, Finder> candidates,
-  ) async {
+    Map<String, Finder> candidates, {
+    required String startAt,
+    required String stopAt,
+    required int maxTabs,
+  }) async {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
 
-    for (var index = 0; index < candidates.length; index += 1) {
+    final order = <String>[];
+    for (var index = 0; index < maxTabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-    }
-    final order = <String>[];
-    final initialLabel = _focusedLabel(candidates);
-    if (initialLabel != null) {
-      order.add(initialLabel);
+      final label = _focusedLabel(candidates);
+      if (label == startAt) {
+        order.add(label!);
+        break;
+      }
     }
 
-    for (var index = 1; index < candidates.length; index += 1) {
+    if (order.isEmpty) {
+      return order;
+    }
+
+    for (var index = 0; index < maxTabs; index += 1) {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
@@ -244,6 +341,9 @@ class WorkspaceOnboardingAccessibilityRobot
       final label = _focusedLabel(candidates);
       if (label != null && order.last != label) {
         order.add(label);
+        if (label == stopAt) {
+          break;
+        }
       }
     }
 
