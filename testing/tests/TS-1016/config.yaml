@@ -1,0 +1,12 @@
+test_id: TS-1016
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState app with preloaded hosted workspace profiles in a pristine state.
+  - Uses the desktop default viewport for web tickets: 1440x900.
+  - Locates a real disabled interactive background control outside the open workspace switcher.
+  - Clicks that disabled background control with a real pointer action and verifies the panel closes.

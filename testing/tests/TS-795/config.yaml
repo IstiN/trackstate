@@ -1,0 +1,16 @@
+test_id: TS-795
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Reuses the production local+hosted workspace fixture from TS-725.
+  - Verifies the active local workspace row in Workspace switcher visibly renders Connect GitHub while signed out.
+  - Confirms activating that row control opens the production GitHub authentication dialog instead of relying on mocked end state.
+runtime_inputs:
+  active_workspace_kind: local
+  active_workspace_auth_state: signed_out
+  expected_active_state: Local Git
+  expected_row_action: Connect GitHub
+  run_command: flutter test testing/tests/TS-795/test_ts_795.dart --reporter expanded

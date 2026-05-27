@@ -10,7 +10,7 @@ The automation:
    `Status`, `Summary`, `Description`, `Priority`, `Assignee`, `Labels`,
    `Components`, `Fix versions`, `Epic`, `Save`, and `Cancel`
 4. clears `Summary`, submits the form, and requires either focus to return to
-   `Summary` or semantics-based evidence that the validation error was exposed
+    `Summary` or semantics-based evidence that the validation error was exposed
 5. measures the empty `Summary` placeholder contrast against the WCAG AA
    placeholder threshold
 
