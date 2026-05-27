@@ -39,22 +39,26 @@ class TrackStateColors extends ThemeExtension<TrackStateColors> {
   final Color info;
   final Color shadow;
 
+  Color get loadingFeedbackBackground => surfaceAlt;
+
+  Color get loadingFeedbackForeground => text;
+
   static const light = TrackStateColors(
     primary: Color(0xFFB24328),
     primarySoft: Color(0xFFF2D2C4),
     secondary: Color(0xFF6D7F4F),
     secondarySoft: Color(0xFFE7EED8),
-    accent: Color(0xFFD9A21B),
+    accent: Color(0xFFB08416),
     accentSoft: Color(0xFFFFF1CF),
     page: Color(0xFFFAF8F4),
     surface: Color(0xFFFFFFFF),
     surfaceAlt: Color(0xFFF1E4D5),
     text: Color(0xFF2D2A26),
-    muted: Color(0xFF6B6D63),
+    muted: Color(0xFF5B5A52),
     border: Color(0xFFE5D3B8),
-    success: Color(0xFF3BBE60),
+    success: Color(0xFF288242),
     warning: Color(0xFF7A6511),
-    error: Color(0xFFC25742),
+    error: Color(0xFF8F3A2A),
     info: Color(0xFF5A5F18),
     shadow: Color(0x1F2D2A26),
   );

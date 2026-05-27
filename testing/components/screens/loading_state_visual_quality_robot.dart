@@ -21,15 +21,26 @@ class LoadingStateVisualQualityRobot {
   );
 
   Finder topBarButton(String label) {
+    final semanticsScope = find.bySemanticsLabel(
+      RegExp('^${RegExp.escape(label)}\$'),
+    );
+    final descendantButtons = find.descendant(
+      of: semanticsScope,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (descendantButtons.evaluate().isNotEmpty) {
+      return _topMost(descendantButtons);
+    }
+
     final buttonCandidates = find.ancestor(
       of: find.text(label),
       matching: find.bySubtype<ButtonStyleButton>(),
     );
-    return _filteredByGeometry(
-      buttonCandidates,
-      predicate: (rect) => rect.top < 120 && rect.right > 900,
-      fallback: _topMost(buttonCandidates),
-    );
+    if (buttonCandidates.evaluate().isNotEmpty) {
+      return _topMost(buttonCandidates);
+    }
+
+    return _topMost(semanticsScope);
   }
 
   Finder navigationItem(String label) {
@@ -126,20 +137,48 @@ class LoadingStateVisualQualityRobot {
   }
 
   Future<List<String>> collectLoadingFocusVisits({required int tabs}) async {
-    final rows = loadingRows();
-    final firstLoadingResult = rows.isNotEmpty
-        ? rows.first
-        : find.byWidgetPredicate(
-            (_) => false,
-            description: 'missing loading result row',
-          );
     return collectFocusVisits(<String, Finder>{
       'Create issue': topBarButton('Create issue'),
       'Connect GitHub': topBarButton('Connect GitHub'),
       'JQL Search navigation': navigationItem('JQL Search'),
       'Search issues field': jqlSearchField,
-      'First loading result': firstLoadingResult,
+      'First loading result': _firstLoadingResultAction(),
     }, tabs: tabs);
+  }
+
+  Finder _firstLoadingResultAction() {
+    final candidates = find.descendant(
+      of: jqlSearchSurface,
+      matching: find.bySemanticsLabel(RegExp(r'^Open .+$')),
+    );
+    final matches = candidates.evaluate().length;
+    if (matches == 0) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing loading result action',
+      );
+    }
+
+    Finder? bestCandidate;
+    var bestTop = double.infinity;
+    for (var index = 0; index < matches; index += 1) {
+      final candidate = candidates.at(index);
+      final label = tester.getSemantics(candidate).label.trim();
+      if (label.endsWith('Loading...')) {
+        continue;
+      }
+      final top = tester.getRect(candidate).top;
+      if (top < bestTop) {
+        bestTop = top;
+        bestCandidate = candidate;
+      }
+    }
+
+    return bestCandidate ??
+        find.byWidgetPredicate(
+          (_) => false,
+          description: 'missing loading result action',
+        );
   }
 
   Future<List<String>> collectFocusVisits(
@@ -150,6 +189,15 @@ class LoadingStateVisualQualityRobot {
     await tester.pump();
 
     final visits = <String>[];
+    if (jqlSearchField.evaluate().isNotEmpty) {
+      await tester.tap(jqlSearchField);
+      await tester.pump();
+      final initialLabel = _focusedCandidate(candidates);
+      if (initialLabel != null) {
+        visits.add(initialLabel);
+      }
+    }
+
     for (var index = 0; index < tabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump(const Duration(milliseconds: 60));
@@ -271,31 +319,28 @@ class LoadingStateVisualQualityRobot {
     if (finder.evaluate().isEmpty) {
       return false;
     }
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext == null) {
       return false;
     }
 
-    final candidateSemantics = _semanticsFinderFor(finder);
-    return find.semantics
-        .descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        )
-        .evaluate()
-        .isNotEmpty;
-  }
-
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
+    for (final element in finder.evaluate()) {
+      if (element == focusedContext) {
+        return true;
+      }
+      var containsFocusedContext = false;
+      focusedContext.visitAncestorElements((ancestor) {
+        if (ancestor == element) {
+          containsFocusedContext = true;
+          return false;
+        }
+        return true;
+      });
+      if (containsFocusedContext) {
+        return true;
+      }
+    }
+    return false;
   }
 
   Finder _filteredByGeometry(

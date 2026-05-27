@@ -1,0 +1,13 @@
+test_id: TS-1035
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app against the live implementation.
+  - Preloads a hosted workspace plus fallback local workspace and exercises the normal GitHub /user startup auth probe path with no synthetic delay.
+  - Accounts for linked fixes TS-1040, TS-1038, TS-1036, and TS-1029 by waiting for the prompt /user probe, the pre-timeout shell_ready transition, and the post-probe success-path diagnostic.
+  - Waits for the live shell to become interactive, then keeps polling long enough for success-path startup diagnostics to surface before asserting.
+  - Fails if the live browser console does not expose a startup diagnostic entry for the successful initialization path with a timing delta that matches the observed auth-probe lifecycle.

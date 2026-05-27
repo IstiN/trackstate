@@ -50,6 +50,12 @@ class GitHubIssueAttachmentUploadFramework
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) =>
-      _repository.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+      _repository.uploadIssueAttachment(
+        issue: issue,
+        name: name,
+        bytes: bytes,
+        sourceName: sourceName,
+      );
 }

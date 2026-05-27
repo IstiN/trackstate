@@ -61,6 +61,64 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncStatus => 'Synced with Git';
 
   @override
+  String get workspaceSyncSettings => 'Workspace sync';
+
+  @override
+  String get workspaceSyncChecking => 'Syncing';
+
+  @override
+  String get workspaceSyncAttentionNeededVisibleLabel => 'Attention needed';
+
+  @override
+  String get workspaceSyncAttentionNeededSemanticLabel =>
+      'Sync error, attention needed';
+
+  @override
+  String get workspaceSyncUnavailable => 'Sync unavailable';
+
+  @override
+  String get workspaceSyncPending => 'Updates pending';
+
+  @override
+  String get workspaceSyncPendingTitle => 'Updates pending';
+
+  @override
+  String get workspaceSyncPendingMessage =>
+      'Background updates were detected while edits were open. TrackState will apply the latest refresh after you finish the current draft or save.';
+
+  @override
+  String get workspaceSyncCheckingMessage =>
+      'TrackState is checking the active workspace for Git and repository changes.';
+
+  @override
+  String get workspaceSyncIdleMessage =>
+      'Workspace sync is running in the background for the active workspace.';
+
+  @override
+  String workspaceSyncLastSuccessful(String timestamp) {
+    return 'Last successful sync check: $timestamp';
+  }
+
+  @override
+  String workspaceSyncRetryAt(String timestamp) {
+    return 'Next retry at $timestamp.';
+  }
+
+  @override
+  String workspaceSyncErrorMessage(String error) {
+    return 'The latest sync check failed: $error';
+  }
+
+  @override
+  String get workspaceSyncLastCheckedLabel => 'Last checked';
+
+  @override
+  String get workspaceSyncLastSuccessfulLabel => 'Last successful';
+
+  @override
+  String get workspaceSyncLatestError => 'Latest error';
+
+  @override
   String get searchIssues => 'Search issues';
 
   @override
@@ -114,6 +172,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get detail => 'Detail';
 
   @override
+  String get comment => 'Comment';
+
+  @override
   String get comments => 'Comments';
 
   @override
@@ -121,7 +182,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsDownloadOnlyMessage =>
-      'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
+      'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.';
 
   @override
   String get attachmentsLimitedUploadMessage =>
@@ -129,7 +190,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsGitHubReleasesUnsupportedMessage =>
-      'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.';
+      'This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.';
 
   @override
   String get attachmentsAccessMessageDisconnected =>
@@ -169,6 +230,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String downloadAttachment(String fileName) {
     return 'Download $fileName';
   }
+
+  @override
+  String get commentPlaceholder => 'Add a comment...';
 
   @override
   String get postComment => 'Post comment';
@@ -346,7 +410,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String attachmentStorageGitHubReleasesRestrictedMessage(String tagPrefix) {
-    return 'New attachments resolve to release tag $tagPrefix<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.';
+    return 'New attachments resolve to release tag $tagPrefix<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.';
   }
 
   @override
@@ -589,6 +653,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
 
   @override
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  ) {
+    return 'Current session flags: canWrite=$canWrite, canCreateBranch=$canCreateBranch.';
+  }
+
+  @override
   String get repositoryAccessAttachmentRestrictedTitle =>
       'Attachments stay download-only in the browser';
 
@@ -610,11 +682,185 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get repositoryAccessReleaseRestrictedMessage =>
-      'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.';
+      'Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.';
 
   @override
   String get repositoryAccessSettingsHint =>
       'Settings is the canonical place to review repository access and reconnect safely.';
+
+  @override
+  String get savedWorkspaces => 'Saved workspaces';
+
+  @override
+  String get workspaceSwitcher => 'Workspace switcher';
+
+  @override
+  String get workspaceSwitcherEmptyState =>
+      'No saved workspaces yet. Add one to switch between repositories faster.';
+
+  @override
+  String get addWorkspace => 'Add workspace';
+
+  @override
+  String get localFolder => 'Local folder';
+
+  @override
+  String get hostedRepository => 'Hosted repository';
+
+  @override
+  String get workspaceOnboardingDescription =>
+      'Choose how TrackState should open the next workspace.';
+
+  @override
+  String get workspaceOnboardingFirstRunDescription =>
+      'Choose a local folder to open an existing workspace or initialize TrackState in a new one.';
+
+  @override
+  String get workspaceOnboardingFirstLaunchDescription =>
+      'Choose a local folder or hosted repository to get started.';
+
+  @override
+  String get localWorkspaceOnboardingOpenExisting => 'Open existing folder';
+
+  @override
+  String get localWorkspaceOnboardingInitializeFolder => 'Initialize folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderLabel => 'Selected folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderRequired =>
+      'Choose a folder to continue.';
+
+  @override
+  String get localWorkspaceOnboardingFolderBrowseOpen =>
+      'Choose existing folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderBrowseInitialize =>
+      'Choose folder to initialize';
+
+  @override
+  String get localWorkspaceOnboardingChangeFolder => 'Change folder';
+
+  @override
+  String get localWorkspaceOnboardingDetailsTitle => 'Workspace details';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceName => 'Workspace name';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceNameRequired =>
+      'Workspace name is required.';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceNameHelper =>
+      'Defaults to the selected folder name. You can rename it before saving the workspace profile.';
+
+  @override
+  String get localWorkspaceOnboardingWriteBranchHelper =>
+      'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.';
+
+  @override
+  String get localWorkspaceOnboardingWriteBranchRequired =>
+      'Write Branch is required.';
+
+  @override
+  String get localWorkspaceOnboardingReadyStatus => 'Ready to open';
+
+  @override
+  String get localWorkspaceOnboardingInitializeStatus =>
+      'Initialization required';
+
+  @override
+  String get localWorkspaceOnboardingBlockedStatus => 'Folder not supported';
+
+  @override
+  String get localWorkspaceOnboardingOpenAction => 'Open workspace';
+
+  @override
+  String get localWorkspaceOnboardingInitializeAction =>
+      'Initialize TrackState here';
+
+  @override
+  String localWorkspaceOnboardingCurrentBranchMismatch(String branch) {
+    return 'This repository is currently on $branch. Switch the branch yourself before onboarding, or keep the detected write branch.';
+  }
+
+  @override
+  String get workspaceOnboardingRepositoryHelper =>
+      'Enter the repository as owner/repo.';
+
+  @override
+  String get workspaceOnboardingLocalFolderHelper =>
+      'Enter the local Git folder path.';
+
+  @override
+  String get workspaceOnboardingBrowseRepositories => 'Accessible repositories';
+
+  @override
+  String get workspaceOnboardingLoadingRepositories =>
+      'Loading accessible repositories...';
+
+  @override
+  String get workspaceOnboardingBrowseUnavailableHint =>
+      'Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.';
+
+  @override
+  String get workspaceOnboardingRepositoryManualFallbackHint =>
+      'Select a repository from the current GitHub session or enter owner/repo manually.';
+
+  @override
+  String workspaceOnboardingRepositoryLoadFailed(String error) {
+    return 'Accessible repositories could not be loaded. Enter owner/repo manually instead. $error';
+  }
+
+  @override
+  String get workspaceTargetTypeHosted => 'Hosted';
+
+  @override
+  String get workspaceTargetTypeLocal => 'Local';
+
+  @override
+  String get activeWorkspace => 'Active';
+
+  @override
+  String get openWorkspace => 'Open';
+
+  @override
+  String get workspaceSaveAndSwitch => 'Save and switch';
+
+  @override
+  String get workspaceStateLocalGit => 'Local Git';
+
+  @override
+  String get workspaceStateLocal => 'Local';
+
+  @override
+  String get workspaceStateConnected => 'Connected';
+
+  @override
+  String get workspaceStateReadOnly => 'Read-only';
+
+  @override
+  String get workspaceStateSyncIssue => 'Sync issue';
+
+  @override
+  String get workspaceStateNeedsSignIn => 'Needs sign-in';
+
+  @override
+  String get workspaceStateSavedHostedWorkspace => 'Saved hosted workspace';
+
+  @override
+  String get workspaceStateUnavailable => 'Unavailable';
+
+  @override
+  String get workspaceDeleteConfirmationTitle => 'Delete saved workspace';
+
+  @override
+  String workspaceDeleteConfirmationMessage(String workspaceName) {
+    return 'Delete $workspaceName and remove its stored credentials? This action cannot be undone.';
+  }
 
   @override
   String get startupRecovery => 'Startup recovery';
@@ -651,7 +897,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String repositoryConfigFallback(String error) {
-    return 'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. $error';
+    return 'TrackState.AI fell back to startup-safe repository defaults so the shell could open. $error';
+  }
+
+  @override
+  String workspaceSwitchFailed(String workspaceName, String reason) {
+    return 'Could not open $workspaceName. $reason';
+  }
+
+  @override
+  String workspaceRestoreSkipped(String workspaceName, String reason) {
+    return 'Skipped $workspaceName during restore. $reason';
+  }
+
+  @override
+  String workspaceRestoreFailed(String workspaceName, String reason) {
+    return 'No valid saved workspace could be restored. Last skipped workspace: $workspaceName. $reason';
+  }
+
+  @override
+  String selectedIssueUnavailable(String issueKey) {
+    return '$issueKey is no longer available in this workspace.';
   }
 
   @override
@@ -758,6 +1024,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.';
 
   @override
+  String get localGitHostedAccessDescription =>
+      'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.';
+
+  @override
   String get close => 'Close';
 
   @override
@@ -765,6 +1035,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get retry => 'Retry';
+
+  @override
+  String get retryStartup => 'Retry startup';
 
   @override
   String get editIssue => 'Edit issue';
@@ -799,7 +1072,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get hierarchyChangeConfirmationTitle => 'Confirm hierarchy move';
 
   @override
-  String hierarchyChangeConfirmationMessage(int descendantCount) {
+  String hierarchyChangeConfirmationMessage(
+    String issueLabel,
+    int descendantCount,
+  ) {
     String _temp0 = intl.Intl.pluralLogic(
       descendantCount,
       locale: localeName,
@@ -807,7 +1083,23 @@ class AppLocalizationsEn extends AppLocalizations {
       one: '1 descendant',
       zero: 'no descendants',
     );
-    return 'Saving this hierarchy change will move the selected issue together with $_temp0 to a new canonical path.';
+    return 'Saving this hierarchy change will move $issueLabel together with $_temp0 to a new canonical path.';
+  }
+
+  @override
+  String hierarchyChangeConfirmationDestinationMessage(
+    String issueLabel,
+    int descendantCount,
+    String destinationLabel,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      descendantCount,
+      locale: localeName,
+      other: '$descendantCount descendants',
+      one: '1 descendant',
+      zero: 'no descendants',
+    );
+    return 'Saving this hierarchy change will move $issueLabel together with $_temp0 to $destinationLabel.';
   }
 
   @override

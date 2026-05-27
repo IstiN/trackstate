@@ -1,0 +1,46 @@
+test_id: TS-961
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts961_probe_surface.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts961-log-validation-success
+  commit_message: "TS-961 probe: verify log-validation succeeds after successful axe scan"
+  pull_request_title: "TS-961 disposable probe: verify successful log-validation path"
+  pull_request_body: "Disposable PR created by TS-961 automation to verify that the live accessibility workflow runs a successful axe-core scan, then executes log-validation and reports the validator success message."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - axe
+    - wcag
+    - log-validation
+  contrast_evidence_markers:
+    - contrast
+    - color contrast
+    - ratio
+    - wcag
+    - 4.5:1
+  semantic_evidence_markers:
+    - aria
+    - semantics
+    - semantic
+    - label
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+  accessibility_job_name: Accessibility checks
+  axe_step_name: Run axe-core accessibility checks
+  log_validation_step_name: log-validation
+  log_validation_success_markers:
+    - "log-validation passed: mandatory engine state tokens were found in the output."
+notes:
+  - Reuses the live disposable compliant accessibility probe path so the pull request contains valid accessibility changes only.
+  - Verifies the default-branch workflow contract and the contributor-visible run data for the successful axe-core and log-validation path.

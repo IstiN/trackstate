@@ -30,6 +30,8 @@ flutter test testing/tests/TS-374/test_ts_374.dart --reporter expanded
 - No extra environment variables are required
 - The test stores a mock hosted token in `SharedPreferences` to drive the
   connected read-only provider session
+- The harness resizes the desktop widget surface to `1440x900` before
+  assertions so the run matches the default desktop viewport for this ticket
 
 ## Expected result
 

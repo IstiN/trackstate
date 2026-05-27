@@ -1,3 +1,4 @@
+import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
 import '../../core/interfaces/dirty_local_issue_write_client.dart';
@@ -7,6 +8,14 @@ class TrackStateProviderDirtyLocalIssueWriteClient
   const TrackStateProviderDirtyLocalIssueWriteClient({
     required TrackStateProviderAdapter provider,
   }) : _provider = provider;
+
+  factory TrackStateProviderDirtyLocalIssueWriteClient.local({
+    required String repositoryPath,
+  }) {
+    return TrackStateProviderDirtyLocalIssueWriteClient(
+      provider: LocalGitTrackStateProvider(repositoryPath: repositoryPath),
+    );
+  }
 
   final TrackStateProviderAdapter _provider;
 

@@ -27,11 +27,11 @@ class SettingsScreenRobot {
   Finder get projectSettingsHeading => find.text('Project Settings');
   Finder get projectSettingsAdmin =>
       find.text('Project settings administration');
-  Finder get statusesTab => find.widgetWithText(Tab, 'Statuses');
-  Finder get issueTypesCard => find.widgetWithText(Tab, 'Issue Types');
-  Finder get workflowCard => find.widgetWithText(Tab, 'Workflows');
-  Finder get fieldsCard => find.widgetWithText(Tab, 'Fields');
-  Finder get localesTab => find.widgetWithText(Tab, 'Locales');
+  Finder get statusesTab => tabByLabel('Statuses');
+  Finder get issueTypesCard => tabByLabel('Issue Types');
+  Finder get workflowCard => tabByLabel('Workflows');
+  Finder get fieldsCard => tabByLabel('Fields');
+  Finder get localesTab => tabByLabel('Locales');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
   Finder get settingsAdminSection =>
@@ -45,8 +45,14 @@ class SettingsScreenRobot {
       topBarProviderControl('Connect GitHub');
   Finder get connectGitHubSettingsControl =>
       settingsProviderControl('Connect GitHub');
+  Finder get readOnlyTopBarControl => topBarProviderControl('Read-only');
+  Finder get readOnlySettingsControl => settingsProviderControl('Read-only');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
+  Finder get attachmentsLimitedTopBarControl =>
+      topBarProviderControl('Attachments limited');
+  Finder get attachmentsLimitedSettingsControl =>
+      settingsProviderControl('Attachments limited');
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
   Finder get localGitControl => providerControl('Local Git');
@@ -122,9 +128,10 @@ class SettingsScreenRobot {
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
     Widget Function(Widget child)? appWrapper,
+    Size viewportSize = const Size(1440, 960),
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
-    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.physicalSize = viewportSize;
     tester.view.devicePixelRatio = 1;
     final app = TrackStateApp(key: UniqueKey(), repository: repository);
     await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
@@ -162,7 +169,8 @@ class SettingsScreenRobot {
 
   Size get viewportSize => tester.view.physicalSize;
 
-  Finder tabByLabel(String label) => find.widgetWithText(Tab, label);
+  Finder tabByLabel(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
 
   Future<void> selectTab(String label) async {
     final tab = tabByLabel(label);
@@ -523,7 +531,6 @@ class SettingsScreenRobot {
 
   bool showsAttachmentStorageModeSetting() =>
       isVisibleText('Attachment storage mode');
-
   bool statusSummaryVisible({
     required String name,
     required String id,
@@ -596,6 +603,22 @@ class SettingsScreenRobot {
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
+  }
+
+  Future<List<String>> collectLocalWorkspaceDetailsFocusOrder({
+    required String submitLabel,
+    int tabs = 20,
+  }) async {
+    await clearFocus();
+    return collectFocusOrder(
+      candidates: <String, Finder>{
+        'Change folder': actionButton('Change folder'),
+        'Workspace name': labeledTextField('Workspace name'),
+        'Write Branch': labeledTextField('Write Branch'),
+        submitLabel: actionButton(submitLabel),
+      },
+      tabs: tabs,
+    );
   }
 
   void expectVisibleSettingsContent() {
@@ -685,26 +708,32 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
       return null;
     }
+
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
           return entry.key;
         }
       }
@@ -723,6 +752,14 @@ class SettingsScreenRobot {
       }
     }
     throw StateError('No rendered text color found for $finder');
+  }
+
+  Color renderedVisibleTextColor(String text) {
+    final finder = find.text(text, findRichText: true);
+    if (finder.evaluate().isEmpty) {
+      throw StateError('Expected visible text "$text".');
+    }
+    return renderedTextColor(finder.first);
   }
 
   Color renderedTextColorWithin(Finder scope, String text) {
@@ -920,8 +957,15 @@ class SettingsScreenRobot {
     return labels.map((entry) => entry.label).toList();
   }
 
-  Finder topBarProviderControl(String label) =>
-      _buttonControlWithText(label, requiresTrackStateIcon: true);
+  Finder topBarProviderControl(String label) {
+    final exact = _buttonControlWithText(label, requiresTrackStateIcon: true);
+    if (exact.evaluate().isNotEmpty) {
+      return exact;
+    }
+    return find.bySemanticsLabel(
+      RegExp('Workspace switcher: .*${RegExp.escape(label)}'),
+    );
+  }
 
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
@@ -1191,13 +1235,19 @@ class SettingsScreenRobot {
   }
 
   Finder _currentTopBarControl() {
-    for (final label in const ['Connected', 'Connect GitHub', 'Local Git']) {
+    for (final label in const [
+      'Connected',
+      'Read-only',
+      'Attachments limited',
+      'Connect GitHub',
+      'Local Git',
+    ]) {
       final control = topBarProviderControl(label);
       if (control.evaluate().isNotEmpty) {
         return control;
       }
     }
-    return connectGitHubTopBarControl;
+    return find.bySemanticsLabel(RegExp('Workspace switcher: .*'));
   }
 
   bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {
