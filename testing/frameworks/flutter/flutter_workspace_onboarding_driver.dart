@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -141,6 +142,25 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     }
     await _tapAndSettle(
       find.byKey(const ValueKey('workspace-onboarding-open')),
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16}) {
+    return _collectFocusOrder(
+      candidates: <String, Finder>{
+        'Local folder': _targetChoiceControl('Local folder'),
+        'Hosted repository': _targetChoiceControl('Hosted repository'),
+        'Repository field': find.byKey(
+          const ValueKey('workspace-onboarding-hosted-repository'),
+        ),
+        'Branch field': find.byKey(
+          const ValueKey('workspace-onboarding-hosted-branch'),
+        ),
+        'Open': find.byKey(const ValueKey('workspace-onboarding-open')),
+      },
+      stopAt: 'Open',
+      maxTabs: maxTabs,
     );
   }
 
@@ -506,6 +526,63 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     await _tester.pumpAndSettle();
   }
 
+  Future<List<String>> _collectFocusOrder({
+    required Map<String, Finder> candidates,
+    required String stopAt,
+    required int maxTabs,
+  }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await _tester.pump();
+
+    final order = <String>[];
+    for (var i = 0; i < maxTabs; i += 1) {
+      await _tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await _tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null && (order.isEmpty || order.last != label)) {
+        order.add(label);
+        if (label == stopAt) {
+          break;
+        }
+      }
+    }
+    return order;
+  }
+
+  String? _focusedLabel(Map<String, Finder> candidates) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
+      return null;
+    }
+
+    for (final entry in candidates.entries) {
+      final matches = entry.value.evaluate().length;
+      if (matches == 0) {
+        continue;
+      }
+      for (var index = 0; index < matches; index += 1) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
   Future<void> _waitForAnyVisible(List<Finder> finders) async {
     const step = Duration(milliseconds: 100);
     const timeout = Duration(seconds: 5);
@@ -514,6 +591,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       if (finders.any((finder) => finder.evaluate().isNotEmpty)) {
         return;
       }
+      await _drainRealAsyncWork(step);
       await _tester.pump(step);
       elapsed += step;
     }
@@ -543,6 +621,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
           detailsTitle.evaluate().isNotEmpty) {
         return;
       }
+      await _drainRealAsyncWork(step);
       await _tester.pump(step);
       elapsed += step;
     }
@@ -557,6 +636,12 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       'selected_folder=${_selectedFolderPath() ?? '<none>'}; '
       'visible_texts=${_uniqueVisibleTexts().join(' | ')}',
     );
+  }
+
+  Future<void> _drainRealAsyncWork(Duration step) async {
+    await _tester.runAsync(() async {
+      await Future<void>.delayed(step);
+    });
   }
 
   List<String> _uniqueVisibleTexts() {

@@ -9,9 +9,9 @@ import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../../components/services/demo_local_workspace_repository.dart';
 import '../../../components/screens/settings_screen_robot.dart';
 import '../../../core/utils/local_git_test_repository.dart';
-import '../../TS-724/support/ts724_workspace_switch_validation_fixture.dart';
 
 class Ts725LocalHostedWorkspaceFixture {
   Ts725LocalHostedWorkspaceFixture._({
@@ -91,7 +91,7 @@ class Ts725LocalHostedWorkspaceFixture {
                 'TS-725 does not know how to open "$repositoryPath".',
               );
             }
-            return createTs724LocalWorkspaceRepository(
+            return createDemoLocalWorkspaceRepository(
               repositoryPath: repositoryPath,
             );
           },
@@ -199,6 +199,12 @@ class Ts725LocalHostedWorkspaceScreen {
   bool canOpenWorkspace(String workspaceId) =>
       _workspaceOpenButton(workspaceId).evaluate().isNotEmpty;
 
+  bool workspaceRowHasControl(String workspaceId, String label) =>
+      _descendantControl(
+        _workspaceRow(workspaceId),
+        label,
+      ).evaluate().isNotEmpty;
+
   bool isTextVisible(String text) =>
       find.textContaining(text, findRichText: true).evaluate().isNotEmpty;
 
@@ -212,6 +218,17 @@ class Ts725LocalHostedWorkspaceScreen {
 
   Future<bool> tapVisibleControl(String label) async {
     final control = _control(label);
+    if (control.evaluate().isEmpty) {
+      return false;
+    }
+    await _tester.ensureVisible(control.first);
+    await _tester.tap(control.first, warnIfMissed: false);
+    await _tester.pumpAndSettle();
+    return true;
+  }
+
+  Future<bool> tapWorkspaceRowControl(String workspaceId, String label) async {
+    final control = _descendantControl(_workspaceRow(workspaceId), label);
     if (control.evaluate().isEmpty) {
       return false;
     }
@@ -296,6 +313,30 @@ class Ts725LocalHostedWorkspaceScreen {
       return semantics;
     }
     return find.text(label, findRichText: true);
+  }
+
+  Finder _descendantControl(Finder scope, String label) {
+    final semantics = find.descendant(
+      of: scope,
+      matching: _exactSemanticsLabel(label),
+    );
+    if (semantics.evaluate().isNotEmpty) {
+      return semantics;
+    }
+    final button = find.descendant(
+      of: scope,
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button;
+    }
+    return find.descendant(
+      of: scope,
+      matching: find.text(label, findRichText: true),
+    );
   }
 
   Finder _labeledTextField(String label) {

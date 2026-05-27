@@ -37,8 +37,14 @@ class FlutterLocalWorkspaceOnboardingDriver
     'Add workspace',
     'Choose a local folder or hosted repository to get started.',
     'Choose a local folder to open an existing workspace or initialize TrackState in a new one.',
+    'Local folder',
+    'Hosted repository',
     'Open existing folder',
     'Initialize folder',
+    'Repository Path',
+    'Branch',
+    'Enter the local Git folder path.',
+    'main',
     'Folder',
     'Change folder',
     'Details',
@@ -111,6 +117,21 @@ class FlutterLocalWorkspaceOnboardingDriver
   @override
   Future<void> enterWriteBranch(String value) async {
     await _enterTextField(_writeBranchKey, value);
+  }
+
+  @override
+  Future<void> submit() async {
+    final submit = find.byKey(_submitKey);
+    if (submit.evaluate().isEmpty) {
+      throw TestFailure('Expected the local onboarding submit action.');
+    }
+    await _tester.ensureVisible(submit.first);
+    await _tester.runAsync(() async {
+      await _tester.tap(submit.first, warnIfMissed: false);
+      await _tester.pump();
+      await Future<void>.delayed(_pumpStep);
+    });
+    await _tester.pump();
   }
 
   @override

@@ -14,7 +14,7 @@ launchLoadingStateVisualQualityFixture(WidgetTester tester) async {
   final screen = LoadingStateVisualQualityScreen(
     app: defaultTestingDependencies.createTrackStateAppScreen(tester),
     robot: LoadingStateVisualQualityRobot(tester),
-    repository: const Ts453BootstrapLoadingRepository(),
+    repository: Ts453BootstrapLoadingRepository(),
   );
   await screen.launch();
   return screen;
