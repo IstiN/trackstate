@@ -1,0 +1,10 @@
+test_id: TS-129
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
+  - TS-119 theme-token policy gate fix deployed on main
+notes:
+  - Reuses the shared HardcodedHexLintValidator to exercise the supported dart run tool/check_theme_tokens.dart enforcement path.
+  - Verifies the compliant theme-tokenized probe exits successfully and prints the clean no-violations terminal message.

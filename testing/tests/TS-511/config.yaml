@@ -1,0 +1,8 @@
+test_id: TS-511
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Exercises the production issue-detail Attachments tab with a hosted github-releases configuration and a connected session that cannot complete release-backed uploads.
+  - Verifies the inline restriction notice stays inside the Attachments tab, keeps existing attachments visible below it, and routes Open settings to Project Settings > Attachments.

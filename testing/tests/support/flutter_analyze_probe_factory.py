@@ -12,8 +12,10 @@ def create_flutter_analyze_probe(
     repository_root: Path,
     *,
     flutter_version: str,
+    env_prefixes: tuple[str, ...] = ("TS132", "TS115", "TRACKSTATE"),
 ) -> FlutterAnalyzeProbe:
     return PythonFlutterAnalyzeFramework(
         repository_root,
         flutter_version=flutter_version,
+        env_prefixes=env_prefixes,
     )

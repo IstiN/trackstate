@@ -3,13 +3,13 @@
 ## Install dependencies
 
 ```bash
-/tmp/flutter/bin/flutter pub get
+flutter pub get
 ```
 
 ## Run this test
 
 ```bash
-/tmp/flutter/bin/flutter test testing/tests/TS-66/test_ts_66.dart -r expanded
+flutter test testing/tests/TS-66/test_ts_66.dart -r expanded
 ```
 
 ## Environment / config

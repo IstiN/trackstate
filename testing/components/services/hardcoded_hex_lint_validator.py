@@ -36,7 +36,7 @@ class HardcodedHexLintValidator:
                 self._probe_source(config.tokenized_color_expression),
                 encoding="utf-8",
             )
-            tokenized_analyze = self._probe.analyze(
+            tokenized_analyze = self._probe.theme_token_check(
                 temp_repository_root,
                 config.probe_relative_path,
             )
@@ -45,7 +45,7 @@ class HardcodedHexLintValidator:
                 self._probe_source(config.hardcoded_color_expression),
                 encoding="utf-8",
             )
-            hardcoded_analyze = self._probe.analyze(
+            hardcoded_analyze = self._probe.theme_token_check(
                 temp_repository_root,
                 config.probe_relative_path,
             )

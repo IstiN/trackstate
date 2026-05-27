@@ -1,0 +1,9 @@
+test_id: TS-532
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Uses the deployed hosted TrackState app against the live setup repository.
+  - Temporarily switches the live DEMO project to repository-path attachment storage when needed, then restores the original project.json after the run.
+  - Verifies the repository-path Attachments notice navigates to Project Settings with the Attachments sub-tab active and the Attachment storage mode configuration visible.

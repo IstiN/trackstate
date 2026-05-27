@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -57,6 +57,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: stable
+          cache: true
 
       - name: Configure npm global prefix
         if: vars.AI_AGENT_PROVIDER == 'copilot'
@@ -72,7 +79,7 @@ jobs:
           path: |
             ~/.npm-global
             ~/.local/bin
-          key: ${{ runner.os }}-npm-global-copilot-${{ hashFiles('.github/workflows/ai-teammate.yml') }}
+          key: ${{ runner.os }}-npm-global-copilot-1.0.44
           restore-keys: |
             ${{ runner.os }}-npm-global-copilot-
             ${{ runner.os }}-npm-global-
@@ -80,9 +87,10 @@ jobs:
       - name: Install Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         run: |
-          if ! command -v github-copilot-cli >/dev/null 2>&1; then
-            npm install -g @github/copilot
+          if ! command -v copilot >/dev/null 2>&1; then
+            npm install -g @github/copilot@1.0.44
           fi
+          copilot --version
           echo "Copilot CLI ready"
 
       - name: Verify Copilot CLI installation
@@ -90,7 +98,7 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.PAT_TOKEN }}
         run: |
-          npx @github/copilot --version || echo "Copilot CLI will be available once credentials are configured"
+          copilot --version || echo "Copilot CLI will be available once credentials are configured"
 
       - name: Validate Copilot model
         if: vars.AI_AGENT_PROVIDER == 'copilot'
@@ -103,9 +111,9 @@ jobs:
           fi
           echo "Using Copilot model: ${COPILOT_MODEL}"
 
-      - name: Install DMTools CLI v1.7.180
+      - name: Install DMTools CLI v1.7.195
         run: |
-          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.180/install.sh | bash -s v1.7.180
+          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.195/install.sh | bash -s v1.7.195
 
       - name: Add DMTools to PATH
         run: echo "$HOME/.dmtools/bin" >> "$GITHUB_PATH"
@@ -120,8 +128,6 @@ jobs:
 
       - name: Run AI Teammate
         env:
-          PATH: "/home/runner/.local/bin:/home/runner/.dmtools/bin:/bin:/usr/bin:$PATH"
-
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_BASE_PATH: ${{ vars.JIRA_BASE_PATH }}
@@ -164,10 +170,12 @@ jobs:
         run: |
           echo "Using configuration: ${{ inputs.config_file }}"
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          INPUT_JQL="key = ${{ inputs.concurrency_key }}"
           echo "CI Run URL: ${CI_RUN_URL}"
+          echo "Input JQL: ${INPUT_JQL}"
 
           if [ -n "${ENCODED_CONFIG}" ]; then
-            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
           else
-            dmtools --debug run "${{ inputs.config_file }}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
           fi

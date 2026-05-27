@@ -18,6 +18,7 @@ void main() {
         tester,
       );
       LocalTrackStateFixture? fixture;
+      const createdIssuePath = 'DEMO/DEMO-2/main.md';
 
       try {
         fixture = await tester.runAsync(LocalTrackStateFixture.create);
@@ -25,7 +26,18 @@ void main() {
           throw StateError('TS-94 fixture creation did not complete.');
         }
 
+        final initialHead = await tester.runAsync(fixture.headRevision) ?? '';
         await tester.runAsync(fixture.makeDirtyMainFileChange);
+        final dirtyStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        expect(
+          dirtyStatus,
+          equals(['M ${LocalTrackStateFixture.issuePath}']),
+          reason:
+              'TS-94 requires exactly one manual filesystem edit before opening '
+              'Create issue, but `git status --short` returned '
+              '${dirtyStatus.join(' | ')}.',
+        );
         await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
         screen.expectLocalRuntimeChrome();
 
@@ -35,44 +47,49 @@ void main() {
           LocalTrackStateFixture.issueSummary,
         );
 
-        const sectionsToInspect = <String>[
-          'Dashboard',
-          'Board',
-          'JQL Search',
-          'Hierarchy',
-          'Settings',
-        ];
-        final visitedSections = <String>[];
-        String? createIssueSection;
-
-        for (final section in sectionsToInspect) {
-          await screen.openSection(section);
-          visitedSections.add(section);
-
-          final openedCreateIssueEntryPoint = await screen.tapVisibleControl(
-            'Create issue',
-          );
-          if (openedCreateIssueEntryPoint) {
-            createIssueSection = section;
-            break;
-          }
-        }
-
-        if (createIssueSection == null) {
-          fail(
-            'TS-94 could not navigate to an issue creation screen after '
-            'dirtying ${LocalTrackStateFixture.issuePath}. No visible '
-            '"Create issue" entry point was rendered in sections '
-            '${visitedSections.join(', ')}. Visible texts: '
-            '${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-            'Visible semantics: '
-            '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
-
+        final createIssueSection = await screen.openCreateIssueFlow();
         await _attemptDirtyIssueCreation(
           screen,
           createIssueSection: createIssueSection,
+        );
+
+        expect(
+          await screen.isTextFieldVisible('Summary'),
+          isTrue,
+          reason:
+              'After the dirty-repository guidance is shown, the Create issue '
+              'form should remain open so the blocked create attempt is visible '
+              'to the user.',
+        );
+
+        final latestHead = await tester.runAsync(fixture.headRevision) ?? '';
+        final finalStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        final createdIssueExists = await tester.runAsync(
+          () => fixture!.repositoryPathExists(createdIssuePath),
+        );
+
+        expect(
+          latestHead,
+          initialHead,
+          reason:
+              'A blocked dirty-repository create attempt must not add a new git '
+              'commit.',
+        );
+        expect(
+          finalStatus,
+          equals(dirtyStatus),
+          reason:
+              'A blocked dirty-repository create attempt must not change the '
+              'worktree beyond the original manual edit. Observed status: '
+              '${finalStatus.join(' | ')}.',
+        );
+        expect(
+          createdIssueExists,
+          isFalse,
+          reason:
+              'A blocked dirty-repository create attempt must not create the '
+              'new issue file at $createdIssuePath.',
         );
       } finally {
         await tester.runAsync(() async {
@@ -92,58 +109,16 @@ Future<void> _attemptDirtyIssueCreation(
   TrackStateAppComponent screen, {
   required String createIssueSection,
 }) async {
-  if (!await screen.isTextFieldVisible('Summary')) {
-    fail(
-      'TS-94 reached the "Create issue" entry point from $createIssueSection, '
-      'but the creation flow did not expose a visible "Summary" field. '
-      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-      'Visible semantics: '
-      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
-
-  await screen.enterLabeledTextField(
-    'Summary',
-    text: 'TS-94 dirty create candidate',
+  await screen.expectCreateIssueFormVisible(
+    createIssueSection: createIssueSection,
   );
-  if (await screen.isTextFieldVisible('Description')) {
-    await screen.enterLabeledTextField(
-      'Description',
-      text: 'Dirty local creation should surface recovery guidance.',
-    );
-  }
-
-  final submittedCreate =
-      await screen.tapVisibleControl('Create') ||
-      await screen.tapVisibleControl('Save');
-  if (!submittedCreate) {
-    fail(
-      'TS-94 reached the "Create issue" entry point from $createIssueSection '
-      'and populated the visible fields, but no visible "Create" or "Save" '
-      'action was rendered for submission. Visible texts: '
-      '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
-      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
+  await screen.populateCreateIssueForm(
+    summary: 'TS-94 dirty create candidate',
+    description: 'Dirty local creation should surface recovery guidance.',
+  );
+  await screen.submitCreateIssue(createIssueSection: createIssueSection);
 
   await screen.expectMessageBannerContains('commit');
   await screen.expectMessageBannerContains('stash');
   await screen.expectMessageBannerContains('clean');
-}
-
-String _formatSnapshot(List<String> values, {int limit = 20}) {
-  final snapshot = <String>[];
-  for (final value in values) {
-    if (value.isEmpty || snapshot.contains(value)) {
-      continue;
-    }
-    snapshot.add(value);
-    if (snapshot.length == limit) {
-      break;
-    }
-  }
-  if (snapshot.isEmpty) {
-    return '<none>';
-  }
-  return snapshot.join(' | ');
 }

@@ -1,0 +1,9 @@
+test_id: TS-242
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - TS-223 Concurrent issue deletes lose tombstone/index updates and break repository reload
+notes:
+  - Uses a ticket-specific Local Git fixture with two active delete targets and one surviving issue.
+  - Triggers concurrent LocalTrackStateRepository.deleteIssue calls through the repository service and verifies that the active issues.json index no longer contains references to deleted issues after the concurrent persistence cycle.

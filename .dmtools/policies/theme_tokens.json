@@ -1,0 +1,18 @@
+{
+  "include": [
+    "lib/**/*.dart"
+  ],
+  "exclude": [
+    "lib/ui/core/trackstate_theme.dart",
+    "lib/ui/core/trackstate_icons.dart",
+    "**/*.g.dart",
+    "**/*.freezed.dart"
+  ],
+  "allowedValues": [
+    "0x00000000"
+  ],
+  "diagnostic": {
+    "code": "trackstate_theme_tokens",
+    "message": "Use TrackState theme tokens instead of hardcoded colors."
+  }
+}

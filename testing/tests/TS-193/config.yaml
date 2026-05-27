@@ -1,0 +1,10 @@
+test_id: TS-193
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - TS-179 archiveIssue relocates archived issue artifacts out of active storage
+notes:
+  - Exercises LocalTrackStateRepository.archiveIssue against a real local Git-backed fixture with an existing TRACK-122 issue.
+  - Restricts filesystem permissions on the archive destination directory so the physical relocation fails before the active artifact can be removed.
+  - Verifies repository consumers still observe TRACK-122 as active after the failed archive attempt.
