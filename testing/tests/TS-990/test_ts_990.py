@@ -74,17 +74,20 @@ LINKED_BUG_NOTES = (
     "past the timeout and continues observing through the delayed release."
 )
 REWORK_SUMMARY = (
-    "Added a live Playwright startup regression that delays the initial GitHub "
-    "`/user` probe beyond the 11-second synchronization window and verifies the "
-    "visible shell stays stable when the late probe finally resolves."
+    "Resolved the main-branch merge conflict in the TS-990 live Playwright "
+    "regression while preserving the delayed startup probe timeout and shell "
+    "stability assertions."
 )
 REWORK_FIXES = (
-    "Made the hosted workspace the active startup workspace and seeded its "
-    "workspace-scoped GitHub token.",
-    "Applied the required 1440x900 viewport before opening the app so startup "
-    "runs under the ticket dimensions.",
-    "Only write `bug_description.md` for confirmed product failures and emit "
-    "per-thread review replies.",
+    "Resolved the `testing/tests/TS-990/test_ts_990.py` merge conflict against `main`.",
+    "Preserved the approved hosted-startup flow coverage, including the linked "
+    "TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
+    "Kept bug artifact generation limited to confirmed product-visible failures.",
+)
+REWORK_RESPONSE_SUMMARY = (
+    "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py` "
+    "and preserved the approved hosted-startup delayed-probe assertions and "
+    "product-only bug artifact gating."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -844,8 +847,6 @@ def _startup_surface_shows_interactive_shell(
         and initial_trigger is not None
         and "Connect GitHub" not in button_labels
     )
-
-
 def _safe_trigger_payload(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, Any] | None:
@@ -1018,11 +1019,7 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
             [
                 "h3. PR Rework Result",
                 "",
-                (
-                    "*Fixed:* Made the hosted workspace active for startup, applied the "
-                    "1440x900 viewport before opening the app, and only emit "
-                    "`bug_description.md` for confirmed product failures."
-                ),
+                f"*Fixed:* {REWORK_RESPONSE_SUMMARY}",
                 f"*Test Run:* `{RUN_COMMAND}`",
                 "*Result:* ✅ PASSED",
                 "*Summary:* 1 passed, 0 failed.",
@@ -1038,11 +1035,7 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         [
             "h3. PR Rework Result",
             "",
-            (
-                "*Fixed:* Made the hosted workspace active for startup, applied the "
-                "1440x900 viewport before opening the app, and only emit "
-                "`bug_description.md` for confirmed product failures."
-            ),
+            f"*Fixed:* {REWORK_RESPONSE_SUMMARY}",
             f"*Test Run:* `{RUN_COMMAND}`",
             "*Result:* ❌ FAILED",
             "*Summary:* 0 passed, 1 failed.",
@@ -1244,6 +1237,15 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 
 def _missing_capability_summary(result: dict[str, Any]) -> str:
     error = str(result.get("error", ""))
+    if "visible TopBar workspace trigger changed during post-timeout monitoring" in error:
+        return (
+            "After the delayed GitHub `/user` startup probe resolves, the deployed "
+            "hosted shell applies a late visible state change to the TopBar workspace "
+            "trigger (`Needs sign-in` -> `Attachments limited`). The timeout fallback "
+            "path should keep the rendered shell stable after it becomes interactive, "
+            "without resetting or mutating the visible workspace state when the late "
+            "probe result arrives."
+        )
     if (
         "delayed GitHub `/user` startup probe never started" in error
         and "Needs sign-in" in error

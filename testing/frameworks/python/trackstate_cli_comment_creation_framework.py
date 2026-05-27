@@ -33,6 +33,11 @@ class PythonTrackStateCliCommentCreationFramework(
         with tempfile.TemporaryDirectory(prefix="trackstate-ts-462-") as temp_dir:
             repository_path = Path(temp_dir)
             self._seed_local_repository(repository_path, config=config)
+            initial_head_revision = self._git_output(
+                repository_path,
+                "rev-parse",
+                "HEAD",
+            ).strip()
             requested_command = (
                 *config.requested_command_prefix,
                 "--path",
@@ -57,7 +62,17 @@ class PythonTrackStateCliCommentCreationFramework(
                 "repository instead of any unrelated `trackstate` binary on PATH."
             )
             first_result = self._run(executed_command)
+            first_head_revision = self._git_output(
+                repository_path,
+                "rev-parse",
+                "HEAD",
+            ).strip()
             second_result = self._run(executed_command)
+            second_head_revision = self._git_output(
+                repository_path,
+                "rev-parse",
+                "HEAD",
+            ).strip()
             comment_directory = repository_path / config.project_key / config.issue_key / "comments"
             comment_files = tuple(
                 CommentFileObservation(
@@ -71,7 +86,9 @@ class PythonTrackStateCliCommentCreationFramework(
                 executed_command=executed_command,
                 fallback_reason=fallback_reason,
                 repository_path=str(repository_path),
-                head_revision=self._git_output(repository_path, "rev-parse", "HEAD").strip(),
+                initial_head_revision=initial_head_revision,
+                first_head_revision=first_head_revision,
+                second_head_revision=second_head_revision,
                 git_status=self._git_output(repository_path, "status", "--short"),
                 first_result=first_result,
                 second_result=second_result,

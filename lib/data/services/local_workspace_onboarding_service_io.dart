@@ -620,7 +620,7 @@ const List<Map<String, Object?>> _issueTypesJson = [
     'id': 'task',
     'name': 'Task',
     'hierarchyLevel': 0,
-    'icon': 'task',
+    'icon': 'issue',
     'workflowId': 'delivery-workflow',
   },
   {
@@ -634,7 +634,7 @@ const List<Map<String, Object?>> _issueTypesJson = [
     'id': 'bug',
     'name': 'Bug',
     'hierarchyLevel': 0,
-    'icon': 'bug',
+    'icon': 'issue',
     'workflowId': 'delivery-workflow',
   },
 ];
