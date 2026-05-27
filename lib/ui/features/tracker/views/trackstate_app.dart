@@ -8880,11 +8880,12 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
               child: IgnorePointer(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(browserSummaryLabel),
-                    if (primaryActionSemanticLabel != null)
-                      Text(primaryActionSemanticLabel),
-                    if (widget.showOpenAction && onOpen != null)
+                   children: [
+                     Text(browserSummaryLabel),
+                     if (isActive) Text(l10n.activeWorkspace),
+                     if (primaryActionSemanticLabel != null)
+                       Text(primaryActionSemanticLabel),
+                     if (widget.showOpenAction && onOpen != null)
                       Text('${l10n.openWorkspace}: ${workspace.displayName}'),
                     if (!isActive)
                       Text('${l10n.delete}: ${workspace.displayName}'),
