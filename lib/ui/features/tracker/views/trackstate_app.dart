@@ -13492,6 +13492,30 @@ class _SettingsTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.ts;
+    final theme = Theme.of(context);
+    final labelBaseStyle =
+        theme.textTheme.labelLarge ??
+        const TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
+    final helperBaseStyle =
+        theme.textTheme.bodyMedium ??
+        const TextStyle(fontSize: 14, fontWeight: FontWeight.w400, height: 1.5);
+    final labelStyle = WidgetStateTextStyle.resolveWith((states) {
+      if (states.contains(WidgetState.error)) {
+        return labelBaseStyle.copyWith(color: colors.error);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return labelBaseStyle.copyWith(color: colors.primary);
+      }
+      return labelBaseStyle.copyWith(color: colors.muted);
+    });
+    final helperStyle = WidgetStateTextStyle.resolveWith((states) {
+      if (states.contains(WidgetState.error)) {
+        return helperBaseStyle.copyWith(color: colors.error);
+      }
+      return helperBaseStyle.copyWith(color: colors.muted);
+    });
+
     return TextFormField(
       key: fieldKey,
       controller: controller,
@@ -13500,7 +13524,14 @@ class _SettingsTextField extends StatelessWidget {
       autofocus: autofocus,
       enabled: enabled,
       onChanged: onChanged,
-      decoration: InputDecoration(labelText: label, helperText: helperText),
+      style: helperBaseStyle.copyWith(color: enabled ? colors.text : colors.muted),
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helperText,
+        labelStyle: labelStyle,
+        floatingLabelStyle: labelStyle,
+        helperStyle: helperStyle,
+      ),
     );
   }
 }
