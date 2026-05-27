@@ -25,6 +25,8 @@ python testing/tests/TS-409/test_ts_409.py
   against the hosted setup repository
 - `TRACKSTATE_LIVE_APP_URL` pointing at the deployed hosted TrackState app
 - Defaults come from `testing/core/config/live_setup_test_config.py`
+- The test uses the installed `trackstate` CLI when available and otherwise falls
+  back to `dart run bin/trackstate.dart` from this repository for the CLI parity step
 
 ## Scenario notes
 
@@ -34,3 +36,9 @@ python testing/tests/TS-409/test_ts_409.py
   the hosted save did not publish a new commit within the configured window.
 - The test restores the original hosted repository configuration during cleanup
   when the mutation succeeds.
+
+## Expected passing output
+
+- `outputs/test_automation_result.json` contains `{ "status": "passed", ... }`
+- `outputs/jira_comment.md`, `outputs/pr_body.md`, and `outputs/response.md`
+  describe the successful hosted save, Git commit verification, and CLI parity check

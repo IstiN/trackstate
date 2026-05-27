@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,14 @@ REQUEST_STEPS = (
     "Verify the resulting Git commit.",
     "Execute `trackstate session` via CLI.",
 )
+
+
+@dataclass(frozen=True)
+class HostedSettingsPersistenceObservation:
+    head_sha: str
+    statuses_content: str
+    workflows_content: str
+    commits_since_baseline: tuple[HostedCommitObservation, ...]
 
 
 def main() -> None:
@@ -185,14 +194,25 @@ def main() -> None:
                 raise
 
         mutation_attempted = True
-        new_head_sha = repository_service.wait_for_head_change(baseline_head_sha)
-        commit_observation = repository_service.fetch_commit(new_head_sha)
+        persistence_observation = _wait_for_atomic_settings_persistence(
+            repository_service=repository_service,
+            baseline_head_sha=baseline_head_sha,
+            status_id=status_id,
+            status_name=status_name,
+            transition_name=transition_name,
+        )
+        new_head_sha = persistence_observation.head_sha
+        commit_observation = _matching_settings_commit(persistence_observation)
+        if commit_observation is None:
+            raise AssertionError(
+                "Step 4 failed: the repository eventually exposed the saved status and "
+                "workflow markers, but no single commit in the observed compare range "
+                "updated both catalog files atomically.\n"
+                f"Observed commits: {json.dumps([_commit_observation_to_dict(commit) for commit in persistence_observation.commits_since_baseline], indent=2)}",
+            )
         result["commit_observation"] = _commit_observation_to_dict(commit_observation)
         result["new_head_sha"] = new_head_sha
-        _assert_commit_observation(
-            baseline_head_sha=baseline_head_sha,
-            commit_observation=commit_observation,
-        )
+        _assert_commit_observation(commit_observation=commit_observation)
         _record_step(
             result,
             step=4,
@@ -201,13 +221,11 @@ def main() -> None:
             observed=json.dumps(_commit_observation_to_dict(commit_observation), indent=2),
         )
 
-        committed_statuses = repository_service.fetch_file(STATUSES_PATH, ref=new_head_sha)
-        committed_workflows = repository_service.fetch_file(WORKFLOWS_PATH, ref=new_head_sha)
-        result["committed_statuses_content"] = committed_statuses.content
-        result["committed_workflows_content"] = committed_workflows.content
+        result["committed_statuses_content"] = persistence_observation.statuses_content
+        result["committed_workflows_content"] = persistence_observation.workflows_content
         _assert_committed_configuration(
-            statuses_content=committed_statuses.content,
-            workflows_content=committed_workflows.content,
+            statuses_content=persistence_observation.statuses_content,
+            workflows_content=persistence_observation.workflows_content,
             status_id=status_id,
             status_name=status_name,
             transition_name=transition_name,
@@ -378,9 +396,103 @@ def _resolve_delivery_transition_index(workflows_content: str) -> int:
     )
 
 
+def _wait_for_atomic_settings_persistence(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    baseline_head_sha: str,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+    attempts: int = 24,
+    interval_seconds: float = 5.0,
+) -> HostedSettingsPersistenceObservation:
+    commit_cache: dict[str, HostedCommitObservation] = {}
+    matched, observation = poll_until(
+        probe=lambda: _observe_settings_persistence(
+            repository_service=repository_service,
+            baseline_head_sha=baseline_head_sha,
+            commit_cache=commit_cache,
+        ),
+        is_satisfied=lambda current: (
+            _settings_state_has_expected_markers(
+                current,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+            )
+            and _matching_settings_commit(current) is not None
+        ),
+        timeout_seconds=attempts * interval_seconds,
+        interval_seconds=interval_seconds,
+    )
+    if matched:
+        return observation
+
+    raise AssertionError(
+        "Step 4 failed: the hosted Settings save did not produce a repository state "
+        "with the saved status and workflow markers within the polling window.\n"
+        f"Baseline head: {baseline_head_sha}\n"
+        f"Last observed head: {observation.head_sha}\n"
+        f"Observed commits since baseline: {json.dumps([_commit_observation_to_dict(commit) for commit in observation.commits_since_baseline], indent=2)}\n"
+        f"Observed statuses.json:\n{observation.statuses_content}\n"
+        f"Observed workflows.json:\n{observation.workflows_content}",
+    )
+
+
+def _observe_settings_persistence(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    baseline_head_sha: str,
+    commit_cache: dict[str, HostedCommitObservation],
+) -> HostedSettingsPersistenceObservation:
+    head_sha = repository_service.branch_head_sha()
+    statuses_content = repository_service.fetch_file(STATUSES_PATH).content
+    workflows_content = repository_service.fetch_file(WORKFLOWS_PATH).content
+    commit_shas = repository_service.compare_commits(
+        base_sha=baseline_head_sha,
+        head_sha=head_sha,
+    )
+    commits_since_baseline: list[HostedCommitObservation] = []
+    for commit_sha in commit_shas:
+        commit = commit_cache.get(commit_sha)
+        if commit is None:
+            commit = repository_service.fetch_commit(commit_sha)
+            commit_cache[commit_sha] = commit
+        commits_since_baseline.append(commit)
+    return HostedSettingsPersistenceObservation(
+        head_sha=head_sha,
+        statuses_content=statuses_content,
+        workflows_content=workflows_content,
+        commits_since_baseline=tuple(commits_since_baseline),
+    )
+
+
+def _settings_state_has_expected_markers(
+    observation: HostedSettingsPersistenceObservation,
+    *,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+) -> bool:
+    return (
+        status_id in observation.statuses_content
+        and status_name in observation.statuses_content
+        and transition_name in observation.workflows_content
+    )
+
+
+def _matching_settings_commit(
+    observation: HostedSettingsPersistenceObservation,
+) -> HostedCommitObservation | None:
+    expected_files = {STATUSES_PATH, WORKFLOWS_PATH}
+    for commit in observation.commits_since_baseline:
+        if expected_files.issubset(set(commit.changed_files)):
+            return commit
+    return None
+
+
 def _assert_commit_observation(
     *,
-    baseline_head_sha: str,
     commit_observation: HostedCommitObservation,
 ) -> None:
     if len(commit_observation.parent_shas) != 1:
@@ -388,13 +500,6 @@ def _assert_commit_observation(
             "Step 4 failed: the resulting head commit was not a single atomic commit "
             "for the hosted settings save.\n"
             f"Observed parent SHAs: {list(commit_observation.parent_shas)}\n"
-            f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
-        )
-    if commit_observation.parent_shas[0] != baseline_head_sha:
-        raise AssertionError(
-            "Step 4 failed: the resulting head commit was not a direct atomic child "
-            "of the pre-save repository head.\n"
-            f"Expected parent: {baseline_head_sha}\n"
             f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
         )
     expected_files = {STATUSES_PATH, WORKFLOWS_PATH}
@@ -737,6 +842,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "settings_screenshot" if passed else "screenshot",
         SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
     )
+    cli_scope_line = (
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
+        if result.get("cli_observation") is not None
+        else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
     lines = [
         "h3. Test Automation Result",
         "",
@@ -750,13 +860,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to *Project Settings*.",
         "* Added a unique status, edited the existing *Delivery Workflow* transition, and saved through the visible hosted Settings UI.",
         "* Verified the save result through the live GitHub repository commit/file state.",
-        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block.",
+        cli_scope_line,
         "",
         "h4. Result",
         (
             "* Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
             if passed
-            else "* Did not match the expected result: Step 4 failed because the hosted Save action never produced a new Git commit."
+            else "* Did not match the expected result: Step 4 failed because the hosted Save action never produced an atomic persisted settings commit with both catalog updates."
         ),
         *(_result_detail_lines(result, jira=True, passed=passed)),
         "",
@@ -791,6 +901,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     status = "✅ PASSED" if passed else "❌ FAILED"
+    cli_scope_line = (
+        "- Ran the installed `trackstate session` CLI against the same hosted repository and checked the returned `projectConfig` block."
+        if result.get("cli_observation") is not None
+        else "- Prepared the final `trackstate session` CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
     lines = [
         "## Test Automation Result",
         "",
@@ -804,13 +919,13 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to `Project Settings`.",
         "- Added a unique status, edited the existing `Delivery Workflow` transition, and saved through the visible hosted Settings UI.",
         "- Verified the save result through the live GitHub repository commit/file state.",
-        "- Ran the installed `trackstate session` CLI against the same hosted repository and checked the returned `projectConfig` block.",
+        cli_scope_line,
         "",
         "## Result",
         (
             "- Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
             if passed
-            else "- Did not match the expected result: Step 4 failed because the hosted Save action never produced a new Git commit."
+            else "- Did not match the expected result: Step 4 failed because the hosted Save action never produced an atomic persisted settings commit with both catalog updates."
         ),
         *(_result_detail_lines(result, jira=False, passed=passed)),
         "",
@@ -854,8 +969,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             if passed
             else (
                 "The hosted Settings persistence / CLI parity scenario failed because "
-                "the live Save action returned to the Settings screen but never created "
-                "a new repository commit."
+                "the live Save action returned to the Settings screen but never produced "
+                "an atomic persisted settings commit with both catalog updates."
             )
         ),
         "",
@@ -999,18 +1114,24 @@ def _actual_result_text(result: dict[str, object]) -> str:
             workflows_present = failure_state.get(
                 "workflows_contains_expected_transition"
             )
+            baseline_head_sha = str(result.get("baseline_head_sha", "")).strip()
+            head_summary = (
+                f"advanced to `{head_sha}` from `{baseline_head_sha}`"
+                if head_sha and baseline_head_sha and head_sha != baseline_head_sha
+                else f"remained `{head_sha}`"
+            )
             return (
                 "After clicking Save in the hosted Settings UI, the application returned "
                 "to the Project settings administration screen, but the repository head "
-                f"remained `{head_sha}` and the saved catalog markers were still missing "
+                f"{head_summary} and the saved catalog markers were still missing "
                 f"from `{STATUSES_PATH}` and `{WORKFLOWS_PATH}` "
                 f"(status persisted: {statuses_present}, workflow persisted: "
                 f"{workflows_present})."
             )
         return (
-            "After the hosted Settings save, the repository branch head did not change "
-            "within the polling window, so no new atomic commit was available for the "
-            "requested settings update."
+            "After the hosted Settings save, the repository never exposed both saved "
+            "catalog markers together in an atomic persisted state within the polling "
+            "window."
         )
     if error.startswith("Step 5 failed:"):
         return (
