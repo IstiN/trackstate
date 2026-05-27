@@ -16,6 +16,7 @@ class BrowserFocusableControl extends StatefulWidget {
     required this.child,
     required this.label,
     required this.onPressed,
+    this.focusNode,
     this.focusTargetId,
     this.panelId,
     this.rowId,
@@ -29,6 +30,7 @@ class BrowserFocusableControl extends StatefulWidget {
   final Widget child;
   final String label;
   final VoidCallback? onPressed;
+  final FocusNode? focusNode;
   final String? focusTargetId;
   final String? panelId;
   final String? rowId;
@@ -211,9 +213,13 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
   void _attachFocusListeners(web.HTMLButtonElement element) {
     _detachFocusListeners();
     _focusListener = ((web.Event _) {
+      widget.focusNode?.requestFocus();
       _applyFocusedStyles(element);
     }).toJS;
     _blurListener = ((web.Event _) {
+      if (widget.focusNode case final focusNode? when focusNode.hasFocus) {
+        focusNode.unfocus();
+      }
       _clearFocusedStyles(element);
     }).toJS;
     _keydownListener = ((web.Event event) {

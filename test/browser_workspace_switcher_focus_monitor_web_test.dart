@@ -310,6 +310,59 @@ void main() {
     );
 
     test(
+      'Escape from an internal panel control is trapped by the browser focus monitor',
+      () {
+        final panel = _appendPanel(host);
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        var escapeCalls = 0;
+        var focusOutsideCalls = 0;
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserEscape: () {
+                escapeCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        row.focus();
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(
+            key: 'Escape',
+            bubbles: true,
+            cancelable: true,
+          ),
+        );
+        row.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        expect(escapeCalls, 1);
+        expect(
+          focusOutsideCalls,
+          0,
+          reason:
+              'Escape from an in-panel control should dismiss the switcher '
+              'instead of looking like focus escaped outside it.',
+        );
+      },
+    );
+
+    test(
       'Tab from the last in-panel control wraps inside the switcher even after recent pointer ownership',
       () {
         final panel = _appendPanel(host);
