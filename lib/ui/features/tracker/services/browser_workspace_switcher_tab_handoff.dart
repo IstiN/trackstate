@@ -43,6 +43,15 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
       startIndex: triggerIndex + 1,
     );
   }
+  if (backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
+    // Reverse Tab from trigger wraps to the last in-panel control (or the
+    // selected row when no post-row controls exist).
+    final lastInPanel = _lastInPanelControlIndex(focusStops);
+    if (lastInPanel != -1) {
+      return lastInPanel;
+    }
+    return selectedRowIndex;
+  }
   if (backwards && currentIndex == selectedRowIndex) {
     final lastInPanelControlIndex = _lastInPanelControlIndex(focusStops);
     if (lastInPanelControlIndex != -1) {

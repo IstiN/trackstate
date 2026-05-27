@@ -7,6 +7,8 @@ import 'package:web/web.dart' as web;
 
 import 'browser_focusable_control_listener_binding.dart';
 import 'browser_focusable_control_logic.dart';
+import 'browser_workspace_switcher_tab_intent_web.dart';
+import 'browser_workspace_switcher_focus_matcher.dart';
 
 class BrowserFocusableControl extends StatefulWidget {
   const BrowserFocusableControl({
@@ -50,6 +52,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
   _BrowserFocusableButtonElementAdapter? _elementAdapter;
   JSFunction? _focusListener;
   JSFunction? _blurListener;
+  JSFunction? _keydownListener;
   JSFunction? _windowKeydownListener;
   JSFunction? _windowFocusinListener;
   late final BrowserFocusableControlListenerBinding<JSFunction> _clickBinding =
@@ -200,9 +203,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
           descendantsAreTraversable: false,
           child: ExcludeSemantics(child: widget.child),
         ),
-        Positioned.fill(
-          child: HtmlElementView(viewType: _viewType),
-        ),
+        Positioned.fill(child: HtmlElementView(viewType: _viewType)),
       ],
     );
   }
@@ -215,8 +216,22 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
     _blurListener = ((web.Event _) {
       _clearFocusedStyles(element);
     }).toJS;
+    _keydownListener = ((web.Event event) {
+      final keyboardEvent = event as web.KeyboardEvent;
+      if (keyboardEvent.key != 'Tab' ||
+          widget.panelId != browserWorkspaceSwitcherSemanticsIdentifier) {
+        return;
+      }
+      recordBrowserWorkspaceSwitcherTabIntent(
+        backwards: keyboardEvent.shiftKey,
+        panelId: widget.panelId,
+        focusTargetId: widget.focusTargetId,
+        rowId: widget.rowId,
+      );
+    }).toJS;
     element.addEventListener('focus', _focusListener);
     element.addEventListener('blur', _blurListener);
+    element.addEventListener('keydown', _keydownListener);
   }
 
   void _detachFocusListeners() {
@@ -228,9 +243,13 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       if (_blurListener != null) {
         element.removeEventListener('blur', _blurListener);
       }
+      if (_keydownListener != null) {
+        element.removeEventListener('keydown', _keydownListener);
+      }
     }
     _focusListener = null;
     _blurListener = null;
+    _keydownListener = null;
   }
 
   void _syncFocusStyle(web.HTMLButtonElement element) {
@@ -270,7 +289,8 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       final element = node as web.Element;
       element.setAttribute(
         _browserFocusOriginalTabIndexAttribute,
-        element.getAttribute('tabindex') ?? _browserFocusMissingTabIndexSentinel,
+        element.getAttribute('tabindex') ??
+            _browserFocusMissingTabIndexSentinel,
       );
       element.setAttribute('tabindex', '-1');
       _suppressedSemanticsElements.add(element);
