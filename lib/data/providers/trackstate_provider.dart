@@ -408,11 +408,13 @@ class RepositoryCommitResult {
     required this.branch,
     required this.message,
     this.revision,
+    this.createdCommit = true,
   });
 
   final String branch;
   final String message;
   final String? revision;
+  final bool createdCommit;
 }
 
 class RepositoryFileChangeRequest {

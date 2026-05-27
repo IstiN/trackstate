@@ -59,6 +59,98 @@ void main() {
   );
 
   test(
+    'provider-backed deferred access restore does not await the initial search page when search needs delayed auth',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final provider = _DelayedFixtureProvider();
+      final repository = _DelayedSearchRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
+      ]);
+
+      expect(
+        completedQuickly,
+        isTrue,
+        reason:
+            'Provider-backed startup should publish the shell snapshot without waiting for the initial search page when auth is still pending.',
+      );
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(repository.searchStarted, isTrue);
+      expect(repository.searchCompleted, isFalse);
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.searchCompleted, isTrue);
+      expect(viewModel.hasLoadedInitialSearchResults, isTrue);
+      expect(viewModel.searchResults, isNotEmpty);
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.providerSession?.canWrite, isTrue);
+      expect(viewModel.providerSession?.canCreateBranch, isTrue);
+    },
+  );
+
+  test(
+    'provider-backed deferred access restore publishes a fallback shell snapshot when hosted bootstrap exceeds the startup timeout',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final provider = _DelayedFixtureProvider();
+      final repository = _SlowHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
+      expect(viewModel.issues, isEmpty);
+      expect(
+        viewModel.snapshot?.loadWarnings,
+        contains(
+          contains(
+            ProviderBackedTrackStateRepository
+                .hostedStartupShellFallbackWarningPrefix,
+          ),
+        ),
+      );
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.isConnected, isFalse);
+      expect(viewModel.providerSession?.canWrite, isFalse);
+      expect(viewModel.providerSession?.canCreateBranch, isFalse);
+    },
+  );
+
+  test(
     'deferred access restore consumes handled token failures after publishing the snapshot',
     () async {
       final authStore = _FixedAuthStore();
@@ -186,17 +278,60 @@ Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
 }
 
 class _DelayedFixtureRepository extends ProviderBackedTrackStateRepository {
-  _DelayedFixtureRepository({
-    required this.snapshot,
-    required _DelayedFixtureProvider provider,
-  }) : super(provider: provider);
+  _DelayedFixtureRepository({required this.snapshot, required this.provider})
+    : super(provider: provider);
 
   final TrackerSnapshot snapshot;
+  final _DelayedFixtureProvider provider;
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
     replaceCachedState(snapshot: snapshot);
     return snapshot;
+  }
+}
+
+class _SlowHostedStartupRepository extends ProviderBackedTrackStateRepository {
+  _SlowHostedStartupRepository({
+    required this.snapshot,
+    required _DelayedFixtureProvider provider,
+  }) : super(
+         provider: provider,
+         hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+       );
+
+  final TrackerSnapshot snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _DelayedSearchRepository extends _DelayedFixtureRepository {
+  _DelayedSearchRepository({required super.snapshot, required super.provider});
+  bool searchStarted = false;
+  bool searchCompleted = false;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    searchStarted = true;
+    await provider.waitForAuthentication();
+    final page = await super.searchIssuePage(
+      jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+    searchCompleted = true;
+    return page;
   }
 }
 
@@ -313,6 +448,8 @@ class _DelayedFixtureProvider implements TrackStateProviderAdapter {
     }
     _authenticationGate.complete();
   }
+
+  Future<void> waitForAuthentication() => _authenticationGate.future;
 }
 
 class _EmptyAuthStore implements TrackStateAuthStore {
