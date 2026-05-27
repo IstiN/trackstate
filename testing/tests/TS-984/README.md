@@ -6,7 +6,7 @@ artificially delayed past 30 seconds.
 
 The automation:
 1. opens the hosted TrackState app in Chromium with a stored GitHub token
-2. preloads local and hosted workspace profiles for the live setup repository
+2. preloads a hosted saved workspace profile for the live setup repository
 3. delays the initial GitHub `/user` startup probe for 31 seconds inside the browser runtime
 4. waits until 11 seconds have elapsed from application launch
 5. checks for a user-visible TopBar workspace trigger and visible branding text

@@ -64,7 +64,12 @@ TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
 TIMEOUT_RENDER_GRACE_SECONDS = 1.5
 OBSERVATION_INTERVAL_SECONDS = 0.1
 LINKED_BUGS = [
+    "TS-1211",
+    "TS-1152",
+    "TS-1149",
+    "TS-1145",
     "TS-1046",
+    "TS-1045",
     "TS-1040",
     "TS-1038",
     "TS-1029",
@@ -125,6 +130,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = Ts984DelayedAuthProbeRuntime(
         repository=config.repository,
@@ -132,6 +138,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_SYNC_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -150,6 +157,7 @@ def main() -> None:
         "simulated_sync_delay_seconds": SIMULATED_SYNC_DELAY_SECONDS,
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -162,8 +170,8 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
                 startup_started_at_monotonic = time.monotonic()
-                tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
+                tracker_page.open_entrypoint()
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
@@ -174,8 +182,8 @@ def main() -> None:
                     action=REQUEST_STEPS[0],
                     observed=(
                         "Opened the deployed TrackState app in Chromium with a stored "
-                        "GitHub token, a preloaded active local workspace plus hosted "
-                        "fallback workspace profile, and an "
+                        "GitHub token, a preloaded active hosted workspace profile plus "
+                        "hosted workspace-scoped token storage, and an "
                         f"injected {SIMULATED_SYNC_DELAY_SECONDS}-second delay on the "
                         "initial GitHub `/user` startup probe."
                     ),
@@ -679,14 +687,34 @@ def main() -> None:
 
 
 def _workspace_state(repository: str) -> dict[str, object]:
-    return build_workspace_state(
+    state = build_workspace_state(
         repository,
         local_target=LOCAL_TARGET,
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
+        active_workspace="hosted",
     )
-
+    profiles = state.get("profiles", [])
+    if not isinstance(profiles, list):
+        raise TypeError("TS-984 expected workspace profiles to be a list.")
+    hosted_profiles = [
+        profile
+        for profile in profiles
+        if isinstance(profile, dict) and str(profile.get("targetType")) == "hosted"
+    ]
+    if len(hosted_profiles) != 1:
+        raise AssertionError(
+            "TS-984 expected build_workspace_state to produce exactly one hosted profile.",
+        )
+    hosted_profile = dict(hosted_profiles[0])
+    hosted_profile["displayName"] = ""
+    hosted_profile.pop("customDisplayName", None)
+    return {
+        "activeWorkspaceId": hosted_profile["id"],
+        "migrationComplete": True,
+        "profiles": [hosted_profile],
+    }
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
     return prepare_local_workspace_repository(
@@ -870,7 +898,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Observed timeout window*: {TIMEOUT_ASSERTION_SECONDS} seconds against a synthetic {SIMULATED_SYNC_DELAY_SECONDS}-second delayed `/user` startup probe",
         "",
         "h4. What was automated",
-        "* Preloaded local and hosted workspace profiles plus a stored GitHub token for the deployed app.",
+        "* Preloaded a hosted saved workspace plus hosted workspace-scoped GitHub token storage for the deployed app.",
         "* Delayed the initial GitHub {/user} startup probe for 31 seconds so the startup synchronization path stayed pending beyond the explicit 11-second timeout.",
         "* Waited through the 11-second timeout before asserting so the test proved the deployed fallback behavior instead of checking too early.",
         "* Verified the live page showed shell navigation, a TopBar workspace trigger, and TrackState branding instead of remaining on the startup loading surface.",
@@ -916,7 +944,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Observed timeout window:** `{TIMEOUT_ASSERTION_SECONDS}` seconds against a synthetic `{SIMULATED_SYNC_DELAY_SECONDS}`-second delayed `/user` startup probe",
         "",
         "## What was automated",
-        "- Preloaded local and hosted workspace profiles plus a stored GitHub token for the deployed app.",
+        "- Preloaded a hosted saved workspace plus hosted workspace-scoped GitHub token storage for the deployed app.",
         "- Delayed the initial GitHub `/user` startup probe for 31 seconds so the startup synchronization path stayed pending beyond the explicit 11-second timeout.",
         "- Waited through the 11-second timeout before asserting so the test proved the deployed fallback behavior instead of checking immediately.",
         "- Verified the live page showed shell navigation, a TopBar workspace trigger, and TrackState branding instead of remaining on the startup loading surface.",
@@ -1027,11 +1055,31 @@ def _failure_metrics_summary(result: dict[str, Any]) -> str:
                 "The deployed app did not prove the non-blocking startup timeout behavior.",
             ),
         )
+    recorded_shell_ready = observation.get("probe_recorded_shell_ready_after_start_seconds")
+    observed_shell_ready = observation.get("shell_ready_after_start_seconds")
+    if recorded_shell_ready is None and observed_shell_ready is None:
+        shell_observation = observation.get("shell_observation", {})
+        trigger = observation.get("trigger", {})
+        visible_navigation = []
+        if isinstance(shell_observation, dict):
+            raw_navigation = shell_observation.get("visible_navigation_labels", [])
+            if isinstance(raw_navigation, list):
+                visible_navigation = [str(label) for label in raw_navigation]
+        return (
+            "Re-run still fails with a product defect: the app never reached "
+            "shell_ready during the delayed startup-probe scenario. The page stayed "
+            "on the workspace switcher / hosted sign-in surface instead of opening "
+            "the shell, with trigger="
+            f"{json.dumps(trigger, ensure_ascii=True)}; visible_navigation_labels="
+            f"{json.dumps(visible_navigation, ensure_ascii=True)}; delayed `/user` "
+            "probe released at "
+            f"{observation.get('auth_probe_released_after_start_seconds')!r}s."
+        )
     return (
         "Re-run still fails with a product defect: "
         f"first recorded shell_ready at "
-        f"{observation.get('probe_recorded_shell_ready_after_start_seconds')!r}s; "
-        f"first observed shell_ready at {observation.get('shell_ready_after_start_seconds')!r}s; "
+        f"{recorded_shell_ready!r}s; "
+        f"first observed shell_ready at {observed_shell_ready!r}s; "
         f"delayed `/user` probe released at "
         f"{observation.get('auth_probe_released_after_start_seconds')!r}s; "
         f"shell_ready_observed_while_auth_pending="
