@@ -8,6 +8,7 @@ import 'package:web/web.dart' as web;
 import 'browser_workspace_switcher_focus_matcher.dart';
 import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
+import 'browser_workspace_switcher_tab_intent_web.dart';
 
 const Duration _workspaceSwitcherPointerInteractionGrace = Duration(
   milliseconds: 150,
@@ -122,6 +123,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
     if (keyboardEvent.key == 'Tab') {
+      clearRecentBrowserWorkspaceSwitcherTabIntent();
       _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
       final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
@@ -161,11 +163,22 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     }
     onBrowserFocusOutside();
   }).toJS;
+  final focusoutListener = ((web.Event event) {
+    final blurredElement = event.target as web.Element?;
+    if (blurredElement == null) {
+      return;
+    }
+    _scheduleBrowserWorkspaceSwitcherNativeTabRescue(
+      blurredElement: blurredElement,
+      onBrowserFocusOutside: onBrowserFocusOutside,
+    );
+  }).toJS;
 
   web.window.addEventListener('pointerdown', pointerdownListener, true.toJS);
   web.window.addEventListener('mousedown', mousedownListener, true.toJS);
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   web.window.addEventListener('focusin', focusinListener, true.toJS);
+  web.window.addEventListener('focusout', focusoutListener, true.toJS);
   return BrowserWorkspaceSwitcherFocusMonitorSubscription(() {
     web.window.removeEventListener(
       'pointerdown',
@@ -175,7 +188,9 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     web.window.removeEventListener('mousedown', mousedownListener, true.toJS);
     web.window.removeEventListener('keydown', keydownListener, true.toJS);
     web.window.removeEventListener('focusin', focusinListener, true.toJS);
+    web.window.removeEventListener('focusout', focusoutListener, true.toJS);
     _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    clearRecentBrowserWorkspaceSwitcherTabIntent();
   });
 }
 
@@ -801,6 +816,93 @@ void _clearRecentBrowserWorkspaceSwitcherPointerInteraction() {
   _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
   _recentBrowserWorkspaceSwitcherPointerResetTimer = null;
   _recentBrowserWorkspaceSwitcherPointerAncestors = null;
+}
+
+void _scheduleBrowserWorkspaceSwitcherNativeTabRescue({
+  required web.Element blurredElement,
+  required VoidCallback onBrowserFocusOutside,
+}) {
+  final tabIntent = consumeRecentBrowserWorkspaceSwitcherTabIntentForElement(
+    blurredElement,
+  );
+  if (tabIntent == null) {
+    return;
+  }
+  Timer.run(() {
+    final activeElement = web.document.activeElement;
+    if (!_browserWorkspaceSwitcherNeedsTabRescue(
+      blurredElement: blurredElement,
+      activeElement: activeElement,
+    )) {
+      return;
+    }
+    final focusTargets = _visibleDocumentFocusTargets();
+    final currentIndex = _focusTargetIndexForActiveElement(
+      targets: focusTargets,
+      activeElement: blurredElement,
+    );
+    if (currentIndex == null) {
+      return;
+    }
+    final focusStops = [
+      for (final target in focusTargets)
+        () {
+          final rect = target.element.getBoundingClientRect();
+          return BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+            visualTop: rect.top,
+            visualLeft: rect.left,
+          );
+        }(),
+    ];
+    final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
+      focusStops: focusStops,
+      currentIndex: currentIndex,
+      backwards: tabIntent.backwards,
+    );
+    if (targetIndex == null) {
+      return;
+    }
+    final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+      focusTargets: focusTargets,
+      targetIndex: targetIndex,
+    );
+    if (tabMoveResult ==
+        _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
+      onBrowserFocusOutside();
+    }
+  });
+}
+
+bool _browserWorkspaceSwitcherNeedsTabRescue({
+  required web.Element blurredElement,
+  required web.Element? activeElement,
+}) {
+  if (activeElement == null) {
+    return true;
+  }
+  if (activeElement == blurredElement ||
+      blurredElement.contains(activeElement)) {
+    return false;
+  }
+  if (_workspaceSwitcherElementFor(activeElement) != null ||
+      _workspaceSwitcherTriggerElementFor(activeElement) != null) {
+    return false;
+  }
+  final tagName = activeElement.tagName.toLowerCase();
+  if (tagName == 'body' ||
+      tagName == 'html' ||
+      tagName == 'flt-glass-pane' ||
+      tagName == 'flt-scene-host' ||
+      tagName == 'flt-semantics-host') {
+    return true;
+  }
+  return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
+      'flutter-view';
 }
 
 void syncBrowserWorkspaceSwitcherRowTabIndices({
