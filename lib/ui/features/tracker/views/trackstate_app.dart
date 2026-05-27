@@ -2241,6 +2241,12 @@ class _TrackStateAppState extends State<TrackStateApp>
                 }
                 _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
               },
+              onBrowserEscape: () {
+                if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                _closeDesktopWorkspaceSwitcher();
+              },
               onBrowserBoundaryKey: (key) {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
                   return;
