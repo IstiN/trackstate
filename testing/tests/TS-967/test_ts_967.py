@@ -45,7 +45,8 @@ BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 10
 SIMULATED_SYNC_DELAY_SECONDS = 30
 TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
-AUTH_PROBE_START_WAIT_SECONDS = 45
+STARTUP_RENDER_WAIT_SECONDS = 60
+AUTH_PROBE_START_WAIT_SECONDS = 60
 AUTH_PROBE_RELEASE_WAIT_SECONDS = SIMULATED_SYNC_DELAY_SECONDS + 45
 TIMELINE_SAMPLE_INTERVAL_SECONDS = 0.25
 TIMING_TOLERANCE_SECONDS = 0.25
@@ -97,6 +98,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
@@ -104,6 +106,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_SYNC_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -123,6 +126,7 @@ def main() -> None:
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "timeout_assertion_anchor": "delayed `/user` startup probe start",
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -143,6 +147,29 @@ def main() -> None:
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
+                startup_rendered, startup_surface = poll_until(
+                    probe=lambda: _startup_surface_payload(tracker_page),
+                    is_satisfied=_startup_surface_loaded,
+                    timeout_seconds=STARTUP_RENDER_WAIT_SECONDS,
+                    interval_seconds=TIMELINE_SAMPLE_INTERVAL_SECONDS,
+                )
+                result["startup_observation_after_render"] = startup_surface
+                if not startup_rendered:
+                    startup_render_error = (
+                        "Step 1 failed: the deployed app never rendered beyond the bare "
+                        "startup title, so the delayed synchronization scenario could not "
+                        "begin.\n"
+                        f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}"
+                    )
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=startup_render_error,
+                    )
+                    _record_not_reached_steps(result, starting_step=2)
+                    raise AssertionError(startup_render_error)
                 auth_probe_started = runtime.wait_for_auth_probe_start(
                     timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
                 )
@@ -159,7 +186,7 @@ def main() -> None:
                         "Step 1 failed: the delayed GitHub `/user` startup probe never "
                         "started, so TS-967 did not exercise the intended timeout scenario.\n"
                         f"Observed startup surface:\n"
-                        f"{json.dumps(result['startup_observation_initial'], indent=2)}\n"
+                        f"{json.dumps(result['startup_observation_after_render'], indent=2)}\n"
                         f"Observed body text:\n{tracker_page.body_text()}\n"
                         f"GitHub requests seen: {json.dumps(result['github_request_urls'], ensure_ascii=True)}\n"
                         f"Delayed requests seen: {json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
@@ -184,6 +211,7 @@ def main() -> None:
                         "fallback workspace profile, and an "
                         f"injected {SIMULATED_SYNC_DELAY_SECONDS}-second delay on the "
                         "initial GitHub `/user` startup probe.\n"
+                        f"startup_surface={json.dumps(result['startup_observation_after_render'], ensure_ascii=True)}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{result['auth_probe_started_after_start_seconds']!r}; "
                         f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
@@ -785,6 +813,13 @@ def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, A
         "body_text": observation.body_text,
         "button_labels": list(observation.button_labels),
     }
+
+
+def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
+    body_text = str(observation.get("body_text", "")).strip()
+    title = str(observation.get("title", "")).strip()
+    button_labels = observation.get("button_labels", [])
+    return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
 
 
 def _shell_observation_from_startup_surface(
