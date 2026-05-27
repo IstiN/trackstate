@@ -3,7 +3,7 @@ import 'package:trackstate/ui/features/tracker/services/browser_workspace_switch
 
 void main() {
   test(
-    'Tab from the selected row hands focus to the first post-row control',
+    'Tab from the selected row still uses managed handoff to the next in-panel control',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -16,7 +16,7 @@ void main() {
               isWorkspaceSwitcherTrigger: false,
             ),
             BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
+              isFocusable: false,
               isWithinWorkspaceSwitcher: true,
               isWithinWorkspaceRow: true,
               isSelectedWorkspaceRow: false,
@@ -30,7 +30,7 @@ void main() {
               isWorkspaceSwitcherTrigger: false,
             ),
             BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
+              isFocusable: false,
               isWithinWorkspaceSwitcher: true,
               isWithinWorkspaceRow: true,
               isSelectedWorkspaceRow: false,
@@ -60,13 +60,13 @@ void main() {
   );
 
   test(
-    'Shift+Tab from the first post-row control returns to the selected row',
+    'Shift+Tab from the first post-row control leaves native DOM order alone when the previous focusable control is already correct',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
           focusStops: const [
             BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
+              isFocusable: false,
               isWithinWorkspaceSwitcher: true,
               isWithinWorkspaceRow: true,
               isSelectedWorkspaceRow: false,
@@ -80,7 +80,7 @@ void main() {
               isWorkspaceSwitcherTrigger: false,
             ),
             BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
+              isFocusable: false,
               isWithinWorkspaceSwitcher: true,
               isWithinWorkspaceRow: true,
               isSelectedWorkspaceRow: false,
@@ -97,7 +97,7 @@ void main() {
           currentIndex: 3,
           backwards: true,
         ),
-        1,
+        isNull,
       );
     },
   );
@@ -157,7 +157,7 @@ void main() {
   });
 
   test(
-    'Tab from the DOM-last post-row control still wraps to the selected row when the footer is earlier in DOM order',
+    'Tab from the DOM-last post-row control reaches the visually later footer before wrapping',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -214,7 +214,7 @@ void main() {
           currentIndex: 4,
           backwards: false,
         ),
-        1,
+        2,
       );
     },
   );
@@ -284,6 +284,93 @@ void main() {
     },
   );
 
+  test(
+    'Tab from the last workspace-row action advances to the first visually later footer control',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: true,
+              visualTop: 24,
+              visualLeft: 24,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 360,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 184,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 184,
+              visualLeft: 112,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 248,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 248,
+              visualLeft: 112,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              visualTop: 40,
+              visualLeft: 760,
+            ),
+          ],
+          currentIndex: 6,
+          backwards: false,
+        ),
+        2,
+      );
+    },
+  );
+
   test('non-boundary tab stops do not trigger a manual handoff', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
@@ -325,7 +412,7 @@ void main() {
   });
 
   test(
-    'Tab from the open trigger hands focus to the first external control',
+    'Tab from the open trigger enters the panel when native DOM order would otherwise escape it',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -336,6 +423,13 @@ void main() {
               isWithinWorkspaceRow: false,
               isSelectedWorkspaceRow: false,
               isWorkspaceSwitcherTrigger: true,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: false,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
             ),
             BrowserWorkspaceSwitcherTabStopSnapshot(
               isFocusable: true,
@@ -351,18 +445,11 @@ void main() {
               isSelectedWorkspaceRow: false,
               isWorkspaceSwitcherTrigger: false,
             ),
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: false,
-              isWithinWorkspaceRow: false,
-              isSelectedWorkspaceRow: false,
-              isWorkspaceSwitcherTrigger: false,
-            ),
           ],
           currentIndex: 0,
           backwards: false,
         ),
-        3,
+        2,
       );
     },
   );

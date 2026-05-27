@@ -863,6 +863,7 @@ void _scheduleBrowserWorkspaceSwitcherNativeTabRescue({
       focusStops: focusStops,
       currentIndex: currentIndex,
       backwards: tabIntent.backwards,
+      respectNativeDomOrder: false,
     );
     if (targetIndex == null) {
       return;
