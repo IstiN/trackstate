@@ -1,0 +1,9 @@
+test_id: TS-379
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Runs the exact shorthand commands from the ticket against a seeded local TrackState repository.
+  - Compares each alias command to its canonical `trackstate read ...` counterpart and verifies the visible terminal JSON payload matches exactly.

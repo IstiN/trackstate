@@ -1,0 +1,12 @@
+test_id: TS-1007
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher in pristine state and verifies the visible footer still exposes Save and switch as a disabled boundary control.
+  - Establishes the ticket precondition by focusing the live first internal keyboard target directly through the page object before the reverse-wrap assertion.
+  - Verifies Shift+Tab wraps to the disabled Save and switch footer button while the workspace switcher stays open.

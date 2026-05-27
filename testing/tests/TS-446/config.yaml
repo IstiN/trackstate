@@ -1,0 +1,9 @@
+test_id: TS-446
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Opens the deployed hosted app in an unauthenticated browser session.
+  - Forces startup recovery by rate-limiting the bootstrap issues index request.
+  - Verifies that browser online/focus events and the recovery wait window do not trigger any additional bootstrap retries before authentication.
