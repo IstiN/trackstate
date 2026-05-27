@@ -89,7 +89,7 @@ REWORK_SUMMARY = (
     "TS-984-specific in-page shell-ready probe overlay in the ticket file, "
     "restored the mixed local-plus-hosted preload that reaches the authenticated "
     "startup path, and preserved the delayed `/user` timeout assertions that "
-    "prove the live app still misses the 11-second fallback behavior."
+    "verify the shell is already interactive before the delayed probe resolves."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -1117,6 +1117,20 @@ def _review_reply_text(
             "now proves the delayed `/user` probe started, stayed pending past the "
             "11-second checkpoint, and the shell was already interactive during that "
             "window. "
+            f"{rerun_summary}"
+        )
+    if thread.get("rootCommentId") == 3312755282:
+        return (
+            "Fixed: updated `testing/tests/TS-984/README.md` to describe the actual "
+            "mixed local-plus-hosted preload and hosted workspace-scoped token "
+            "storage used by the reworked test. "
+            f"{rerun_summary}"
+        )
+    if thread.get("rootCommentId") == 3312755449:
+        return (
+            "Fixed: updated `testing/tests/TS-984/config.yaml` so its notes match "
+            "the implemented startup flow: active local workspace preload, hosted "
+            "fallback profile, and hosted workspace-scoped token storage. "
             f"{rerun_summary}"
         )
     return (
