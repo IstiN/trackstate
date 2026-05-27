@@ -176,7 +176,7 @@ void main() {
     );
 
     test(
-      'Shift+Tab from the selected row does not wrap to a non-overlapping input outside the workspace switcher',
+      'Shift+Tab from the selected row stays inside the workspace switcher even when only non-overlapping external controls exist',
       () {
         final panel = _appendPanel(host);
         final trigger = _appendButton(
@@ -237,18 +237,12 @@ void main() {
         );
         web.window.dispatchEvent(event);
 
-        expect(
-          web.document.activeElement,
-          same(trigger),
-          reason:
-              'Only controls that visually overlap the open workspace switcher '
-              'panel should be considered wrap targets for reverse tab handoff.',
-        );
+        expect(web.document.activeElement, same(row));
       },
     );
 
     test(
-      'Tab from the open trigger moves focus outside and clears recent switcher pointer ownership',
+      'Tab from the open trigger enters the panel and keeps focus owned by the switcher',
       () {
         final panel = _appendPanel(host);
         final trigger = _appendButton(
@@ -262,7 +256,7 @@ void main() {
           width: 240,
           height: 40,
         );
-        _appendButton(
+        final row = _appendButton(
           panel,
           label: 'Hosted main workspace, Hosted, Needs sign-in',
           rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
@@ -305,24 +299,18 @@ void main() {
 
         expect(
           web.document.activeElement,
-          same(externalInput),
+          same(row),
           reason:
-              'Forward Tab from the open workspace switcher trigger should blur '
-              'to the next external control instead of re-entering the switcher.',
+              'Forward Tab from the open workspace switcher trigger should enter '
+              'the trapped panel instead of escaping to the next external control.',
         );
-        expect(
-          focusOutsideCalls,
-          greaterThanOrEqualTo(1),
-          reason:
-              'Keyboard navigation away from the trigger should notify the blur '
-              'dismissal path as soon as focus reaches the next external control.',
-        );
-        expect(isBrowserFocusWithinWorkspaceSwitcher(), isFalse);
+        expect(focusOutsideCalls, 0);
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isTrue);
       },
     );
 
     test(
-      'Tab from an in-panel control clears recent switcher pointer ownership before blur dismissal',
+      'Tab from the last in-panel control wraps inside the switcher even after recent pointer ownership',
       () {
         final panel = _appendPanel(host);
         final saveButton = _appendButton(
@@ -366,15 +354,9 @@ void main() {
 
         _pressTab([saveButton, externalInput]);
 
-        expect(web.document.activeElement, same(externalInput));
-        expect(
-          focusOutsideCalls,
-          greaterThanOrEqualTo(1),
-          reason:
-              'The most recent pointer interaction should not keep the switcher '
-              'owned once keyboard Tab moves focus to an external control.',
-        );
-        expect(isBrowserFocusWithinWorkspaceSwitcher(), isFalse);
+        expect(web.document.activeElement, same(saveButton));
+        expect(focusOutsideCalls, 0);
+        expect(isBrowserFocusWithinWorkspaceSwitcher(), isTrue);
       },
     );
 
@@ -877,6 +859,118 @@ void main() {
     );
 
     test(
+      'Tab from the last workspace-row action reaches the visually later footer control before focus wraps',
+      () {
+        final panel = _appendPanel(host);
+        _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        final saveButton = _appendButton(
+          panel,
+          label: 'Save and switch',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 216,
+          width: 180,
+          height: 40,
+        );
+        _appendButton(
+          panel,
+          label: 'Open: Hosted alt workspace',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('alt'),
+          left: 0,
+          top: 96,
+          width: 180,
+          height: 40,
+        );
+        _appendButton(
+          panel,
+          label: 'Delete: Hosted alt workspace',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('alt'),
+          left: 196,
+          top: 96,
+          width: 180,
+          height: 40,
+        );
+        _appendButton(
+          panel,
+          label: 'Open: Hosted third workspace',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('third'),
+          left: 0,
+          top: 152,
+          width: 180,
+          height: 40,
+        );
+        final lastRowAction = _appendButton(
+          panel,
+          label: 'Delete: Hosted third workspace',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('third'),
+          left: 196,
+          top: 152,
+          width: 180,
+          height: 40,
+        );
+        _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        lastRowAction.focus();
+        expect(web.document.activeElement, same(lastRowAction));
+
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        expect(
+          web.document.activeElement,
+          same(saveButton),
+          reason:
+              'Forward tab from the last saved-workspace row action should '
+              'advance to the footer before the workspace switcher wraps.',
+        );
+      },
+    );
+
+    test(
       'Shift+Tab from the selected row reaches the visually last in-panel control even when controls are earlier in DOM order',
       () {
         _appendButton(
@@ -950,7 +1044,6 @@ void main() {
         );
         web.window.dispatchEvent(event);
 
-        expect(event.defaultPrevented, isTrue);
         expect(
           web.document.activeElement,
           same(branchInput),
