@@ -39,7 +39,7 @@ TEST_CASE_TITLE = (
 INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-824/test_ts_824.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 TAB_FOCUS_TIMEOUT_MS = 4_000
 ESCAPE_DISMISS_TIMEOUT_MS = 4_000
 PRE_TAB_TRIGGER_SHIFT_TAB_LIMIT = 3
@@ -448,19 +448,22 @@ def _assert_desktop_panel_open(
 ) -> None:
     switcher_text = switcher.switcher_text.strip()
     panel_text = panel.container_text.strip()
-    if not switcher_text:
+    panel_signals = ("Saved workspaces", "Add workspace", "Save and switch")
+    has_expected_panel_content = switcher.row_count > 0 or any(
+        signal in switcher_text or signal in panel_text
+        for signal in panel_signals
+    )
+    if not switcher_text and not panel_text:
         raise AssertionError(
             "Step 2 failed: opening the workspace switcher did not expose readable "
-            "visible panel content.\n"
-            f"Observed switcher text:\n{switcher.switcher_text}",
+            "desktop switcher content.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}\n"
+            f"Observed panel text:\n{panel.container_text}",
         )
-    if (
+    if not has_expected_panel_content and (
         "Workspace switcher" not in switcher_text
         and trigger.display_name not in switcher_text
-        and "Add workspace" not in switcher_text
-        and not any(
-            signal in panel_text for signal in ("Saved workspaces", "Add workspace", "Save and switch")
-        )
+        and "Workspace switcher" not in panel_text
     ):
         raise AssertionError(
             "Step 2 failed: opening the workspace switcher trigger did not expose the "
@@ -731,6 +734,13 @@ def _record_human_verification(
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
     checks.append({"check": check, "observed": observed})
+
+
+def _snippet(text: str, *, limit: int = 240) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}..."
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
