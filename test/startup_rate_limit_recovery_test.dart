@@ -40,12 +40,9 @@ void main() {
 
       expect(find.text('Project Settings'), findsOneWidget);
       expect(find.text('GitHub startup limit reached'), findsOneWidget);
-      expect(
-        find.widgetWithText(OutlinedButton, 'Retry startup'),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry startup'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
       await tester.pumpAndSettle();
 
       expect(repository.loadCount, 2);

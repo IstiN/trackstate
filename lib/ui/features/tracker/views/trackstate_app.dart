@@ -5160,7 +5160,9 @@ class _Sidebar extends StatelessWidget {
                           !kIsWeb && item.section == TrackerSection.settings
                           ? onAdvanceFromSettings
                           : null,
-                      onPressed: () => viewModel.selectSection(item.section),
+                      onPressed: viewModel.isSectionSelectable(item.section)
+                          ? () => viewModel.selectSection(item.section)
+                          : null,
                     ),
                   ),
               ],
@@ -7830,7 +7832,7 @@ class _SettingsState extends State<_Settings> {
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),
             message: _startupRecoveryMessage(l10n, widget.viewModel),
-            primaryActionLabel: l10n.retryStartup,
+            primaryActionLabel: l10n.retry,
             onPrimaryAction: () {
               unawaited(widget.onRetryStartupRecovery());
             },
@@ -7857,7 +7859,8 @@ class _SettingsState extends State<_Settings> {
           ),
         ),
         const SizedBox(height: 16),
-        _ProjectSettingsAdmin(viewModel: widget.viewModel),
+        if (widget.viewModel.startupRecovery == null)
+          _ProjectSettingsAdmin(viewModel: widget.viewModel),
       ],
     );
   }
@@ -12453,7 +12456,8 @@ class _IssueList extends StatelessWidget {
               ),
               child: _IssueListRow(
                 issue: visibleResults[index],
-                selected: visibleResults[index].key == viewModel.selectedIssue?.key,
+                selected:
+                    visibleResults[index].key == viewModel.selectedIssue?.key,
                 project: viewModel.project,
                 onSelect: viewModel.selectIssue,
                 trailingAction: showSearchBootstrapLoading
@@ -13555,7 +13559,9 @@ class _SettingsTextField extends StatelessWidget {
       autofocus: autofocus,
       enabled: enabled,
       onChanged: onChanged,
-      style: helperBaseStyle.copyWith(color: enabled ? colors.text : colors.muted),
+      style: helperBaseStyle.copyWith(
+        color: enabled ? colors.text : colors.muted,
+      ),
       decoration: InputDecoration(
         labelText: label,
         helperText: helperText,
@@ -16162,7 +16168,7 @@ class _NavButton extends StatelessWidget {
   final String? semanticsIdentifier;
   final FocusNode? focusNode;
   final VoidCallback? onTabForward;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -16170,13 +16176,16 @@ class _NavButton extends StatelessWidget {
     final selectedBackground = Theme.of(context).brightness == Brightness.light
         ? Color.alphaBlend(colors.text.withValues(alpha: .12), colors.secondary)
         : colors.secondary;
+    final enabled = onPressed != null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Semantics(
         button: true,
+        enabled: enabled,
         selected: selected,
         identifier: semanticsIdentifier,
         label: item.label,
+        onTap: enabled ? onPressed : null,
         sortKey: _semanticsSortKey(semanticsSortOrder),
         child: CallbackShortcuts(
           bindings: onTabForward == null
@@ -16186,7 +16195,7 @@ class _NavButton extends StatelessWidget {
                 },
           child: InkWell(
             focusNode: focusNode,
-            canRequestFocus: !selected || selectedCanRequestFocus,
+            canRequestFocus: enabled && (!selected || selectedCanRequestFocus),
             borderRadius: BorderRadius.circular(10),
             excludeFromSemantics: true,
             onTap: onPressed,
@@ -16211,7 +16220,11 @@ class _NavButton extends StatelessWidget {
                     Text(
                       item.label,
                       style: TextStyle(
-                        color: selected ? colors.page : colors.text,
+                        color: selected
+                            ? colors.page
+                            : enabled
+                            ? colors.text
+                            : colors.muted,
                         fontWeight: selected
                             ? FontWeight.w700
                             : FontWeight.w500,
@@ -16250,10 +16263,16 @@ class _BottomNavigation extends StatelessWidget {
               Expanded(
                 child: Semantics(
                   button: true,
+                  enabled: viewModel.isSectionSelectable(item.section),
                   selected: viewModel.section == item.section,
                   label: item.label,
+                  onTap: viewModel.isSectionSelectable(item.section)
+                      ? () => viewModel.selectSection(item.section)
+                      : null,
                   child: InkWell(
-                    onTap: () => viewModel.selectSection(item.section),
+                    onTap: viewModel.isSectionSelectable(item.section)
+                        ? () => viewModel.selectSection(item.section)
+                        : null,
                     child: ExcludeSemantics(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -16264,7 +16283,9 @@ class _BottomNavigation extends StatelessWidget {
                               item.glyph,
                               color: viewModel.section == item.section
                                   ? colors.primary
-                                  : colors.muted,
+                                  : viewModel.isSectionSelectable(item.section)
+                                  ? colors.muted
+                                  : colors.border,
                             ),
                             const SizedBox(height: 4),
                             Text(
