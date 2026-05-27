@@ -628,6 +628,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     observed_reason = ""
     if isinstance(observed_details, dict):
         observed_reason = _as_text(observed_details.get("reason"))
+    human_verification_summary = (
+        "Real user-style verification checked the exact terminal output a CLI user would "
+        "read, then checked the observable local repository path and remote GitHub "
+        "release/tag state. The side effects matched the expected failed-upload cleanup, "
+        "but the visible error contract did not match the expected explicit GitHub API "
+        "422 / target_commitish failure."
+    )
 
     actual_vs_expected = (
         "Actual: the CLI returned "
@@ -679,6 +686,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         final_remote_state_text,
         "{code}",
         *([f"* Product gap: {product_gap}"] if product_gap else []),
+        f"* Human-style verification: {_jira_inline(human_verification_summary)}",
         "",
         "h4. Observed command output",
         "{code}",
@@ -728,6 +736,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         final_remote_state_text,
         "```",
         *([f"- Product gap: {product_gap}"] if product_gap else []),
+        f"- Human-style verification: {human_verification_summary}",
         "",
         "## Observed command output",
         "```text",
@@ -750,27 +759,30 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"- Local active branch: `{unpushed_branch}`",
         f"- Expected release tag: `{expected_release_tag}`",
         "",
-        "## Steps to reproduce",
-        "1. ✅ Configure the project with `attachmentStorage.mode = github-releases`. Observed: the disposable fixture repository used that storage mode.",
+        "## Preconditions observed during setup",
+        "- ✅ `attachmentStorage.mode = github-releases` was configured in the disposable fixture repository.",
         (
-            f"2. ✅ Work on a new local branch `{unpushed_branch}` that does not exist in "
-            "the GitHub remote repository. Observed: the fixture repository checked out "
-            "that branch locally and the remote branch lookup was empty before the command."
+            f"- ✅ The fixture repository was on local branch `{unpushed_branch}`, and that "
+            "branch was absent from the GitHub remote before the command ran."
         ),
+        "",
+        "## Steps to reproduce",
         (
-            f"3. ❌ Execute CLI command: `{_as_text(result.get('ticket_command'))}`. "
+            f"1. ❌ Execute CLI command: `{_as_text(result.get('ticket_command'))}`. "
             f"Observed: exit code `{_as_text(result.get('exit_code'))}` with visible output "
             f"`{visible_error}`."
         ),
         (
-            "4. ❌ Inspect the command output. Observed: the caller-visible failure did "
+            "2. ❌ Inspect the command output. Observed: the caller-visible failure did "
             "not clearly surface the required explicit GitHub API branch-resolution "
-            "error for `target_commitish` / HTTP 422."
+            "error for `target_commitish` / HTTP 422. Instead it surfaced a generic "
+            f"`{observed_error_code}` / `{observed_error_category}` contract with reason "
+            f"`{observed_reason}`."
         ),
         (
-            f"5. ✅ Inspect local and remote side effects. Observed local state at "
+            f"Additional observation: ✅ Local state at "
             f"`{expected_path}` and remote state for `{expected_release_tag}` are shown "
-            "below."
+            "below; no attachment file, manifest, release, or tag was created."
         ),
         "",
         "## Expected result",
