@@ -501,10 +501,14 @@ class WorkspaceOnboardingAccessibilityRobot
   }) {
     final text = _finderText(textFinder);
     final foreground = _renderedTextColor(textFinder);
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: text,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
@@ -529,10 +533,14 @@ class WorkspaceOnboardingAccessibilityRobot
         resolvedBackground == null || resolvedBackground.alpha == 0
         ? backgroundFallback
         : resolvedBackground;
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: text,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
@@ -555,10 +563,14 @@ class WorkspaceOnboardingAccessibilityRobot
         ? backgroundFallback
         : resolvedBackground;
     final foreground = _renderedIconColorWithin(buttonFinder.first);
+    final effectiveForeground = compositeForegroundOverBackground(
+      foreground,
+      background,
+    );
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: iconLabel,
-      foregroundHex: _rgbHex(foreground),
+      foregroundHex: _rgbHex(effectiveForeground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,

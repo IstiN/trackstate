@@ -8,5 +8,5 @@ dependencies:
 notes:
   - Uses the live deployed TrackState web app at 1440x900.
   - Establishes Workspace A as a real saved local workspace through the visible Retry/Re-authenticate flow, then reloads startup with an added broken inactive Workspace B.
-  - Accounts for linked bugs TS-1030, TS-1011, TS-995, and TS-994 by waiting for both the restore flow and the startup hydration state to settle before asserting.
+  - Accounts for linked bugs TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, TS-995, and TS-994 by waiting for the restore flow, the reload persistence path, and the startup hydration state to settle before asserting.
   - Fails as a product defect if the deployed app cannot preserve Workspace A as the active Local Git workspace before the requested startup scenario begins.
