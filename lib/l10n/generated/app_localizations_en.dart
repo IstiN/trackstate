@@ -877,6 +877,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
 
   @override
+  String get startupHostedBootstrapIndexRecoveryTitle =>
+      'Hosted issue index needs regeneration';
+
+  @override
+  String get startupHostedBootstrapIndexRecoveryMessage =>
+      'Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.';
+
+  @override
   String get repositoryPath => 'Repository Path';
 
   @override
