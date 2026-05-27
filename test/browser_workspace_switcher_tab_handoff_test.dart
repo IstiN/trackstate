@@ -102,7 +102,7 @@ void main() {
     },
   );
 
-  test('Tab from the last post-row control wraps back to the trigger', () {
+  test('Tab from the last post-row control wraps back to the selected row', () {
     expect(
       browserWorkspaceSwitcherTabHandoffIndex(
         focusStops: const [
@@ -152,12 +152,12 @@ void main() {
         currentIndex: 4,
         backwards: false,
       ),
-      0,
+      1,
     );
   });
 
   test(
-    'Tab from the DOM-last post-row control wraps to the trigger when the footer is earlier in DOM order',
+    'Tab from the DOM-last post-row control still wraps to the selected row when the footer is earlier in DOM order',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -214,7 +214,7 @@ void main() {
           currentIndex: 4,
           backwards: false,
         ),
-        0,
+        1,
       );
     },
   );
@@ -325,7 +325,7 @@ void main() {
   });
 
   test(
-    'Tab from the open trigger wraps to the selected row inside the panel',
+    'Tab from the open trigger hands focus to the first external control',
     () {
       expect(
         browserWorkspaceSwitcherTabHandoffIndex(
@@ -362,7 +362,7 @@ void main() {
           currentIndex: 0,
           backwards: false,
         ),
-        1,
+        3,
       );
     },
   );
@@ -487,55 +487,52 @@ void main() {
     },
   );
 
-  test(
-    'Shift+Tab from the trigger wraps to the last in-panel control',
-    () {
-      expect(
-        browserWorkspaceSwitcherTabHandoffIndex(
-          focusStops: const [
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: true,
-              isWithinWorkspaceRow: false,
-              isSelectedWorkspaceRow: false,
-              isWorkspaceSwitcherTrigger: true,
-            ),
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: true,
-              isWithinWorkspaceRow: true,
-              isSelectedWorkspaceRow: true,
-              isWorkspaceSwitcherTrigger: false,
-            ),
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: true,
-              isWithinWorkspaceRow: false,
-              isSelectedWorkspaceRow: false,
-              isWorkspaceSwitcherTrigger: false,
-            ),
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: true,
-              isWithinWorkspaceRow: false,
-              isSelectedWorkspaceRow: false,
-              isWorkspaceSwitcherTrigger: false,
-            ),
-            BrowserWorkspaceSwitcherTabStopSnapshot(
-              isFocusable: true,
-              isWithinWorkspaceSwitcher: false,
-              isWithinWorkspaceRow: false,
-              isSelectedWorkspaceRow: false,
-              isWorkspaceSwitcherTrigger: false,
-            ),
-          ],
-          currentIndex: 0,
-          backwards: true,
-        ),
-        3,
-      );
-    },
-  );
+  test('Shift+Tab from the trigger wraps to the last in-panel control', () {
+    expect(
+      browserWorkspaceSwitcherTabHandoffIndex(
+        focusStops: const [
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: true,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: true,
+            isSelectedWorkspaceRow: true,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: true,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+          BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: false,
+            isWithinWorkspaceRow: false,
+            isSelectedWorkspaceRow: false,
+            isWorkspaceSwitcherTrigger: false,
+          ),
+        ],
+        currentIndex: 0,
+        backwards: true,
+      ),
+      3,
+    );
+  });
 
   test(
     'Shift+Tab from the trigger wraps to the selected row when no post-row controls exist',

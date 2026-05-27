@@ -378,6 +378,87 @@ void main() {
     );
 
     test(
+      'Tab from the last in-panel control wraps to the selected row instead of escaping the switcher',
+      () {
+        _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        final panel = _appendPanel(host);
+        final row = _appendButton(
+          panel,
+          label: 'Hosted main workspace, Hosted, Needs sign-in',
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        _appendButton(
+          panel,
+          label: 'Hosted',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 120,
+          width: 96,
+          height: 36,
+        );
+        final branchInput = _appendInput(
+          panel,
+          label: 'Branch',
+          left: 0,
+          top: 216,
+          width: 220,
+          height: 36,
+        );
+        _appendInput(
+          host,
+          label: 'Search issues',
+          left: 760,
+          top: 88,
+          width: 220,
+          height: 36,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        branchInput.focus();
+        expect(web.document.activeElement, same(branchInput));
+
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        expect(
+          web.document.activeElement,
+          same(row),
+          reason:
+              'Forward Tab from the last reachable in-panel control should wrap '
+              'back to the selected workspace row instead of escaping to page '
+              'chrome.',
+        );
+      },
+    );
+
+    test(
       'recent pointer activity inside the switcher keeps focus ownership when the browser falls back to flutter-view',
       () async {
         final panel = _appendPanel(host);

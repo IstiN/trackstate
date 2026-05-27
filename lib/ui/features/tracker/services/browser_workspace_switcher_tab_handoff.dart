@@ -38,9 +38,10 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
     (stop) => stop.isFocusable && stop.isWorkspaceSwitcherTrigger,
   );
   if (!backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
-    // Forward Tab from trigger wraps to the selected row inside the panel,
-    // keeping focus trapped within the workspace switcher.
-    return selectedRowIndex;
+    return _firstOutsideWorkspaceSwitcherIndex(
+      focusStops,
+      startIndex: triggerIndex + 1,
+    );
   }
   if (backwards && triggerIndex != -1 && currentIndex == triggerIndex) {
     // Reverse Tab from trigger wraps to the last in-panel control (or the
@@ -80,12 +81,7 @@ int? browserWorkspaceSwitcherTabHandoffIndex({
     if (currentIndex == selectedRowIndex) {
       return firstPostRowControlIndex;
     }
-    // Forward Tab from the last post-row control wraps to the trigger (or
-    // back to the selected row when no trigger exists) to complete the
-    // focus trap loop.
-    return currentIndex == lastPostRowControlIndex
-        ? (triggerIndex != -1 ? triggerIndex : selectedRowIndex)
-        : null;
+    return currentIndex == lastPostRowControlIndex ? selectedRowIndex : null;
   }
 
   return currentIndex == firstPostRowControlIndex ? selectedRowIndex : null;
@@ -166,6 +162,19 @@ int _firstVisuallyOrderedMatchingIndex(
     }
   }
   return visuallyFirstIndex != -1 ? visuallyFirstIndex : fallbackIndex;
+}
+
+int? _firstOutsideWorkspaceSwitcherIndex(
+  List<BrowserWorkspaceSwitcherTabStopSnapshot> stops, {
+  required int startIndex,
+}) {
+  for (var index = startIndex; index < stops.length; index += 1) {
+    final stop = stops[index];
+    if (stop.isFocusable && !stop.isWithinWorkspaceSwitcher) {
+      return index;
+    }
+  }
+  return null;
 }
 
 int _lastVisuallyOrderedMatchingIndex(
