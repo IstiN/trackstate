@@ -65,31 +65,32 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + POST_RELEASE_STABILITY_SECONDS + 20
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-996", "TS-992", "TS-971"]
+LINKED_BUGS = ["TS-1152", "TS-1145", "TS-1046", "TS-1045"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996, TS-992, and TS-971. Their fixes require the startup GitHub "
-    "`/user` probe to begin normally, the shell to remain interactive once the "
-    "11-second timeout fallback is available, and the late probe resolution to "
-    "avoid resetting visible hosted-workspace state. This test therefore waits "
-    "past the timeout and continues observing through the delayed release."
+    "Reviewed TS-1152, TS-1145, TS-1046, and TS-1045 from "
+    "`input/TS-990/linked_bugs.md`. Those fixes require the hosted shell to "
+    "reach `shell_ready` within the shared 11-second timeout window even while "
+    "startup probes are still pending, and they require late `/user` probe "
+    "resolution to leave the visible TopBar workspace trigger and branding "
+    "stable. This test therefore waits past the timeout while the delayed "
+    "GitHub `/user` probe is still pending and keeps observing until the late "
+    "resolution finishes."
 )
 REWORK_SUMMARY = (
-    "Removed the Step 2 early-pass shortcut so the timeout assertion stays "
-    "bound to the recorded post-timeout shell observation while preserving the "
-    "delayed startup probe stability coverage."
+    "Refreshed TS-990 to reference the current linked startup-fix chain and "
+    "reran the live delayed-probe stability scenario against the deployed app."
 )
 REWORK_FIXES = (
-    "Removed the Step 2 shortcut that could pass from the initial startup surface "
-    "without proving the post-timeout `shell_ready=true` condition.",
-    "Kept Step 2 tied to the timeout-window observation while preserving the "
-    "linked TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
-    "Updated review-thread replies so the current PR feedback is answered with the "
-    "exact Step 2 fix and rerun result.",
+    "Reused the existing hosted-workspace delayed `/user` Playwright regression "
+    "under `testing/tests/TS-990/` instead of rewriting the scenario.",
+    "Updated the linked-bug references so the test documentation matches the "
+    "current TS-1152 / TS-1145 / TS-1046 / TS-1045 startup-fix chain.",
+    "Reran the live deployed scenario and kept failure artifacts focused on the "
+    "product-visible post-timeout stability result.",
 )
 REWORK_RESPONSE_SUMMARY = (
-    "Removed the Step 2 early-pass shortcut, kept the timeout assertion bound to "
-    "the recorded post-timeout observation, and updated the review reply for the "
-    "current thread."
+    "Refreshed the TS-990 linked-bug metadata and reran the live delayed-probe "
+    "stability scenario against the deployed app."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
