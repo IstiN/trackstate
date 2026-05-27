@@ -2337,14 +2337,27 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   TrackerStartupRecovery? _startupRecoveryFrom(Object error) {
-    if (error is! GitHubRateLimitException) {
-      return null;
+    if (error is GitHubRateLimitException) {
+      return TrackerStartupRecovery(
+        kind: TrackerStartupRecoveryKind.githubRateLimit,
+        failedPath: error.requestPath,
+        retryAfter: error.retryAfter,
+      );
     }
-    return TrackerStartupRecovery(
-      kind: TrackerStartupRecoveryKind.githubRateLimit,
-      failedPath: error.requestPath,
-      retryAfter: error.retryAfter,
-    );
+    if (error is TrackStateRepositoryException &&
+        _isHostedBootstrapIndexRecoveryMessage(error.message)) {
+      return TrackerStartupRecovery(
+        kind: TrackerStartupRecoveryKind.hostedBootstrapIndex,
+        detail: error.message,
+      );
+    }
+    return null;
+  }
+
+  bool _isHostedBootstrapIndexRecoveryMessage(String message) {
+    return message.contains('Hosted bootstrap') &&
+        message.contains('.trackstate/index/issues.json') &&
+        message.contains('Regenerate the tracker indexes and retry.');
   }
 
   Future<({String repository, String branch})?> _connectionTarget() async {

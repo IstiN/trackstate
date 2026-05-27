@@ -144,6 +144,30 @@ void main() {
   );
 
   test(
+    'view model maps hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const missingIndexError = TrackStateRepositoryException(
+        'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [missingIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, missingIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
     'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
     () async {
       final authStore = _TokenTrackingAuthStore(
