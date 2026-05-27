@@ -487,8 +487,10 @@ void main() {
       issueKey: 'DEMO-2',
       body: 'CLI parity keeps comments in the shared mutation layer.',
     );
+    final head = await Process.run('git', ['-C', repo.path, 'rev-parse', 'HEAD']);
 
     expect(result.isSuccess, isTrue);
+    expect(result.revision, head.stdout.toString().trim());
     expect(result.value!.comments, hasLength(1));
     expect(
       result.value!.comments.single.body,
