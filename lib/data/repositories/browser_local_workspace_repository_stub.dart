@@ -17,6 +17,10 @@ Future<void> rememberBrowserLocalWorkspaceSelection({
   required Object selection,
 }) async {}
 
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) async {}
+
 Future<void> debugResetBrowserLocalWorkspaceSelectionCache({
   bool clearPersisted = false,
 }) async {}

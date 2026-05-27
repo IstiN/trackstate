@@ -364,6 +364,13 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
 
 String _normalizeWorkspacePath(String path) => path.trim();
 
+@visibleForTesting
+Future<void> clearRememberedBrowserLocalWorkspaceSelections({
+  bool clearPersisted = true,
+}) => debugResetBrowserLocalWorkspaceSelectionCache(
+  clearPersisted: clearPersisted,
+);
+
 Future<TrackStateRepository?> _openRememberedBrowserLocalWorkspaceRepository({
   required String repositoryPath,
   required String defaultBranch,
@@ -378,11 +385,7 @@ Future<TrackStateRepository?> _openRememberedBrowserLocalWorkspaceRepository({
   if (handle == null) {
     return null;
   }
-  final hasPermission =
-      requestPermissionIfNeeded
-      ? await _requestDirectoryPermission(handle)
-      : await _hasGrantedDirectoryPermission(handle);
-  if (!hasPermission) {
+  if (requestPermissionIfNeeded && !await _requestDirectoryPermission(handle)) {
     return null;
   }
   return _BrowserLocalTrackStateRepository(
@@ -410,13 +413,6 @@ Future<web.FileSystemDirectoryHandle?> _resolveRememberedDirectoryHandle(
   );
 }
 
-Future<bool> _hasGrantedDirectoryPermission(
-  web.FileSystemDirectoryHandle handle,
-) async {
-  final state = await _queryDirectoryPermissionState(handle);
-  return state == 'granted';
-}
-
 Future<bool> _requestDirectoryPermission(
   web.FileSystemDirectoryHandle handle,
 ) async {
@@ -425,9 +421,9 @@ Future<bool> _requestDirectoryPermission(
     return true;
   }
   try {
-    final nextState = await _FileSystemPermissionHandle._(handle as JSObject)
-        .requestPermission(_readWritePermissionDescriptor)
-        .toDart;
+    final nextState = await _FileSystemPermissionHandle._(
+      handle as JSObject,
+    ).requestPermission(_readWritePermissionDescriptor).toDart;
     return nextState.toDart == 'granted';
   } on Object {
     return false;
@@ -438,9 +434,9 @@ Future<String?> _queryDirectoryPermissionState(
   web.FileSystemDirectoryHandle handle,
 ) async {
   try {
-    final state = await _FileSystemPermissionHandle._(handle as JSObject)
-        .queryPermission(_readWritePermissionDescriptor)
-        .toDart;
+    final state = await _FileSystemPermissionHandle._(
+      handle as JSObject,
+    ).queryPermission(_readWritePermissionDescriptor).toDart;
     return state.toDart;
   } on Object {
     return 'granted';

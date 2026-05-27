@@ -47,7 +47,8 @@ final List<String> _startupDiagnosticMessages = <String>[];
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    await debugResetBrowserLocalWorkspaceSelectionCache(clearPersisted: true);
+    await clearRememberedBrowserLocalWorkspaceSelections();
+    addTearDown(() => clearRememberedBrowserLocalWorkspaceSelections());
     _startupDiagnosticMessages.clear();
     final previousDiagnostics = startupAuthProbeDiagnostics;
     startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
@@ -207,6 +208,99 @@ void main() {
       delayedRepository.completeUserProbe();
       await tester.pump();
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'web startup keeps the workspace switcher open when the browser handle is missing and no hosted token exists',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+
+      var hostedRepositoryOpened = false;
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => null,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                hostedRepositoryOpened = true;
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp(
+            r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+          ),
+        ),
+        findsNothing,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsWidgets,
+      );
+      expect(hostedRepositoryOpened, isFalse);
+
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, isNull);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(activeLocalWorkspaceId),
+      );
     },
   );
 
@@ -472,6 +566,9 @@ void main() {
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
+      browserHarness.completeUserProbe();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
     },
   );
 
@@ -571,6 +668,118 @@ void main() {
   );
 
   testWidgets(
+    'web startup keeps the restored active local workspace selected when an inactive saved workspace fails revalidation',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const inactiveLocalWorkspaceId = 'local:/tmp/trackstate-broken@main';
+      const activeLocalWorkspacePath = '/tmp/trackstate-demo';
+      const inactiveLocalWorkspacePath = '/tmp/trackstate-broken';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: activeLocalWorkspacePath,
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: inactiveLocalWorkspacePath,
+          defaultBranch: 'main',
+          displayName: 'Broken inactive workspace',
+        ),
+        select: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                if (repositoryPath == activeLocalWorkspacePath) {
+                  return DemoTrackStateRepository(
+                    snapshot: await _snapshotForRepository(repositoryPath),
+                  );
+                }
+                if (repositoryPath == inactiveLocalWorkspacePath) {
+                  throw StateError(
+                    'Saved workspace path no longer matches the expected TrackState repository.',
+                  );
+                }
+                return null;
+              },
+        ),
+      );
+      await tester.pump();
+      for (var index = 0; index < 20; index += 1) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      final savedStateAfterStartup = await workspaceProfiles.loadState();
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        contains(inactiveLocalWorkspaceId),
+      );
+      expect(
+        savedStateAfterStartup.unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pump();
+      for (var index = 0; index < 10; index += 1) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Unavailable')),
+        findsNothing,
+      );
+
+      final brokenRow = find.byKey(
+        const ValueKey('workspace-$inactiveLocalWorkspaceId'),
+      );
+      expect(brokenRow, findsOneWidget);
+      expect(
+        find.descendant(of: brokenRow, matching: find.text('Unavailable')),
+        findsWidgets,
+      );
+    },
+  );
+
+  testWidgets(
     'web startup opens the preserved local shell within the timeout while the real delayed /user probe is still pending',
     (tester) async {
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -635,6 +844,9 @@ void main() {
       _expectRestrictedFallbackShell(delayedRepository);
       _expectHostedFallbackTrigger();
       await _expectHostedFallbackWorkspaceRow(tester);
+      browserHarness.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
     },
   );
 
@@ -662,6 +874,7 @@ void main() {
         ),
         select: false,
       );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
 
       final delayedRepository = _SearchBlockingBrowserStartupRepository(
         snapshot: await _snapshotForRepository('stable/repo'),
@@ -844,7 +1057,7 @@ void main() {
         contains(activeLocalWorkspaceId),
       );
       browserHarness.completeUserProbe();
-      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
       _expectHostedFallbackTrigger();
     },
