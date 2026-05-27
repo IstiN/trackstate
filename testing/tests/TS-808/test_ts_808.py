@@ -351,8 +351,15 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         encoding="utf-8",
     )
 
+    seeded_paths = [marker_path.name]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        destination = local_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        seeded_paths.append(relative_path)
+
     subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
+        ["git", "-C", str(local_path), "add", "."],
         check=True,
         capture_output=True,
         text=True,
@@ -414,6 +421,111 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "seeded_paths": seeded_paths,
+    }
+
+
+def _restorable_workspace_fixture_files() -> dict[str, str]:
+    return {
+        "project.json": json.dumps(
+            {
+                "key": "DEMO",
+                "name": "TS-808 Demo",
+                "repository": "local/ts-808-demo",
+                "branch": DEFAULT_BRANCH,
+                "defaultLocale": "en",
+                "supportedLocales": ["en"],
+            },
+        )
+        + "\n",
+        "DEMO/config/statuses.json": json.dumps(
+            [
+                {"id": "todo", "name": "To Do", "category": "new"},
+                {
+                    "id": "in-progress",
+                    "name": "In Progress",
+                    "category": "indeterminate",
+                },
+                {"id": "done", "name": "Done", "category": "done"},
+            ],
+        )
+        + "\n",
+        "DEMO/config/workflows.json": json.dumps(
+            {
+                "default": {
+                    "name": "Default Workflow",
+                    "statuses": ["todo", "in-progress", "done"],
+                    "transitions": [
+                        {
+                            "id": "start-progress",
+                            "name": "Start progress",
+                            "from": "todo",
+                            "to": "in-progress",
+                        },
+                        {
+                            "id": "finish-work",
+                            "name": "Finish work",
+                            "from": "in-progress",
+                            "to": "done",
+                        },
+                    ],
+                },
+            },
+        )
+        + "\n",
+        "DEMO/config/issue-types.json": json.dumps(
+            [
+                {
+                    "id": "story",
+                    "name": "Story",
+                    "workflowId": "default",
+                    "hierarchyLevel": 0,
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/config/fields.json": json.dumps(
+            [
+                {"id": "summary", "name": "Summary", "type": "string", "required": True},
+                {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "markdown",
+                    "required": False,
+                },
+                {
+                    "id": "priority",
+                    "name": "Priority",
+                    "type": "option",
+                    "required": False,
+                    "options": [
+                        {"id": "high", "name": "High"},
+                        {"id": "medium", "name": "Medium"},
+                    ],
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/DEMO-1/main.md": "\n".join(
+            [
+                "---",
+                "key: DEMO-1",
+                "project: DEMO",
+                "issueType: story",
+                "status: in-progress",
+                "priority: high",
+                "summary: TS-808 seeded local workspace issue",
+                "assignee: ts808-user",
+                "reporter: ts808-user",
+                "updated: 2026-05-27T00:00:00Z",
+                "---",
+                "",
+                "# Description",
+                "",
+                "Seeded local workspace content for TS-808 signed-in startup validation.",
+                "",
+            ],
+        ),
     }
 
 

@@ -77,13 +77,13 @@ LINKED_BUG_NOTES = (
     "resolution finishes."
 )
 REWORK_FIXES = (
-    "Reused the existing TS-990 live Playwright automation in `testing/tests/TS-990/test_ts_990.py`.",
-    "Kept the timeout assertion tied to the recorded post-timeout shell snapshot while the delayed `/user` probe was still pending.",
-    "Updated the human-style verification summary to report the visible workspace trigger, branding, route, and navigation state that a user would actually observe.",
+    "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py`.",
+    "Preserved the approved timeout-window assertion so Step 2 still depends on the recorded post-timeout shell snapshot while the delayed `/user` probe is pending.",
+    "Reran the live delayed-probe stability scenario with the user-visible workspace trigger, branding, route, and navigation checks intact.",
 )
 REWORK_RESPONSE_SUMMARY = (
-    "Validated the live delayed-probe stability scenario against the deployed app "
-    "with the timeout-window assertion and user-visible shell checks intact."
+    "Resolved the `main` merge conflict in TS-990 and reran the live delayed-"
+    "probe stability scenario with the approved timeout-window assertion intact."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"

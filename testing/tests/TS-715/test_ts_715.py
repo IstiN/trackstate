@@ -36,6 +36,7 @@ RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 900
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
@@ -200,24 +201,43 @@ def main() -> None:
                     sync_observation,
                     timeout_seconds=60,
                 )
-                second_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    previous_request=first_failed_request,
-                    minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
-                    timeout_seconds=360,
-                )
-                retry_interval_seconds = (
-                    second_failed_request.observed_at_monotonic
-                    - first_failed_request.observed_at_monotonic
-                )
-                result["failed_sync_requests"] = [
-                    asdict(request) for request in sync_observation.failed_sync_requests
-                ]
-                result["post_revocation_request_urls"] = list(
-                    sync_observation.post_revocation_request_urls,
-                )
-                result["retry_interval_seconds"] = retry_interval_seconds
-                _assert_retry_interval(retry_interval_seconds)
+                try:
+                    second_failed_request = _wait_for_failed_request(
+                        sync_observation,
+                        previous_request=first_failed_request,
+                        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+                        timeout_seconds=FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS,
+                    )
+                    retry_interval_seconds = (
+                        second_failed_request.observed_at_monotonic
+                        - first_failed_request.observed_at_monotonic
+                    )
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    result["retry_interval_seconds"] = retry_interval_seconds
+                    _assert_retry_interval(retry_interval_seconds)
+                except Exception as step5_error:
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    _record_step(
+                        result,
+                        step=5,
+                        status="failed",
+                        action="Verify the time of the next scheduled check in the logs.",
+                        observed=_step5_failure_observation(
+                            sync_observation,
+                            step5_error,
+                        ),
+                    )
+                    raise
                 _record_step(
                     result,
                     step=5,
@@ -261,6 +281,7 @@ def main() -> None:
             result["post_revocation_request_urls"] = list(
                 sync_observation.post_revocation_request_urls,
             )
+        _upgrade_step5_timeout_failure(result)
         _write_failure_outputs(result)
         raise
 
@@ -415,6 +436,67 @@ def _record_human_verification(
     verifications.append({"check": check, "observed": observed})
 
 
+def _step5_failure_observation(
+    observation: HostedSyncAuthFailureObservation,
+    error: Exception,
+) -> str:
+    requests = tuple(observation.failed_sync_requests)
+    if len(requests) >= 2:
+        retry_interval_seconds = (
+            requests[1].observed_at_monotonic - requests[0].observed_at_monotonic
+        )
+        return (
+            f"first_failed_sync_request={requests[0].url}; "
+            f"second_failed_sync_request={requests[1].url}; "
+            f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+            f"error={type(error).__name__}: {error}"
+        )
+    return f"error={type(error).__name__}: {error}"
+
+
+def _upgrade_step5_timeout_failure(result: dict[str, object]) -> None:
+    error = str(result.get("error", ""))
+    timeout_prefix = (
+        "AssertionError: Step 5 failed: the hosted app did not issue a distinct "
+        "follow-up failed repository-scoped GitHub request after the first revoked-PAT "
+        "check."
+    )
+    if not error.startswith(timeout_prefix):
+        return
+    requests = _request_items(result)
+    if len(requests) < 2:
+        return
+    first_request = requests[0]
+    second_request = _matching_failed_request(
+        requests,
+        previous_request=first_request,
+        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+    )
+    if second_request is None:
+        return
+    retry_interval_seconds = (
+        second_request.observed_at_monotonic - first_request.observed_at_monotonic
+    )
+    result["retry_interval_seconds"] = retry_interval_seconds
+    try:
+        _assert_retry_interval(retry_interval_seconds)
+    except AssertionError as measured_error:
+        measured_message = f"{type(measured_error).__name__}: {measured_error}"
+        result["error"] = measured_message
+        result["traceback"] = measured_message
+        _replace_step_result(
+            result,
+            step=5,
+            status="failed",
+            observed=(
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"error={measured_message}"
+            ),
+        )
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -467,6 +549,15 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         if passed
         else "* Did not match the expected result."
     )
+    retry_log_line = (
+        "* Verified the visible authentication error and the {Next retry at ...} message, "
+        "then confirmed from the captured sync-request log that the next automatic check "
+        "happened about one minute later."
+        if passed
+        else "* Verified the visible authentication error and the {Next retry at ...} "
+        "message, then inspected the captured sync-request log for the actual follow-up "
+        "retry timing."
+    )
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
@@ -474,7 +565,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed hosted TrackState web app in Chromium and connected the real hosted workspace session.",
         "* Switched the live GitHub sync runtime to synthetic HTTP 401 {Bad credentials} responses for workspace-sync repository checks to reproduce a revoked PAT.",
         "* Waited for the background sync coordinator to perform a failed check, then verified the visible top-bar sync pill and the {Workspace sync} Settings card.",
-        "* Verified the visible authentication error and the {Next retry at ...} message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later.",
+        retry_log_line,
         "",
         "*Observed result*",
         outcome,
@@ -514,6 +605,11 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         if passed
         else "- Did not match the expected result."
     )
+    retry_log_line = (
+        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later."
+        if passed
+        else "- Verified the visible authentication error and the `Next retry at ...` message, then inspected the captured sync-request log for the actual follow-up retry timing."
+    )
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
@@ -521,7 +617,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed hosted TrackState web app in Chromium and connected the real hosted workspace session.",
         "- Switched the live GitHub sync runtime to synthetic HTTP 401 `Bad credentials` responses for workspace-sync repository checks to reproduce a revoked PAT.",
         "- Waited for the background sync coordinator to perform a failed check, then verified the visible top-bar sync pill and the `Workspace sync` Settings card.",
-        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later.",
+        retry_log_line,
         "",
         "### Observed result",
         outcome,
@@ -682,6 +778,23 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("observed", ""))
     return "Step was not completed."
+
+
+def _replace_step_result(
+    result: dict[str, object],
+    *,
+    step: int,
+    status: str,
+    observed: str,
+) -> None:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return
+    for item in steps:
+        if isinstance(item, dict) and item.get("step") == step:
+            item["status"] = status
+            item["observed"] = observed
+            return
 
 
 def _assert_stable_workspace_sync_copy(
