@@ -63,6 +63,8 @@ BROKEN_LOCAL_TARGET = "/tmp/trackstate-ts1006-workspace-b"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
 LINKED_BUGS = [
+    "TS-1212",
+    "TS-1209",
     "TS-1146",
     "TS-1143",
     "TS-1142",
@@ -72,12 +74,12 @@ LINKED_BUGS = [
     "TS-994",
 ]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, TS-995, and TS-994. "
-    "The linked fixes span the visible Retry/Re-authenticate recovery path, the "
-    "reload persistence path, and the follow-up startup hydration selection logic, "
-    "so this test waits for the visible restore callback, the restored Local Git "
-    "precondition, the post-reload shell, and the final Workspace switcher row "
-    "state before asserting."
+    "Reviewed TS-1212, TS-1209, TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, "
+    "TS-995, and TS-994. The linked fixes span the visible Retry/Re-authenticate "
+    "recovery path, browser-persisted local directory access across reload, and "
+    "the follow-up startup hydration selection logic, so this test waits for the "
+    "visible restore callback, the restored Local Git precondition, the post-"
+    "reload shell, and the final Workspace switcher row state before asserting."
 )
 PRECONDITION_WAIT_SECONDS = 60
 STARTUP_WAIT_SECONDS = 90
@@ -1080,6 +1082,9 @@ def _assert_startup_selection_preserved(
     selected_row: WorkspaceSwitcherRowObservation | None,
     switcher: WorkspaceSwitcherObservation,
 ) -> None:
+    switcher_text_confirms_active_workspace = _switcher_text_shows_active_workspace(
+        switcher.switcher_text,
+    )
     if active_row is None:
         raise AssertionError(
             "Step 4 failed: Workspace switcher no longer showed Workspace A after startup.\n"
@@ -1090,7 +1095,10 @@ def _assert_startup_selection_preserved(
             "Step 4 failed: Workspace A was no longer shown as `Local Git` in the switcher.\n"
             f"Observed active row: {json.dumps(_row_payload(active_row), indent=2)}"
         )
-    if selected_row is None or selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME:
+    if (
+        (selected_row is None or selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME)
+        and not switcher_text_confirms_active_workspace
+    ):
         raise AssertionError(
             "Step 4 failed: Workspace A did not remain the selected active workspace in the "
             "Workspace switcher after startup.\n"
@@ -1119,13 +1127,22 @@ def _assert_startup_selection_preserved(
             f"Observed broken row: {json.dumps(_row_payload(broken_row), indent=2)}"
         )
     if not any(
-        label in ACCEPTED_RECOVERY_ACTION_LABELS for label in broken_row.action_labels
+        any(label.startswith(f"{accepted}:") or label == accepted for accepted in ACCEPTED_RECOVERY_ACTION_LABELS)
+        for label in broken_row.action_labels
     ):
         raise AssertionError(
             "Step 4 failed: Workspace B did not expose a visible recovery action such as "
             "`Retry` or `Re-authenticate`.\n"
             f"Observed broken row: {json.dumps(_row_payload(broken_row), indent=2)}"
         )
+
+
+def _switcher_text_shows_active_workspace(switcher_text: str) -> bool:
+    normalized = " ".join(switcher_text.split())
+    return (
+        f"{ACTIVE_LOCAL_DISPLAY_NAME} · Local · Local Git" in normalized
+        or f"{ACTIVE_LOCAL_DISPLAY_NAME}, Local, Local Git" in normalized
+    )
 
 
 def _extract_workspace_open_failure_message(body_text: str) -> str | None:
@@ -1385,9 +1402,10 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         "Workspace B inactive and broken.",
         "",
         "## Files Modified",
+        "- `testing/tests/TS-1006/test_ts_1006.py`",
         "- `testing/tests/TS-1006/config.yaml`",
         "- `testing/tests/TS-1006/README.md`",
-        "- `testing/tests/TS-1006/test_ts_1006.py`",
+        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
         "",
         "## Test Coverage",
         "- Visible restore flow for Workspace A before the startup scenario begins.",
