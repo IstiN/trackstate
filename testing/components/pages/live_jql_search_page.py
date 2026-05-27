@@ -158,6 +158,7 @@ class LiveJqlSearchPage:
         field_index: int,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
+        issue_result_labels = self._issue_result_labels()
         return LiveJqlSearchObservation(
             query=query,
             visible_query=self._session.read_value(
@@ -167,8 +168,8 @@ class LiveJqlSearchPage:
             ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
-            issue_result_count=self._session.count(self._issue_button_selector),
-            issue_result_labels=self._issue_result_labels(),
+            issue_result_count=len(issue_result_labels),
+            issue_result_labels=issue_result_labels,
         )
 
     def _wait_for_search_field(self) -> tuple[str, int]:
@@ -239,6 +240,9 @@ class LiveJqlSearchPage:
                     const bodyText = document.body?.innerText ?? "";
                     const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
                     const countSummary = countMatch ? countMatch[0] : null;
+                    if (countSummary === null) {
+                        return null;
+                    }
                     const issueLabels = Array.from(document.querySelectorAll(issueSelector))
                         .map((element) => (element.getAttribute("aria-label") ?? "").trim())
                         .filter((label) => label.length > 0);

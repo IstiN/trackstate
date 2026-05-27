@@ -144,6 +144,54 @@ void main() {
   );
 
   test(
+    'view model maps missing hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const missingIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [missingIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, missingIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
+    'view model maps inconsistent hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const inconsistentIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [inconsistentIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, inconsistentIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
     'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
     () async {
       final authStore = _TokenTrackingAuthStore(
@@ -1468,6 +1516,24 @@ void main() {
   );
 
   test(
+    'view model surfaces the no-commit guard when project settings save produces no git commit',
+    () async {
+      final repository = _NoCommitSettingsRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+
+      final success = await viewModel.saveProjectSettings(
+        viewModel.settingsCatalog!,
+      );
+
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(viewModel.message?.error, projectSettingsNoCommitProducedMessage);
+    },
+  );
+
+  test(
     'view model saves issue edits through shared field, hierarchy, and workflow mutations',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
@@ -2149,6 +2215,15 @@ class _EditableSettingsRepository extends _LocalRuntimeRepository
     _snapshot = Future<TrackerSnapshot>.value(updated);
     return updated;
   }
+}
+
+class _NoCommitSettingsRepository extends _EditableSettingsRepository {
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async => throw const TrackStateRepositoryException(
+    projectSettingsNoCommitProducedMessage,
+  );
 }
 
 class _RecordingIssueMutationService extends IssueMutationService {

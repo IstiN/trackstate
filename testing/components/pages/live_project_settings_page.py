@@ -144,7 +144,7 @@ class LiveProjectSettingsPage:
             repository=repository,
         )
         current_body = self.body_text()
-        if TrackStateTrackerPage.body_has_connected_banner(
+        if TrackStateTrackerPage.body_has_authenticated_session(
             current_body,
             user_login=user_login,
             repository=repository,
@@ -237,7 +237,7 @@ class LiveProjectSettingsPage:
             repository=repository,
         )
         current_body = self.body_text()
-        if TrackStateTrackerPage.body_has_connected_banner(
+        if TrackStateTrackerPage.body_has_authenticated_session(
             current_body,
             user_login=user_login,
             repository=repository,
@@ -276,6 +276,8 @@ class LiveProjectSettingsPage:
                 wait_match = self._session.wait_for_any_text(
                     [
                         *connected_banners,
+                        "Attachments limited",
+                        "Manage GitHub access",
                         "GitHub connection failed:",
                     ],
                     timeout_ms=timeout_seconds * 1_000,
@@ -295,6 +297,15 @@ class LiveProjectSettingsPage:
                         "reach a write-capable hosted session.\n"
                         f"Observed body text:\n{current_body}",
                     ) from None
+                if any(
+                    marker in current_body
+                    for marker in (
+                        *connected_banners,
+                        "Attachments limited",
+                        "Manage GitHub access",
+                    )
+                ):
+                    return current_body
                 if attempt == 0:
                     continue
                 raise AssertionError(
@@ -613,12 +624,8 @@ class LiveProjectSettingsPage:
         return workflow_dialog_text, workflow_tab_text
 
     def save_settings(self) -> str:
-        self._session.click(
-            self._visible_button_selector,
-            has_text=self._save_settings_label,
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
+        self.click_save_settings(timeout_ms=30_000)
+        self.wait_for_save_cycle_completion(timeout_ms=120_000)
         return self.body_text()
 
     def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
@@ -632,16 +639,30 @@ class LiveProjectSettingsPage:
     def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
         self._session.wait_for_function(
             """
-            (selector) => {
-              const button = Array.from(document.querySelectorAll(selector)).find((candidate) => {
+            (saveSettingsLabel) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
                 const text = (candidate.innerText ?? '').trim();
                 const aria = (candidate.getAttribute('aria-label') ?? '').trim();
-                return text === 'Save settings' || aria === 'Save settings';
+                return isVisible(candidate)
+                  && (text === saveSettingsLabel || aria === saveSettingsLabel);
               });
               return !!button && button.getAttribute('aria-disabled') !== 'true';
             }
             """,
-            arg='flt-semantics[aria-label="Save settings"], flt-semantics[role="button"]',
+            arg=self._save_settings_label,
             timeout_ms=timeout_ms,
         )
         return self.body_text()
@@ -649,12 +670,26 @@ class LiveProjectSettingsPage:
     def read_save_state(self) -> ProjectSettingsSaveState:
         payload = self._session.evaluate(
             r"""
-            (selector) => {
+            (saveSettingsLabel) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const bodyText = document.body?.innerText ?? '';
-              const button = Array.from(document.querySelectorAll(selector)).find((candidate) => {
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
                 const text = (candidate.innerText ?? '').trim();
                 const aria = (candidate.getAttribute('aria-label') ?? '').trim();
-                return text === 'Save settings' || aria === 'Save settings';
+                return isVisible(candidate)
+                  && (text === saveSettingsLabel || aria === saveSettingsLabel);
               });
               const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
               return {
@@ -664,7 +699,7 @@ class LiveProjectSettingsPage:
               };
             }
             """,
-            arg='flt-semantics[role="button"], flt-semantics[aria-label="Save settings"]',
+            arg=self._save_settings_label,
         )
         if not isinstance(payload, dict):
             raise AssertionError(

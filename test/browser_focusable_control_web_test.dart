@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -18,8 +19,10 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 import 'package:web/web.dart' as web;
 
 void main() {
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await clearRememberedBrowserLocalWorkspaceSelections();
+    addTearDown(() => clearRememberedBrowserLocalWorkspaceSelections());
   });
 
   testWidgets(
@@ -141,7 +144,7 @@ void main() {
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
+        findsWidgets,
       );
       expect(
         find.descendant(of: localRow, matching: find.text('Retry')),
@@ -251,7 +254,7 @@ void main() {
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.descendant(of: localRow, matching: find.text('Unavailable')),
-        findsOneWidget,
+        findsWidgets,
       );
       expect(
         find.descendant(of: localRow, matching: find.text('Retry')),

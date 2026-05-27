@@ -85,9 +85,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Removed the synthetic directory-picker override so TS-912 stays bound to "
-    "the actual saved workspace action and reports the real manual re-auth gap "
-    "instead of replaying fixture data through a substitute handle."
+    "Removed the synthetic directory-picker override and restored the stricter "
+    "active-workspace assertion so TS-912 stays bound to the real visible "
+    "manual re-authentication flow."
 )
 
 
@@ -828,10 +828,11 @@ def _assert_restored_local_workspace(
 
 def _switcher_text_shows_active_local_git(switcher_text: str) -> bool:
     normalized = " ".join(switcher_text.split())
-    return (
-        LOCAL_DISPLAY_NAME in normalized
-        and "Local Git" in normalized
-        and "Active" in normalized
+    return bool(
+        re.search(
+            rf"{re.escape(LOCAL_DISPLAY_NAME)}.*Local(?:\s*[·,]\s*|\s+)Local Git.*Active",
+            normalized,
+        ),
     )
 
 
@@ -1680,10 +1681,10 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
     )
     return (
         "Fixed: TS-912 no longer overrides `showDirectoryPicker()` or returns a "
-        "test-authored substitute handle. The test now stays on the real visible "
-        "Retry flow, records only the actual browser callback probe, reports the "
-        "missing remembered-handle path when the live app cannot re-bind the "
-        "saved directory from the existing runtime surface, and generates "
+        "test-authored substitute handle, and the compact-card fallback again requires "
+        "evidence that the restored workspace is both `Local Git` and `Active`. The test "
+        "stays on the real visible Retry flow, reports the live product gap when the app "
+        "cannot re-bind the saved directory from the current runtime surface, and generates "
         "`review_replies.json` from the unresolved threads in "
         f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
         f"{rerun_summary}"
