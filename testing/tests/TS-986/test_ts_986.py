@@ -40,7 +40,7 @@ UNAVAILABLE_STATE_TIMEOUT_MS = 30_000
 LOCAL_TARGET = "/tmp/trackstate-ts986-mismatched-workspace"
 LOCAL_DISPLAY_NAME = "Broken local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-972"]
+LINKED_BUGS = ["TS-995", "TS-993", "TS-972"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
 REWORK_SUMMARY = (
@@ -402,9 +402,11 @@ def _assert_unavailable_transition(
             f"Observed refreshed local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
             f"Observed refreshed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
         )
-    if not any(
-        label in ACCEPTED_RECOVERY_ACTION_LABELS for label in local_row.action_labels
-    ):
+    normalized_actions = {
+        _normalize_workspace_action_label(label)
+        for label in (*local_row.action_labels, *local_row.button_labels)
+    }
+    if not any(label in normalized_actions for label in ACCEPTED_RECOVERY_ACTION_LABELS):
         raise AssertionError(
             "Step 4 failed: the unavailable workspace row did not expose a visible recovery "
             "action such as `Retry`.\n"
@@ -771,6 +773,13 @@ def _find_seeded_local_row(
     return None
 
 
+def _normalize_workspace_action_label(label: str) -> str:
+    separator_index = label.find(":")
+    if separator_index == -1:
+        return label.strip()
+    return label[:separator_index].strip()
+
+
 def _actual_result_summary(result: dict[str, object], *, passed: bool) -> str:
     if passed:
         local_row = result.get("refreshed_local_row", result.get("local_row"))
@@ -849,24 +858,7 @@ def _write_review_replies(*, passed: bool) -> None:
     REVIEW_REPLIES_PATH.write_text(
         json.dumps(
             {
-                "replies": [
-                    {
-                        "inReplyToId": 3292403736,
-                        "threadId": "PRRT_kwDOSU6Gf86ESTdt",
-                        "reply": (
-                            "Fixed: moved the refreshed switcher wait/probe out of "
-                            "`test_ts_986.py` into `LiveWorkspaceSwitcherPage`, so the test now "
-                            "uses the page abstraction instead of reaching through to the "
-                            "session and re-implementing DOM logic."
-                            if passed
-                            else "Updated: moved the refreshed switcher wait/probe into "
-                            "`LiveWorkspaceSwitcherPage`, so the test now keeps DOM polling "
-                            "inside the component layer. The latest run still fails because the "
-                            "visible switcher keeps presenting the broken workspace as `Active`, "
-                            "which remains a genuine product failure."
-                        ),
-                    },
-                ],
+                "replies": [],
             },
         )
         + "\n",

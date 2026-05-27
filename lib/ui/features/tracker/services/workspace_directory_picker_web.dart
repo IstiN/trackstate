@@ -1,6 +1,7 @@
 @JS()
 library;
 
+import 'dart:async';
 import 'dart:js_interop';
 
 import 'package:file_selector/file_selector.dart';
@@ -14,6 +15,11 @@ typedef BrowserDirectoryAccessRequester =
       String? confirmButtonText,
       String? initialDirectory,
     });
+typedef BrowserWorkspaceSelectionPersister =
+    Future<void> Function({
+      required String workspacePath,
+      required Object selection,
+    });
 
 extension type _DirectoryHandle(JSObject _value) implements JSObject {
   external String get name;
@@ -25,6 +31,10 @@ external JSPromise<JSAny?> _showDirectoryPicker();
 @visibleForTesting
 BrowserDirectoryAccessRequester browserDirectoryAccessRequester =
     _requestBrowserDirectoryAccess;
+
+@visibleForTesting
+BrowserWorkspaceSelectionPersister browserWorkspaceSelectionPersister =
+    rememberBrowserLocalWorkspaceSelection;
 
 Future<String?> pickWorkspaceDirectory({
   String? confirmButtonText,
@@ -43,7 +53,7 @@ Future<String?> pickWorkspaceDirectory({
     if (normalizedSelection != null &&
         selection != null &&
         selection is! String) {
-      rememberBrowserLocalWorkspaceSelection(
+      await _rememberBrowserWorkspaceSelection(
         workspacePath: normalizedSelection,
         selection: selection,
       );
@@ -54,6 +64,29 @@ Future<String?> pickWorkspaceDirectory({
       return null;
     }
     rethrow;
+  }
+}
+
+Future<void> _rememberBrowserWorkspaceSelection({
+  required String workspacePath,
+  required Object selection,
+}) async {
+  try {
+    await browserWorkspaceSelectionPersister(
+      workspacePath: workspacePath,
+      selection: selection,
+    );
+  } on Object catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'workspace_directory_picker_web',
+        context: ErrorDescription(
+          'while persisting browser local workspace access',
+        ),
+      ),
+    );
   }
 }
 

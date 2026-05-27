@@ -42,7 +42,7 @@ def _default_runtime_factory() -> AbstractContextManager[WebAppSession]:
         )
     except ModuleNotFoundError as error:
         raise AssertionError(
-            "Playwright browser verification is required for GitHub Actions UI "
+            "Playwright browser verification is required for GitHub Actions page "
             "checks, but the Playwright runtime is not available in this environment."
         ) from error
     return PlaywrightWebAppRuntime()

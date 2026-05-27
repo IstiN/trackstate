@@ -383,7 +383,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
-                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                        f"local_row_after_restore={json.dumps(local_row_after, ensure_ascii=True) if local_row_after else 'null'}"
                     ),
                 )
 

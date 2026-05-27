@@ -17,7 +17,9 @@ class TrackStateCliCommentCreationObservation:
     executed_command: tuple[str, ...]
     fallback_reason: str | None
     repository_path: str
-    head_revision: str
+    initial_head_revision: str
+    first_head_revision: str
+    second_head_revision: str
     git_status: str
     first_result: CliCommandResult
     second_result: CliCommandResult

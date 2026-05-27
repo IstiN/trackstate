@@ -52,6 +52,48 @@ void main() {
     },
   );
 
+  test(
+    'workspace selection preserves a newer hosted restore when a stale refresh finishes later',
+    () {
+      const localWorkspace = WorkspaceProfile(
+        id: 'local:/tmp/trackstate-demo@main',
+        displayName: 'Active local workspace',
+        targetType: WorkspaceProfileTargetType.local,
+        target: '/tmp/trackstate-demo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      const hostedWorkspace = WorkspaceProfile(
+        id: 'hosted:stable/repo@main',
+        displayName: 'Hosted setup workspace',
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: 'stable/repo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final startupWorkspaces = WorkspaceProfilesState(
+        profiles: [localWorkspace, hostedWorkspace],
+        activeWorkspaceId: localWorkspace.id,
+        migrationComplete: true,
+      );
+      final staleRefreshWorkspaces = WorkspaceProfilesState(
+        profiles: [localWorkspace, hostedWorkspace],
+        activeWorkspaceId: localWorkspace.id,
+        migrationComplete: true,
+        unavailableLocalWorkspaceIds: {localWorkspace.id},
+      );
+
+      expect(
+        resolveWorkspaceSwitcherSelectedWorkspaceId(
+          currentSelectedWorkspaceId: hostedWorkspace.id,
+          previousWorkspaces: startupWorkspaces,
+          nextWorkspaces: staleRefreshWorkspaces,
+        ),
+        hostedWorkspace.id,
+      );
+    },
+  );
+
   testWidgets(
     'workspace switcher enables Save and switch after selecting a different saved workspace row',
     (tester) async {

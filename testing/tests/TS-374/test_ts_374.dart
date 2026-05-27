@@ -9,6 +9,7 @@ import '../../components/screens/settings_screen_robot.dart';
 import '../../core/fakes/reactive_issue_detail_trackstate_repository.dart';
 import '../../core/utils/color_contrast.dart';
 
+const Size _desktopViewport = Size(1440, 900);
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -38,6 +39,7 @@ void main() {
             _hostedTokenKey: 'read-only-token',
           },
         );
+        await robot.resize(_desktopViewport);
 
         final globalBanner = _calloutScope(_globalBannerSemanticsLabel);
         if (globalBanner.evaluate().isEmpty) {
