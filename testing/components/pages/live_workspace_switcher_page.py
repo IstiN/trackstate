@@ -3598,6 +3598,8 @@ class LiveWorkspaceSwitcherPage:
               ];
               const actionLabelMatcher = (label) =>
                 label === 'Active'
+                || label === 'Connect GitHub'
+                || label === 'Manage GitHub access'
                 || label.startsWith('Retry:')
                 || label.startsWith('Open:')
                 || label.startsWith('Re-authenticate:')
@@ -3606,6 +3608,13 @@ class LiveWorkspaceSwitcherPage:
               const visibleButtons = Array.from(
                 document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
               ).filter(isVisible);
+              const actionCandidates = visibleButtons
+                .map((candidate) => ({
+                  element: candidate,
+                  label: accessibleLabel(candidate),
+                  rect: candidate.getBoundingClientRect(),
+                }))
+                .filter((candidate) => actionLabelMatcher(candidate.label));
               const rows = visibleButtons
                 .map((element) => {
                   const summaryLabel = accessibleLabel(element);
@@ -3634,34 +3643,70 @@ class LiveWorkspaceSwitcherPage:
                   let rowElement = element;
                   let current = element.parentElement;
                   while (current && current !== document.body) {
+                    const rowIdentifier = normalize(
+                      current.getAttribute('data-trackstate-browser-focus-row-id')
+                        || current.getAttribute('data-trackstate-browser-focus-id')
+                        || current.getAttribute('flt-semantics-identifier')
+                        || '',
+                    );
+                    if (rowIdentifier.startsWith('trackstate-workspace-switcher-row-')) {
+                      rowElement = current;
+                      break;
+                    }
+                    const currentText = accessibleLabel(current);
                     const labels = Array.from(
                       current.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
                     )
                       .filter(isVisible)
                       .map((candidate) => accessibleLabel(candidate))
                       .filter((label) => actionLabelMatcher(label));
+                    const looksLikeWorkspaceRow =
+                      currentText.includes(displayName)
+                      && currentText.includes(detailText)
+                      && (
+                        currentText.includes('Active')
+                        || labels.length > 0
+                      );
                     if (
-                      labels.some((label) => label.startsWith('Delete:'))
-                      && labels.some((label) => !label.startsWith('Delete:'))
+                      looksLikeWorkspaceRow
+                      && (
+                        currentText.includes('Active')
+                        || (
+                          labels.some((label) => label.startsWith('Delete:'))
+                          && labels.some((label) => !label.startsWith('Delete:'))
+                        )
+                      )
                     ) {
                       rowElement = current;
                       break;
                     }
                     current = current.parentElement;
                   }
-                  const buttonLabels = Array.from(
+                  const summaryRect = element.getBoundingClientRect();
+                  const domButtonLabels = Array.from(
                     rowElement.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
                   )
                     .filter(isVisible)
                     .map((candidate) => accessibleLabel(candidate))
                     .filter((label) => actionLabelMatcher(label));
+                  const nearbyButtonLabels = actionCandidates
+                    .filter((candidate) => candidate.element !== element)
+                    .filter((candidate) =>
+                      Math.abs(candidate.rect.top - summaryRect.top)
+                        <= Math.max(summaryRect.height, candidate.rect.height) + 48,
+                    )
+                    .map((candidate) => candidate.label);
+                  const buttonLabels = Array.from(
+                    new Set([...domButtonLabels, ...nearbyButtonLabels]),
+                  );
+                  const rowText = accessibleLabel(rowElement);
                   return {
                     displayName,
                     targetTypeLabel,
                     stateLabel,
                     detailText,
                     visibleText: [summaryLabel, ...buttonLabels].join(' ').trim(),
-                    selected: buttonLabels.includes('Active'),
+                    selected: buttonLabels.includes('Active') || rowText.includes('Active'),
                     semanticsLabel: summaryLabel,
                     iconAccessibilityLabel: null,
                     actionLabels: buttonLabels.filter((label) => !label.startsWith('Delete:')),
