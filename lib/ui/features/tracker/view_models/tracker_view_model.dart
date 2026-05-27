@@ -734,6 +734,9 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   void selectSection(TrackerSection section) {
+    if (!isSectionSelectable(section)) {
+      return;
+    }
     _section = section;
     if (section != TrackerSection.search) {
       _issueDetailReturnSection = null;
@@ -743,6 +746,13 @@ class TrackerViewModel extends ChangeNotifier {
       unawaited(ensureIssueDetailLoaded(issue));
     }
     notifyListeners();
+  }
+
+  bool isSectionSelectable(TrackerSection section) {
+    if (!hasStartupRecovery || _snapshot == null) {
+      return true;
+    }
+    return section == TrackerSection.settings;
   }
 
   void openProjectSettings({ProjectSettingsTab? tab}) {
@@ -1907,50 +1917,51 @@ class TrackerViewModel extends ChangeNotifier {
       }
       final completedWithinTimeout =
           await _runAutomaticRepositoryConnectionRestore(
-        connect: () => _repository.connect(
-          GitHubConnection(
-            repository: target.repository,
-            branch: target.branch,
-            token: storedToken,
-          ),
-        ),
-        onSuccess: (user) async {
-          _connectedUser = user;
-          _isConnected = true;
-          if (callbackToken != null) {
-            _startupHostedAccessModeOverride = null;
-          }
-          if (callbackToken != null) {
-            await _authStore.saveToken(
-              callbackToken,
-              repository: _workspaceId == null ? target.repository : null,
-              workspaceId: _workspaceId,
-            );
-          }
-          await _resumeStartupRecoveryAfterAuthentication();
-          await _reloadHostedStartupShellFallbackIfNeeded();
-          if (callbackToken != null) {
-            _message = TrackerMessage.githubConnected(
-              login: user.login,
-              repository: target.repository,
-            );
-          }
-        },
-        onError: (error) async {
-          _message = TrackerMessage.storedGitHubTokenInvalid(error);
-          await _authStore.clearToken(
-            repository: _workspaceId == null ? target.repository : null,
-            workspaceId: _workspaceId,
+            connect: () => _repository.connect(
+              GitHubConnection(
+                repository: target.repository,
+                branch: target.branch,
+                token: storedToken,
+              ),
+            ),
+            onSuccess: (user) async {
+              _connectedUser = user;
+              _isConnected = true;
+              if (callbackToken != null) {
+                _startupHostedAccessModeOverride = null;
+              }
+              if (callbackToken != null) {
+                await _authStore.saveToken(
+                  callbackToken,
+                  repository: _workspaceId == null ? target.repository : null,
+                  workspaceId: _workspaceId,
+                );
+              }
+              await _resumeStartupRecoveryAfterAuthentication();
+              await _reloadHostedStartupShellFallbackIfNeeded();
+              if (callbackToken != null) {
+                _message = TrackerMessage.githubConnected(
+                  login: user.login,
+                  repository: target.repository,
+                );
+              }
+            },
+            onError: (error) async {
+              _message = TrackerMessage.storedGitHubTokenInvalid(error);
+              await _authStore.clearToken(
+                repository: _workspaceId == null ? target.repository : null,
+                workspaceId: _workspaceId,
+              );
+            },
+            onFinally: () async {
+              _bindProviderSession();
+            },
           );
-        },
-        onFinally: () async {
-          _bindProviderSession();
-        },
-      );
       if (!completedWithinTimeout &&
           _startupHostedAccessModeOverride == null &&
           _snapshot != null) {
-        _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
+        _startupHostedAccessModeOverride =
+            HostedRepositoryAccessMode.disconnected;
         if (!_disposed) {
           notifyListeners();
         }

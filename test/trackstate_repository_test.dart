@@ -1316,7 +1316,7 @@ Summary data stays available.
   );
 
   test(
-    'setup repository keeps startup blocked when issue summary index is rate limited',
+    'setup repository publishes startup recovery when issue summary index is rate limited',
     () async {
       final repository = _mockSetupRepository(
         files: {
@@ -1364,9 +1364,22 @@ updated: 2026-05-05T00:00:00Z
         },
       );
 
-      await expectLater(
-        repository.loadSnapshot,
-        throwsA(isA<GitHubRateLimitException>()),
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.startupRecovery, isNotNull);
+      expect(
+        snapshot.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(snapshot.issues, hasLength(1));
+      expect(snapshot.repositoryIndex.entries, hasLength(1));
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.settings),
+        TrackerLoadState.ready,
+      );
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.board),
+        isNot(TrackerLoadState.ready),
       );
     },
   );
