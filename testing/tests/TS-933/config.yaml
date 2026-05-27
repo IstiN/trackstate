@@ -1,0 +1,36 @@
+test_id: TS-933
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts933_semantics_failure_simulation.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts933-semantics-init-failure
+  commit_message: "TS-933 probe: verify descriptive semantics initialization failure log"
+  pull_request_title: "TS-933 disposable probe: verify descriptive semantics initialization failure log"
+  pull_request_body: "Disposable PR created by TS-933 automation to simulate a Flutter semantics exposure failure inside the live accessibility gate and verify that GitHub Actions logs a descriptive semantics error instead of a generic Playwright timeout."
+  expected_accessibility_markers:
+    - accessibility
+    - semantics
+    - flutter engine
+    - semantics tree
+  contrast_evidence_markers:
+    - page.waitForFunction
+  semantic_evidence_markers:
+    - semantics
+    - nodes
+    - tree
+    - render
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files so the live PR workflow simulates missing Flutter semantics nodes during gate initialization.
+  - Verifies the user-visible GitHub Actions error surface reports a descriptive semantics failure and not the generic Playwright page.waitForFunction timeout.

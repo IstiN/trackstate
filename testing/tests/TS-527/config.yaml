@@ -1,0 +1,8 @@
+test_id: TS-527
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production issue-detail Attachments tab with mixed legacy repository-path and github-releases attachment entries.
+  - Verifies hosted write-enabled users can still choose and upload a new unique file through the browser UI, and that the persisted attachment metadata keeps the new file on github-releases storage.
