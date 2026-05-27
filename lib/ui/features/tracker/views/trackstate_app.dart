@@ -8445,6 +8445,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                     order: NumericFocusOrder(addWorkspaceOrderBase),
                     child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeHosted,
+                      identifier: _workspaceSwitcherTargetTypeHostedFocusId,
                       child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeHosted,
                         onPressed: () => setState(
@@ -8472,6 +8473,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                     order: NumericFocusOrder(addWorkspaceOrderBase + 1),
                     child: _WorkspaceSwitcherExplicitControlSemantics(
                       label: l10n.workspaceTargetTypeLocal,
+                      identifier: _workspaceSwitcherTargetTypeLocalFocusId,
                       child: browser_focusable_control.BrowserFocusableControl(
                         label: l10n.workspaceTargetTypeLocal,
                         onPressed: () => setState(
@@ -8520,6 +8522,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                 child: _WorkspaceSwitcherExplicitControlSemantics(
                   label: l10n.workspaceSaveAndSwitch,
                   enabled: _canSaveWorkspace || _hasPendingWorkspaceSwitch,
+                  identifier: _workspaceSwitcherSaveFocusId,
                   child: browser_focusable_control.BrowserFocusableControl(
                     label: l10n.workspaceSaveAndSwitch,
                     onPressed: _canSaveWorkspace
@@ -8537,6 +8540,36 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           : _hasPendingWorkspaceSwitch
                           ? _saveAndSwitchSelectedWorkspace
                           : null,
+                      style: ButtonStyle(
+                        backgroundColor: WidgetStateProperty.resolveWith((
+                          states,
+                        ) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return colors.surfaceAlt;
+                          }
+                          return colors.primary;
+                        }),
+                        foregroundColor: WidgetStateProperty.resolveWith((
+                          states,
+                        ) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return colors.muted;
+                          }
+                          return Theme.of(context).colorScheme.onPrimary;
+                        }),
+                        side: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.disabled)) {
+                            return BorderSide(color: colors.border);
+                          }
+                          if (states.contains(WidgetState.focused)) {
+                            return BorderSide(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              width: 2,
+                            );
+                          }
+                          return BorderSide(color: colors.primary);
+                        }),
+                      ),
                       child: Text(l10n.workspaceSaveAndSwitch),
                     ),
                   ),
@@ -8595,11 +8628,13 @@ class _WorkspaceSwitcherExplicitControlSemantics extends StatelessWidget {
     required this.label,
     required this.child,
     this.enabled = true,
+    this.identifier,
   });
 
   final String label;
   final Widget child;
   final bool enabled;
+  final String? identifier;
 
   @override
   Widget build(BuildContext context) {
@@ -8609,6 +8644,7 @@ class _WorkspaceSwitcherExplicitControlSemantics extends StatelessWidget {
       label: label,
       button: true,
       enabled: enabled,
+      identifier: identifier,
       child: child,
     );
   }
@@ -8686,6 +8722,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         );
     final browserSummaryLabel =
         '${workspace.displayName}, $typeLabel, $stateLabel, $detailText';
+    final rowSemanticsIdentifier =
+        browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id);
     final summaryButton = SizedBox(
       width: double.infinity,
       child: CallbackShortcuts(
@@ -8757,8 +8795,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
         ? browser_focusable_control.BrowserFocusableControl(
             label: browserSummaryLabel,
             onPressed: browserSummaryActivatesSelection ? onSelect : null,
+            focusTargetId: rowSemanticsIdentifier,
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
-            rowId: browserWorkspaceSwitcherRowSemanticsIdentifier(workspace.id),
+            rowId: rowSemanticsIdentifier,
             selectedRow: isActive,
             tabIndex: isActive ? 0 : -1,
             child: summaryButton,
@@ -8770,9 +8809,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             focusable: isActive,
             focused: isActive,
             selected: isActive,
-            identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
-              workspace.id,
-            ),
+            identifier: rowSemanticsIdentifier,
             label:
                 '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
             child: ExcludeSemantics(child: summaryButton),
@@ -8962,46 +8999,23 @@ class _WorkspaceStateBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final lowerLabel = label.toLowerCase();
-    final Color backgroundColor;
-    final Color borderColor;
-    final Color textColor;
-    if (active) {
-      backgroundColor = colors.primary;
-      borderColor = colors.primary;
-      textColor = colors.page;
-    } else if (lowerLabel.contains('unavailable')) {
-      backgroundColor = colors.error.withValues(alpha: 0.12);
-      borderColor = colors.error.withValues(alpha: 0.45);
-      textColor = colors.text;
-    } else if (lowerLabel.contains('sign') ||
-        lowerLabel.contains('read-only') ||
-        lowerLabel.contains('attachment')) {
-      backgroundColor = colors.warning.withValues(alpha: 0.14);
-      borderColor = colors.warning.withValues(alpha: 0.45);
-      textColor = colors.text;
-    } else if (lowerLabel.contains('connected') ||
-        lowerLabel.contains('local git')) {
-      backgroundColor = colors.success.withValues(alpha: 0.14);
-      borderColor = colors.success.withValues(alpha: 0.45);
-      textColor = colors.text;
-    } else {
-      backgroundColor = colors.surfaceAlt;
-      borderColor = colors.border;
-      textColor = colors.muted;
-    }
+    final palette = _workspaceStateBadgePalette(
+      colors,
+      lowerLabel: label.toLowerCase(),
+      active: active,
+    );
     final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: palette.backgroundColor,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: palette.borderColor),
       ),
       child: Text(
         label,
         style: Theme.of(
           context,
-        ).textTheme.labelSmall?.copyWith(color: textColor),
+        ).textTheme.labelSmall?.copyWith(color: palette.textColor),
       ),
     );
     return MergeSemantics(
@@ -9013,6 +9027,65 @@ class _WorkspaceStateBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+_WorkspaceStateBadgePalette _workspaceStateBadgePalette(
+  TrackStateColors colors, {
+  required String lowerLabel,
+  required bool active,
+}) {
+  if (active) {
+    return _WorkspaceStateBadgePalette(
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+      textColor: colors.page,
+    );
+  }
+  if (lowerLabel.contains('unavailable')) {
+    return _workspaceStateBadgeTone(colors, baseColor: colors.error);
+  }
+  if (lowerLabel.contains('sign') ||
+      lowerLabel.contains('read-only') ||
+      lowerLabel.contains('attachment')) {
+    return _workspaceStateBadgeTone(colors, baseColor: colors.warning);
+  }
+  if (lowerLabel.contains('connected') || lowerLabel.contains('local git')) {
+    return _workspaceStateBadgeTone(colors, baseColor: colors.primary);
+  }
+  return _WorkspaceStateBadgePalette(
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    textColor: colors.muted,
+  );
+}
+
+_WorkspaceStateBadgePalette _workspaceStateBadgeTone(
+  TrackStateColors colors, {
+  required Color baseColor,
+}) {
+  return _WorkspaceStateBadgePalette(
+    backgroundColor: Color.alphaBlend(
+      baseColor.withValues(alpha: 0.16),
+      colors.surface,
+    ),
+    borderColor: Color.alphaBlend(
+      baseColor.withValues(alpha: 0.35),
+      colors.surface,
+    ),
+    textColor: Color.lerp(baseColor, colors.text, 0.25)!,
+  );
+}
+
+class _WorkspaceStateBadgePalette {
+  const _WorkspaceStateBadgePalette({
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.textColor,
+  });
+
+  final Color backgroundColor;
+  final Color borderColor;
+  final Color textColor;
 }
 
 class _WorkspaceSwitcherActionButton extends StatelessWidget {
@@ -9081,6 +9154,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
       explicitChildNodes: true,
       button: true,
       enabled: onPressed != null,
+      identifier: focusTargetId,
       label: semanticsLabel,
       child: ExcludeSemantics(
         child: browser_focusable_control.BrowserFocusableControl(
@@ -13678,7 +13752,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         ),
         side: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.focused)) {
-            return BorderSide(color: onPrimary, width: 2);
+            return BorderSide(color: onPrimary, width: 3);
           }
           return BorderSide(color: colors.primary);
         }),
@@ -13731,6 +13805,31 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       ),
       child: triggerButton,
     );
+    final visualButton = focusNode == null
+        ? constrainedButton
+        : AnimatedBuilder(
+            animation: focusNode!,
+            child: constrainedButton,
+            builder: (context, child) {
+              final focused = focusNode!.hasFocus;
+              return DecoratedBox(
+                key: const ValueKey('workspace-switcher-trigger-focus-ring'),
+                decoration: BoxDecoration(
+                  borderRadius: borderRadius,
+                  boxShadow: focused
+                      ? [
+                          BoxShadow(
+                            color: onPrimary.withValues(alpha: 0.88),
+                            spreadRadius: 2,
+                          ),
+                          BoxShadow(color: colors.primary, spreadRadius: 5),
+                        ]
+                      : const [],
+                ),
+                child: child,
+              );
+            },
+          );
     final controlsId = controlsNodes == null || controlsNodes!.isEmpty
         ? null
         : controlsNodes!.first;
@@ -13748,11 +13847,12 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           child: browser_focusable_control.BrowserFocusableControl(
             label: summary.semanticLabel,
             onPressed: onPressed,
+            focusNode: focusNode,
             focusTargetId: semanticsIdentifier,
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
             controlsId: controlsId,
             expanded: expanded,
-            child: constrainedButton,
+            child: visualButton,
           ),
         ),
       );
@@ -13768,7 +13868,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         sortKey: _semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
         onTap: enabled ? onPressed : null,
-        child: constrainedButton,
+        child: visualButton,
       ),
     );
   }
