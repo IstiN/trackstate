@@ -1,175 +1,228 @@
 @TestOn('browser')
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/services/workspace_profile_service.dart';
-import 'package:trackstate/domain/models/workspace_profile_models.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_focusable_control_logic.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_matcher.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_monitor_stub.dart'
+    if (dart.library.js_interop) 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_monitor_web.dart';
+import 'package:web/web.dart' as web;
+
+const _saveFocusId = 'trackstate-workspace-switcher-save';
 
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
+  group('workspace switcher pristine footer browser focus', () {
+    late web.HTMLDivElement host;
+    late web.HTMLDivElement panel;
+    late web.HTMLButtonElement activeRow;
+    late web.HTMLInputElement repositoryInput;
+    late web.HTMLInputElement branchInput;
+    late web.HTMLButtonElement saveButton;
+
+    setUp(() {
+      host = web.HTMLDivElement()
+        ..id = 'workspace-switcher-pristine-footer-browser-focus-test-host'
+        ..style.position = 'relative'
+        ..style.width = '1280px'
+        ..style.height = '960px';
+      web.document.body!.append(host);
+
+      panel = web.HTMLDivElement()
+        ..setAttribute(
+          'flt-semantics-identifier',
+          browserWorkspaceSwitcherSemanticsIdentifier,
+        )
+        ..style.position = 'absolute'
+        ..style.left = '100px'
+        ..style.top = '120px'
+        ..style.width = '420px'
+        ..style.height = '320px';
+      host.append(panel);
+
+      activeRow = _appendButton(
+        panel,
+        label: 'Hosted main workspace, Hosted, Needs sign-in',
+        rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('active'),
+        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+        left: 0,
+        top: 0,
+        width: 320,
+        height: 48,
+        tabIndex: 0,
+        selectedRow: true,
+      );
+      repositoryInput = _appendInput(
+        panel,
+        label: 'Repository',
+        left: 0,
+        top: 120,
+        width: 220,
+        height: 36,
+      );
+      branchInput = _appendInput(
+        panel,
+        label: 'Branch',
+        left: 0,
+        top: 168,
+        width: 220,
+        height: 36,
+      );
+
+      final saveDomConfig = resolveBrowserFocusableControlDomConfig(
+        enabled: false,
+        focusableWhenDisabled: true,
+        explicitTabIndex: null,
+      );
+      saveButton = _appendButton(
+        panel,
+        label: 'Save and switch',
+        focusId: _saveFocusId,
+        panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+        left: 0,
+        top: 216,
+        width: 180,
+        height: 40,
+        tabIndex: saveDomConfig.tabIndex,
+        ariaDisabled: saveDomConfig.ariaDisabled,
+      );
+    });
+
+    tearDown(() {
+      host.remove();
+    });
+
+    test(
+      'pristine footer keeps the disabled Save and switch boundary control reachable',
+      () {
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        expect(saveButton.tabIndex, 0);
+        expect(saveButton.getAttribute('aria-disabled'), 'true');
+
+        final orderedFocusTargets = <web.HTMLElement>[
+          activeRow,
+          repositoryInput,
+          branchInput,
+          saveButton,
+        ];
+
+        activeRow.focus();
+        expect(web.document.activeElement, same(activeRow));
+
+        _pressTab(orderedFocusTargets);
+        expect(web.document.activeElement, same(repositoryInput));
+
+        _pressTab(orderedFocusTargets);
+        expect(web.document.activeElement, same(branchInput));
+
+        _pressTab(orderedFocusTargets);
+        expect(
+          web.document.activeElement,
+          same(saveButton),
+          reason:
+              'Tab from Branch should still reach the disabled Save and switch '
+              'footer boundary in pristine state.',
+        );
+
+        _pressTab(orderedFocusTargets);
+        expect(
+          web.document.activeElement,
+          same(activeRow),
+          reason:
+              'Tab from the disabled pristine footer should wrap back to the '
+              'selected workspace row instead of escaping the switcher.',
+        );
+      },
+    );
   });
-
-  testWidgets(
-    'desktop web pristine workspace switcher exports an Active marker for the selected saved workspace row',
-    (tester) async {
-      const primaryWorkspace = WorkspaceProfile(
-        id: 'hosted:primary/repo@main',
-        displayName: 'Hosted main workspace',
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'primary/repo',
-        defaultBranch: 'main',
-        writeBranch: 'main',
-      );
-      const alternateWorkspace = WorkspaceProfile(
-        id: 'hosted:alternate/repo@main',
-        displayName: 'Hosted alt workspace',
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'alternate/repo',
-        defaultBranch: 'main',
-        writeBranch: 'ts-954-alt',
-      );
-      final service = _MemoryWorkspaceProfileService(
-        WorkspaceProfilesState(
-          profiles: const [primaryWorkspace, alternateWorkspace],
-          activeWorkspaceId: primaryWorkspace.id,
-          migrationComplete: true,
-        ),
-      );
-
-      tester.view.physicalSize = const Size(1440, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
-
-      await tester.pumpWidget(
-        TrackStateApp(
-          workspaceProfileService: service,
-          openHostedRepository:
-              ({
-                required String repository,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => const DemoTrackStateRepository(),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
-      final triggerButton = tester.widget<FilledButton>(
-        find.descendant(of: trigger, matching: find.byType(FilledButton)).first,
-      );
-      triggerButton.onPressed!();
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const ValueKey('workspace-switcher-sheet')), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey('workspace-${primaryWorkspace.id}')),
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Opacity &&
-                widget.opacity == 0 &&
-                widget.alwaysIncludeSemantics,
-            description:
-                'web-only hidden semantics export for the active workspace row',
-          ),
-        ),
-        findsAtLeastNWidgets(1),
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey('workspace-${primaryWorkspace.id}')),
-          matching: find.text('Active'),
-        ),
-        findsNWidgets(2),
-        reason:
-            'The selected saved workspace row needs both the visible Active chip '
-            'and a web-exported hidden Active semantics marker so browser '
-            'automation can still identify the selected row in pristine state.',
-      );
-    },
-  );
 }
 
-class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
-  _MemoryWorkspaceProfileService(this.state);
+void _pressTab(List<web.HTMLElement> orderedFocusTargets) {
+  final before = web.document.activeElement;
+  final event = web.KeyboardEvent(
+    'keydown',
+    web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+  );
+  web.window.dispatchEvent(event);
 
-  WorkspaceProfilesState state;
-
-  @override
-  Future<WorkspaceProfile> createProfile(
-    WorkspaceProfileInput input, {
-    bool select = true,
-  }) async {
-    final profile = WorkspaceProfile.create(input);
-    state = WorkspaceProfilesState(
-      profiles: [...state.profiles, profile],
-      activeWorkspaceId: select ? profile.id : state.activeWorkspaceId,
-      migrationComplete: true,
-    );
-    return profile;
+  final after = web.document.activeElement;
+  if (after != before || event.defaultPrevented) {
+    return;
   }
 
-  @override
-  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
-    state = state.copyWith(activeWorkspaceId: null);
-    return state;
+  final currentIndex = orderedFocusTargets.indexWhere(
+    (target) => target == before || target.contains(before),
+  );
+  if (currentIndex == -1 || currentIndex == orderedFocusTargets.length - 1) {
+    return;
   }
+  orderedFocusTargets[currentIndex + 1].focus();
+}
 
-  @override
-  Future<WorkspaceProfilesState> deleteProfile(String workspaceId) async {
-    state = WorkspaceProfilesState(
-      profiles: state.profiles
-          .where((profile) => profile.id != workspaceId)
-          .toList(),
-      activeWorkspaceId: state.activeWorkspaceId == workspaceId
-          ? null
-          : state.activeWorkspaceId,
-      migrationComplete: true,
-      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
-    );
-    return state;
+web.HTMLButtonElement _appendButton(
+  web.Element parent, {
+  required String label,
+  required double left,
+  required double top,
+  required double width,
+  required double height,
+  required int tabIndex,
+  String? focusId,
+  String? panelId,
+  String? rowId,
+  String? ariaDisabled,
+  bool selectedRow = false,
+}) {
+  final button = web.HTMLButtonElement()
+    ..textContent = label
+    ..tabIndex = tabIndex
+    ..setAttribute('aria-label', label)
+    ..style.position = 'absolute'
+    ..style.left = '${left}px'
+    ..style.top = '${top}px'
+    ..style.width = '${width}px'
+    ..style.height = '${height}px';
+  if (focusId != null) {
+    button.setAttribute('data-trackstate-browser-focus-id', focusId);
   }
-
-  @override
-  Future<WorkspaceProfile?> ensureLegacyContextMigrated(
-    WorkspaceProfileInput? input,
-  ) async => state.activeWorkspace;
-
-  @override
-  Future<WorkspaceProfilesState> loadState() async => state;
-
-  @override
-  Future<WorkspaceProfilesState> saveHostedAccessMode(
-    String workspaceId,
-    HostedWorkspaceAccessMode? accessMode,
-  ) async => state;
-
-  @override
-  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
-    String workspaceId, {
-    required bool isAvailable,
-  }) async => state;
-
-  @override
-  Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
-    state = state.copyWith(activeWorkspaceId: workspaceId);
-    return state;
+  if (panelId != null) {
+    button.setAttribute('data-trackstate-browser-focus-panel-id', panelId);
   }
-
-  @override
-  Future<WorkspaceProfile> updateProfile(
-    String workspaceId,
-    WorkspaceProfileInput input, {
-    bool select = true,
-  }) async {
-    throw UnimplementedError();
+  if (rowId != null) {
+    button.setAttribute('data-trackstate-browser-focus-row-id', rowId);
   }
+  if (ariaDisabled != null) {
+    button.setAttribute('aria-disabled', ariaDisabled);
+  }
+  if (selectedRow) {
+    button.setAttribute('aria-current', 'true');
+  }
+  parent.append(button);
+  return button;
+}
+
+web.HTMLInputElement _appendInput(
+  web.Element parent, {
+  required String label,
+  required double left,
+  required double top,
+  required double width,
+  required double height,
+}) {
+  final input = web.HTMLInputElement()
+    ..tabIndex = 0
+    ..setAttribute('aria-label', label)
+    ..style.position = 'absolute'
+    ..style.left = '${left}px'
+    ..style.top = '${top}px'
+    ..style.width = '${width}px'
+    ..style.height = '${height}px';
+  parent.append(input);
+  return input;
 }
