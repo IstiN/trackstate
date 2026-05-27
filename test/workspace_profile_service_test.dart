@@ -108,6 +108,115 @@ void main() {
   );
 
   test(
+    'saveHostedAccessMode persists the last verified hosted access mode per workspace',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final nextState = await service.saveHostedAccessMode(
+        'hosted:trackstate/trackstate@main',
+        HostedWorkspaceAccessMode.readOnly,
+      );
+
+      expect(
+        nextState.profiles.single.hostedAccessMode,
+        HostedWorkspaceAccessMode.readOnly,
+      );
+      expect(
+        (await service.loadState()).profiles.single.hostedAccessMode,
+        HostedWorkspaceAccessMode.readOnly,
+      );
+    },
+  );
+
+  test(
+    'saveLocalWorkspaceAvailability persists the unavailable local workspace guard until it is explicitly cleared',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final unavailableState = await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: false,
+      );
+      expect(
+        unavailableState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+      expect(
+        (await service.loadState()).unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+
+      final availableState = await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: true,
+      );
+      expect(
+        availableState.unavailableLocalWorkspaceIds,
+        isNot(contains('local:/tmp/trackstate@main')),
+      );
+      expect(
+        (await service.loadState()).unavailableLocalWorkspaceIds,
+        isNot(contains('local:/tmp/trackstate@main')),
+      );
+    },
+  );
+
+  test(
+    'clearActiveWorkspaceSelection removes the persisted active workspace without dropping saved availability state',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+      await service.saveLocalWorkspaceAvailability(
+        'local:/tmp/trackstate@main',
+        isAvailable: false,
+      );
+
+      final clearedState = await service.clearActiveWorkspaceSelection();
+
+      expect(clearedState.activeWorkspaceId, isNull);
+      expect(
+        clearedState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+      final persistedState = await service.loadState();
+      expect(persistedState.activeWorkspaceId, isNull);
+      expect(
+        persistedState.unavailableLocalWorkspaceIds,
+        contains('local:/tmp/trackstate@main'),
+      );
+    },
+  );
+
+  test(
     'deleteProfile clears scoped credentials and falls back to the most recently opened workspace',
     () async {
       final authStore = _MemoryAuthStore()

@@ -7,5 +7,6 @@ dependencies:
   - git CLI available on PATH
 notes:
   - Reuses the disposable Local Git CLI mutation harness used by the existing ticket-link regressions.
+  - Compiles the CLI from `origin/main` so the regression runs against the merged live implementation even when the automation branch itself predates the product fix.
   - Creates Issue A, then runs `trackstate ticket link --key TS-1 --target-key TS-1 --type "relates to"` against the live CLI implementation.
   - Verifies the CLI rejects self-referencing links with a validation error and does not persist `links.json` metadata for the issue.

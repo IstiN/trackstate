@@ -1,10 +1,18 @@
 enum WorkspaceProfileTargetType { hosted, local }
 
+enum HostedWorkspaceAccessMode {
+  disconnected,
+  readOnly,
+  writable,
+  attachmentRestricted,
+}
+
 class WorkspaceProfileInput {
   const WorkspaceProfileInput({
     required this.targetType,
     required this.target,
     required this.defaultBranch,
+    this.displayName,
     String? writeBranch,
   }) : writeBranch = writeBranch ?? defaultBranch;
 
@@ -12,6 +20,7 @@ class WorkspaceProfileInput {
   final String target;
   final String defaultBranch;
   final String writeBranch;
+  final String? displayName;
 
   bool get isValid =>
       _normalizeTarget(targetType, target).isNotEmpty &&
@@ -27,7 +36,9 @@ class WorkspaceProfile {
     required this.target,
     required this.defaultBranch,
     required this.writeBranch,
+    this.customDisplayName,
     this.lastOpenedAt,
+    this.hostedAccessMode,
   });
 
   final String id;
@@ -36,7 +47,9 @@ class WorkspaceProfile {
   final String target;
   final String defaultBranch;
   final String writeBranch;
+  final String? customDisplayName;
   final DateTime? lastOpenedAt;
+  final HostedWorkspaceAccessMode? hostedAccessMode;
 
   bool get isHosted => targetType == WorkspaceProfileTargetType.hosted;
   bool get isLocal => targetType == WorkspaceProfileTargetType.local;
@@ -44,11 +57,21 @@ class WorkspaceProfile {
   String get normalizedTarget => _normalizeTarget(targetType, target);
   String get normalizedDefaultBranch => _normalizeBranch(defaultBranch);
   String get normalizedWriteBranch => _normalizeBranch(writeBranch);
+  String? get normalizedCustomDisplayName =>
+      _normalizeDisplayName(customDisplayName);
 
-  String get baseDisplayName => switch (targetType) {
-    WorkspaceProfileTargetType.hosted => normalizedTarget,
-    WorkspaceProfileTargetType.local => _localBaseDisplayName(normalizedTarget),
-  };
+  String get baseDisplayName {
+    final customName = normalizedCustomDisplayName;
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
+    }
+    return switch (targetType) {
+      WorkspaceProfileTargetType.hosted => normalizedTarget,
+      WorkspaceProfileTargetType.local => _localBaseDisplayName(
+        normalizedTarget,
+      ),
+    };
+  }
 
   WorkspaceProfile copyWith({
     String? id,
@@ -57,7 +80,9 @@ class WorkspaceProfile {
     String? target,
     String? defaultBranch,
     String? writeBranch,
+    Object? customDisplayName = _workspaceProfileNoop,
     Object? lastOpenedAt = _workspaceProfileNoop,
+    Object? hostedAccessMode = _workspaceProfileNoop,
   }) {
     return WorkspaceProfile(
       id: id ?? this.id,
@@ -66,9 +91,15 @@ class WorkspaceProfile {
       target: target ?? this.target,
       defaultBranch: defaultBranch ?? this.defaultBranch,
       writeBranch: writeBranch ?? this.writeBranch,
+      customDisplayName: identical(customDisplayName, _workspaceProfileNoop)
+          ? this.customDisplayName
+          : customDisplayName as String?,
       lastOpenedAt: identical(lastOpenedAt, _workspaceProfileNoop)
           ? this.lastOpenedAt
           : lastOpenedAt as DateTime?,
+      hostedAccessMode: identical(hostedAccessMode, _workspaceProfileNoop)
+          ? this.hostedAccessMode
+          : hostedAccessMode as HostedWorkspaceAccessMode?,
     );
   }
 
@@ -80,7 +111,9 @@ class WorkspaceProfile {
       'target': target,
       'defaultBranch': defaultBranch,
       'writeBranch': writeBranch,
+      'customDisplayName': customDisplayName,
       'lastOpenedAt': lastOpenedAt?.toUtc().toIso8601String(),
+      'hostedAccessMode': hostedAccessMode?.name,
     };
   }
 
@@ -89,6 +122,10 @@ class WorkspaceProfile {
     final targetType = WorkspaceProfileTargetType.values.firstWhere(
       (candidate) => candidate.name == targetTypeName,
       orElse: () => WorkspaceProfileTargetType.hosted,
+    );
+    final hostedAccessModeName = json['hostedAccessMode']?.toString().trim();
+    final hostedAccessMode = HostedWorkspaceAccessMode.values.where(
+      (candidate) => candidate.name == hostedAccessModeName,
     );
     final lastOpenedAtValue = json['lastOpenedAt']?.toString().trim();
     return WorkspaceProfile(
@@ -101,9 +138,17 @@ class WorkspaceProfile {
           json['writeBranch']?.toString() ??
           json['defaultBranch']?.toString() ??
           '',
+      customDisplayName: _normalizeDisplayName(
+        json['customDisplayName']?.toString(),
+      ),
       lastOpenedAt: lastOpenedAtValue == null || lastOpenedAtValue.isEmpty
           ? null
           : DateTime.tryParse(lastOpenedAtValue)?.toUtc(),
+      hostedAccessMode:
+          targetType == WorkspaceProfileTargetType.hosted &&
+              hostedAccessMode.isNotEmpty
+          ? hostedAccessMode.first
+          : null,
     );
   }
 
@@ -126,7 +171,9 @@ class WorkspaceProfile {
       target: normalizedTarget,
       defaultBranch: normalizedDefaultBranch,
       writeBranch: normalizedWriteBranch,
+      customDisplayName: _normalizeDisplayName(input.displayName),
       lastOpenedAt: lastOpenedAt?.toUtc(),
+      hostedAccessMode: null,
     );
   }
 }
@@ -136,25 +183,31 @@ class WorkspaceProfilesState {
     this.profiles = const <WorkspaceProfile>[],
     this.activeWorkspaceId,
     this.migrationComplete = false,
+    this.unavailableLocalWorkspaceIds = const <String>{},
   });
 
   final List<WorkspaceProfile> profiles;
   final String? activeWorkspaceId;
   final bool migrationComplete;
+  final Set<String> unavailableLocalWorkspaceIds;
 
   bool get hasProfiles => profiles.isNotEmpty;
 
-  WorkspaceProfile? get activeWorkspace {
+  WorkspaceProfile? get selectedWorkspace {
     final activeWorkspaceId = this.activeWorkspaceId;
     if (activeWorkspaceId == null || activeWorkspaceId.isEmpty) {
-      return mostRecentlyOpenedWorkspace;
+      return null;
     }
     for (final profile in profiles) {
       if (profile.id == activeWorkspaceId) {
         return profile;
       }
     }
-    return mostRecentlyOpenedWorkspace;
+    return null;
+  }
+
+  WorkspaceProfile? get activeWorkspace {
+    return selectedWorkspace ?? mostRecentlyOpenedWorkspace;
   }
 
   WorkspaceProfile? get mostRecentlyOpenedWorkspace {
@@ -170,6 +223,7 @@ class WorkspaceProfilesState {
     List<WorkspaceProfile>? profiles,
     Object? activeWorkspaceId = _workspaceProfileNoop,
     bool? migrationComplete,
+    Set<String>? unavailableLocalWorkspaceIds,
   }) {
     return WorkspaceProfilesState(
       profiles: profiles ?? this.profiles,
@@ -177,6 +231,8 @@ class WorkspaceProfilesState {
           ? this.activeWorkspaceId
           : activeWorkspaceId as String?,
       migrationComplete: migrationComplete ?? this.migrationComplete,
+      unavailableLocalWorkspaceIds:
+          unavailableLocalWorkspaceIds ?? this.unavailableLocalWorkspaceIds,
     );
   }
 }
@@ -290,6 +346,14 @@ String _normalizeTarget(WorkspaceProfileTargetType targetType, String target) {
 }
 
 String _normalizeBranch(String branch) => branch.trim();
+
+String? _normalizeDisplayName(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) {
+    return null;
+  }
+  return trimmed;
+}
 
 String _normalizeLocalPath(String path) {
   var normalized = path.replaceAll('\\', '/').trim();

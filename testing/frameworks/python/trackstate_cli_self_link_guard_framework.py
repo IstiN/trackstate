@@ -36,58 +36,64 @@ class PythonTrackStateCliSelfLinkGuardFramework(
         config: TrackStateCliSelfLinkGuardConfig,
     ) -> TrackStateCliSelfLinkGuardValidationResult:
         test_prefix = config.test_id.lower()
-        with tempfile.TemporaryDirectory(
-            prefix=f"trackstate-{test_prefix}-bin-"
-        ) as bin_dir:
-            executable_path = Path(bin_dir) / "trackstate"
-            self._compile_executable(executable_path)
+        with self._materialize_source_tree(config.compiled_source_ref) as source_root:
             with tempfile.TemporaryDirectory(
-                prefix=f"trackstate-{test_prefix}-repo-"
-            ) as temp_dir:
-                repository_path = Path(temp_dir)
-                self._seed_local_repository(repository_path, config=config)
-                fallback_reason = (
-                    "Pinned execution to a temporary executable compiled from this "
-                    f"checkout so {config.test_id} exercises the live local CLI against "
-                    "a seeded disposable repository."
-                )
-                issue_a_create_observation = self._observe_command(
-                    requested_command=config.issue_a_create_command(str(repository_path)),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                self_link_observation = self._observe_command(
-                    requested_command=config.self_link_command(str(repository_path)),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-
-                discovered_snapshots = tuple(
-                    TrackStateCliSelfLinkLinksJsonSnapshot(
-                        relative_path=str(path.relative_to(repository_path)),
-                        content=self._read_text_if_exists(path),
-                        payload=self._read_json_if_exists(path),
+                prefix=f"trackstate-{test_prefix}-bin-"
+            ) as bin_dir:
+                executable_path = Path(bin_dir) / "trackstate"
+                self._compile_executable(executable_path, source_root=source_root)
+                with tempfile.TemporaryDirectory(
+                    prefix=f"trackstate-{test_prefix}-repo-"
+                ) as temp_dir:
+                    repository_path = Path(temp_dir)
+                    self._seed_local_repository(repository_path, config=config)
+                    fallback_reason = (
+                        "Pinned execution to a temporary executable compiled from the "
+                        f"configured source ref ({config.compiled_source_ref}) so "
+                        f"{config.test_id} exercises the live local CLI against a seeded "
+                        "disposable repository."
                     )
-                    for path in sorted(repository_path.rglob("links.json"))
-                )
-                links_json_path = repository_path / config.links_json_relative_path
-
-                return TrackStateCliSelfLinkGuardValidationResult(
-                    observation=TrackStateCliSelfLinkGuardObservation(
-                        issue_a_create_observation=issue_a_create_observation,
-                        self_link_observation=self_link_observation,
-                        links_json_relative_path=config.links_json_relative_path,
-                        links_json_content=self._read_text_if_exists(links_json_path),
-                        links_json_payload=self._read_json_if_exists(links_json_path),
-                        discovered_links_json_files=tuple(
-                            snapshot.relative_path
-                            for snapshot in discovered_snapshots
+                    issue_a_create_observation = self._observe_command(
+                        requested_command=config.issue_a_create_command(
+                            str(repository_path)
                         ),
-                        discovered_links_json_snapshots=discovered_snapshots,
+                        repository_path=repository_path,
+                        executable_path=executable_path,
+                        fallback_reason=fallback_reason,
                     )
-                )
+                    self_link_observation = self._observe_command(
+                        requested_command=config.self_link_command(str(repository_path)),
+                        repository_path=repository_path,
+                        executable_path=executable_path,
+                        fallback_reason=fallback_reason,
+                    )
+
+                    discovered_snapshots = tuple(
+                        TrackStateCliSelfLinkLinksJsonSnapshot(
+                            relative_path=str(path.relative_to(repository_path)),
+                            content=self._read_text_if_exists(path),
+                            payload=self._read_json_if_exists(path),
+                        )
+                        for path in sorted(repository_path.rglob("links.json"))
+                    )
+                    links_json_path = repository_path / config.links_json_relative_path
+
+                    return TrackStateCliSelfLinkGuardValidationResult(
+                        observation=TrackStateCliSelfLinkGuardObservation(
+                            issue_a_create_observation=issue_a_create_observation,
+                            self_link_observation=self_link_observation,
+                            links_json_relative_path=config.links_json_relative_path,
+                            links_json_content=self._read_text_if_exists(
+                                links_json_path
+                            ),
+                            links_json_payload=self._read_json_if_exists(links_json_path),
+                            discovered_links_json_files=tuple(
+                                snapshot.relative_path
+                                for snapshot in discovered_snapshots
+                            ),
+                            discovered_links_json_snapshots=discovered_snapshots,
+                        )
+                    )
 
     def _observe_command(
         self,

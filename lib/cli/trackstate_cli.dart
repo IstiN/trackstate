@@ -11,6 +11,7 @@ import '../data/providers/local/local_git_trackstate_provider.dart';
 import '../data/providers/trackstate_provider.dart';
 import '../data/repositories/trackstate_repository.dart';
 import '../data/services/jql_search_service.dart';
+import '../data/services/issue_link_validation_service.dart';
 import '../data/services/issue_mutation_service.dart';
 import '../data/repositories/trackstate_runtime.dart';
 import '../domain/models/issue_mutation_models.dart';
@@ -57,71 +58,89 @@ class TrackStateCli {
         );
       }
 
-      final normalizedArguments = _normalizeCommandArguments(arguments);
+      final normalizedArguments = _normalizeCommandArguments(
+        _normalizeRootCommandArguments(arguments),
+      );
       return switch (normalizedArguments.first) {
-        'session' => await _runSession(arguments.skip(1).toList()),
+        'session' => await _runSession(normalizedArguments.skip(1).toList()),
         'search' => await _runSearch(normalizedArguments.skip(1).toList()),
         'read' => await _runRead(normalizedArguments.skip(1).toList()),
+        'create' => await _runCreate(normalizedArguments.skip(1).toList()),
         'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
-        'attachment' => await _runAttachment(arguments.skip(1).toList()),
+        'archive' => await _runTicketArchive(
+          normalizedArguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
+        ),
+        'attachment' => await _runAttachment(normalizedArguments.skip(1).toList()),
         'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_create_ticket_with_json' => await _runJiraCreateTicketWithJson(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_create_ticket_with_parent' =>
-          await _runJiraCreateTicketWithParent(arguments.skip(1).toList()),
+          await _runJiraCreateTicketWithParent(
+            normalizedArguments.skip(1).toList(),
+          ),
         'jira_update_ticket' => await _runJiraUpdateTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_description' => await _runJiraUpdateDescription(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_field' => await _runJiraUpdateField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_all_fields_with_name' => await _runJiraUpdateField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_clear_field' => await _runJiraClearField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_ticket_parent' => await _runJiraUpdateTicketParent(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_move_to_status' => await _runJiraMoveToStatus(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_move_to_status_with_resolution' =>
-          await _runJiraMoveToStatusWithResolution(arguments.skip(1).toList()),
+          await _runJiraMoveToStatusWithResolution(
+            normalizedArguments.skip(1).toList(),
+          ),
         'jira_set_priority' => await _runJiraSetPriority(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_assign_ticket_to' => await _runJiraAssignTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
-        'jira_add_label' => await _runJiraAddLabel(arguments.skip(1).toList()),
+        'jira_add_label' => await _runJiraAddLabel(
+          normalizedArguments.skip(1).toList(),
+        ),
         'jira_remove_label' => await _runJiraRemoveLabel(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_post_comment' => await _runJiraPostComment(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
         ),
         'jira_attach_file_to_ticket' => await _runAttachmentUpload(
-          _normalizeAttachmentUploadArguments(arguments.skip(1).toList()),
+          _normalizeAttachmentUploadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
         ),
         'jira_download_attachment' => await _runAttachmentDownload(
-          _normalizeAttachmentDownloadArguments(arguments.skip(1).toList()),
+          _normalizeAttachmentDownloadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
         ),
         'jira_execute_request' => await _runExecuteRequest(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         _ => _error(
           _TrackStateCliException(
@@ -163,7 +182,35 @@ class TrackStateCli {
     }
   }
 
+  List<String> _normalizeRootCommandArguments(List<String> arguments) {
+    if (arguments.isEmpty || _isHelpInvocation(arguments)) {
+      return arguments;
+    }
+
+    final firstArgument = arguments.first;
+    if (!firstArgument.startsWith('-')) {
+      return arguments;
+    }
+
+    final firstOption = firstArgument.split('=').first;
+    if (!_rootSessionOptionNames.contains(firstOption)) {
+      return arguments;
+    }
+
+    return <String>['session', ...arguments];
+  }
+
   List<String> _normalizeCommandArguments(List<String> arguments) {
+    if (arguments.isEmpty) {
+      return arguments;
+    }
+    final rewrittenCommand = switch (arguments.first.toLowerCase()) {
+      'jiraattachfiletoticket' => 'jira_attach_file_to_ticket',
+      _ => null,
+    };
+    if (rewrittenCommand != null) {
+      return [rewrittenCommand, ...arguments.skip(1)];
+    }
     if (arguments.length < 2) {
       return arguments;
     }
@@ -178,7 +225,10 @@ class TrackStateCli {
       'versions list' => 'versions',
       'profile get' => 'profile',
       'user get' => 'user',
-      'link-types list' || 'link-type list' => 'link-types',
+      'link-types list' ||
+      'link-type list' ||
+      'issue-link-types list' ||
+      'issue-link-type list' => 'link-types',
       'account-by-email get' => 'account-by-email',
       _ => null,
     };
@@ -187,6 +237,16 @@ class TrackStateCli {
     }
     return ['read', rewrittenResource, ...arguments.skip(2)];
   }
+
+  static const Set<String> _rootSessionOptionNames = <String>{
+    '--target',
+    '--provider',
+    '--repository',
+    '--path',
+    '--branch',
+    '--token',
+    '--output',
+  };
 
   Future<TrackStateCliExecution> _runSession(List<String> arguments) async {
     final parser = ArgParser(allowTrailingOptions: false)
@@ -490,6 +550,24 @@ class TrackStateCli {
       results,
       defaultTargetType: TrackStateCliTargetType.local,
     );
+    if (resource == 'account-by-email') {
+      return _error(
+        _TrackStateCliException(
+          code: 'UNSUPPORTED_ACCOUNT_BY_EMAIL',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: 'Reading accounts by email is currently unsupported.',
+          exitCode: 5,
+          details: <String, Object?>{
+            'resource': resource,
+            if (results.rest.isNotEmpty) 'arguments': results.rest,
+          },
+        ),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
 
     try {
       return await switch (target.type) {
@@ -600,6 +678,14 @@ class TrackStateCli {
       );
     }
 
+    _validateSingleOptionOccurrence(
+      arguments,
+      option: 'file',
+      code: 'INVALID_ATTACHMENT',
+      message:
+          'Only one file may be provided per invocation; duplicate "--file" options are not allowed.',
+    );
+
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
@@ -637,11 +723,9 @@ class TrackStateCli {
       );
     }
     final bytes = await sourceFile.readAsBytes();
+    final sourceName = _fileNameFromPath(resolvedFilePath);
     final attachmentName =
-        results['name']?.toString().trim().ifEmpty(
-          _fileNameFromPath(resolvedFilePath),
-        ) ??
-        _fileNameFromPath(resolvedFilePath);
+        results['name']?.toString().trim().ifEmpty(sourceName) ?? sourceName;
 
     try {
       return await switch (target.type) {
@@ -650,6 +734,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
         TrackStateCliTargetType.hosted => _runHostedAttachmentUpload(
@@ -657,6 +742,7 @@ class TrackStateCli {
           output,
           issueKey: issueKey,
           attachmentName: attachmentName,
+          sourceName: sourceName,
           bytes: bytes,
         ),
       };
@@ -847,18 +933,14 @@ class TrackStateCli {
           const <String>[],
     );
     final body = _parseJsonBody(results['body']?.toString());
-    final normalizedRequestPath = requestPath.trim().toLowerCase();
-    if (normalizedRequestPath.contains('/attachment/')) {
-      throw _mapCompatibilityError(
-        const JiraCompatibilityRequestException(
-          code: 'UNSUPPORTED_REQUEST',
-          message:
-              'Attachment and binary Jira paths are not supported through jira_execute_request. Use the dedicated attachment commands instead.',
-        ),
-      );
-    }
 
     try {
+      _jiraCompatibilityService.validate(
+        method: method,
+        path: requestPath,
+        query: query,
+        body: body,
+      );
       return await switch (target.type) {
         TrackStateCliTargetType.local => _runLocalExecuteRequest(
           target,
@@ -875,6 +957,14 @@ class TrackStateCli {
           body: body,
         ),
       };
+    } on JiraCompatibilityRequestException catch (error) {
+      return _error(
+        _mapCompatibilityError(error),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: TrackStateCliOutput.json,
+      );
     } on _TrackStateCliException catch (error) {
       return _error(
         error,
@@ -923,6 +1013,13 @@ class TrackStateCli {
       ),
     };
   }
+
+  Future<TrackStateCliExecution> _runCreate(List<String> arguments) =>
+      _runTicketCreate(
+        _normalizeLegacyJiraArguments(arguments, const {
+          '--issueType': '--issue-type',
+        }),
+      );
 
   Future<TrackStateCliExecution> _runTicketShow(List<String> arguments) async {
     final parser = _mutationParser()
@@ -1463,8 +1560,9 @@ class TrackStateCli {
   }
 
   Future<TrackStateCliExecution> _runTicketArchive(
-    List<String> arguments,
-  ) async {
+    List<String> arguments, {
+    TrackStateCliTargetType? defaultTargetType,
+  }) async {
     final parser = _mutationParser()
       ..addOption('key', help: 'Issue key to archive.');
     return _runMutationCommand(
@@ -1472,8 +1570,14 @@ class TrackStateCli {
       parser: parser,
       helpText: _ticketArchiveHelpText(parser),
       commandName: 'ticket-archive',
+      defaultTargetType: defaultTargetType,
       execute: (context, results) async {
-        final issueKey = _requiredTrimmedOption(results, 'key');
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['key'],
+          results.rest,
+          0,
+        );
         final result = await context.service.archiveIssue(issueKey);
         final issue = _requireMutationSuccess(result);
         return <String, Object?>{
@@ -2205,8 +2309,9 @@ class TrackStateCli {
   }
 
   Future<TrackStateCliExecution> _runJiraDeleteTicket(
-    List<String> arguments,
-  ) async {
+    List<String> arguments, {
+    TrackStateCliTargetType? defaultTargetType,
+  }) async {
     final parser = _mutationParser()
       ..addOption('issueKey', help: 'Issue key to delete permanently.');
     return _runMutationCommand(
@@ -2216,10 +2321,14 @@ class TrackStateCli {
       parser: parser,
       helpText: _jiraDeleteTicketHelpText(parser),
       commandName: 'jira-delete-ticket',
+      defaultTargetType: defaultTargetType,
       execute: (context, results) async {
-        final issueKey = _firstRequiredTrimmedOption(results, const [
-          'issueKey',
-        ]);
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['issueKey'],
+          results.rest,
+          0,
+        );
         final result = await context.service.deleteIssue(issueKey);
         final tombstone = _requireMutationSuccess(result);
         return <String, Object?>{
@@ -2271,6 +2380,7 @@ class TrackStateCli {
     required ArgParser parser,
     required String helpText,
     required String commandName,
+    TrackStateCliTargetType? defaultTargetType,
     required Future<Map<String, Object?>> Function(
       _PreparedMutationContext context,
       ArgResults results,
@@ -2300,7 +2410,10 @@ class TrackStateCli {
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
-    final target = await _resolveTarget(results);
+    final target = await _resolveTarget(
+      results,
+      defaultTargetType: defaultTargetType,
+    );
 
     try {
       final context = await _prepareMutationContext(target);
@@ -2407,7 +2520,10 @@ class TrackStateCli {
     'versions' => 'versions',
     'profile' => 'profile',
     'user' => 'user',
-    'link-types' || 'link-type' => 'link-types',
+    'link-types' ||
+    'link-type' ||
+    'issue-link-types' ||
+    'issue-link-type' => 'link-types',
     'account-by-email' => 'account-by-email',
     _ => null,
   };
@@ -2700,7 +2816,12 @@ class TrackStateCli {
     switch (resource) {
       case 'ticket':
         final snapshot = await repository.loadSnapshot();
-        final key = _requiredTrimmedOption(results, 'key');
+        final key = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['key'],
+          results.rest,
+          0,
+        );
         final locale = _optionalLocale(results);
         TrackStateIssue? issue;
         for (final item in snapshot.issues) {
@@ -2875,9 +2996,9 @@ class TrackStateCli {
         return _ReadResponse(
           text: _listText(
             title: 'Link types',
-            values: _jiraLinkTypes.map((entry) => entry['name']! as String),
+            values: jiraIssueLinkTypes.map((entry) => entry['name']! as String),
           ),
-          jsonPayload: _jiraLinkTypes,
+          jsonPayload: jiraIssueLinkTypes,
         );
       case 'profile':
         final user = currentUser!;
@@ -3314,6 +3435,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final branch = await _resolveLocalBranch(target);
@@ -3350,6 +3472,7 @@ class TrackStateCli {
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3378,6 +3501,7 @@ class TrackStateCli {
     TrackStateCliOutput output, {
     required String issueKey,
     required String attachmentName,
+    required String sourceName,
     required List<int> bytes,
   }) async {
     final credential = await _resolveHostedCredential(target);
@@ -3400,10 +3524,19 @@ class TrackStateCli {
       );
       final snapshot = await repository.loadSnapshot();
       final issue = _findIssue(snapshot, issueKey);
+      await _ensureHostedAttachmentUploadSupported(
+        target: target,
+        branch: branch,
+        credential: credential,
+        repository: repository,
+        issue: issue,
+        attachmentName: attachmentName,
+      );
       final updatedIssue = await repository.uploadIssueAttachment(
         issue: issue,
         name: attachmentName,
         bytes: Uint8List.fromList(bytes),
+        sourceName: sourceName,
       );
       final attachment = _findAttachmentByName(updatedIssue, attachmentName);
       return _success(
@@ -3425,6 +3558,73 @@ class TrackStateCli {
         action: 'Attachment upload failed for "${target.value}".',
       );
     }
+  }
+
+  Future<void> _ensureHostedAttachmentUploadSupported({
+    required _ResolvedTarget target,
+    required String branch,
+    required TrackStateCliCredential credential,
+    required TrackStateRepository repository,
+    required TrackStateIssue issue,
+    required String attachmentName,
+  }) async {
+    final attachmentPath = repository.resolveIssueAttachmentPath(
+      issue,
+      attachmentName,
+    );
+    if (!await _isHostedAttachmentLfsTracked(
+      target: target,
+      branch: branch,
+      credential: credential,
+      repository: repository,
+      issue: issue,
+      attachmentName: attachmentName,
+      attachmentPath: attachmentPath,
+    )) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: 'UNSUPPORTED_OPERATION',
+      category: TrackStateCliErrorCategory.unsupported,
+      message:
+          'Hosted Git LFS attachment upload is not implemented yet for '
+          '$attachmentPath.',
+      exitCode: 5,
+      details: <String, Object?>{
+        'provider': target.provider,
+        'repository': target.value,
+        'issue': issue.key,
+        'attachmentPath': attachmentPath,
+      },
+    );
+  }
+
+  Future<bool> _isHostedAttachmentLfsTracked({
+    required _ResolvedTarget target,
+    required String branch,
+    required TrackStateCliCredential credential,
+    required TrackStateRepository repository,
+    required TrackStateIssue issue,
+    required String attachmentName,
+    required String attachmentPath,
+  }) async {
+    if (await repository.isIssueAttachmentLfsTracked(issue, attachmentName)) {
+      return true;
+    }
+    final provider = _providerFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+    await provider.authenticate(
+      RepositoryConnection(
+        repository: target.value,
+        branch: branch,
+        token: credential.token,
+      ),
+    );
+    return provider.isLfsTracked(attachmentPath);
   }
 
   Future<TrackStateCliExecution> _runLocalAttachmentDownload(
@@ -3883,8 +4083,42 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (target.type == TrackStateCliTargetType.hosted &&
+          _looksLikeUnsupportedHostedLfsUpload(error.message)) {
+        return _TrackStateCliException(
+          code: 'UNSUPPORTED_OPERATION',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: error.message,
+          exitCode: 5,
+          details: <String, Object?>{
+            'provider': target.provider,
+            'repository': target.value,
+            'reason': error.message,
+          },
+        );
+      }
+      final releaseCreationFailure = _mapReleaseCreationProviderError(
+        error,
+        target,
+      );
+      if (releaseCreationFailure != null) {
+        return releaseCreationFailure;
+      }
       if (target.type == TrackStateCliTargetType.local &&
           _looksLikeAttachmentStorageValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeRepositoryIdentityValidationFailure(error.message)) {
         return _TrackStateCliException(
           code: 'INVALID_REQUEST',
           category: TrackStateCliErrorCategory.validation,
@@ -3926,6 +4160,20 @@ class TrackStateCli {
             );
     }
     if (error is TrackStateRepositoryException) {
+      if (target.type == TrackStateCliTargetType.hosted &&
+          _looksLikeUnsupportedHostedLfsUpload(error.message)) {
+        return _TrackStateCliException(
+          code: 'UNSUPPORTED_OPERATION',
+          category: TrackStateCliErrorCategory.unsupported,
+          message: error.message,
+          exitCode: 5,
+          details: <String, Object?>{
+            'provider': target.provider,
+            'repository': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       return _TrackStateCliException(
         code: 'REPOSITORY_OPEN_FAILED',
         category: TrackStateCliErrorCategory.repository,
@@ -3955,6 +4203,16 @@ class TrackStateCli {
     return segments.isEmpty ? path : segments.last;
   }
 
+  bool _looksLikeUnsupportedHostedLfsUpload(String message) {
+    final normalized = message.toLowerCase();
+    if (!normalized.contains('git lfs')) {
+      return false;
+    }
+    return normalized.contains('not implemented') ||
+        normalized.contains('not yet implemented') ||
+        normalized.contains('download-only');
+  }
+
   String _sanitizeAttachmentName(String value) => value
       .replaceAll('\\', '/')
       .split('/')
@@ -3978,14 +4236,18 @@ class TrackStateCli {
       final branch = target.branch.isEmpty
           ? await provider.resolveWriteBranch()
           : target.branch;
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: branch,
-          token: credential?.token ?? '',
-        ),
+      final connection = RepositoryConnection(
+        repository: target.value,
+        branch: branch,
+        token: credential?.token ?? '',
       );
+      final user = await provider.authenticate(connection);
       final permission = await provider.getPermission();
+      final repository = _repositoryFactory.createLocal(
+        repositoryPath: target.value,
+        dataRef: branch,
+        client: _httpClient,
+      );
       final data = <String, Object?>{
         'command': 'session',
         'provider': target.provider,
@@ -3996,6 +4258,10 @@ class TrackStateCli {
           'displayName': user.displayName,
         },
         'permissions': _permissionJson(permission),
+        'projectConfig': await _loadSessionProjectConfig(
+          repository: repository,
+          connection: connection,
+        ),
       };
       return _success(
         targetType: target.type,
@@ -4050,16 +4316,23 @@ class TrackStateCli {
     );
 
     try {
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: target.branch.ifEmpty(
-            GitHubTrackStateProvider.defaultSourceRef,
-          ),
-          token: credential.token,
+      final connection = RepositoryConnection(
+        repository: target.value,
+        branch: target.branch.ifEmpty(
+          GitHubTrackStateProvider.defaultSourceRef,
         ),
+        token: credential.token,
       );
+      final user = await provider.authenticate(connection);
       final permission = await provider.getPermission();
+      final repository = _repositoryFactory.createHosted(
+        provider: target.provider,
+        repository: target.value,
+        branch: target.branch.ifEmpty(
+          GitHubTrackStateProvider.defaultSourceRef,
+        ),
+        client: _httpClient,
+      );
       final data = <String, Object?>{
         'command': 'session',
         'provider': target.provider,
@@ -4072,6 +4345,10 @@ class TrackStateCli {
           'displayName': user.displayName,
         },
         'permissions': _permissionJson(permission),
+        'projectConfig': await _loadSessionProjectConfig(
+          repository: repository,
+          connection: connection,
+        ),
       };
       return _success(
         targetType: target.type,
@@ -4421,6 +4698,36 @@ class TrackStateCli {
       ((results[option] as List<Object?>?) ?? const <Object?>[])
           .map((value) => value?.toString() ?? '')
           .toList(growable: false);
+
+  void _validateSingleOptionOccurrence(
+    List<String> arguments, {
+    required String option,
+    required String code,
+    required String message,
+  }) {
+    final occurrences = _countOptionOccurrences(arguments, option);
+    if (occurrences <= 1) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: code,
+      category: TrackStateCliErrorCategory.validation,
+      message: message,
+      exitCode: 2,
+      details: <String, Object?>{'option': option, 'occurrences': occurrences},
+    );
+  }
+
+  int _countOptionOccurrences(List<String> arguments, String option) {
+    final flag = '--$option';
+    var occurrences = 0;
+    for (final argument in arguments) {
+      if (argument == flag || argument.startsWith('$flag=')) {
+        occurrences += 1;
+      }
+    }
+    return occurrences;
+  }
 
   String _firstRequiredTrimmedOption(
     ArgResults results,
@@ -5195,7 +5502,7 @@ class TrackStateCli {
       };
 
   Map<String, Object?> _linkPayload(IssueLink link) {
-    final warning = _nonCanonicalLinkMetadataWarning(link);
+    final warning = nonCanonicalIssueLinkMetadataWarning(link);
     if (warning != null) {
       stderr.writeln(warning);
     }
@@ -5209,7 +5516,7 @@ class TrackStateCli {
 
   String _displayLinkType(String type, {required String direction}) {
     final normalizedType = type.trim().toLowerCase();
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString().trim().toLowerCase();
       final name = linkType['name']!.toString().trim().toLowerCase();
       final outward = linkType['outward']!.toString().trim().toLowerCase();
@@ -5226,42 +5533,6 @@ class TrackStateCli {
       return linkType['outward']!.toString();
     }
     return type;
-  }
-
-  String? _nonCanonicalLinkMetadataWarning(IssueLink link) {
-    final normalizedType = link.type.trim().toLowerCase();
-    final normalizedDirection = link.direction.trim().toLowerCase();
-    if (normalizedType.isEmpty || normalizedDirection.isEmpty) {
-      return null;
-    }
-
-    for (final linkType in _jiraLinkTypes) {
-      final id = linkType['id']!.toString().trim().toLowerCase();
-      final name = linkType['name']!.toString().trim().toLowerCase();
-      final outward = linkType['outward']!.toString().trim().toLowerCase();
-      final inward = linkType['inward']!.toString().trim().toLowerCase();
-
-      if (normalizedType != id &&
-          normalizedType != name &&
-          normalizedType != outward &&
-          normalizedType != inward) {
-        continue;
-      }
-
-      if (outward == inward) {
-        return null;
-      }
-
-      final expectedDirection = normalizedType == inward ? 'inward' : 'outward';
-      if (normalizedDirection == expectedDirection) {
-        return null;
-      }
-
-      return 'Warning: link type "${link.type}" uses non-canonical '
-          'direction "${link.direction}"; expected "$expectedDirection".';
-    }
-
-    return null;
   }
 
   IssueLink _canonicalCliLinkPayload({
@@ -5287,7 +5558,7 @@ class TrackStateCli {
       return requestedType;
     }
 
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString().trim().toLowerCase();
       if (id != canonicalKey) {
         continue;
@@ -5312,7 +5583,7 @@ class TrackStateCli {
 
   _ResolvedMutationField? _normalizeCliLinkType(String rawType) {
     final normalized = rawType.trim().toLowerCase();
-    for (final linkType in _jiraLinkTypes) {
+    for (final linkType in jiraIssueLinkTypes) {
       final id = linkType['id']!.toString();
       final name = linkType['name']!.toString();
       final outward = linkType['outward']!.toString();
@@ -5344,6 +5615,7 @@ class TrackStateCli {
   }) => <String, Object?>{
     'id': _jiraEntityId(issue.key),
     'key': issue.key,
+    'links': [for (final link in issue.links) _linkPayload(link)],
     'fields': <String, Object?>{
       'summary': issue.summary,
       'description': issue.description,
@@ -5430,7 +5702,7 @@ class TrackStateCli {
 
   Map<String, Object?> _jiraIssueLinkTypePayload(IssueLink link) {
     final normalizedType = link.type.trim().toLowerCase();
-    for (final entry in _jiraLinkTypes) {
+    for (final entry in jiraIssueLinkTypes) {
       final id = entry['id']!.toString().trim().toLowerCase();
       final name = entry['name']!.toString().trim().toLowerCase();
       final outward = entry['outward']!.toString().trim().toLowerCase();
@@ -5742,6 +6014,35 @@ class TrackStateCli {
     );
   }
 
+  _TrackStateCliException? _mapReleaseCreationProviderError(
+    TrackStateProviderException error,
+    _ResolvedTarget target,
+  ) {
+    final message = error.message;
+    final match = RegExp(
+      r'^Could not create GitHub release .+ \((\d{3})\):',
+    ).firstMatch(message);
+    if (match == null) {
+      return null;
+    }
+    final statusCode = int.tryParse(match.group(1) ?? '');
+    final pathKey = target.type == TrackStateCliTargetType.local
+        ? 'path'
+        : 'repository';
+    final (code, category) = switch (statusCode) {
+      409 => ('RESOURCE_CONFLICT', TrackStateCliErrorCategory.repository),
+      422 => ('API_VALIDATION_FAILED', TrackStateCliErrorCategory.validation),
+      _ => ('RELEASE_CREATION_FAILED', TrackStateCliErrorCategory.repository),
+    };
+    return _TrackStateCliException(
+      code: code,
+      category: category,
+      message: message,
+      exitCode: 4,
+      details: <String, Object?>{pathKey: target.value, 'reason': message},
+    );
+  }
+
   TrackStateCliExecution _success({
     required TrackStateCliTargetType targetType,
     required String targetValue,
@@ -5821,6 +6122,14 @@ class TrackStateCli {
   bool _looksLikeAttachmentStorageValidationFailure(String message) =>
       message.startsWith('project.json attachmentStorage.');
 
+  bool _looksLikeRepositoryIdentityValidationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains(
+          'github repository identity cannot be resolved from the local git configuration',
+        ) &&
+        normalized.contains('no github remote is configured');
+  }
+
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{
         'canRead': permission.canRead,
@@ -5831,6 +6140,71 @@ class TrackStateCli {
         'attachmentUploadMode': permission.attachmentUploadMode.name,
         'canCheckCollaborators': permission.canCheckCollaborators,
       };
+
+  Future<Map<String, Object?>> _loadSessionProjectConfig({
+    required TrackStateRepository repository,
+    required RepositoryConnection connection,
+  }) async {
+    await repository.connect(connection);
+    final snapshot = await repository.loadSnapshot();
+    return _sessionProjectConfigJson(snapshot.project);
+  }
+
+  Map<String, Object?> _sessionProjectConfigJson(ProjectConfig project) =>
+      <String, Object?>{
+        'key': project.key,
+        'name': project.name,
+        'defaultLocale': project.defaultLocale,
+        'supportedLocales': project.effectiveSupportedLocales,
+        'statuses': [
+          for (final status in project.statusDefinitions)
+            _sessionConfigEntryJson(status),
+        ],
+        'workflows': [
+          for (final workflow in project.workflowDefinitions)
+            _sessionWorkflowJson(workflow, project),
+        ],
+      };
+
+  Map<String, Object?> _sessionConfigEntryJson(
+    TrackStateConfigEntry entry,
+  ) => <String, Object?>{
+    'id': entry.id,
+    'name': entry.name,
+    if (entry.category != null) 'category': entry.category,
+    if (entry.hierarchyLevel != null) 'hierarchyLevel': entry.hierarchyLevel,
+    if (entry.icon != null) 'icon': entry.icon,
+    if (entry.workflowId != null) 'workflowId': entry.workflowId,
+  };
+
+  Map<String, Object?> _sessionWorkflowJson(
+    TrackStateWorkflowDefinition workflow,
+    ProjectConfig project,
+  ) => <String, Object?>{
+    'id': workflow.id,
+    'name': workflow.name,
+    'statuses': [
+      for (final statusId in workflow.statusIds)
+        _sessionStatusReferenceJson(project, statusId),
+    ],
+    'transitions': [
+      for (final transition in workflow.transitions)
+        <String, Object?>{
+          'id': transition.id,
+          'name': transition.name,
+          'from': _sessionStatusReferenceJson(project, transition.fromStatusId),
+          'to': _sessionStatusReferenceJson(project, transition.toStatusId),
+        },
+    ],
+  };
+
+  Map<String, Object?> _sessionStatusReferenceJson(
+    ProjectConfig project,
+    String statusId,
+  ) {
+    final status = _findConfigEntry(project.statusDefinitions, statusId);
+    return <String, Object?>{'id': status.id, 'name': status.name};
+  }
 
   String _textSuccess({
     required TrackStateCliTargetType targetType,
@@ -6000,6 +6374,7 @@ class TrackStateCli {
     '',
     'Compatibility aliases:',
     '  jira_attach_file_to_ticket',
+    '  jiraattachfiletoticket',
     '  jira_download_attachment',
     '',
     'Use "trackstate attachment <command> --help" for command-specific options.',
@@ -6014,8 +6389,9 @@ class TrackStateCli {
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png [--name architecture.png] [--output json|text]',
     '  trackstate attachment upload --target hosted --provider github --repository owner/name --issue TRACK-1 --file ./design.png [--branch main] [--token <token>] [--output json|text]',
     '',
-    'Compatibility alias:',
+    'Compatibility aliases:',
     '  jira_attach_file_to_ticket --issueKey TRACK-1 --file ./design.png',
+    '  jiraattachfiletoticket --issueKey TRACK-1 --file ./design.png',
     '',
     'Options:',
     parser.usage,
@@ -6063,7 +6439,7 @@ class TrackStateCli {
         '  link-types        List canonical issue link types.',
         '  profile           Read the current provider identity.',
         '  user              Read a provider user by login when supported.',
-        '  account-by-email  Read an account by email when the active provider can resolve it.',
+        '  account-by-email  Reserved for Jira compatibility; currently returns an unsupported error.',
         '',
         'Canonical examples:',
         '  trackstate read ticket --key TRACK-1',
@@ -6072,7 +6448,7 @@ class TrackStateCli {
         '  trackstate read profile --target hosted --provider github --repository owner/name',
         '',
         'Compatibility aliases:',
-        '  trackstate ticket get --key TRACK-1',
+        '  trackstate ticket get TRACK-1',
         '  trackstate fields list',
         '  trackstate statuses list',
         '  trackstate issue-types list',
@@ -6081,6 +6457,7 @@ class TrackStateCli {
         '  trackstate profile get',
         '  trackstate user get --login octocat',
         '  trackstate link-types list',
+        '  trackstate issue-link-types list',
       ].join('\n');
     }
 
@@ -6097,20 +6474,22 @@ class TrackStateCli {
         '  trackstate read components [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'versions' =>
         '  trackstate read versions [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
-      'link-types' => '  trackstate read link-types [--output json|text]',
+      'link-types' =>
+        '  trackstate read link-types [--output json|text]\n'
+            '  trackstate read issue-link-types [--output json|text]',
       'profile' =>
         '  trackstate read profile [--path /repo|--target hosted --provider github --repository owner/name] [--output json|text]',
       'user' =>
         '  trackstate read user --login octocat [--target hosted --provider github --repository owner/name] [--output json|text]',
       'account-by-email' =>
-        '  trackstate read account-by-email --email user@example.com',
+        '  trackstate read account-by-email user@example.com',
       _ => '  trackstate read $resource',
     };
     final notes = switch (resource) {
       'user' =>
         '  Local runtime only supports returning the current Git identity when the login matches.',
       'account-by-email' =>
-        '  Local runtime resolves the active Git identity by email; hosted GitHub mode also searches provider-native email matches.',
+        '  This command currently returns an explicit unsupported-operation error instead of querying provider or repository state.',
       _ =>
         '  JSON success output matches the equivalent Jira response family and omits TrackState-only wrappers.',
     };
@@ -6465,18 +6844,28 @@ class TrackStateCli {
     '  session    Resolve the target and print session metadata.',
     '  search     Execute a paged JQL search.',
     '  read       Read tickets and metadata as Jira-shaped JSON.',
+    '  create     Compatibility alias for "trackstate ticket create".',
     '  ticket     Mutate tickets through the shared mutation service.',
+    '  archive    Archive one issue from the current local repository by default.',
     '  attachment Upload or download one attachment.',
     '  jira_execute_request',
     '             Execute a narrow Jira-compatible raw request.',
+    '',
+    'Shared target selection options:',
+    '    --target        Target type: local or hosted.',
+    '    --provider      Provider name. Supported values: local-git, github.',
+    '    --repository    Hosted repository in owner/name form.',
     '',
     'Examples:',
     '  trackstate session --target local',
     '  trackstate session --target hosted --provider github --repository owner/name',
     '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\'',
     '  trackstate read ticket --key TRACK-1',
+    '  trackstate create --target local --summary "Implement mutations" --issueType Story',
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
+    '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
+    '  trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',
     'Use "trackstate <command> --help" for command-specific options.',
@@ -6898,33 +7287,6 @@ const List<_ResolvedMutationField> _mutationSystemFields = [
     displayName: 'Acceptance Criteria',
     aliases: <String>['acceptancecriteria'],
   ),
-];
-
-const List<Map<String, Object?>> _jiraLinkTypes = [
-  {
-    'id': 'blocks',
-    'name': 'Blocks',
-    'outward': 'blocks',
-    'inward': 'is blocked by',
-  },
-  {
-    'id': 'relates-to',
-    'name': 'Relates',
-    'outward': 'relates to',
-    'inward': 'relates to',
-  },
-  {
-    'id': 'duplicates',
-    'name': 'Duplicates',
-    'outward': 'duplicates',
-    'inward': 'is duplicated by',
-  },
-  {
-    'id': 'clones',
-    'name': 'Clones',
-    'outward': 'clones',
-    'inward': 'is cloned by',
-  },
 ];
 
 extension on String {

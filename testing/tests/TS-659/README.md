@@ -20,8 +20,9 @@ python3 -m unittest discover -s testing/tests/TS-659 -p 'test_*.py' -v
 ## Required configuration
 
 This test creates its own temporary local Git repository fixture and compiles a
-temporary CLI binary from the current checkout, so no external service
-credentials are required.
+temporary CLI binary from `origin/main` so it exercises the merged live
+implementation even when the current automation branch lags behind `main`. No
+external service credentials are required.
 
 ## Expected result
 

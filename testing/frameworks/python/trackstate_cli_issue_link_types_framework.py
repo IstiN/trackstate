@@ -33,15 +33,15 @@ class PythonTrackStateCliIssueLinkTypesFramework(
         *,
         config: TrackStateCliIssueLinkTypesConfig,
     ) -> TrackStateCliIssueLinkTypesValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-376-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(prefix="trackstate-ts-1138-bin-") as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-376-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="trackstate-ts-1138-repo-") as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-376 can run the exact metadata-read commands from "
+                    "checkout so TS-1138 can run the exact metadata-read commands from "
                     "a seeded Local Git repository."
                 )
                 return TrackStateCliIssueLinkTypesValidationResult(
@@ -111,7 +111,7 @@ key: TRACK-1
 project: {config.project_key}
 issueType: story
 status: todo
-summary: "TS-376 issue link type fixture"
+summary: "TS-1138 issue link type fixture"
 assignee: cli-user
 reporter: cli-user
 updated: 2026-05-12T00:00:00Z
@@ -123,13 +123,13 @@ Seeded issue to keep the repository recognizable as a valid TrackState project.
 """,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-376 Tester")
+        self._git(repository_path, "config", "--local", "user.name", "TS-1138 Tester")
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts376@example.com",
+            "ts1138@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-376 fixture")
+        self._git(repository_path, "commit", "-m", "Seed TS-1138 fixture")
