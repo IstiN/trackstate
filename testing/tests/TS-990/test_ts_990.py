@@ -77,20 +77,19 @@ LINKED_BUG_NOTES = (
     "resolution finishes."
 )
 REWORK_SUMMARY = (
-    "Refreshed TS-990 to reference the current linked startup-fix chain and "
-    "reran the live delayed-probe stability scenario against the deployed app."
+    "Resolved the `main` merge conflict in TS-990 while preserving the approved "
+    "timeout-window assertion and late-probe stability coverage."
 )
 REWORK_FIXES = (
-    "Reused the existing hosted-workspace delayed `/user` Playwright regression "
-    "under `testing/tests/TS-990/` instead of rewriting the scenario.",
-    "Updated the linked-bug references so the test documentation matches the "
-    "current TS-1152 / TS-1145 / TS-1046 / TS-1045 startup-fix chain.",
+    "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py`.",
+    "Preserved the approved Step 2 timeout-window assertion instead of any "
+    "startup-surface shortcut.",
     "Reran the live deployed scenario and kept failure artifacts focused on the "
     "product-visible post-timeout stability result.",
 )
 REWORK_RESPONSE_SUMMARY = (
-    "Refreshed the TS-990 linked-bug metadata and reran the live delayed-probe "
-    "stability scenario against the deployed app."
+    "Resolved the `main` merge conflict in TS-990 and reran the live delayed-"
+    "probe stability scenario with the approved timeout-window assertion intact."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
