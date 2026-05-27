@@ -787,6 +787,43 @@ void main() {
   );
 
   test(
+    'view model reports hosted persistence feedback after a successful edit transition',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'in-review',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.message?.kind, TrackerMessageKind.githubMoveCommitted);
+      expect(viewModel.message?.issueKey, 'TRACK-12');
+      expect(viewModel.message?.statusLabel, 'In Review');
+    },
+  );
+
+  test(
     'hosted edit saves refresh issue detail, board data, hierarchy data, and search state',
     () async {
       SharedPreferences.setMockInitialValues({
