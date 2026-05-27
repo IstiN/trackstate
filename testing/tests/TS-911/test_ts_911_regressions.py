@@ -257,7 +257,7 @@ class Ts911RegressionsTest(unittest.TestCase):
                     "outer_html": "<button aria-label='Save and switch' aria-disabled='true'></button>",
                 },
                 "expected_target": {
-                    "label": "Branch",
+                    "label": "Save and switch",
                 },
             },
         )

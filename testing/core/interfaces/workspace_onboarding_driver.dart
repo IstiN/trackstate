@@ -40,6 +40,8 @@ abstract interface class WorkspaceOnboardingDriver {
 
   Future<void> submit();
 
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16});
+
   WorkspaceOnboardingState captureState();
 
   WorkspaceOnboardingChoiceObservation observeTargetChoices();

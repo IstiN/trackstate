@@ -1,38 +1,85 @@
 @TestOn('browser')
 library;
 
+import 'dart:js_interop';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker_web.dart';
 
 void main() {
   late BrowserDirectoryAccessRequester originalRequester;
+  late BrowserWorkspaceSelectionPersister originalPersister;
 
-  setUp(() {
+  setUp(() async {
     originalRequester = browserDirectoryAccessRequester;
+    originalPersister = browserWorkspaceSelectionPersister;
+    await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
-  tearDown(() {
+  tearDown(() async {
     browserDirectoryAccessRequester = originalRequester;
+    browserWorkspaceSelectionPersister = originalPersister;
+    await clearRememberedBrowserLocalWorkspaceSelections();
   });
 
   test(
     'browser workspace picker preserves the saved target after browser access is granted',
     () async {
       var calls = 0;
+      String? persistedWorkspacePath;
       browserDirectoryAccessRequester =
           ({String? confirmButtonText, String? initialDirectory}) async {
             calls += 1;
             expect(confirmButtonText, isNull);
             expect(initialDirectory, '/tmp/demo');
-            return Object();
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
+          };
+      browserWorkspaceSelectionPersister =
+          ({required String workspacePath, required Object selection}) async {
+            persistedWorkspacePath = workspacePath;
           };
 
       final selectedPath = await pickWorkspaceDirectory(
         initialDirectory: '/tmp/demo',
       );
+      await Future<void>.delayed(Duration.zero);
 
       expect(calls, 1);
       expect(selectedPath, '/tmp/demo');
+      expect(persistedWorkspacePath, '/tmp/demo');
+    },
+  );
+
+  test(
+    'browser workspace picker preserves the selected path when persistence fails',
+    () async {
+      final reportedErrors = <FlutterErrorDetails>[];
+      final previousOnError = FlutterError.onError;
+      addTearDown(() {
+        FlutterError.onError = previousOnError;
+      });
+      FlutterError.onError = reportedErrors.add;
+      browserDirectoryAccessRequester =
+          ({String? confirmButtonText, String? initialDirectory}) async {
+            expect(initialDirectory, '/tmp/demo');
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
+          };
+      browserWorkspaceSelectionPersister =
+          ({required String workspacePath, required Object selection}) async =>
+              throw StateError('IndexedDB write failed');
+
+      final selectedPath = await pickWorkspaceDirectory(
+        initialDirectory: '/tmp/demo',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(selectedPath, '/tmp/demo');
+      expect(reportedErrors, hasLength(1));
+      expect(
+        reportedErrors.single.exceptionAsString(),
+        contains('IndexedDB write failed'),
+      );
     },
   );
 
@@ -72,6 +119,53 @@ void main() {
       );
     },
   );
+
+  test(
+    'browser local repository restores a saved directory handle after a reload',
+    () async {
+      final directoryHandle = _FakeDirectoryHandle(
+        kind: 'directory',
+        name: 'trackstate-demo',
+      );
+
+      await rememberBrowserLocalWorkspaceSelection(
+        workspacePath: '/tmp/trackstate-demo',
+        selection: directoryHandle,
+      );
+      await clearRememberedBrowserLocalWorkspaceSelections(
+        clearPersisted: false,
+      );
+
+      final repository = await openBrowserLocalWorkspaceRepository(
+        repositoryPath: '/tmp/trackstate-demo',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+
+      expect(repository, isNotNull);
+    },
+  );
+
+  test(
+    'browser local repository returns null quickly when no saved directory handle exists',
+    () async {
+      final repositoryFuture = openBrowserLocalWorkspaceRepository(
+        repositoryPath: '/tmp/missing-workspace',
+        defaultBranch: 'main',
+        writeBranch: 'main',
+      );
+      final result = await Future.any<Object?>([
+        repositoryFuture,
+        Future<Object?>.delayed(
+          const Duration(seconds: 1),
+          () => const _Timeout(),
+        ),
+      ]);
+
+      expect(result, isNot(const _Timeout()));
+      expect(result, isNull);
+    },
+  );
 }
 
 class _AbortError implements Exception {
@@ -79,4 +173,12 @@ class _AbortError implements Exception {
 
   @override
   String toString() => 'AbortError: The user aborted a request.';
+}
+
+class _Timeout {
+  const _Timeout();
+}
+
+extension type _FakeDirectoryHandle._(JSObject _) implements JSObject {
+  external factory _FakeDirectoryHandle({String kind, String name});
 }

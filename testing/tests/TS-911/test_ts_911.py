@@ -1474,6 +1474,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now derives the reverse-wrap expectation from the judged run's live keyboard-reachable current-panel tab order, including focusable footer controls when the live panel exposes them.",
+        "- Rework: matched the ticket viewport at `1440x900`, preserved the live selected-row focus when the panel already opens on the first internal element, and now derives the reverse-wrap expectation from the judged run's live keyboard-reachable current-panel tab order, including focusable footer controls when the live panel exposes them.",
         f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
