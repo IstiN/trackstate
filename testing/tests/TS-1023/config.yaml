@@ -1,0 +1,12 @@
+test_id: TS-1023
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Reuses the live startup retry recovery setup from TS-983 with a deferred tombstones bootstrap block so the deployed app exposes the recoverable Sync issue state.
+  - Records retry request telemetry while waiting for the recovered workspace switcher to repopulate.
+  - Verifies both Add workspace and Save and switch are visible after recovery.
+  - Confirms Save and switch starts disabled, then becomes enabled after selecting a different saved workspace row.
