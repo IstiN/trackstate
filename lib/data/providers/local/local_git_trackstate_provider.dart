@@ -3,37 +3,67 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../domain/models/trackstate_models.dart';
+import '../github/github_trackstate_provider.dart';
 import '../trackstate_provider.dart';
 
-class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
+typedef LocalGitHostedProviderFactory =
+    TrackStateProviderAdapter Function({
+      required String repository,
+      required String branch,
+      required String dataRef,
+    });
+
+class LocalGitTrackStateProvider
+    implements
+        TrackStateProviderAdapter,
+        RepositoryReleaseAttachmentStore,
+        RepositoryFileMutator,
+        RepositoryHistoryReader,
+        RepositoryGitHubIdentityResolver {
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
+    String? writeBranch,
     GitProcessRunner? processRunner,
-  }) : _processRunner = processRunner ?? const IoGitProcessRunner();
+    LocalGitHostedProviderFactory? hostedProviderFactory,
+  }) : _processRunner = processRunner ?? const IoGitProcessRunner(),
+       _writeBranch = writeBranch?.trim(),
+       _hostedProviderFactory =
+           hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
 
   final String repositoryPath;
   final GitProcessRunner _processRunner;
+  final LocalGitHostedProviderFactory _hostedProviderFactory;
+  final String? _writeBranch;
+  RepositoryConnection? _connection;
 
   @override
   final String dataRef;
+
+  @override
+  ProviderType get providerType => ProviderType.local;
 
   @override
   String get repositoryLabel => repositoryPath;
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
-    final branch = await getBranch(connection.branch);
+    final resolvedBranch = _writeBranch ?? connection.branch;
+    final branch = await getBranch(resolvedBranch);
     if (!branch.exists) {
       throw TrackStateProviderException(
-        'Local branch ${connection.branch} was not found in $repositoryPath.',
+        'Local branch $resolvedBranch was not found in $repositoryPath.',
       );
     }
+    _connection = connection;
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
     return RepositoryUser(
-      login: email.ifEmpty('local-user'),
-      displayName: name.ifEmpty(email.ifEmpty('Local User')),
+      login: email,
+      displayName: name.ifEmpty(email),
+      accountId: email.ifEmpty(name),
+      emailAddress: email.isEmpty ? null : email,
+      active: true,
     );
   }
 
@@ -68,6 +98,10 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
 
   @override
   Future<String> resolveWriteBranch() async {
+    final configuredWriteBranch = _writeBranch;
+    if (configuredWriteBranch != null && configuredWriteBranch.isNotEmpty) {
+      return configuredWriteBranch;
+    }
     final result = await _runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.stdout.trim();
   }
@@ -92,6 +126,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    validateRepositoryTextWrite(request);
     await _ensureOnBranch(request.branch);
     await _ensurePathClean(request.path);
     _ensureExpectedRevisionMatches(
@@ -99,9 +134,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsString(request.content);
+    await _writeTextToWorktree(path: request.path, content: request.content);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -141,14 +174,153 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    await _ensureOnBranch(request.branch);
+    final paths = {
+      for (final change in request.changes) change.path,
+    }.toList(growable: false);
+    for (final change in request.changes) {
+      await _ensurePathClean(change.path);
+      switch (change) {
+        case RepositoryTextFileChange():
+          validateRepositoryTextChange(change);
+          _ensureExpectedRevisionMatches(
+            path: change.path,
+            expectedRevision: change.expectedRevision,
+            currentRevision: await _currentHeadRevision(change.path),
+          );
+          await _writeTextToWorktree(
+            path: change.path,
+            content: change.content,
+          );
+          await _runGit(['add', '--', change.path]);
+        case RepositoryBinaryFileChange():
+          _ensureExpectedRevisionMatches(
+            path: change.path,
+            expectedRevision: change.expectedRevision,
+            currentRevision: await _currentHeadRevision(change.path),
+          );
+          await _writeBytesToWorktree(path: change.path, bytes: change.bytes);
+          await _runGit(['add', '--', change.path]);
+        case RepositoryDeleteFileChange():
+          if (change.expectedRevision != null) {
+            _ensureExpectedRevisionMatches(
+              path: change.path,
+              expectedRevision: change.expectedRevision,
+              currentRevision: await _currentHeadRevision(change.path),
+            );
+          }
+          final currentRevision = await _currentHeadRevision(change.path);
+          if (currentRevision == null) {
+            await _deleteWorktreeFileIfExists(change.path);
+            continue;
+          }
+          await _runGit(['rm', '-f', '--', change.path]);
+      }
+    }
+    if (!await _hasStagedChangesForPaths(paths)) {
+      final revision = await _tryGit(['rev-parse', 'HEAD']);
+      return RepositoryCommitResult(
+        branch: request.branch,
+        message: request.message,
+        revision: revision?.stdout.trim(),
+        createdCommit: false,
+      );
+    }
+    await _runGit(['commit', '-m', request.message, '--', ...paths]);
+    final revision = await _runGit(['rev-parse', 'HEAD']);
+    return RepositoryCommitResult(
+      branch: request.branch,
+      message: request.message,
+      revision: revision.stdout.trim(),
+    );
+  }
+
+  @override
+  Future<void> ensureCleanWorktree() async {
+    final result = await _runGit(['status', '--porcelain']);
+    if (result.stdout.trim().isEmpty) {
+      return;
+    }
+    throw const TrackStateProviderException(
+      'Cannot create an issue because this repository has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
+    final releaseAttachmentCapability = await _releaseAttachmentCapability(
+      branch: branch,
+    );
     return RepositoryPermission(
       canRead: exists.exists,
       canWrite: exists.exists,
       isAdmin: false,
+      supportsReleaseAttachmentWrites:
+          releaseAttachmentCapability.supportsReleaseAttachmentWrites,
+      releaseAttachmentWriteFailureReason:
+          releaseAttachmentCapability.failureReason,
     );
+  }
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    final currentState = await _readSyncState();
+    if (previousState == null) {
+      return RepositorySyncCheck(state: currentState);
+    }
+    final signals = <WorkspaceSyncSignal>{};
+    final changedPaths = <String>{};
+    if (previousState.repositoryRevision != currentState.repositoryRevision) {
+      signals.add(WorkspaceSyncSignal.localHead);
+      changedPaths.addAll(
+        await _changedPathsBetween(
+          previousState.repositoryRevision,
+          currentState.repositoryRevision,
+        ),
+      );
+    }
+    if ((previousState.workingTreeRevision ?? '') !=
+        (currentState.workingTreeRevision ?? '')) {
+      signals.add(WorkspaceSyncSignal.localWorktree);
+      changedPaths.addAll(await _worktreeChangedPaths());
+    }
+    return RepositorySyncCheck(
+      state: currentState,
+      signals: signals,
+      changedPaths: changedPaths,
+    );
+  }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    return store.readReleaseAttachment(request);
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: request.branch);
+    return store.writeReleaseAttachment(request);
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    await store.deleteReleaseAttachment(request);
   }
 
   @override
@@ -158,10 +330,18 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   }) async {
     final result = await _runGit(['show', '$ref:$path'], binaryOutput: true);
     final revision = await _tryGit(['rev-parse', '$ref:$path']);
+    final pointerInfo = _parseLfsPointer(result.stdout);
+    final currentBranch = await resolveWriteBranch();
+    final useWorktreeBytes =
+        pointerInfo != null && (ref == 'HEAD' || ref == currentBranch);
     return RepositoryAttachment(
       path: path,
-      bytes: result.stdoutBytes,
+      bytes: useWorktreeBytes
+          ? await File(_absolutePath(path)).readAsBytes()
+          : result.stdoutBytes,
       revision: revision?.stdout.trim(),
+      lfsOid: pointerInfo?.oid,
+      declaredSizeBytes: pointerInfo?.sizeBytes,
     );
   }
 
@@ -176,9 +356,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(request.bytes);
+    await _writeBytesToWorktree(path: request.path, bytes: request.bytes);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -203,6 +381,26 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     return result?.stdout.trim().endsWith(': lfs') ?? false;
   }
 
+  @override
+  Future<List<RepositoryHistoryCommit>> listHistory({
+    required String ref,
+    required String path,
+    int limit = 50,
+  }) async {
+    final result = await _runGit([
+      'log',
+      '--format=%x1e%H%x1f%P%x1f%aI%x1f%an%x1f%s',
+      '--name-status',
+      '--find-renames',
+      '-n',
+      '$limit',
+      ref,
+      '--',
+      path,
+    ]);
+    return _parseGitHistory(result.stdout);
+  }
+
   Future<void> _ensureOnBranch(String branch) async {
     final currentBranch = await resolveWriteBranch();
     if (currentBranch != branch) {
@@ -223,8 +421,263 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     return result.stdout.trim().isNotEmpty;
   }
 
+  Future<bool> _hasStagedChangesForPaths(List<String> paths) async {
+    final result = await _runGit([
+      'diff',
+      '--cached',
+      '--name-only',
+      '--',
+      ...paths,
+    ]);
+    return result.stdout.trim().isNotEmpty;
+  }
+
   Future<String> _gitConfigValue(String key) async =>
-      (await _tryGit(['config', key]))?.stdout.trim() ?? '';
+      (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
+
+  Future<RepositorySyncState> _readSyncState() async {
+    final permission = await getPermission();
+    final branch = await resolveWriteBranch();
+    final revision = await _runGit(['rev-parse', dataRef]);
+    final status = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    return RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: revision.stdout.trim(),
+      sessionRevision:
+          '$branch:${permission.canRead}:${permission.canWrite}:${permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      workingTreeRevision: status.stdout.trim(),
+      permission: permission,
+    );
+  }
+
+  Future<Set<String>> _changedPathsBetween(
+    String previous,
+    String current,
+  ) async {
+    if (previous.trim().isEmpty ||
+        current.trim().isEmpty ||
+        previous.trim() == current.trim()) {
+      return const <String>{};
+    }
+    final result = await _runGit([
+      'diff',
+      '--name-only',
+      '--find-renames',
+      previous,
+      current,
+    ]);
+    return LineSplitter.split(
+      result.stdout,
+    ).map((line) => line.trim()).where((line) => line.isNotEmpty).toSet();
+  }
+
+  Future<Set<String>> _worktreeChangedPaths() async {
+    final result = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    final paths = <String>{};
+    for (final line in LineSplitter.split(result.stdout)) {
+      final normalized = line.trimRight();
+      if (normalized.length < 4) {
+        continue;
+      }
+      final rawPath = normalized.substring(3).trim();
+      if (rawPath.contains(' -> ')) {
+        final parts = rawPath.split(' -> ');
+        for (final part in parts) {
+          final value = part.trim();
+          if (value.isNotEmpty) {
+            paths.add(value);
+          }
+        }
+        continue;
+      }
+      if (rawPath.isNotEmpty) {
+        paths.add(rawPath);
+      }
+    }
+    return paths;
+  }
+
+  Future<_LocalReleaseAttachmentCapability> _releaseAttachmentCapability({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      return _LocalReleaseAttachmentCapability.unsupported(
+        await _gitRemoteFailureReason(),
+      );
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      return const _LocalReleaseAttachmentCapability.unsupported(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    try {
+      final provider = await _createHostedReleaseProvider(
+        repository: remoteIdentity,
+        branch: branch,
+      );
+      final permission = await provider.getPermission();
+      if (permission.supportsReleaseAttachmentWrites) {
+        return const _LocalReleaseAttachmentCapability.supported();
+      }
+      return _LocalReleaseAttachmentCapability.unsupported(
+        permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
+                true
+            ? permission.releaseAttachmentWriteFailureReason!.trim()
+            : 'GitHub authentication for $remoteIdentity does not permit '
+                  'GitHub Release uploads.',
+      );
+    } on TrackStateProviderException catch (error) {
+      return _LocalReleaseAttachmentCapability.unsupported(error.message);
+    }
+  }
+
+  Future<RepositoryReleaseAttachmentStore> _resolveReleaseAttachmentStore({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      throw TrackStateProviderException(await _gitRemoteFailureReason());
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    final provider = await _createHostedReleaseProvider(
+      repository: remoteIdentity,
+      branch: branch,
+    );
+    if (provider case final RepositoryReleaseAttachmentStore store) {
+      return store;
+    }
+    throw TrackStateProviderException(
+      'GitHub release uploads are not supported for $remoteIdentity.',
+    );
+  }
+
+  Future<TrackStateProviderAdapter> _createHostedReleaseProvider({
+    required String repository,
+    required String branch,
+  }) async {
+    final connection = _connection;
+    if (connection == null) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires a connected repository session.',
+      );
+    }
+    final provider = _hostedProviderFactory(
+      repository: repository,
+      branch: branch,
+      dataRef: branch,
+    );
+    await provider.authenticate(
+      RepositoryConnection(
+        repository: repository,
+        branch: branch,
+        token: connection.token,
+      ),
+    );
+    return provider;
+  }
+
+  Future<String?> _resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
+          '';
+      final identity = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (identity != null) {
+        return identity;
+      }
+    }
+    return null;
+  }
+
+  Future<String> _gitRemoteFailureReason() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    if (remoteNames.isEmpty) {
+      return 'GitHub repository identity cannot be resolved from the local Git '
+          'configuration because no remote is configured.';
+    }
+    return 'GitHub repository identity cannot be resolved from the local Git '
+        'configuration because no GitHub remote is configured.';
+  }
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
+          '';
+      final repository = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (repository != null) {
+        return repository;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async =>
+      (await _releaseAttachmentCapability(
+        branch: await resolveWriteBranch(),
+      )).failureReason;
+
+  String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
+    final normalized = remoteUrl.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final match = RegExp(
+      r'^(?:https://|ssh://git@|git@)github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?/?$',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (match == null) {
+      return null;
+    }
+    final owner = match.namedGroup('owner')?.trim() ?? '';
+    final repo = match.namedGroup('repo')?.trim() ?? '';
+    if (owner.isEmpty || repo.isEmpty) {
+      return null;
+    }
+    return '$owner/$repo';
+  }
 
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);
@@ -232,7 +685,8 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       return;
     }
     throw TrackStateProviderException(
-      'Cannot save $path because it has staged or unstaged local changes.',
+      'Cannot save $path because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
     );
   }
 
@@ -253,7 +707,123 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
+  }
+
+  Future<void> _writeTextToWorktree({
+    required String path,
+    required String content,
+  }) async {
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write text file',
+      action: () async {
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsString(content, flush: true),
+        );
+      },
+    );
+  }
+
+  Future<void> _writeBytesToWorktree({
+    required String path,
+    required List<int> bytes,
+  }) async {
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write binary file',
+      action: () async {
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsBytes(bytes, flush: true),
+        );
+      },
+    );
+  }
+
+  Future<void> _replaceWorktreeFileAtomically({
+    required String path,
+    required Future<void> Function(File file) writeTempFile,
+  }) async {
+    final file = File(_absolutePath(path));
+    await file.parent.create(recursive: true);
+    final tempFile = File(
+      '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    final backupFile = File(
+      '${file.path}.bak-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await writeTempFile(tempFile);
+    try {
+      await _replaceFile(
+        tempFile: tempFile,
+        targetFile: file,
+        backupFile: backupFile,
+      );
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+      if (await backupFile.exists()) {
+        await backupFile.delete();
+      }
+    }
+  }
+
+  Future<void> _replaceFile({
+    required File tempFile,
+    required File targetFile,
+    required File backupFile,
+  }) async {
+    try {
+      await tempFile.rename(targetFile.path);
+      return;
+    } on FileSystemException {
+      if (await targetFile.exists()) {
+        await targetFile.rename(backupFile.path);
+      }
+      try {
+        await tempFile.rename(targetFile.path);
+      } on Object {
+        if (await backupFile.exists()) {
+          await backupFile.rename(targetFile.path);
+        }
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> _deleteWorktreeFileIfExists(String path) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'delete file',
+      action: () async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      },
+    );
+  }
+
+  Future<void> _withFileSystemErrorMapping({
+    required String path,
+    required String operation,
+    required Future<void> Function() action,
+  }) async {
+    try {
+      await action();
+    } on FileSystemException {
+      throw TrackStateProviderException(
+        'Local repository could not $operation at $path because the filesystem rejected the change.',
+      );
+    }
   }
 
   Future<GitCommandResult> _runGit(
@@ -287,6 +857,115 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
 
   String _absolutePath(String path) =>
       '$repositoryPath/${path.replaceAll('\\', '/')}';
+
+  List<RepositoryHistoryCommit> _parseGitHistory(String output) {
+    final commits = <RepositoryHistoryCommit>[];
+    for (final block in output.split('\x1e')) {
+      final trimmed = block.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final lines = LineSplitter.split(trimmed).toList(growable: false);
+      if (lines.isEmpty) {
+        continue;
+      }
+      final metadata = lines.first.split('\x1f');
+      if (metadata.length < 5) {
+        continue;
+      }
+      final changes = <RepositoryHistoryFileChange>[];
+      for (final line in lines.skip(1)) {
+        if (line.trim().isEmpty) {
+          continue;
+        }
+        final columns = line.split('\t');
+        final status = columns.first.trim();
+        if (status.startsWith('R') && columns.length >= 3) {
+          changes.add(
+            RepositoryHistoryFileChange(
+              path: columns[2],
+              previousPath: columns[1],
+              changeType: RepositoryHistoryChangeType.renamed,
+            ),
+          );
+          continue;
+        }
+        if (columns.length < 2) {
+          continue;
+        }
+        changes.add(
+          RepositoryHistoryFileChange(
+            path: columns[1],
+            changeType: switch (status) {
+              'A' => RepositoryHistoryChangeType.added,
+              'D' => RepositoryHistoryChangeType.removed,
+              _ => RepositoryHistoryChangeType.modified,
+            },
+          ),
+        );
+      }
+      commits.add(
+        RepositoryHistoryCommit(
+          sha: metadata[0],
+          parentSha: metadata[1].trim().isEmpty
+              ? null
+              : metadata[1].trim().split(' ').first,
+          timestamp: metadata[2],
+          author: metadata[3],
+          message: metadata[4],
+          changes: changes,
+        ),
+      );
+    }
+    return commits;
+  }
+}
+
+TrackStateProviderAdapter _defaultLocalGitHostedProviderFactory({
+  required String repository,
+  required String branch,
+  required String dataRef,
+}) => GitHubTrackStateProvider(
+  repositoryName: repository,
+  sourceRef: branch,
+  dataRef: dataRef,
+);
+
+class _LocalReleaseAttachmentCapability {
+  const _LocalReleaseAttachmentCapability.supported()
+    : supportsReleaseAttachmentWrites = true,
+      failureReason = null;
+
+  const _LocalReleaseAttachmentCapability.unsupported(this.failureReason)
+    : supportsReleaseAttachmentWrites = false;
+
+  final bool supportsReleaseAttachmentWrites;
+  final String? failureReason;
+}
+
+_LfsPointerInfo? _parseLfsPointer(String content) {
+  if (!content.contains('version https://git-lfs.github.com/spec/v1')) {
+    return null;
+  }
+  final oidMatch = RegExp(
+    r'^oid sha256:([a-f0-9]+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  final sizeMatch = RegExp(
+    r'^size (\d+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  return _LfsPointerInfo(
+    oid: oidMatch?.group(1),
+    sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),
+  );
+}
+
+class _LfsPointerInfo {
+  const _LfsPointerInfo({this.oid, this.sizeBytes});
+
+  final String? oid;
+  final int? sizeBytes;
 }
 
 abstract interface class GitProcessRunner {

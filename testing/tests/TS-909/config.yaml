@@ -1,0 +1,23 @@
+test_id: TS-909
+type: web
+framework: python
+platform: github
+dependencies:
+  - gh CLI access to the public IstiN/trackstate repository
+  - Playwright Chromium runtime for browser verification of the live GitHub file page
+notes:
+  - Verifies the live repository state on GitHub rather than local checkout files.
+  - Treats the actual GitHub compose-page PR description field value as the source of truth; repository template probes are diagnostics only.
+runtime_inputs:
+  repository: IstiN/trackstate
+  expected_default_branch: main
+  required_checklist_item: "Manual verification: DOM order matches visual hierarchy for keyboard-accessible elements."
+  accessibility_section_markers:
+    - Accessibility checklist
+    - accessibility checklist
+    - Accessibility
+  candidate_template_paths:
+    - .github/PULL_REQUEST_TEMPLATE.md
+    - .github/pull_request_template.md
+    - PULL_REQUEST_TEMPLATE.md
+    - pull_request_template.md

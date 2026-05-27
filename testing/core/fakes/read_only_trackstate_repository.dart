@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -20,6 +18,23 @@ class _IssueDetailTrackStateProvider implements TrackStateProviderAdapter {
   final bool canWrite;
 
   static const String _revision = 'read-only-test-revision';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: _revision,
+      sessionRevision: 'readonly:$canWrite',
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: canWrite,
+        isAdmin: false,
+      ),
+    ),
+  );
 
   static const Map<String, String> _files = {
     'project.json': '''
@@ -111,6 +126,9 @@ Read and write tracker files through GitHub Contents API.
   String get dataRef => 'main';
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override
@@ -174,6 +192,9 @@ Read and write tracker files through GitHub Contents API.
       'TS-42 should not attempt to create commits in a read-only session.',
     );
   }
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<RepositoryWriteResult> writeTextFile(

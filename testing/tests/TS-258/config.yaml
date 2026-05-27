@@ -1,0 +1,38 @@
+test_id: TS-258
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs and GitHub Actions logs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  target_workflow_name: New utility workflow
+  target_workflow_path: .github/workflows/new-utility.yml
+  branch_prefix: ts258-actionlint-directory-coverage
+  commit_message: "TS-258 probe: add invalid workflow file"
+  mutation_mode: create_file
+  mutation_replacement_text: "workflow_dispatch branches"
+  created_workflow_contents: |
+    name: New Utility
+    on:
+      workflow_dispatch:
+        branches:
+          - main
+
+    jobs:
+      noop:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo "TS-258 probe"
+  expected_actionlint_marker: actionlint
+  expected_log_markers:
+    - .github/workflows/new-utility.yml
+    - workflow_dispatch
+    - branches
+  poll_interval_seconds: 5
+  run_timeout_seconds: 90
+notes:
+  - Creates a disposable branch in IstiN/trackstate-setup and adds a brand-new invalid workflow file under .github/workflows.
+  - Expects the live actionlint pipeline to fail and to mention the new file in the visible run logs.

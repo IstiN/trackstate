@@ -62,8 +62,13 @@ Loaded from local git.
     );
 
     _git(directory.path, ['init', '-b', 'main']);
-    _git(directory.path, ['config', 'user.name', 'Local Tester']);
-    _git(directory.path, ['config', 'user.email', 'local@example.com']);
+    _git(directory.path, ['config', '--local', 'user.name', 'Local Tester']);
+    _git(directory.path, [
+      'config',
+      '--local',
+      'user.email',
+      'local@example.com',
+    ]);
     _git(directory.path, ['add', '.']);
     _git(directory.path, ['commit', '-m', 'Initial import']);
 

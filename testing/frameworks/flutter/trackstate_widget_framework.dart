@@ -66,21 +66,8 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
 
   @override
   bool isSelected(String label) {
-    for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
-      final matches = finder.evaluate().toList();
-      for (var index = 0; index < matches.length; index++) {
-        final flags = tester.getSemantics(finder.at(index)).flagsCollection;
-        final hasSelectionState =
-            flags.hasCheckedState || flags.hasSelectedState;
-        if (!hasSelectionState) {
-          continue;
-        }
-        if (flags.isChecked || flags.isSelected) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return _finderHasSelectedState(_semanticsFinder(label)) ||
+        _finderHasSelectedState(_textFinder(label));
   }
 
   @override
@@ -143,12 +130,12 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
 
   @override
   bool isProviderSelected(String label) {
-    final control = _providerControl(label);
-    if (control.evaluate().isEmpty) {
-      return false;
-    }
-    final flags = tester.getSemantics(control.first).flagsCollection;
-    return flags.isSelected || flags.isChecked;
+    final providerSemantics = find.descendant(
+      of: _repositoryAccessSection,
+      matching: _semanticsFinder(label),
+    );
+    return _finderHasSelectedState(providerSemantics) ||
+        _finderHasSelectedState(_providerControl(label));
   }
 
   @override
@@ -161,6 +148,19 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
   }
 
   Finder _bestTapTarget(String label) {
+    final providerControl = _providerControl(label);
+    if (providerControl.evaluate().isNotEmpty) {
+      return providerControl.first;
+    }
+
+    final providerSemantics = find.descendant(
+      of: _repositoryAccessSection,
+      matching: _semanticsFinder(label),
+    );
+    if (providerSemantics.evaluate().isNotEmpty) {
+      return providerSemantics.first;
+    }
+
     final buttonFinder = find.ancestor(
       of: _textFinder(label),
       matching: find.bySubtype<ButtonStyleButton>(),
@@ -203,6 +203,17 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       matching: find.bySubtype<ButtonStyleButton>(),
     ),
   );
+
+  bool _finderHasSelectedState(Finder finder) {
+    final matches = finder.evaluate().toList();
+    for (var index = 0; index < matches.length; index++) {
+      final flags = tester.getSemantics(finder.at(index)).flagsCollection;
+      if (flags.isChecked || flags.isSelected) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   Finder _textFieldFinder(String label) =>
       find.widgetWithText(TextFormField, label);

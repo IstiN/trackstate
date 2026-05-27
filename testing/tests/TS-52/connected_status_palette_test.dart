@@ -12,7 +12,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-52 connected status uses the centralized accessible success palette hex',
+    'TS-52 connected status background uses the centralized accessible success palette hex',
     (tester) async {
       final robot = SettingsScreenRobot(tester);
       final failures = <String>[];
@@ -57,33 +57,31 @@ void main() {
 
       if (connectedButtonCount == 1 &&
           visibleConnectedLabel.evaluate().isNotEmpty) {
+        final paletteSuccess = robot.colors().success;
         final renderedColor = robot.renderedTextColorWithin(
           robot.selectedConnectedControl,
           'Connected',
         );
-        final paletteSuccess = robot.colors().success;
         final buttonBackground = robot.renderedButtonBackground(
           robot.selectedConnectedControl,
         );
 
-        final renderedHex = _rgbHex(renderedColor);
         final paletteHex = _rgbHex(paletteSuccess);
         final backgroundHex = _rgbHex(buttonBackground);
         final renderedContrast = contrastRatio(renderedColor, buttonBackground);
-        final paletteContrast = contrastRatio(paletteSuccess, buttonBackground);
 
-        if (paletteContrast < 4.5) {
+        if (renderedContrast < 4.5) {
           failures.add(
-            'Centralized success palette hex $paletteHex only reaches '
-            '${paletteContrast.toStringAsFixed(2)}:1 on the Connected button background '
+            'Connected label contrast only reaches '
+            '${renderedContrast.toStringAsFixed(2)}:1 on the Connected button background '
             '$backgroundHex, below the required 4.5:1.',
           );
         }
 
-        if (renderedHex != paletteHex) {
+        if (backgroundHex != paletteHex) {
           failures.add(
-            'Visible Connected status text rendered with $renderedHex instead of the centralized success palette hex '
-            '$paletteHex. Rendered contrast was ${renderedContrast.toStringAsFixed(2)}:1 on $backgroundHex.',
+            'Visible Connected status background rendered with $backgroundHex instead of the centralized success palette hex '
+            '$paletteHex. Rendered contrast was ${renderedContrast.toStringAsFixed(2)}:1.',
           );
         }
       }

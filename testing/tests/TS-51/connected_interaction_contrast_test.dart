@@ -30,12 +30,14 @@ void main() {
         expect(
           robot.projectSettingsHeading,
           findsOneWidget,
-          reason: 'The Settings screen should open before the Connected control is inspected.',
+          reason:
+              'The Settings screen should open before the Connected control is inspected.',
         );
         expect(
           robot.settingsConnectedControl,
           findsOneWidget,
-          reason: 'A remembered GitHub token should render the Connected provider control.',
+          reason:
+              'A remembered GitHub token should render the Connected provider control.',
         );
         expect(
           find.descendant(
@@ -43,12 +45,14 @@ void main() {
             matching: find.text('Connected'),
           ),
           findsOneWidget,
-          reason: 'The user-visible Connected label should stay inside the selected provider control.',
+          reason:
+              'The user-visible Connected label should stay inside the selected provider control.',
         );
         expect(
           robot.semanticsLabelOf(robot.settingsConnectedControl),
           'Connected',
-          reason: 'The highlighted provider row should keep an explicit semantics label.',
+          reason:
+              'The highlighted provider row should keep an explicit semantics label.',
         );
 
         final idleObservation = _observeContrast(
@@ -83,7 +87,9 @@ void main() {
           robot: robot,
           states: const <WidgetState>{WidgetState.pressed},
         );
-        debugPrint('TS-51 pressed observation: ${pressedObservation.describe()}');
+        debugPrint(
+          'TS-51 pressed observation: ${pressedObservation.describe()}',
+        );
         if (pressedObservation.contrastRatio < 4.5) {
           failures.add(
             'Pressed Connected contrast was ${pressedObservation.describe()}, below the WCAG AA threshold.',

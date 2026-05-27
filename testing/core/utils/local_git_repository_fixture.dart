@@ -25,16 +25,36 @@ class LocalGitRepositoryFixture {
 
   Future<void> configureAuthor({String? userName, String? userEmail}) async {
     if (userName == null) {
-      await _git(['config', '--unset-all', 'user.name']);
+      await _git(['config', '--local', '--unset-all', 'user.name']);
     } else {
-      await _git(['config', 'user.name', userName]);
+      await _git(['config', '--local', 'user.name', userName]);
     }
     if (userEmail == null) {
-      await _git(['config', '--unset-all', 'user.email']);
+      await _git(['config', '--local', '--unset-all', 'user.email']);
     } else {
-      await _git(['config', 'user.email', userEmail]);
+      await _git(['config', '--local', 'user.email', userEmail]);
     }
   }
+
+  Future<void> writeFile(String relativePath, String content) async {
+    final file = File('${directory.path}/$relativePath');
+    await file.parent.create(recursive: true);
+    await file.writeAsString(content);
+  }
+
+  Future<void> stageAll() => _git(['add', '.']);
+
+  Future<void> commit(
+    String message, {
+    String? authorDate,
+    String? committerDate,
+  }) => _git(
+    ['commit', '-m', message],
+    environment: {
+      if (authorDate != null) 'GIT_AUTHOR_DATE': authorDate,
+      if (committerDate != null) 'GIT_COMMITTER_DATE': committerDate,
+    },
+  );
 
   static Future<LocalGitRepositoryFixture> create({
     String userName = 'Local Tester',
@@ -55,24 +75,24 @@ class LocalGitRepositoryFixture {
   }
 
   Future<void> _seedRepository() async {
-    await _writeFile(
+    await writeFile(
       '.gitattributes',
       '*.png filter=lfs diff=lfs merge=lfs -text\n',
     );
-    await _writeFile(
+    await writeFile(
       'DEMO/project.json',
       '{"key":"DEMO","name":"Local Demo"}\n',
     );
-    await _writeFile(
+    await writeFile(
       'DEMO/config/statuses.json',
       '[{"name":"To Do"},{"name":"Done"}]\n',
     );
-    await _writeFile('DEMO/config/issue-types.json', '[{"name":"Story"}]\n');
-    await _writeFile(
+    await writeFile('DEMO/config/issue-types.json', '[{"name":"Story"}]\n');
+    await writeFile(
       'DEMO/config/fields.json',
       '[{"name":"Summary"},{"name":"Priority"}]\n',
     );
-    await _writeFile('DEMO/DEMO-1/main.md', '''
+    await writeFile('DEMO/DEMO-1/main.md', '''
 ---
 key: DEMO-1
 project: DEMO
@@ -89,26 +109,27 @@ updated: 2026-05-05T00:00:00Z
 
 Loaded from local Git.
 ''');
-    await _writeFile(
+    await writeFile(
       'DEMO/DEMO-1/acceptance_criteria.md',
       '- Loads through the local Git runtime\n',
     );
 
     await _git(['init', '-b', branch]);
-    await _git(['config', 'user.name', userName]);
-    await _git(['config', 'user.email', userEmail]);
-    await _git(['add', '.']);
-    await _git(['commit', '-m', 'Initial local runtime fixture']);
+    await _git(['config', '--local', 'user.name', userName]);
+    await _git(['config', '--local', 'user.email', userEmail]);
+    await stageAll();
+    await commit('Initial local runtime fixture');
   }
 
-  Future<void> _writeFile(String relativePath, String content) async {
-    final file = File('${directory.path}/$relativePath');
-    await file.parent.create(recursive: true);
-    await file.writeAsString(content);
-  }
-
-  Future<void> _git(List<String> args) async {
-    final result = await Process.run('git', ['-C', directory.path, ...args]);
+  Future<void> _git(
+    List<String> args, {
+    Map<String, String>? environment,
+  }) async {
+    final result = await Process.run('git', [
+      '-C',
+      directory.path,
+      ...args,
+    ], environment: environment);
     if (result.exitCode != 0) {
       throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }

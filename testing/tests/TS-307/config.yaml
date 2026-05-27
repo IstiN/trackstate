@@ -1,0 +1,8 @@
+test_id: TS-307
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the Create issue surface adapts from a desktop side sheet to a compact full-screen layout.
+  - Confirms visible form labels, placeholder copy, accessibility traversal order, and WCAG AA contrast on the rendered Create issue form.

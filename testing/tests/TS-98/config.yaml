@@ -1,0 +1,10 @@
+test_id: TS-98
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - TS-75 customFields canonical mapping fix deployed on main
+notes:
+  - Verifies malformed primitive customFields frontmatter is ignored rather than crashing repository resolution.
+  - Reuses the shared IssueResolutionService and TrackState app screen abstractions.
+  - Confirms both the resolved canonical model and the real issue-detail flow stay usable.

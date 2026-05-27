@@ -1,0 +1,9 @@
+test_id: TS-181
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Starts from the hosted runtime, verifies the top-bar Create issue entry point is visible and user-reachable, then switches to Local Git through Settings.
+  - Verifies the storage-mode indicator changes to Local Git without a page refresh and that Dashboard still shows a reachable top-bar Create issue entry point.
+  - Fails with top-bar and visible-text snapshots when the runtime label or Create issue affordance does not match the expected user-facing state.

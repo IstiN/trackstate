@@ -1,6 +1,9 @@
-import 'dart:typed_data';
+import 'dart:convert';
 
 import '../../domain/models/trackstate_models.dart';
+import 'foundation_compat.dart';
+
+typedef ProviderSessionListener = void Function();
 
 abstract interface class RepositoryFileReader {
   Future<RepositoryTextFile> readTextFile(String path, {required String ref});
@@ -14,15 +17,35 @@ abstract interface class RepositorySessionManager {
   Future<RepositoryUser> authenticate(RepositoryConnection connection);
 }
 
+abstract interface class RepositoryUserLookup {
+  Future<RepositoryUser> lookupUserByLogin(String login);
+  Future<RepositoryUser> lookupUserByEmail(String email);
+}
+
 abstract interface class RepositoryCommitManager {
   Future<String> resolveWriteBranch();
   Future<RepositoryBranch> getBranch(String name);
   Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request);
   Future<RepositoryCommitResult> createCommit(RepositoryCommitRequest request);
+  Future<void> ensureCleanWorktree();
+}
+
+abstract interface class RepositoryFileMutator {
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  );
 }
 
 abstract interface class RepositoryPermissionChecker {
   Future<RepositoryPermission> getPermission();
+}
+
+abstract interface class RepositorySyncChecker {
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
+abstract interface class RepositoryCatalogReader {
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories();
 }
 
 abstract interface class RepositoryAttachmentStore {
@@ -36,6 +59,31 @@ abstract interface class RepositoryAttachmentStore {
   Future<bool> isLfsTracked(String path);
 }
 
+abstract interface class RepositoryReleaseAttachmentStore {
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  );
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  );
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  );
+}
+
+abstract interface class RepositoryGitHubIdentityResolver {
+  Future<String?> resolveGitHubRepositoryIdentity();
+  Future<String?> releaseAttachmentIdentityFailureReason();
+}
+
+abstract interface class RepositoryHistoryReader {
+  Future<List<RepositoryHistoryCommit>> listHistory({
+    required String ref,
+    required String path,
+    int limit = 50,
+  });
+}
+
 abstract interface class TrackStateProviderAdapter
     implements
         RepositoryFileReader,
@@ -43,9 +91,101 @@ abstract interface class TrackStateProviderAdapter
         RepositorySessionManager,
         RepositoryCommitManager,
         RepositoryPermissionChecker,
+        RepositorySyncChecker,
         RepositoryAttachmentStore {
+  ProviderType get providerType;
   String get repositoryLabel;
   String get dataRef;
+}
+
+enum ProviderType { github, local }
+
+enum ProviderConnectionState { disconnected, connecting, connected, error }
+
+enum AttachmentUploadMode { full, noLfs, none }
+
+class ProviderSession {
+  ProviderSession({
+    required this.providerType,
+    required this.connectionState,
+    required this.resolvedUserIdentity,
+    required this.canRead,
+    required this.canWrite,
+    required this.canCreateBranch,
+    required this.canManageAttachments,
+    required this.attachmentUploadMode,
+    required this.supportsReleaseAttachmentWrites,
+    required this.canCheckCollaborators,
+  });
+
+  ProviderType providerType;
+  ProviderConnectionState connectionState;
+  String resolvedUserIdentity;
+  bool canRead;
+  bool canWrite;
+  bool canCreateBranch;
+  bool canManageAttachments;
+  AttachmentUploadMode attachmentUploadMode;
+  bool supportsReleaseAttachmentWrites;
+  bool canCheckCollaborators;
+  final Set<ProviderSessionListener> _listeners = <ProviderSessionListener>{};
+
+  void addListener(ProviderSessionListener listener) {
+    _listeners.add(listener);
+  }
+
+  void removeListener(ProviderSessionListener listener) {
+    _listeners.remove(listener);
+  }
+
+  void _notifyListeners() {
+    if (_listeners.isEmpty) {
+      return;
+    }
+    for (final listener in List<ProviderSessionListener>.of(_listeners)) {
+      listener();
+    }
+  }
+
+  void update({
+    required ProviderType providerType,
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required bool canRead,
+    required bool canWrite,
+    required bool canCreateBranch,
+    required bool canManageAttachments,
+    required AttachmentUploadMode attachmentUploadMode,
+    required bool supportsReleaseAttachmentWrites,
+    required bool canCheckCollaborators,
+  }) {
+    final changed =
+        this.providerType != providerType ||
+        this.connectionState != connectionState ||
+        this.resolvedUserIdentity != resolvedUserIdentity ||
+        this.canRead != canRead ||
+        this.canWrite != canWrite ||
+        this.canCreateBranch != canCreateBranch ||
+        this.canManageAttachments != canManageAttachments ||
+        this.attachmentUploadMode != attachmentUploadMode ||
+        this.supportsReleaseAttachmentWrites !=
+            supportsReleaseAttachmentWrites ||
+        this.canCheckCollaborators != canCheckCollaborators;
+    if (!changed) {
+      return;
+    }
+    this.providerType = providerType;
+    this.connectionState = connectionState;
+    this.resolvedUserIdentity = resolvedUserIdentity;
+    this.canRead = canRead;
+    this.canWrite = canWrite;
+    this.canCreateBranch = canCreateBranch;
+    this.canManageAttachments = canManageAttachments;
+    this.attachmentUploadMode = attachmentUploadMode;
+    this.supportsReleaseAttachmentWrites = supportsReleaseAttachmentWrites;
+    this.canCheckCollaborators = canCheckCollaborators;
+    _notifyListeners();
+  }
 }
 
 class RepositoryTreeEntry {
@@ -53,6 +193,66 @@ class RepositoryTreeEntry {
 
   final String path;
   final String type;
+}
+
+class RepositorySyncState {
+  const RepositorySyncState({
+    required this.providerType,
+    required this.repositoryRevision,
+    required this.sessionRevision,
+    required this.connectionState,
+    this.workingTreeRevision,
+    this.permission,
+  });
+
+  final ProviderType providerType;
+  final String repositoryRevision;
+  final String sessionRevision;
+  final ProviderConnectionState connectionState;
+  final String? workingTreeRevision;
+  final RepositoryPermission? permission;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'provider_type': providerType.name,
+      'repository_revision': repositoryRevision,
+      'session_revision': sessionRevision,
+      'connection_state': connectionState.name,
+      'working_tree_revision': workingTreeRevision,
+      'permission': permission?.toJson(),
+    };
+  }
+}
+
+class RepositorySyncCheck {
+  const RepositorySyncCheck({
+    required this.state,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.changedPaths = const <String>{},
+    this.hostedSnapshotReloadDirective,
+  });
+
+  final RepositorySyncState state;
+  final Set<WorkspaceSyncSignal> signals;
+  final Set<String> changedPaths;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
+
+  Map<String, Object?> toJson() {
+    final payload = <String, Object?>{
+      'state': state.toJson(),
+      'signals': signals.map((signal) => signal.name).toList()..sort(),
+      'changed_paths': changedPaths.toList()..sort(),
+    };
+    final loadSnapshotDelta = switch (hostedSnapshotReloadDirective) {
+      HostedSnapshotReloadDirective.enabled => 1,
+      HostedSnapshotReloadDirective.disabled => 0,
+      null => null,
+    };
+    if (loadSnapshotDelta != null) {
+      payload['load_snapshot_delta'] = loadSnapshotDelta;
+    }
+    return payload;
+  }
 }
 
 class RepositoryTextFile {
@@ -81,6 +281,98 @@ class RepositoryWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+}
+
+void validateRepositoryTextWrite(RepositoryWriteRequest request) {
+  _validateRepositoryTextContent(path: request.path, content: request.content);
+}
+
+void validateRepositoryTextChange(RepositoryTextFileChange change) {
+  _validateRepositoryTextContent(path: change.path, content: change.content);
+}
+
+void _validateRepositoryTextContent({
+  required String path,
+  required String content,
+}) {
+  if (!_isLinksJsonPath(path)) {
+    return;
+  }
+
+  final decoded = _decodeLinksJson(path, content);
+  if (decoded is! List) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain a JSON array of link records.',
+    );
+  }
+
+  for (final entry in decoded) {
+    if (entry is! Map) {
+      throw TrackStateProviderException(
+        'Validation failed for $path: links.json must contain only link objects.',
+      );
+    }
+    _validateStoredLinkRecord(path, entry);
+  }
+}
+
+bool _isLinksJsonPath(String path) =>
+    path == 'links.json' || path.endsWith('/links.json');
+
+Object? _decodeLinksJson(String path, String content) {
+  try {
+    return jsonDecode(content);
+  } on FormatException catch (error) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain valid JSON. ${error.message}',
+    );
+  }
+}
+
+void _validateStoredLinkRecord(String path, Map entry) {
+  final rawType = entry['type']?.toString();
+  if (rawType == null || rawType.trim().isEmpty) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: each links.json record must include a non-empty type.',
+    );
+  }
+
+  final normalizedType = _canonicalStorageToken(rawType);
+  final canonicalType = _canonicalStoredLinkType(normalizedType);
+  if (canonicalType == null) {
+    return;
+  }
+
+  final rawDirection = entry['direction']?.toString() ?? 'outward';
+  final normalizedDirection = _canonicalStorageToken(rawDirection);
+  if (normalizedType == canonicalType && normalizedDirection == 'outward') {
+    return;
+  }
+
+  throw TrackStateProviderException(
+    'Validation failed for $path: standardized links.json records must use the canonical outward form. '
+    'Found type "$rawType" with direction "$rawDirection".',
+  );
+}
+
+String? _canonicalStoredLinkType(String normalizedType) {
+  return switch (normalizedType) {
+    'blocks' || 'is-blocked-by' => 'blocks',
+    'relates' || 'relates-to' => 'relates-to',
+    'duplicates' || 'is-duplicated-by' => 'duplicates',
+    'clones' || 'is-cloned-by' => 'clones',
+    _ => null,
+  };
+}
+
+String _canonicalStorageToken(String? value) {
+  final text = value?.trim().toLowerCase() ?? '';
+  if (text.isEmpty) {
+    return '';
+  }
+  return text
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
 }
 
 class RepositoryWriteResult {
@@ -116,11 +408,59 @@ class RepositoryCommitResult {
     required this.branch,
     required this.message,
     this.revision,
+    this.createdCommit = true,
   });
 
   final String branch;
   final String message;
   final String? revision;
+  final bool createdCommit;
+}
+
+class RepositoryFileChangeRequest {
+  const RepositoryFileChangeRequest({
+    required this.branch,
+    required this.message,
+    required this.changes,
+  });
+
+  final String branch;
+  final String message;
+  final List<RepositoryFileChange> changes;
+}
+
+abstract base class RepositoryFileChange {
+  const RepositoryFileChange({required this.path, this.expectedRevision});
+
+  final String path;
+  final String? expectedRevision;
+}
+
+final class RepositoryTextFileChange extends RepositoryFileChange {
+  const RepositoryTextFileChange({
+    required super.path,
+    required this.content,
+    super.expectedRevision,
+  });
+
+  final String content;
+}
+
+final class RepositoryBinaryFileChange extends RepositoryFileChange {
+  const RepositoryBinaryFileChange({
+    required super.path,
+    required this.bytes,
+    super.expectedRevision,
+  });
+
+  final Uint8List bytes;
+}
+
+final class RepositoryDeleteFileChange extends RepositoryFileChange {
+  const RepositoryDeleteFileChange({
+    required super.path,
+    super.expectedRevision,
+  });
 }
 
 class RepositoryBranch {
@@ -140,11 +480,45 @@ class RepositoryPermission {
     required this.canRead,
     required this.canWrite,
     required this.isAdmin,
-  });
+    bool? canCreateBranch,
+    bool? canManageAttachments,
+    AttachmentUploadMode? attachmentUploadMode,
+    this.supportsReleaseAttachmentWrites = false,
+    this.releaseAttachmentWriteFailureReason,
+    bool? canCheckCollaborators,
+  }) : canCreateBranch = canCreateBranch ?? canWrite,
+       canManageAttachments = canManageAttachments ?? canWrite,
+       attachmentUploadMode =
+           attachmentUploadMode ??
+           ((canManageAttachments ?? canWrite)
+               ? AttachmentUploadMode.full
+               : AttachmentUploadMode.none),
+       canCheckCollaborators = canCheckCollaborators ?? isAdmin;
 
   final bool canRead;
   final bool canWrite;
   final bool isAdmin;
+  final bool canCreateBranch;
+  final bool canManageAttachments;
+  final AttachmentUploadMode attachmentUploadMode;
+  final bool supportsReleaseAttachmentWrites;
+  final String? releaseAttachmentWriteFailureReason;
+  final bool canCheckCollaborators;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'can_read': canRead,
+      'can_write': canWrite,
+      'is_admin': isAdmin,
+      'can_create_branch': canCreateBranch,
+      'can_manage_attachments': canManageAttachments,
+      'attachment_upload_mode': attachmentUploadMode.name,
+      'supports_release_attachment_writes': supportsReleaseAttachmentWrites,
+      'release_attachment_write_failure_reason':
+          releaseAttachmentWriteFailureReason,
+      'can_check_collaborators': canCheckCollaborators,
+    };
+  }
 }
 
 class RepositoryAttachment {
@@ -152,11 +526,15 @@ class RepositoryAttachment {
     required this.path,
     required this.bytes,
     this.revision,
+    this.lfsOid,
+    this.declaredSizeBytes,
   });
 
   final String path;
   final Uint8List bytes;
   final String? revision;
+  final String? lfsOid;
+  final int? declaredSizeBytes;
 }
 
 class RepositoryAttachmentWriteRequest {
@@ -187,11 +565,115 @@ class RepositoryAttachmentWriteResult {
   final String? revision;
 }
 
+class RepositoryReleaseAttachmentReadRequest {
+  const RepositoryReleaseAttachmentReadRequest({
+    required this.releaseTag,
+    required this.assetName,
+    this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String? assetId;
+}
+
+class RepositoryReleaseAttachmentWriteRequest {
+  const RepositoryReleaseAttachmentWriteRequest({
+    required this.issueKey,
+    required this.releaseTag,
+    required this.releaseTitle,
+    required this.assetName,
+    required this.bytes,
+    required this.mediaType,
+    required this.branch,
+    this.allowedAssetNames = const <String>{},
+  });
+
+  final String issueKey;
+  final String releaseTag;
+  final String releaseTitle;
+  final String assetName;
+  final Uint8List bytes;
+  final String mediaType;
+  final String branch;
+  final Set<String> allowedAssetNames;
+}
+
+class RepositoryReleaseAttachmentWriteResult {
+  const RepositoryReleaseAttachmentWriteResult({
+    required this.releaseTag,
+    required this.assetName,
+    required this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String assetId;
+}
+
+class RepositoryReleaseAttachmentDeleteRequest {
+  const RepositoryReleaseAttachmentDeleteRequest({
+    required this.releaseTag,
+    required this.assetId,
+    required this.assetName,
+  });
+
+  final String releaseTag;
+  final String assetId;
+  final String assetName;
+}
+
+enum RepositoryHistoryChangeType { added, modified, removed, renamed }
+
+class RepositoryHistoryFileChange {
+  const RepositoryHistoryFileChange({
+    required this.path,
+    required this.changeType,
+    this.previousPath,
+  });
+
+  final String path;
+  final RepositoryHistoryChangeType changeType;
+  final String? previousPath;
+}
+
+class RepositoryHistoryCommit {
+  const RepositoryHistoryCommit({
+    required this.sha,
+    required this.author,
+    required this.timestamp,
+    required this.message,
+    required this.changes,
+    this.parentSha,
+  });
+
+  final String sha;
+  final String? parentSha;
+  final String author;
+  final String timestamp;
+  final String message;
+  final List<RepositoryHistoryFileChange> changes;
+}
+
 class TrackStateProviderException implements Exception {
-  const TrackStateProviderException(this.message);
+  const TrackStateProviderException(this.message, {this.details = const {}});
 
   final String message;
+  final Map<String, Object?> details;
 
   @override
   String toString() => message;
+}
+
+class GitHubRateLimitException extends TrackStateProviderException {
+  const GitHubRateLimitException({
+    required String message,
+    required this.requestPath,
+    required this.statusCode,
+    this.retryAfter,
+  }) : super(message);
+
+  final String requestPath;
+  final int statusCode;
+  final DateTime? retryAfter;
 }
