@@ -226,6 +226,7 @@ class LocalGitTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: revision?.stdout.trim(),
+        createdCommit: false,
       );
     }
     await _runGit(['commit', '-m', request.message, '--', ...paths]);
@@ -706,6 +707,11 @@ class LocalGitTrackStateProvider
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 

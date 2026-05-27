@@ -23,24 +23,24 @@ class Ts982BlockedRequestObservation:
 @dataclass
 class Ts982BootstrapSyncFailureObservation:
     repository: str
-    repository_metadata_urls: list[str] = field(default_factory=list)
+    startup_sync_urls: list[str] = field(default_factory=list)
     all_repository_request_urls: list[str] = field(default_factory=list)
     blocked_requests: list[Ts982BlockedRequestObservation] = field(default_factory=list)
 
     @property
-    def repository_metadata_path(self) -> str:
-        return f"/repos/{self.repository}".lower()
+    def startup_sync_path(self) -> str:
+        return f"/repos/{self.repository}/branches/main".lower()
 
     @property
     def blocked_was_exercised(self) -> bool:
         return len(self.blocked_requests) > 0
 
-    def record_repository_request(self, url: str, *, path: str) -> int:
+    def record_startup_sync_request(self, url: str, *, path: str) -> int:
         self.all_repository_request_urls.append(url)
         normalized_path = path.lower()
-        if normalized_path == self.repository_metadata_path:
-            self.repository_metadata_urls.append(url)
-            return len(self.repository_metadata_urls)
+        if normalized_path == self.startup_sync_path:
+            self.startup_sync_urls.append(url)
+            return len(self.startup_sync_urls)
         return 0
 
     def record_blocked_request(
@@ -70,12 +70,12 @@ class Ts982BootstrapSyncFailureRuntime(StoredWorkspaceProfilesRuntime):
         workspace_state: dict[str, object],
         observation: Ts982BootstrapSyncFailureObservation,
         fail_status_code: int = 500,
-        fail_on_repository_metadata_attempt: int = 2,
+        fail_on_startup_sync_attempt: int = 1,
     ) -> None:
         super().__init__(repository=repository, token=token, workspace_state=workspace_state)
         self._observation = observation
         self._fail_status_code = fail_status_code
-        self._fail_on_repository_metadata_attempt = fail_on_repository_metadata_attempt
+        self._fail_on_startup_sync_attempt = fail_on_startup_sync_attempt
         self._request_counts: Counter[str] = Counter()
 
     @property
@@ -91,19 +91,19 @@ class Ts982BootstrapSyncFailureRuntime(StoredWorkspaceProfilesRuntime):
 
         normalized_path = path.lower()
         self._request_counts[normalized_path] += 1
-        repository_metadata_attempt = self._observation.record_repository_request(
+        startup_sync_attempt = self._observation.record_startup_sync_request(
             url,
             path=path,
         )
         if (
-            normalized_path == self._observation.repository_metadata_path
-            and repository_metadata_attempt == self._fail_on_repository_metadata_attempt
+            normalized_path == self._observation.startup_sync_path
+            and startup_sync_attempt == self._fail_on_startup_sync_attempt
             and not self._observation.blocked_was_exercised
         ):
             self._observation.record_blocked_request(
                 url=url,
                 path=path,
-                attempt=repository_metadata_attempt,
+                attempt=startup_sync_attempt,
                 status_code=self._fail_status_code,
             )
             route.fulfill(

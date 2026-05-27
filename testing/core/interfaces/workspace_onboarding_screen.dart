@@ -23,6 +23,8 @@ abstract interface class WorkspaceOnboardingScreenHandle {
 
   Future<void> submit();
 
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16});
+
   WorkspaceOnboardingState captureState();
 
   WorkspaceOnboardingChoiceObservation observeTargetChoices();

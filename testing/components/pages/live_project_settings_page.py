@@ -109,7 +109,9 @@ class ProjectSettingsAdminTabObservation:
 
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_selector = 'flt-semantics[role="tab"]'
+    _visible_tab_selector = 'flt-semantics[role="tab"]:visible'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _remember_on_this_browser_selector = (
@@ -123,9 +125,8 @@ class LiveProjectSettingsPage:
     _status_id_selector = 'input[aria-label="ID"]'
     _status_name_selector = 'input[aria-label="Name"]'
     _transition_name_selector = 'input[aria-label="Transition name"]'
-    _save_settings_selector = 'flt-semantics[aria-label="Save settings"]'
+    _save_settings_label = "Save settings"
     _close_selector = 'flt-semantics[aria-label="Close"]'
-
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
@@ -138,46 +139,54 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if TrackStateTrackerPage.body_has_authenticated_session(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
-        connect_via_text = self._session.count(self._button_selector, has_text="Connect GitHub") > 0
+        connect_via_text = (
+            self._session.count(
+                self._visible_button_selector,
+                has_text="Connect GitHub",
+            )
+            > 0
+        )
         if not connect_via_aria and not connect_via_text:
             raise AssertionError(
-                "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
+                "Step 2 failed: the hosted runtime did not expose the Connect GitHub "
                 "action needed to enter the writable Settings flow.\n"
                 f"Observed body text:\n{current_body}",
             )
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
-                if connect_via_aria:
-                    self._session.click(self._connect_selector, timeout_ms=30_000)
-                else:
-                    self._session.click(
-                        self._button_selector,
-                        has_text="Connect GitHub",
-                        timeout_ms=30_000,
-                    )
+                self._open_connect_dialog()
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
+            self._scroll_into_view(self._token_input_selector)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-            self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-            self._session.click(
-                self._button_selector,
-                has_text="Connect token",
-                timeout_ms=30_000,
-            )
+            if self._session.count(self._connect_token_selector) > 0:
+                self._scroll_into_view(self._connect_token_selector)
+                self._session.click(self._connect_token_selector, timeout_ms=30_000)
+            else:
+                self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
+                self._session.click(
+                    self._visible_button_selector,
+                    has_text="Connect token",
+                    timeout_ms=30_000,
+                )
 
             try:
                 wait_match = self._session.wait_for_any_text(
                     [
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                         "GitHub connection failed:",
@@ -189,7 +198,7 @@ class LiveProjectSettingsPage:
                 if any(
                     marker in current_body
                     for marker in (
-                        connected_banner,
+                        *connected_banners,
                         "Attachments limited",
                         "Manage GitHub access",
                     )
@@ -198,21 +207,21 @@ class LiveProjectSettingsPage:
                 if attempt == 0:
                     continue
                 raise AssertionError(
-                    "Step 3 failed: submitting the fine-grained token never reached a "
+                    "Step 2 failed: submitting the fine-grained token never reached a "
                     "connected hosted session.\n"
                     f"Observed body text:\n{current_body}",
                 ) from None
 
             if wait_match.matched_text == "GitHub connection failed:":
                 raise AssertionError(
-                    "Step 3 failed: submitting the fine-grained token did not reach a "
+                    "Step 2 failed: submitting the fine-grained token did not reach a "
                     "connected hosted session.\n"
                     f"Observed body text:\n{wait_match.body_text}",
                 )
             return wait_match.body_text
 
         raise AssertionError(
-            "Step 3 failed: the hosted token connect flow could not complete.",
+            "Step 2 failed: the hosted token connect flow could not complete.",
         )
 
     def ensure_write_capable_connection(
@@ -223,17 +232,21 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = TrackStateTrackerPage.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if TrackStateTrackerPage.body_has_connected_banner(
+            current_body,
+            user_login=user_login,
+            repository=repository,
+        ):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
         connect_via_text = self._session.count(
-            self._button_selector,
+            self._visible_button_selector,
             has_text="Connect GitHub",
         ) > 0
         if not connect_via_aria and not connect_via_text:
@@ -245,19 +258,7 @@ class LiveProjectSettingsPage:
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
-                if connect_via_aria:
-                    self._scroll_into_view(self._connect_selector)
-                    self._session.click(self._connect_selector, timeout_ms=30_000)
-                else:
-                    connect_button_selector = (
-                        'flt-semantics[role="button"][aria-label="Connect GitHub"]'
-                    )
-                    self._scroll_into_view(connect_button_selector)
-                    self._session.click(
-                        self._button_selector,
-                        has_text="Connect GitHub",
-                        timeout_ms=30_000,
-                    )
+                self._open_connect_dialog()
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
             self._scroll_into_view(self._token_input_selector)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
@@ -266,16 +267,27 @@ class LiveProjectSettingsPage:
                 self._session.click(self._connect_token_selector, timeout_ms=30_000)
             else:
                 self._session.click(
-                    self._button_selector,
+                    self._visible_button_selector,
                     has_text="Connect token",
                     timeout_ms=30_000,
                 )
 
             try:
-                self._session.wait_for_text(
-                    connected_banner,
+                wait_match = self._session.wait_for_any_text(
+                    [
+                        *connected_banners,
+                        "Attachments limited",
+                        "Manage GitHub access",
+                        "GitHub connection failed:",
+                    ],
                     timeout_ms=timeout_seconds * 1_000,
                 )
+                if wait_match.matched_text == "GitHub connection failed:":
+                    raise AssertionError(
+                        "Step 2 failed: submitting the fine-grained token did not "
+                        "reach a write-capable hosted session.\n"
+                        f"Observed body text:\n{wait_match.body_text}",
+                    )
                 return self.body_text()
             except WebAppTimeoutError:
                 current_body = self.body_text()
@@ -285,12 +297,21 @@ class LiveProjectSettingsPage:
                         "reach a write-capable hosted session.\n"
                         f"Observed body text:\n{current_body}",
                     ) from None
+                if any(
+                    marker in current_body
+                    for marker in (
+                        *connected_banners,
+                        "Attachments limited",
+                        "Manage GitHub access",
+                    )
+                ):
+                    return current_body
                 if attempt == 0:
                     continue
                 raise AssertionError(
                     "Step 2 failed: the hosted session never exposed the connected "
                     "write-capable banner after the token submit.\n"
-                    f"Expected banner: {connected_banner}\n"
+                    f"Expected one of: {connected_banners}\n"
                     f"Observed body text:\n{current_body}",
                 ) from None
 
@@ -532,14 +553,16 @@ class LiveProjectSettingsPage:
             attachment_storage_visible=bool(payload.get("attachmentStorageVisible")),
             add_status_visible=bool(payload.get("addStatusVisible")),
         )
-
     def add_status(
         self,
         *,
         status_id: str,
         status_name: str,
     ) -> tuple[str, str]:
-        self._session.click('flt-semantics[aria-label="Add status"]', timeout_ms=30_000)
+        self._session.click(
+            'flt-semantics[role="button"][aria-label="Add status"]:visible',
+            timeout_ms=30_000,
+        )
         self._session.wait_for_selector(self._status_id_selector, timeout_ms=30_000)
         self._session.fill(self._status_id_selector, status_id, timeout_ms=30_000)
         self._session.fill(self._status_name_selector, status_name, timeout_ms=30_000)
@@ -550,13 +573,17 @@ class LiveProjectSettingsPage:
             state="hidden",
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._save_settings_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._visible_button_selector,
+            has_text=self._save_settings_label,
+            timeout_ms=30_000,
+        )
         status_list_text = self.body_text()
         return status_dialog_text, status_list_text
 
     def open_workflows_tab(self) -> str:
         self._session.click(
-            'flt-semantics[role="tab"][aria-label="Workflows"]',
+            'flt-semantics[role="tab"][aria-label="Workflows"]:visible',
             timeout_ms=30_000,
         )
         self._session.wait_for_selector(
@@ -588,29 +615,54 @@ class LiveProjectSettingsPage:
         )
         workflow_dialog_text = self.body_text()
         self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
-        self._session.wait_for_selector(self._save_settings_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._visible_button_selector,
+            has_text=self._save_settings_label,
+            timeout_ms=30_000,
+        )
         workflow_tab_text = self.body_text()
         return workflow_dialog_text, workflow_tab_text
 
     def save_settings(self) -> str:
-        self._session.click(self._save_settings_selector, timeout_ms=30_000)
-        self._session.wait_for_text(self._settings_admin_heading, timeout_ms=120_000)
+        self.click_save_settings(timeout_ms=30_000)
+        self.wait_for_save_cycle_completion(timeout_ms=120_000)
         return self.body_text()
 
     def click_save_settings(self, *, timeout_ms: int = 30_000) -> str:
-        self._scroll_into_view(self._save_settings_selector)
-        self._session.click(self._save_settings_selector, timeout_ms=timeout_ms)
+        self._session.click(
+            self._visible_button_selector,
+            has_text=self._save_settings_label,
+            timeout_ms=timeout_ms,
+        )
         return self.body_text()
 
     def wait_for_save_cycle_completion(self, *, timeout_ms: int = 120_000) -> str:
         self._session.wait_for_function(
             """
-            (selector) => {
-              const button = document.querySelector(selector);
+            (saveSettingsLabel) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
+                const text = (candidate.innerText ?? '').trim();
+                const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                return isVisible(candidate)
+                  && (text === saveSettingsLabel || aria === saveSettingsLabel);
+              });
               return !!button && button.getAttribute('aria-disabled') !== 'true';
             }
             """,
-            arg=self._save_settings_selector,
+            arg=self._save_settings_label,
             timeout_ms=timeout_ms,
         )
         return self.body_text()
@@ -618,9 +670,27 @@ class LiveProjectSettingsPage:
     def read_save_state(self) -> ProjectSettingsSaveState:
         payload = self._session.evaluate(
             r"""
-            (selector) => {
+            (saveSettingsLabel) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const bodyText = document.body?.innerText ?? '';
-              const button = document.querySelector(selector);
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
+                const text = (candidate.innerText ?? '').trim();
+                const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                return isVisible(candidate)
+                  && (text === saveSettingsLabel || aria === saveSettingsLabel);
+              });
               const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
               return {
                 bodyText,
@@ -629,7 +699,7 @@ class LiveProjectSettingsPage:
               };
             }
             """,
-            arg=self._save_settings_selector,
+            arg=self._save_settings_label,
         )
         if not isinstance(payload, dict):
             raise AssertionError(
@@ -644,7 +714,6 @@ class LiveProjectSettingsPage:
                 str(save_failure_text).strip() if save_failure_text is not None else None
             ),
         )
-
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
@@ -1569,7 +1638,6 @@ class LiveProjectSettingsPage:
             primary_callout=self._repository_access_callout(primary_payload),
             secondary_callout=self._repository_access_callout(secondary_payload),
         )
-
     def observe_saved_configuration(
         self,
         *,
@@ -1656,6 +1724,101 @@ class LiveProjectSettingsPage:
             """,
             arg=selector,
         )
+
+    def _open_connect_dialog(self) -> None:
+        if self._session.count(self._connect_selector) > 0:
+            self._scroll_into_view(self._connect_selector)
+            self._session.click(self._connect_selector, timeout_ms=30_000)
+            return
+
+        payload = self._session.evaluate(
+            """
+            (expectedText) => {
+              const isVisible = (candidate) => {
+                const rect = candidate.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  const text = (candidate.innerText ?? '').trim();
+                  const ariaLabel = (candidate.getAttribute('aria-label') ?? '').trim();
+                  const role = (candidate.getAttribute('role') ?? '').trim();
+                  return role === 'button'
+                    && isVisible(candidate)
+                    && (text === expectedText || ariaLabel === expectedText);
+                })
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+                })[0];
+              if (!match) {
+                return null;
+              }
+              const rect = match.getBoundingClientRect();
+              return {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+              };
+            }
+            """,
+            arg="Connect GitHub",
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                'Step 2 failed: the hosted runtime did not expose a visible "Connect GitHub" '
+                "control.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        self._session.mouse_click(
+            float(payload["x"]) + (float(payload["width"]) / 2),
+            float(payload["y"]) + (float(payload["height"]) / 2),
+        )
+
+    def _click_visible_semantics_control(self, *, label: str, role: str) -> None:
+        clicked = self._session.evaluate(
+            """
+            ({ expectedLabel, expectedRole }) => {
+              const isVisible = (candidate) => {
+                const rect = candidate.getBoundingClientRect();
+                const style = window.getComputedStyle(candidate);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const normalize = (value) => (value ?? '').trim();
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  const role = candidate.getAttribute('role') ?? '';
+                  const aria = normalize(candidate.getAttribute('aria-label'));
+                  const text = normalize(candidate.innerText);
+                  return role === expectedRole
+                    && isVisible(candidate)
+                    && (aria === expectedLabel || text === expectedLabel);
+                })
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+                })[0];
+              if (!match) {
+                return false;
+              }
+              match.scrollIntoView({ block: 'center', inline: 'center' });
+              match.click();
+              return true;
+            }
+            """,
+            arg={"expectedLabel": label, "expectedRole": role},
+        )
+        if clicked is not True:
+            raise AssertionError(
+                f'The Settings surface did not expose a visible {role} labeled "{label}".\n'
+                f"Observed body text:\n{self.body_text()}",
+            )
 
     def _wait_for_visible_semantics_text(self, text: str, *, timeout_ms: int) -> str:
         payload = self._session.wait_for_function(

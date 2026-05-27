@@ -5,17 +5,17 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from testing.components.pages.live_workspace_switcher_page import (
-    LiveWorkspaceSwitcherPage,
-    WorkspaceSwitcherTriggerObservation,
-)
-from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import WebAppTimeoutError
-from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
-    DelayedAuthWorkspaceProfilesRuntime,
-)
+if TYPE_CHECKING:
+    from testing.components.pages.live_workspace_switcher_page import (
+        LiveWorkspaceSwitcherPage,
+        WorkspaceSwitcherTriggerObservation,
+    )
+    from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
+    from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
+        DelayedAuthWorkspaceProfilesRuntime,
+    )
 
 
 @dataclass
@@ -317,6 +317,8 @@ def safe_trigger_payload(
     *,
     timeout_ms: int = 1_000,
 ) -> dict[str, Any] | None:
+    from testing.core.interfaces.web_app_session import WebAppTimeoutError
+
     try:
         trigger = page.observe_trigger(timeout_ms=timeout_ms)
     except (AssertionError, WebAppTimeoutError):
@@ -327,6 +329,8 @@ def safe_trigger_payload(
 def try_observe_trigger(
     page: LiveWorkspaceSwitcherPage,
 ) -> WorkspaceSwitcherTriggerObservation | None:
+    from testing.core.interfaces.web_app_session import WebAppTimeoutError
+
     try:
         return page.observe_trigger(timeout_ms=1_000)
     except (AssertionError, WebAppTimeoutError):

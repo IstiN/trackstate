@@ -5,8 +5,9 @@ import json
 import time
 from dataclasses import dataclass, field
 from threading import Lock
+from urllib.parse import parse_qs, urlsplit
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Request, Route, sync_playwright
 
 from testing.frameworks.python.playwright_web_app_session import PlaywrightWebAppSession
 
@@ -20,6 +21,11 @@ class StartupRecoveryObservedEvent:
 @dataclass(frozen=True)
 class StartupRecoveryBlockedRequestObservation(StartupRecoveryObservedEvent):
     url: str
+    body_text_snapshot: str
+    visible_navigation_labels: tuple[str, ...]
+    settings_selected: bool
+    settings_heading_visible: bool
+    topbar_title_visible: bool
 
 
 @dataclass
@@ -32,9 +38,23 @@ class StartupRecoveryRateLimitObservation:
     _next_observed_order: int = field(default=1, init=False, repr=False)
     _event_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
-    def record_blocked_request(self, url: str) -> StartupRecoveryBlockedRequestObservation:
+    def record_blocked_request(
+        self,
+        url: str,
+        *,
+        body_text_snapshot: str,
+        visible_navigation_labels: tuple[str, ...],
+        settings_selected: bool,
+        settings_heading_visible: bool,
+        topbar_title_visible: bool,
+    ) -> StartupRecoveryBlockedRequestObservation:
         observation = StartupRecoveryBlockedRequestObservation(
             url=url,
+            body_text_snapshot=body_text_snapshot,
+            visible_navigation_labels=visible_navigation_labels,
+            settings_selected=settings_selected,
+            settings_heading_visible=settings_heading_visible,
+            topbar_title_visible=topbar_title_visible,
             **self._reserve_event_payload(),
         )
         self.blocked_requests.append(observation)
@@ -90,12 +110,12 @@ class StartupRecoveryRateLimitRuntime(
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 1200})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         self._page = self._context.new_page()
+        self._page.on("request", self._handle_page_request)
         return PlaywrightWebAppSession(self._page)
 
     def _handle_github_api_route(self, route: Route) -> None:
         url = route.request.url
-        if f"/contents/{self._observation.blocked_repository_path}" in url:
-            self._observation.record_blocked_request(url)
+        if self._is_blocked_request(url):
             route.fulfill(
                 status=403,
                 content_type="application/json",
@@ -114,7 +134,85 @@ class StartupRecoveryRateLimitRuntime(
                 },
             )
             return
-        route.continue_()
+        route.fallback()
+
+    def _handle_page_request(self, request: Request) -> None:
+        url = request.url
+        if not self._is_blocked_request(url):
+            return
+        snapshot = self._capture_ui_snapshot()
+        self._observation.record_blocked_request(
+            url,
+            body_text_snapshot=str(snapshot["body_text"]),
+            visible_navigation_labels=tuple(snapshot["visible_navigation_labels"]),
+            settings_selected=bool(snapshot["settings_selected"]),
+            settings_heading_visible=bool(snapshot["settings_heading_visible"]),
+            topbar_title_visible=bool(snapshot["topbar_title_visible"]),
+        )
+
+    def _capture_ui_snapshot(self) -> dict[str, object]:
+        if self._page is None:
+            return {
+                "body_text": "",
+                "visible_navigation_labels": [],
+                "settings_selected": False,
+                "settings_heading_visible": False,
+                "topbar_title_visible": False,
+            }
+        try:
+            body_text = self._page.locator("body").inner_text(timeout=2_000)
+        except Exception:
+            body_text = ""
+        try:
+            payload = self._page.evaluate(
+                """
+                () => {
+                  const selectedLabels = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"][aria-current="true"]'),
+                  )
+                    .map((candidate) => (candidate.innerText ?? '').trim())
+                    .filter((label) => label.length > 0);
+                  return {
+                    settings_selected: selectedLabels.includes('Settings'),
+                  };
+                }
+                """,
+            )
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return {
+                "body_text": body_text,
+                "visible_navigation_labels": self._visible_navigation_labels(body_text),
+                "settings_selected": False,
+                "settings_heading_visible": "Project settings administration" in body_text,
+                "topbar_title_visible": "Project Settings" in body_text,
+            }
+        return {
+            "body_text": body_text,
+            "visible_navigation_labels": self._visible_navigation_labels(body_text),
+            "settings_selected": bool(payload.get("settings_selected", False)),
+            "settings_heading_visible": "Project settings administration" in body_text,
+            "topbar_title_visible": "Project Settings" in body_text,
+        }
+
+    @staticmethod
+    def _visible_navigation_labels(body_text: str) -> list[str]:
+        return [
+            label
+            for label in ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
+            if label in body_text
+        ]
+
+    def _is_blocked_request(self, url: str) -> bool:
+        parsed_url = urlsplit(url)
+        expected_path_suffix = f"/contents/{self._observation.blocked_repository_path}"
+        return (
+            parsed_url.scheme == "https"
+            and parsed_url.netloc == "api.github.com"
+            and parsed_url.path.endswith(expected_path_suffix)
+            and bool(parse_qs(parsed_url.query).get("ref"))
+        )
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         if self._context is not None:

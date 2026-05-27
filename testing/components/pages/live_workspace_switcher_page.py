@@ -612,9 +612,14 @@ class WorkspaceTriggerFocusStateObservation:
 class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
-    _top_bar_button_selector = 'button, flt-semantics[role="button"], [role="button"]'
+    _top_bar_button_selector = 'button,flt-semantics[role="button"],[role="button"]'
     _first_top_bar_control_label = "Create issue"
     _trigger_label_prefix = "Workspace switcher:"
+    _trigger_selector = (
+        'button[aria-label^="Workspace switcher:"],'
+        'flt-semantics[aria-label^="Workspace switcher:"],'
+        '[role="button"][aria-label^="Workspace switcher:"]'
+    )
     _button_selector = 'button, flt-semantics[role="button"], [role="button"]'
     _workspace_trigger_selector = '[aria-label^="Workspace switcher:"]'
     _switcher_heading = "Workspace switcher"
@@ -978,7 +983,7 @@ class LiveWorkspaceSwitcherPage:
                 """
                 (label) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                  return Array.from(document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'))
                     .some((element) =>
                       normalize(element.innerText) === label
                       && element.getAttribute('aria-current') === 'true');
@@ -1061,7 +1066,11 @@ class LiveWorkspaceSwitcherPage:
                     f"Observed body text:\n{self.current_body_text()}",
                 ) from error
         active = self._session.active_element()
-        if self._is_workspace_trigger_label(active.accessible_name):
+        if self._is_workspace_trigger_focus_target(
+            active.accessible_name,
+            active.tag_name,
+            active.role,
+        ):
             return
 
         focus_probe: object = None
@@ -4291,7 +4300,14 @@ class LiveWorkspaceSwitcherPage:
         self,
         sequence: tuple[FocusNavigationStep, ...],
     ) -> bool:
-        return any(self._is_workspace_trigger_label(step.after_label) for step in sequence)
+        return any(
+            self._is_workspace_trigger_focus_target(
+                step.after_label,
+                step.after_tag_name,
+                step.after_role,
+            )
+            for step in sequence
+        )
 
     def observe_trigger_focusability(
         self,
@@ -4316,7 +4332,7 @@ class LiveWorkspaceSwitcherPage:
               const labelFor = (element) =>
                 normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
               const trigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
               )
                 .filter(isVisible)
                 .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -4381,7 +4397,7 @@ class LiveWorkspaceSwitcherPage:
                   const labelFor = (element) =>
                     normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                    document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -4467,7 +4483,7 @@ class LiveWorkspaceSwitcherPage:
                   const labelFor = (element) =>
                     normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                    document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -4543,7 +4559,7 @@ class LiveWorkspaceSwitcherPage:
                   const labelFor = (element) =>
                     normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                    document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -4639,7 +4655,7 @@ class LiveWorkspaceSwitcherPage:
                   const labelFor = (element) =>
                     normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                    document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -4838,7 +4854,11 @@ class LiveWorkspaceSwitcherPage:
                 after_outer_html=after.outer_html,
             )
             steps.append(step)
-            if self._is_workspace_trigger_label(after.accessible_name):
+            if self._is_workspace_trigger_focus_target(
+                after.accessible_name,
+                after.tag_name,
+                after.role,
+            ):
                 return tuple(steps)
         raise AssertionError(
             f"Keyboard Tab navigation from {start_description} never reached the "
@@ -5112,11 +5132,35 @@ class LiveWorkspaceSwitcherPage:
                   height: rect.height,
                 };
               };
+              const isWorkspaceRow = (text) =>
+                text.includes('Branch:')
+                && (text.includes('Hosted') || text.includes('Local'))
+                && (
+                  text.includes('Open')
+                  || text.includes('Active')
+                  || text.includes('Unavailable')
+                  || text.includes('Needs sign-in')
+                  || text.includes('Attachments limited')
+                  || text.includes('Read-only')
+                  || text.includes('Connected')
+                );
+              const isWorkspaceSwitcherSurfaceText = (text) =>
+                text.includes('Workspace switcher')
+                && (
+                  text.includes('Saved workspaces')
+                  || text.includes('Save and switch')
+                  || text.includes('Add workspace')
+                  || isWorkspaceRow(text)
+                  || text.includes('Hosted Local')
+                  || (text.includes('Repository') && text.includes('Branch'))
+                );
               const visibleDialogs = Array.from(
                 document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
               ).filter(isVisible);
               let switcher = visibleDialogs.find((candidate) =>
-                normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
+                isWorkspaceSwitcherSurfaceText(
+                  normalize(candidate.innerText || candidate.textContent),
+                ),
               );
               if (!switcher) {
                 const headings = Array.from(document.querySelectorAll('*'))
@@ -5133,28 +5177,14 @@ class LiveWorkspaceSwitcherPage:
                   .filter((candidate) =>
                     candidate.label === 'Workspace switcher'
                     || candidate.text === 'Workspace switcher'
-                    || (
-                      candidate.text.includes('Workspace switcher')
-                      && (
-                        candidate.text.includes('Saved workspaces')
-                        || candidate.text.includes('Save and switch')
-                        || candidate.text.includes('Hosted Local')
-                      )
-                    )
+                    || isWorkspaceSwitcherSurfaceText(candidate.text)
                   )
                   .sort((left, right) => left.area - right.area);
                 for (const headingCandidate of headings) {
                   let current = headingCandidate.element;
                   while (current && current !== document.body) {
                     const text = normalize(current.innerText || current.textContent || '');
-                    if (
-                      text.includes('Workspace switcher')
-                      && (
-                        text.includes('Saved workspaces')
-                        || text.includes('Save and switch')
-                        || text.includes('Hosted Local')
-                      )
-                    ) {
+                    if (isWorkspaceSwitcherSurfaceText(text)) {
                       switcher = current;
                       break;
                     }
@@ -5276,20 +5306,22 @@ class LiveWorkspaceSwitcherPage:
               const interactiveTextElements = Array.from(switcher.querySelectorAll(interactiveSelector))
                 .filter(isVisible)
                 .map((element) => {
-                  const visibleText = visibleTextFor(element);
+                  const label = labelFor(element);
+                  const visibleText = visibleTextFor(element) || label;
                   const backgroundColor = resolveBackgroundColor(
                     element,
                     toHex(window.getComputedStyle(switcher).backgroundColor),
                   );
                   const foregroundColor = resolveForegroundColor(element);
                   return {
-                    label: labelFor(element),
+                    label,
                     visibleText,
                     role: element.getAttribute('role'),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
                     ...rectPayload(element),
+                    tagName: element.tagName.toLowerCase(),
                   };
                 })
                 .filter((element) => element.visibleText.length > 0);
@@ -5312,6 +5344,7 @@ class LiveWorkspaceSwitcherPage:
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
                     ...rectPayload(element),
+                    tagName: element.tagName.toLowerCase(),
                   };
                 })
                 .filter((element) => element !== null);
@@ -5363,28 +5396,71 @@ class LiveWorkspaceSwitcherPage:
                 'Local Git',
                 'Saved hosted workspace',
               ]);
+              const resolveBadgeLabel = (value) => {
+                const normalized = normalize(value);
+                if (badgeLabels.has(normalized)) {
+                  return normalized;
+                }
+                for (const label of badgeLabels) {
+                  if (normalized === normalize(`${label} ${label}`)) {
+                    return label;
+                  }
+                }
+                return null;
+              };
               const dialogBackground = toHex(window.getComputedStyle(switcher).backgroundColor);
               const badgeElements = Array.from(switcher.querySelectorAll('*'))
                 .filter(isVisible)
-                .filter((element) => badgeLabels.has(normalize(element.innerText || element.textContent)))
-                .filter((element) => {
-                  const rect = element.getBoundingClientRect();
+                .map((element) => ({
+                  element,
+                  label: resolveBadgeLabel(element.innerText || element.textContent),
+                }))
+                .filter((candidate) => candidate.label !== null)
+                .filter((candidate) => {
+                  const rect = candidate.element.getBoundingClientRect();
                   return rect.height <= 40 && rect.width <= 180;
                 });
-              const badges = badgeElements.map((element) => {
+              const badges = badgeElements.map((candidate) => {
+                const { element, label } = candidate;
                 const backgroundColor = resolveBackgroundColor(element, dialogBackground);
                 const style = window.getComputedStyle(element);
                 return {
-                  label: normalize(element.innerText || element.textContent),
+                  label,
                   foregroundColor: toHex(style.color),
                   backgroundColor,
                   contrastRatio: contrastRatio(style.color, backgroundColor),
                   ...rectPayload(element),
                 };
               });
+              const panelScopedInteractiveElements = panelScopedControls
+                .map((element) => ({
+                  label: labelFor(element),
+                  accessibleLabel: normalize(
+                    element.getAttribute('aria-label')
+                    || element.getAttribute('placeholder')
+                    || '',
+                  ),
+                  role: element.getAttribute('role'),
+                  tagName: element.tagName.toLowerCase(),
+                  ...rectPayload(element),
+                }))
+                .filter((candidate) => candidate.label.length > 0);
+              for (const candidate of panelScopedInteractiveElements) {
+                if (interactiveElements.some((element) =>
+                  element.label === candidate.label
+                  && Math.abs(element.x - candidate.x) < 1
+                  && Math.abs(element.y - candidate.y) < 1
+                  && Math.abs(element.width - candidate.width) < 1
+                  && Math.abs(element.height - candidate.height) < 1
+                )) {
+                  continue;
+                }
+                interactiveElements.push(candidate);
+              }
               const triggerCandidates = [
                 ...Array.from(document.querySelectorAll('button')),
                 ...Array.from(document.querySelectorAll('flt-semantics[role="button"]')),
+                ...Array.from(document.querySelectorAll('[role="button"]')),
               ].filter((element, index, all) => all.indexOf(element) === index);
               const workspaceTrigger = triggerCandidates.find((candidate) =>
                 isVisible(candidate)
@@ -5593,15 +5669,11 @@ class LiveWorkspaceSwitcherPage:
     ) -> WorkspaceSwitcherTriggerObservation:
         try:
             switcher = self.observe_open_switcher(timeout_ms=min(timeout_ms, 5_000))
-        except AssertionError:
+        except (AssertionError, WebAppTimeoutError):
             switcher = self.open_and_observe(timeout_ms=timeout_ms)
-        open_labels = (
-            f"Open: {display_name}",
-            f"Open workspace: {display_name}",
-        )
-        clicked_open_label = self._session.evaluate(
+        row_click_target = self._session.evaluate(
             """
-            ({ openLabels, displayName, targetTypeLabel, detailContains }) => {
+            ({ displayName, targetTypeLabel, detailContains, expectedStateLabel }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
               const isVisible = (element) => {
                 if (!element) {
@@ -5614,60 +5686,104 @@ class LiveWorkspaceSwitcherPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
-              const labelFor = (element) =>
-                normalize(
-                  element.getAttribute?.('aria-label')
-                  || element.innerText
-                  || element.textContent
-                  || '',
-                );
-              const matchesRow = (element) => {
-                let current = element;
-                while (current && current !== document.body) {
-                  const text = normalize(current.innerText || current.textContent || '');
-                  if (
-                    text.includes(displayName)
-                    && text.includes(targetTypeLabel)
-                    && (!detailContains || text.includes(detailContains))
-                  ) {
-                    return true;
-                  }
-                  current = current.parentElement;
-                }
-                return false;
-              };
-              const candidates = Array.from(document.querySelectorAll('*'))
+              const normalizedDetailContains = normalize(detailContains).toLowerCase();
+              const normalizedExpectedStateLabel = normalize(expectedStateLabel);
+              const match = Array.from(document.querySelectorAll('*'))
                 .filter(isVisible)
-                .map((element) => ({
-                  element,
-                  label: labelFor(element),
-                }))
-                .filter((candidate) => openLabels.includes(candidate.label));
-              const match =
-                candidates.find((candidate) => matchesRow(candidate.element))
-                ?? candidates[0]
-                ?? null;
-              if (!match) {
-                return null;
-              }
-              match.element.click();
-              return match.label;
+                .map((element) => {
+                  const label = normalize(
+                    element.getAttribute?.('aria-label')
+                      || element.innerText
+                      || element.textContent
+                      || '',
+                  );
+                  if (
+                    !label.includes(displayName)
+                    || !label.includes(targetTypeLabel)
+                    || (
+                      normalizedExpectedStateLabel.length > 0
+                      && !label.includes(normalizedExpectedStateLabel)
+                    )
+                    || (
+                      normalizedDetailContains.length > 0
+                      && !label.toLowerCase().includes(normalizedDetailContains)
+                    )
+                  ) {
+                    return null;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    label,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                    area: rect.width * rect.height,
+                    tagName: element.tagName,
+                    looksLikeRowSummary:
+                      label.startsWith(`${displayName}, ${targetTypeLabel},`)
+                      && label.includes('Branch:'),
+                  };
+                })
+                .filter((candidate) => candidate !== null)
+                .sort((left, right) => {
+                  if (left.looksLikeRowSummary !== right.looksLikeRowSummary) {
+                    return left.looksLikeRowSummary ? -1 : 1;
+                  }
+                  const rankFor = (candidate) => {
+                    switch (candidate.tagName) {
+                      case 'BUTTON':
+                      case 'FLT-PLATFORM-VIEW':
+                      case 'DIV':
+                        return 0;
+                      case 'FLT-SEMANTICS':
+                        return 1;
+                      default:
+                        return 2;
+                    }
+                  };
+                  const leftRank = rankFor(left);
+                  const rightRank = rankFor(right);
+                  if (leftRank != rightRank) {
+                    return leftRank - rightRank;
+                  }
+                  return left.area - right.area;
+                })[0] ?? null;
+              return match;
             }
             """,
             arg={
-                "openLabels": open_labels,
                 "displayName": display_name,
                 "targetTypeLabel": target_type_label,
                 "detailContains": detail_contains,
+                "expectedStateLabel": expected_state_label,
             },
         )
-        if clicked_open_label is None:
+        if row_click_target is None:
             raise AssertionError(
                 f'The workspace switcher did not expose a selectable "{display_name}" '
                 f'{target_type_label} workspace row.\n'
                 f"Observed switcher text:\n{switcher.switcher_text}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        mouse_page = getattr(self._session, "_page", None)
+        if mouse_page is not None:
+            mouse_page.mouse.click(row_click_target["x"], row_click_target["y"])
+        else:
+            clicked_row = self._session.evaluate(
+                """
+                ({ x, y }) => {
+                  document.elementFromPoint(x, y)?.click();
+                  return true;
+                }
+                """,
+                arg={"x": row_click_target["x"], "y": row_click_target["y"]},
+            )
+            if clicked_row is not True:
+                raise AssertionError(
+                    f'Unable to select workspace "{display_name}" from the open workspace '
+                    "switcher.\n"
+                    f"Observed switcher text:\n{switcher.switcher_text}\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                )
         try:
             self._session.wait_for_function(
                 """
@@ -5684,20 +5800,26 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  return Array.from(document.querySelectorAll('*'))
+                  return Array.from(document.querySelectorAll('button, flt-semantics[role="button"]'))
                     .filter(isVisible)
-                    .some((candidate) =>
-                      normalize(candidate.innerText || candidate.textContent || '')
-                        === 'Save and switch'
-                    );
+                    .some((candidate) => {
+                      const label = normalize(
+                        candidate.getAttribute('aria-label')
+                          || candidate.innerText
+                          || candidate.textContent
+                          || '',
+                      );
+                      return label === 'Save and switch'
+                        && candidate.getAttribute('aria-disabled') !== 'true';
+                    });
                 }
                 """,
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
-                f'Selecting workspace "{display_name}" exposed `{clicked_open_label}`, '
-                "but the follow-up `Save and switch` control never became visible.\n"
+                f'Selecting workspace "{display_name}" did not enable the follow-up '
+                "`Save and switch` control.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         clicked_save = self._session.evaluate(
@@ -5715,10 +5837,16 @@ class LiveWorkspaceSwitcherPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
-              const save = Array.from(document.querySelectorAll('*'))
+              const save = Array.from(document.querySelectorAll('button, flt-semantics[role="button"]'))
                 .filter((candidate) => isVisible(candidate))
                 .find((candidate) =>
-                  normalize(candidate.innerText || candidate.textContent || '') === 'Save and switch'
+                  normalize(
+                    candidate.getAttribute('aria-label')
+                      || candidate.innerText
+                      || candidate.textContent
+                      || '',
+                  ) === 'Save and switch'
+                  && candidate.getAttribute('aria-disabled') !== 'true'
                 );
               if (!save) {
                 return false;
@@ -5730,9 +5858,8 @@ class LiveWorkspaceSwitcherPage:
         )
         if clicked_save is not True:
             raise AssertionError(
-                f'Selecting workspace "{display_name}" exposed `{clicked_open_label}`, '
-                "but the follow-up `Save and switch` control did not appear or could not "
-                "be activated.\n"
+                f'Selecting workspace "{display_name}" enabled `Save and switch`, '
+                "but that control could not be activated.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
         try:
@@ -5740,6 +5867,8 @@ class LiveWorkspaceSwitcherPage:
                 """
                 ({ displayName, targetTypeLabel, expectedStateLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const bodyText = normalize(document.body?.innerText || document.body?.textContent || '');
+                  const expectedPrefix = `Workspace switcher: ${displayName}, ${targetTypeLabel},`;
                   const isVisible = (element) => {
                     if (!element) {
                       return false;
@@ -5752,7 +5881,7 @@ class LiveWorkspaceSwitcherPage:
                       && style.display !== 'none';
                   };
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
+                    document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) =>
@@ -5762,16 +5891,13 @@ class LiveWorkspaceSwitcherPage:
                   if (!trigger) {
                     return null;
                   }
-                  const label = normalize(
-                    trigger.getAttribute('aria-label') || trigger.innerText || '',
-                  );
-                  if (!label.includes(`Workspace switcher: ${displayName}, ${targetTypeLabel},`)) {
+                  if (!bodyText.includes(expectedPrefix)) {
                     return null;
                   }
-                  if (expectedStateLabel && !label.endsWith(expectedStateLabel)) {
+                  if (expectedStateLabel && !bodyText.includes(`${expectedPrefix} ${expectedStateLabel}`)) {
                     return null;
                   }
-                  return label;
+                  return expectedPrefix;
                 }
                 """,
                 arg={
@@ -5785,7 +5911,7 @@ class LiveWorkspaceSwitcherPage:
             raise AssertionError(
                 f'Switching to workspace "{display_name}" did not update the workspace '
                 "switcher trigger to the expected active state.\n"
-                f"Observed open action: {clicked_open_label!r}\n"
+                f"Observed selected row: {row_click_target.get('label')!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self.observe_trigger(timeout_ms=timeout_ms)
@@ -6209,21 +6335,31 @@ class LiveWorkspaceSwitcherPage:
               const visibleText = (element) =>
                 normalize(element.innerText || element.textContent || '');
               const buttons = Array.from(
-                document.querySelectorAll(
-                  'button, flt-semantics[role="button"], [role="button"], [aria-label^="Workspace switcher:"]',
-                ),
+                document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
               ).filter(isVisible);
-              const trigger = buttons
+              const triggerCandidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
                 .filter((element) => {
                   const label = labelFor(element);
                   const text = visibleText(element);
-                  return label.includes('Workspace switcher:') || text.includes('Workspace switcher:');
+                  return label.startsWith('Workspace switcher:') || text.startsWith('Workspace switcher:');
+                })
+                .sort((left, right) => {
+                  const leftIsPreferred =
+                    left.tagName === 'BUTTON' || left.getAttribute('role') === 'button';
+                  const rightIsPreferred =
+                    right.tagName === 'BUTTON' || right.getAttribute('role') === 'button';
+                  if (leftIsPreferred != rightIsPreferred) {
+                    return leftIsPreferred ? -1 : 1;
+                  }
+                  return 0;
                 })
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
                   const rightRect = right.getBoundingClientRect();
                   return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                })[0] ?? null;
+                });
+              const trigger = triggerCandidates[0] ?? null;
               if (!trigger) {
                 return null;
               }
@@ -6257,9 +6393,40 @@ class LiveWorkspaceSwitcherPage:
             timeout_ms=timeout_ms,
         )
         if not isinstance(payload, dict):
-            raise AssertionError(
-                "The live app did not expose a visible workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
+            body_text = self.current_body_text()
+            trigger_line = next(
+                (
+                    line.strip()
+                    for line in body_text.splitlines()
+                    if line.strip().startswith("Workspace switcher:")
+                ),
+                None,
+            )
+            if trigger_line is None:
+                raise AssertionError(
+                    "The live app did not expose a visible workspace switcher trigger.\n"
+                    f"Observed body text:\n{body_text}",
+                )
+            semantic_label = trigger_line
+            match = re.match(
+                r"^Workspace switcher:\s*(.*?),\s*(Hosted|Local),\s*(.+)$",
+                semantic_label,
+            )
+            return WorkspaceSwitcherTriggerObservation(
+                viewport_width=0,
+                viewport_height=0,
+                semantic_label=semantic_label,
+                visible_text=semantic_label,
+                raw_text_lines=(semantic_label,),
+                display_name=match.group(1).strip() if match else "",
+                workspace_type=match.group(2).strip() if match else "",
+                state_label=match.group(3).strip() if match else "",
+                icon_count=0,
+                left=0,
+                top=0,
+                width=0,
+                height=0,
+                top_button_labels=tuple(),
             )
         semantic_label = str(payload["semanticLabel"])
         match = re.match(
@@ -6494,7 +6661,7 @@ class LiveWorkspaceSwitcherPage:
               switcherRect.width = switcherRect.right - switcherRect.left;
               switcherRect.height = switcherRect.bottom - switcherRect.top;
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
               ).filter(isVisible);
               const trigger = buttons
                 .filter((element) =>
@@ -6975,7 +7142,7 @@ class LiveWorkspaceSwitcherPage:
                   || text.includes('Save and switch')
                   || isWorkspaceRow(text);
                 const buttons = Array.from(
-                  document.querySelectorAll('flt-semantics[role="button"]'),
+                  document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
                 ).filter(isVisible);
                 const trigger = buttons
                   .filter((element) =>
@@ -8031,7 +8198,7 @@ class LiveWorkspaceSwitcherPage:
                   || '',
                 );
               const buttons = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
               ).filter(isVisible);
               const trigger = buttons.find((element) =>
                 labelFor(element).startsWith(triggerLabelPrefix),
@@ -8214,7 +8381,11 @@ class LiveWorkspaceSwitcherPage:
                     after_outer_html=active_after.outer_html,
                 )
             )
-            if self._is_workspace_trigger_label(active_after.accessible_name):
+            if self._is_workspace_trigger_focus_target(
+                active_after.accessible_name,
+                active_after.tag_name,
+                active_after.role,
+            ):
                 break
         after = self._trigger_snapshot(timeout_ms=timeout_ms)
         active = self._session.active_element()
@@ -8263,8 +8434,10 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 10_000,
     ) -> WorkspaceTriggerForwardFocusObservation:
         starting_focus = self._session.active_element()
-        if not self._is_workspace_trigger_label(starting_focus.accessible_name) and not self._is_workspace_trigger_label(
-            starting_focus.text,
+        if not self._is_workspace_trigger_focus_target(
+            starting_focus.accessible_name,
+            starting_focus.tag_name,
+            starting_focus.role,
         ):
             raise AssertionError(
                 "Forward keyboard navigation must start with the workspace switcher "
@@ -8309,8 +8482,10 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 10_000,
     ) -> WorkspaceTriggerReverseFocusObservation:
         starting_focus = self._session.active_element()
-        if self._is_workspace_trigger_label(starting_focus.accessible_name) or self._is_workspace_trigger_label(
-            starting_focus.text,
+        if self._is_workspace_trigger_focus_target(
+            starting_focus.accessible_name,
+            starting_focus.tag_name,
+            starting_focus.role,
         ):
             raise AssertionError(
                 "Reverse keyboard navigation must start from the control after the "
@@ -8342,7 +8517,7 @@ class LiveWorkspaceSwitcherPage:
                   const labelFor = (element) =>
                     normalize(element?.getAttribute?.('aria-label') || element?.innerText || element?.textContent || '');
                   const trigger = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                    document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
                   )
                     .filter(isVisible)
                     .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
@@ -8447,7 +8622,7 @@ class LiveWorkspaceSwitcherPage:
               }
               const bodyText = document.body?.innerText ?? '';
               const triggerVisible = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
               )
                 .filter(isVisible)
                 .some((element) =>
@@ -8455,7 +8630,7 @@ class LiveWorkspaceSwitcherPage:
                     .startsWith('Workspace switcher:'),
                 );
               const dashboardVisible = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
               )
                 .filter(isVisible)
                 .some((element) => normalize(element.innerText || '') === 'Dashboard');
@@ -8558,11 +8733,17 @@ class LiveWorkspaceSwitcherPage:
               };
               const trigger = Array.from(
                 document.querySelectorAll('button,[role="button"],flt-semantics[role="button"],[aria-label]'),
-              ).find((candidate) =>
-                isVisible(candidate)
-                && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
-                  .startsWith('Workspace switcher:')
-              );
+              )
+                .filter((candidate) =>
+                  isVisible(candidate)
+                  && normalize(candidate.getAttribute('aria-label') || candidate.innerText || candidate.textContent)
+                    .startsWith('Workspace switcher:')
+                )
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] ?? null;
               if (!trigger) {
                 return null;
               }
@@ -8654,7 +8835,11 @@ class LiveWorkspaceSwitcherPage:
             )
             if (
                 stop_when_workspace_trigger_reached
-                and self._is_workspace_trigger_label(after.accessible_name)
+                and self._is_workspace_trigger_focus_target(
+                    after.accessible_name,
+                    after.tag_name,
+                    after.role,
+                )
             ):
                 break
         return tuple(steps)
@@ -8676,12 +8861,36 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
+                  const isWorkspaceRow = (text) =>
+                    text.includes('Branch:')
+                    && (text.includes('Hosted') || text.includes('Local'))
+                    && (
+                      text.includes('Open')
+                      || text.includes('Active')
+                      || text.includes('Unavailable')
+                      || text.includes('Needs sign-in')
+                      || text.includes('Attachments limited')
+                      || text.includes('Read-only')
+                      || text.includes('Connected')
+                    );
+                  const isWorkspaceSwitcherSurfaceText = (text) =>
+                    text.includes('Workspace switcher')
+                    && (
+                      text.includes('Saved workspaces')
+                      || text.includes('Save and switch')
+                      || text.includes('Add workspace')
+                      || isWorkspaceRow(text)
+                      || text.includes('Hosted Local')
+                      || (text.includes('Repository') && text.includes('Branch'))
+                    );
                   const visibleDialogs = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
                   ).filter(isVisible);
                   if (
                     visibleDialogs.some((dialog) =>
-                      normalize(dialog.innerText || dialog.textContent).includes('Workspace switcher'),
+                      isWorkspaceSwitcherSurfaceText(
+                        normalize(dialog.innerText || dialog.textContent),
+                      ),
                     )
                   ) {
                     return true;
@@ -8694,14 +8903,7 @@ class LiveWorkspaceSwitcherPage:
                       || element.textContent
                       || '',
                     ));
-                  return headings.some((text) =>
-                    text.includes('Workspace switcher')
-                    && (
-                      text.includes('Saved workspaces')
-                      || text.includes('Save and switch')
-                      || text.includes('Hosted Local')
-                    )
-                  )
+                  return headings.some((text) => isWorkspaceSwitcherSurfaceText(text))
                     ? true
                     : null;
                 }
@@ -8746,19 +8948,22 @@ class LiveWorkspaceSwitcherPage:
                 && text.includes('Delete')
                 && (text.includes('Hosted') || text.includes('Local'))
                 && (text.includes('Open') || text.includes('Active'));
+              const isWorkspaceSwitcherSurfaceText = (text) =>
+                text.includes(heading)
+                && (
+                  text.includes('Saved workspaces')
+                  || text.includes('Save and switch')
+                  || text.includes('Add workspace')
+                  || text.includes('Hosted Local')
+                  || isWorkspaceRow(text)
+                  || (text.includes('Repository') && text.includes('Branch'))
+                );
               const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
                 .filter(isVisible)
                 .some((element) => {
                   const text = visibleText(element);
-                  return text.includes(heading)
-                    && (
-                      text.includes('Saved workspaces')
-                      || text.includes('Save and switch')
-                      || text.includes('Add workspace')
-                      || text.includes('Hosted Local')
-                        || isWorkspaceRow(text)
-                     );
-                 });
+                  return isWorkspaceSwitcherSurfaceText(text);
+                });
               window.__tsWorkspaceSwitcherDismissalState ??= {
                 hiddenSinceMs: null,
               };
@@ -8778,7 +8983,7 @@ class LiveWorkspaceSwitcherPage:
               }
               const bodyText = document.body?.innerText ?? '';
               const trigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button[aria-label],flt-semantics[aria-label],[role="button"]'),
               )
                 .filter(isVisible)
                 .find((element) =>
@@ -8786,7 +8991,7 @@ class LiveWorkspaceSwitcherPage:
                     .startsWith('Workspace switcher:'),
                 );
               const dashboardVisible = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
+                document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
               )
                 .filter(isVisible)
                 .some((element) => normalize(element.innerText || '') === 'Dashboard');
@@ -8817,6 +9022,20 @@ class LiveWorkspaceSwitcherPage:
     @staticmethod
     def _is_workspace_trigger_label(label: str | None) -> bool:
         return (label or "").startswith("Workspace switcher:")
+
+    @classmethod
+    def _is_workspace_trigger_focus_target(
+        cls,
+        label: str | None,
+        tag_name: str | None,
+        role: str | None,
+    ) -> bool:
+        if not cls._is_workspace_trigger_label(label):
+            return False
+        normalized_tag_name = (tag_name or "").upper()
+        if normalized_tag_name not in {"BUTTON", "FLT-SEMANTICS"}:
+            return False
+        return role in {None, "button"}
 
     def _accessible_saved_workspace_rows(
         self,
@@ -9237,7 +9456,9 @@ class LiveWorkspaceSwitcherPage:
             && activeTagName !== 'FLUTTER-VIEW'
           );
           const triggerVisible = Array.from(
-            document.querySelectorAll('flt-semantics[role="button"]'),
+            document.querySelectorAll(
+              'button[aria-label],flt-semantics[aria-label],[role="button"]',
+            ),
           )
             .filter(isVisible)
             .some((element) =>
@@ -9245,7 +9466,7 @@ class LiveWorkspaceSwitcherPage:
                 .startsWith(triggerLabelPrefix),
             );
           const dashboardVisible = Array.from(
-            document.querySelectorAll('flt-semantics[role="button"]'),
+            document.querySelectorAll('button,flt-semantics[role="button"],[role="button"]'),
           )
             .filter(isVisible)
             .some((element) => normalize(element.innerText || '') === 'Dashboard');
@@ -9373,7 +9594,10 @@ class LiveWorkspaceSwitcherPage:
                   }
                 }
               }
-              const buttons = visibleElements(document, 'flt-semantics[role="button"],[role="button"]');
+              const buttons = visibleElements(
+                document,
+                'button[aria-label],flt-semantics[aria-label],[role="button"]',
+              );
               const trigger = buttons.find((element) =>
                 normalize(element.getAttribute?.('aria-label') || element.innerText || '')
                   .startsWith(triggerLabelPrefix),
