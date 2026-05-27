@@ -185,11 +185,34 @@ bool isBrowserFocusWithinWorkspaceSwitcher() {
   )) {
     return true;
   }
+  // The trigger button lives in a separate DOM subtree from the panel, so
+  // the ancestor walk above won't find the panel identifier. Check the
+  // panelId attribute directly — the trigger sets
+  // data-trackstate-browser-focus-panel-id to the workspace-switcher id.
+  if (_activeBrowserFocusHasWorkspaceSwitcherPanelId()) {
+    return true;
+  }
   final ancestors = _recentBrowserWorkspaceSwitcherPointerAncestors;
   if (ancestors == null) {
     return false;
   }
   return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
+}
+
+bool _activeBrowserFocusHasWorkspaceSwitcherPanelId() {
+  final activeElement = web.document.activeElement;
+  if (activeElement is! web.Element) {
+    return false;
+  }
+  web.Element? current = activeElement;
+  while (current != null) {
+    final panelId = current.getAttribute(_browserFocusPanelIdAttribute);
+    if (panelId?.trim() == browserWorkspaceSwitcherSemanticsIdentifier) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
 }
 
 BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
