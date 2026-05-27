@@ -991,10 +991,14 @@ class IssueMutationService {
         resolution.issue!,
         body,
       );
+      final revision = await _currentRepositoryRevision(
+        providerRepository.providerAdapter,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
         value: updatedIssue,
+        revision: revision,
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
@@ -1246,6 +1250,27 @@ class IssueMutationService {
         final ProviderBackedTrackStateRepository repository => repository,
         _ => null,
       };
+
+  Future<String?> _currentRepositoryRevision(
+    TrackStateProviderAdapter provider,
+  ) async {
+    final mutator = switch (provider) {
+      final RepositoryFileMutator supported => supported,
+      _ => null,
+    };
+    if (mutator == null) {
+      return null;
+    }
+    final branch = await provider.resolveWriteBranch();
+    final result = await mutator.applyFileChanges(
+      RepositoryFileChangeRequest(
+        branch: branch,
+        message: 'Read current repository revision',
+        changes: const [],
+      ),
+    );
+    return result.revision;
+  }
 
   IssueMutationResult<T> _unsupported<T>({
     required String operation,
