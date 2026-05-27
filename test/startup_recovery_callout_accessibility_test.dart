@@ -12,7 +12,7 @@ void main() {
   });
 
   testWidgets(
-    'settings startup recovery callout uses retry startup label and AA-safe action states',
+    'settings startup recovery callout uses retry label and AA-safe action states',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final robot = SettingsScreenRobot(tester);
@@ -35,7 +35,7 @@ void main() {
         const expectedMessage =
             'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
         final callout = robot.startupRecoveryCallout;
-        final retryAction = robot.startupRecoveryActionButton('Retry startup');
+        final retryAction = robot.startupRecoveryActionButton('Retry');
         final connectAction = robot.startupRecoveryActionButton(
           'Connect GitHub',
         );
@@ -67,7 +67,7 @@ void main() {
           _buttonContrast(
             robot: robot,
             action: retryAction,
-            label: 'Retry startup',
+            label: 'Retry',
             states: const <WidgetState>{WidgetState.hovered},
             calloutBackground: calloutBackground,
           ),
@@ -81,7 +81,7 @@ void main() {
           _buttonContrast(
             robot: robot,
             action: retryAction,
-            label: 'Retry startup',
+            label: 'Retry',
             states: const <WidgetState>{WidgetState.focused},
             calloutBackground: calloutBackground,
           ),
