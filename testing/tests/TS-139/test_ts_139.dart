@@ -95,6 +95,7 @@ Future<void> _verifyCreateIssueEntryPointForSection(
     failures.add(
       'Step 2 failed in ${section.label}: no visible "Create issue" entry point '
       'was rendered after opening ${section.label} with dirty local changes. '
+      'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -105,7 +106,8 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   if (!openedCreateFlow) {
     failures.add(
       'Step 3 failed in ${section.label}: the visible "Create issue" entry point '
-      'could not be activated while the repository was dirty. Visible texts: '
+      'could not be activated while the repository was dirty. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -131,7 +133,8 @@ Future<void> _verifyCreateIssueEntryPointForSection(
       '${summaryVisible ? 'visible' : 'missing'}, Description='
       '${descriptionVisible ? 'visible' : 'missing'}, Save='
       '${saveVisible ? 'visible' : 'missing'}, Cancel='
-      '${cancelVisible ? 'visible' : 'missing'}. Visible texts: '
+      '${cancelVisible ? 'visible' : 'missing'}. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -142,7 +145,8 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   if (!cancelled) {
     failures.add(
       'Step 3 failed in ${section.label}: the create flow opened, but no visible '
-      '"Cancel" action was reachable to close it again. Visible texts: '
+      '"Cancel" action was reachable to close it again. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -153,7 +157,8 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   if (summaryStillVisible) {
     failures.add(
       'Step 3 failed in ${section.label}: tapping "Cancel" left the create form '
-      'open with the Summary field still visible. Visible texts: '
+      'open with the Summary field still visible. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -177,6 +182,7 @@ Future<void> _verifyDirtyRecoveryGuidance(
     failures.add(
       'Step 3 failed in JQL Search: the dirty-state recovery path could not be '
       'validated because no visible "Create issue" control was available. '
+      'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -187,7 +193,8 @@ Future<void> _verifyDirtyRecoveryGuidance(
   if (!openedCreateFlow) {
     failures.add(
       'Step 3 failed in JQL Search: "Create issue" was visible but not '
-      'interactive while the repository was dirty. Visible texts: '
+      'interactive while the repository was dirty. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -210,7 +217,9 @@ Future<void> _verifyDirtyRecoveryGuidance(
       failures.add(
         'Step 3 failed after submitting Create issue from JQL Search: expected '
         'dirty-state recovery guidance containing "$keyword", but it was not '
-        'visible. Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+        'visible. Top bar texts: '
+        '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
+        '${_formatSnapshot(screen.visibleTextsSnapshot())}. '
         'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
       );
       return;

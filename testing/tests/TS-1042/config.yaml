@@ -1,0 +1,12 @@
+test_id: TS-1042
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with stored hosted token state plus preloaded local and hosted workspace profiles.
+  - Delays the live repository tree bootstrap request (git/trees/main) by 10 seconds to exercise the ticket's secondary bootstrap latency condition on the current deployment.
+  - Records the GitHub /user request initiation timestamp from the Playwright route layer and requires dispatch within 2000ms of app launch.
+  - Captures the visible startup surface and later shell state for user-perspective verification.

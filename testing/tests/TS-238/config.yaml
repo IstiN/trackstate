@@ -1,0 +1,9 @@
+test_id: TS-238
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+notes:
+  - Reuses the shared ProjectQuickStartValidator parser to verify the quick-start validation command is exposed in a fenced markdown code block.
+  - Reads the repository's trackstate-setup/README.md contract directly from the checked-out main branch content under test.

@@ -4,6 +4,165 @@ enum IssueStatus { todo, inProgress, inReview, done }
 
 enum IssuePriority { highest, high, medium, low }
 
+enum TrackerLoadState { loading, partial, ready, error }
+
+enum TrackerDataDomain {
+  projectMeta,
+  issueSummaries,
+  repositoryIndex,
+  issueDetails,
+}
+
+enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
+
+enum TrackerStartupRecoveryKind { githubRateLimit }
+
+enum WorkspaceSyncDomain {
+  projectMeta,
+  issueSummaries,
+  issueDetails,
+  comments,
+  attachments,
+  repositoryIndex,
+}
+
+enum WorkspaceSyncSignal {
+  localHead,
+  localWorktree,
+  hostedRepository,
+  hostedSnapshotReload,
+  hostedSession,
+}
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
+
+enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
+
+enum WorkspaceSyncHealth { synced, checking, attentionNeeded, unavailable }
+
+const _unsetWorkspaceSyncStatusValue = Object();
+
+class TrackerStartupRecovery {
+  const TrackerStartupRecovery({
+    required this.kind,
+    this.failedPath,
+    this.retryAfter,
+  });
+
+  final TrackerStartupRecoveryKind kind;
+  final String? failedPath;
+  final DateTime? retryAfter;
+}
+
+class WorkspaceSyncDomainChange {
+  const WorkspaceSyncDomainChange({
+    required this.domain,
+    this.issueKeys = const <String>{},
+    this.paths = const <String>{},
+    this.isGlobal = false,
+  });
+
+  final WorkspaceSyncDomain domain;
+  final Set<String> issueKeys;
+  final Set<String> paths;
+  final bool isGlobal;
+
+  WorkspaceSyncDomainChange merge(WorkspaceSyncDomainChange other) {
+    if (domain != other.domain) {
+      throw ArgumentError('Cannot merge sync changes for different domains.');
+    }
+    return WorkspaceSyncDomainChange(
+      domain: domain,
+      issueKeys: {...issueKeys, ...other.issueKeys},
+      paths: {...paths, ...other.paths},
+      isGlobal: isGlobal || other.isGlobal,
+    );
+  }
+}
+
+class WorkspaceSyncResult {
+  const WorkspaceSyncResult({
+    this.trigger = WorkspaceSyncTrigger.automatic,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.domains = const <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{},
+  });
+
+  final WorkspaceSyncTrigger trigger;
+  final Set<WorkspaceSyncSignal> signals;
+  final Map<WorkspaceSyncDomain, WorkspaceSyncDomainChange> domains;
+
+  bool get hasChanges => domains.isNotEmpty;
+
+  Set<WorkspaceSyncDomain> get changedDomains => domains.keys.toSet();
+}
+
+class WorkspaceSyncStatus {
+  const WorkspaceSyncStatus({
+    this.health = WorkspaceSyncHealth.synced,
+    this.hasPendingRefresh = false,
+    this.lastCheckAt,
+    this.lastSuccessfulCheckAt,
+    this.nextRetryAt,
+    this.latestError,
+    this.lastResult,
+  });
+
+  final WorkspaceSyncHealth health;
+  final bool hasPendingRefresh;
+  final DateTime? lastCheckAt;
+  final DateTime? lastSuccessfulCheckAt;
+  final DateTime? nextRetryAt;
+  final String? latestError;
+  final WorkspaceSyncResult? lastResult;
+
+  WorkspaceSyncStatus copyWith({
+    WorkspaceSyncHealth? health,
+    bool? hasPendingRefresh,
+    Object? lastCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? lastSuccessfulCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? nextRetryAt = _unsetWorkspaceSyncStatusValue,
+    Object? latestError = _unsetWorkspaceSyncStatusValue,
+    Object? lastResult = _unsetWorkspaceSyncStatusValue,
+  }) {
+    return WorkspaceSyncStatus(
+      health: health ?? this.health,
+      hasPendingRefresh: hasPendingRefresh ?? this.hasPendingRefresh,
+      lastCheckAt: identical(lastCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastCheckAt
+          : lastCheckAt as DateTime?,
+      lastSuccessfulCheckAt:
+          identical(lastSuccessfulCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastSuccessfulCheckAt
+          : lastSuccessfulCheckAt as DateTime?,
+      nextRetryAt: identical(nextRetryAt, _unsetWorkspaceSyncStatusValue)
+          ? this.nextRetryAt
+          : nextRetryAt as DateTime?,
+      latestError: identical(latestError, _unsetWorkspaceSyncStatusValue)
+          ? this.latestError
+          : latestError as String?,
+      lastResult: identical(lastResult, _unsetWorkspaceSyncStatusValue)
+          ? this.lastResult
+          : lastResult as WorkspaceSyncResult?,
+    );
+  }
+}
+
+class TrackerBootstrapReadiness {
+  const TrackerBootstrapReadiness({
+    this.sectionStates = const {},
+    this.domainStates = const {},
+  });
+
+  final Map<TrackerSectionKey, TrackerLoadState> sectionStates;
+  final Map<TrackerDataDomain, TrackerLoadState> domainStates;
+
+  TrackerLoadState sectionState(TrackerSectionKey section) =>
+      sectionStates[section] ?? TrackerLoadState.loading;
+
+  TrackerLoadState domainState(TrackerDataDomain domain) =>
+      domainStates[domain] ?? TrackerLoadState.loading;
+}
+
 class TrackStateIssue {
   const TrackStateIssue({
     required this.key,
@@ -34,6 +193,9 @@ class TrackStateIssue {
     required this.links,
     required this.attachments,
     required this.isArchived,
+    this.hasDetailLoaded = true,
+    this.hasCommentsLoaded = true,
+    this.hasAttachmentsLoaded = true,
     this.resolutionId,
     this.storagePath = '',
     this.rawMarkdown = '',
@@ -67,6 +229,9 @@ class TrackStateIssue {
   final List<IssueLink> links;
   final List<IssueAttachment> attachments;
   final bool isArchived;
+  final bool hasDetailLoaded;
+  final bool hasCommentsLoaded;
+  final bool hasAttachmentsLoaded;
   final String? resolutionId;
   final String storagePath;
   final String rawMarkdown;
@@ -80,6 +245,13 @@ class TrackStateIssue {
     String? rawMarkdown,
     String? updatedLabel,
     bool? isArchived,
+    String? storagePath,
+    bool? hasDetailLoaded,
+    bool? hasCommentsLoaded,
+    bool? hasAttachmentsLoaded,
+    List<IssueComment>? comments,
+    List<IssueLink>? links,
+    List<IssueAttachment>? attachments,
   }) {
     return TrackStateIssue(
       key: key,
@@ -106,12 +278,15 @@ class TrackStateIssue {
       progress: progress,
       updatedLabel: updatedLabel ?? this.updatedLabel,
       acceptanceCriteria: acceptanceCriteria,
-      comments: comments,
-      links: links,
-      attachments: attachments,
+      comments: comments ?? this.comments,
+      links: links ?? this.links,
+      attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
+      hasDetailLoaded: hasDetailLoaded ?? this.hasDetailLoaded,
+      hasCommentsLoaded: hasCommentsLoaded ?? this.hasCommentsLoaded,
+      hasAttachmentsLoaded: hasAttachmentsLoaded ?? this.hasAttachmentsLoaded,
       resolutionId: resolutionId,
-      storagePath: storagePath,
+      storagePath: storagePath ?? this.storagePath,
       rawMarkdown: rawMarkdown ?? this.rawMarkdown,
     );
   }
@@ -147,6 +322,9 @@ class TrackStateIssue {
       links: links,
       attachments: attachments,
       isArchived: indexEntry.isArchived || isArchived,
+      hasDetailLoaded: hasDetailLoaded,
+      hasCommentsLoaded: hasCommentsLoaded,
+      hasAttachmentsLoaded: hasAttachmentsLoaded,
       resolutionId: resolutionId,
       storagePath: storagePath,
       rawMarkdown: rawMarkdown,
@@ -188,14 +366,194 @@ class IssueLink {
 
 class IssueAttachment {
   const IssueAttachment({
+    required this.id,
     required this.name,
-    required this.storagePath,
     required this.mediaType,
+    required this.sizeBytes,
+    required this.author,
+    required this.createdAt,
+    required this.storagePath,
+    required this.revisionOrOid,
+    this.storageBackend = AttachmentStorageMode.repositoryPath,
+    this.repositoryPath,
+    this.githubReleaseTag,
+    this.githubReleaseAssetName,
   });
 
+  final String id;
   final String name;
-  final String storagePath;
   final String mediaType;
+  final int sizeBytes;
+  final String author;
+  final String createdAt;
+  final String storagePath;
+  final String revisionOrOid;
+  final AttachmentStorageMode storageBackend;
+  final String? repositoryPath;
+  final String? githubReleaseTag;
+  final String? githubReleaseAssetName;
+
+  IssueAttachment copyWith({
+    String? id,
+    String? name,
+    String? mediaType,
+    int? sizeBytes,
+    String? author,
+    String? createdAt,
+    String? storagePath,
+    String? revisionOrOid,
+    AttachmentStorageMode? storageBackend,
+    Object? repositoryPath = _issueAttachmentUnset,
+    Object? githubReleaseTag = _issueAttachmentUnset,
+    Object? githubReleaseAssetName = _issueAttachmentUnset,
+  }) {
+    return IssueAttachment(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      mediaType: mediaType ?? this.mediaType,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      storagePath: storagePath ?? this.storagePath,
+      revisionOrOid: revisionOrOid ?? this.revisionOrOid,
+      storageBackend: storageBackend ?? this.storageBackend,
+      repositoryPath: identical(repositoryPath, _issueAttachmentUnset)
+          ? this.repositoryPath
+          : repositoryPath as String?,
+      githubReleaseTag: identical(githubReleaseTag, _issueAttachmentUnset)
+          ? this.githubReleaseTag
+          : githubReleaseTag as String?,
+      githubReleaseAssetName:
+          identical(githubReleaseAssetName, _issueAttachmentUnset)
+          ? this.githubReleaseAssetName
+          : githubReleaseAssetName as String?,
+    );
+  }
+
+  String get resolvedRepositoryPath => repositoryPath ?? storagePath;
+}
+
+const Object _issueAttachmentUnset = Object();
+
+enum AttachmentStorageMode {
+  repositoryPath('repository-path'),
+  githubReleases('github-releases');
+
+  const AttachmentStorageMode(this.persistedValue);
+
+  final String persistedValue;
+
+  static AttachmentStorageMode? tryParse(Object? value) {
+    final normalized = value?.toString().trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    for (final mode in values) {
+      if (mode.persistedValue == normalized) {
+        return mode;
+      }
+    }
+    return null;
+  }
+}
+
+class GitHubReleasesAttachmentStorageSettings {
+  const GitHubReleasesAttachmentStorageSettings({required this.tagPrefix});
+
+  static const String defaultTagPrefix = 'trackstate-attachments-';
+
+  final String tagPrefix;
+
+  GitHubReleasesAttachmentStorageSettings copyWith({String? tagPrefix}) {
+    return GitHubReleasesAttachmentStorageSettings(
+      tagPrefix: tagPrefix ?? this.tagPrefix,
+    );
+  }
+
+  String releaseTagForIssue(String issueKey) =>
+      '$tagPrefix${issueKey.trim().toUpperCase()}';
+
+  String releaseTitleForIssue(String issueKey) =>
+      'Attachments for ${issueKey.trim().toUpperCase()}';
+}
+
+class ProjectAttachmentStorageSettings {
+  const ProjectAttachmentStorageSettings({
+    this.mode = AttachmentStorageMode.repositoryPath,
+    this.githubReleases,
+  });
+
+  final AttachmentStorageMode mode;
+  final GitHubReleasesAttachmentStorageSettings? githubReleases;
+
+  ProjectAttachmentStorageSettings copyWith({
+    AttachmentStorageMode? mode,
+    Object? githubReleases = _projectAttachmentStorageNoop,
+  }) {
+    return ProjectAttachmentStorageSettings(
+      mode: mode ?? this.mode,
+      githubReleases: identical(githubReleases, _projectAttachmentStorageNoop)
+          ? this.githubReleases
+          : githubReleases as GitHubReleasesAttachmentStorageSettings?,
+    );
+  }
+}
+
+const Object _projectAttachmentStorageNoop = Object();
+
+enum IssueHistoryChangeType {
+  created,
+  updated,
+  deleted,
+  restored,
+  archived,
+  moved,
+  added,
+  removed,
+}
+
+enum IssueHistoryEntity { issue, comment, attachment, hierarchy }
+
+class IssueHistoryEntry {
+  const IssueHistoryEntry({
+    required this.commitSha,
+    required this.timestamp,
+    required this.author,
+    required this.changeType,
+    required this.affectedEntity,
+    required this.summary,
+    required this.changedPaths,
+    this.affectedEntityId,
+    this.fieldName,
+    this.before,
+    this.after,
+  });
+
+  final String commitSha;
+  final String timestamp;
+  final String author;
+  final IssueHistoryChangeType changeType;
+  final IssueHistoryEntity affectedEntity;
+  final String summary;
+  final List<String> changedPaths;
+  final String? affectedEntityId;
+  final String? fieldName;
+  final String? before;
+  final String? after;
+}
+
+class LocalizedLabelResolution {
+  const LocalizedLabelResolution({
+    required this.displayName,
+    required this.usedFallback,
+    this.requestedLocale,
+    this.fallbackLocale,
+  });
+
+  final String displayName;
+  final bool usedFallback;
+  final String? requestedLocale;
+  final String? fallbackLocale;
 }
 
 class TrackStateConfigEntry {
@@ -203,14 +561,104 @@ class TrackStateConfigEntry {
     required this.id,
     required this.name,
     this.localizedLabels = const {},
+    this.category,
+    this.hierarchyLevel,
+    this.icon,
+    this.workflowId,
   });
 
   final String id;
   final String name;
   final Map<String, String> localizedLabels;
+  final String? category;
+  final int? hierarchyLevel;
+  final String? icon;
+  final String? workflowId;
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  LocalizedLabelResolution resolveLabel({
+    String? locale,
+    String? defaultLocale,
+  }) {
+    final requestedLocale = locale?.trim();
+    if (requestedLocale != null && requestedLocale.isNotEmpty) {
+      final requestedLabel = localizedLabels[requestedLocale]?.trim();
+      if (requestedLabel != null && requestedLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: requestedLabel,
+          usedFallback: false,
+          requestedLocale: requestedLocale,
+        );
+      }
+      final fallbackLocale = defaultLocale?.trim();
+      final fallbackLabel = fallbackLocale == null || fallbackLocale.isEmpty
+          ? null
+          : localizedLabels[fallbackLocale]?.trim();
+      if (fallbackLocale != null &&
+          fallbackLocale.isNotEmpty &&
+          fallbackLocale != requestedLocale &&
+          fallbackLabel != null &&
+          fallbackLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: fallbackLabel,
+          usedFallback: true,
+          requestedLocale: requestedLocale,
+          fallbackLocale: fallbackLocale,
+        );
+      }
+      return LocalizedLabelResolution(
+        displayName: name,
+        usedFallback: true,
+        requestedLocale: requestedLocale,
+        fallbackLocale: fallbackLocale,
+      );
+    }
+
+    final fallbackLocale = defaultLocale?.trim();
+    final defaultLabel = fallbackLocale == null || fallbackLocale.isEmpty
+        ? null
+        : localizedLabels[fallbackLocale]?.trim();
+    return LocalizedLabelResolution(
+      displayName: defaultLabel == null || defaultLabel.isEmpty
+          ? name
+          : defaultLabel,
+      usedFallback: false,
+      requestedLocale: fallbackLocale,
+    );
+  }
+
+  TrackStateConfigEntry copyWith({
+    String? id,
+    String? name,
+    Map<String, String>? localizedLabels,
+    String? category,
+    int? hierarchyLevel,
+    String? icon,
+    String? workflowId,
+  }) {
+    return TrackStateConfigEntry(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      localizedLabels: localizedLabels ?? this.localizedLabels,
+      category: category ?? this.category,
+      hierarchyLevel: hierarchyLevel ?? this.hierarchyLevel,
+      icon: icon ?? this.icon,
+      workflowId: workflowId ?? this.workflowId,
+    );
+  }
+}
+
+class TrackStateFieldOption {
+  const TrackStateFieldOption({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  TrackStateFieldOption copyWith({String? id, String? name}) {
+    return TrackStateFieldOption(id: id ?? this.id, name: name ?? this.name);
+  }
 }
 
 class TrackStateFieldDefinition {
@@ -220,6 +668,10 @@ class TrackStateFieldDefinition {
     required this.type,
     required this.required,
     this.localizedLabels = const {},
+    this.options = const [],
+    this.defaultValue,
+    this.applicableIssueTypeIds = const [],
+    this.reserved = false,
   });
 
   final String id;
@@ -227,9 +679,222 @@ class TrackStateFieldDefinition {
   final String type;
   final bool required;
   final Map<String, String> localizedLabels;
+  final List<TrackStateFieldOption> options;
+  final Object? defaultValue;
+  final List<String> applicableIssueTypeIds;
+  final bool reserved;
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  LocalizedLabelResolution resolveLabel({
+    String? locale,
+    String? defaultLocale,
+  }) {
+    final requestedLocale = locale?.trim();
+    if (requestedLocale != null && requestedLocale.isNotEmpty) {
+      final requestedLabel = localizedLabels[requestedLocale]?.trim();
+      if (requestedLabel != null && requestedLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: requestedLabel,
+          usedFallback: false,
+          requestedLocale: requestedLocale,
+        );
+      }
+      final fallbackLocale = defaultLocale?.trim();
+      final fallbackLabel = fallbackLocale == null || fallbackLocale.isEmpty
+          ? null
+          : localizedLabels[fallbackLocale]?.trim();
+      if (fallbackLocale != null &&
+          fallbackLocale.isNotEmpty &&
+          fallbackLocale != requestedLocale &&
+          fallbackLabel != null &&
+          fallbackLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: fallbackLabel,
+          usedFallback: true,
+          requestedLocale: requestedLocale,
+          fallbackLocale: fallbackLocale,
+        );
+      }
+      return LocalizedLabelResolution(
+        displayName: name,
+        usedFallback: true,
+        requestedLocale: requestedLocale,
+        fallbackLocale: fallbackLocale,
+      );
+    }
+
+    final fallbackLocale = defaultLocale?.trim();
+    final defaultLabel = fallbackLocale == null || fallbackLocale.isEmpty
+        ? null
+        : localizedLabels[fallbackLocale]?.trim();
+    return LocalizedLabelResolution(
+      displayName: defaultLabel == null || defaultLabel.isEmpty
+          ? name
+          : defaultLabel,
+      usedFallback: false,
+      requestedLocale: fallbackLocale,
+    );
+  }
+
+  TrackStateFieldDefinition copyWith({
+    String? id,
+    String? name,
+    String? type,
+    bool? required,
+    Map<String, String>? localizedLabels,
+    List<TrackStateFieldOption>? options,
+    Object? defaultValue = _trackStateFieldDefinitionNoop,
+    List<String>? applicableIssueTypeIds,
+    bool? reserved,
+  }) {
+    return TrackStateFieldDefinition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      required: required ?? this.required,
+      localizedLabels: localizedLabels ?? this.localizedLabels,
+      options: options ?? this.options,
+      defaultValue: identical(defaultValue, _trackStateFieldDefinitionNoop)
+          ? this.defaultValue
+          : defaultValue,
+      applicableIssueTypeIds:
+          applicableIssueTypeIds ?? this.applicableIssueTypeIds,
+      reserved: reserved ?? this.reserved,
+    );
+  }
+}
+
+const Object _trackStateFieldDefinitionNoop = Object();
+
+class TrackStateWorkflowTransition {
+  const TrackStateWorkflowTransition({
+    required this.id,
+    required this.name,
+    required this.fromStatusId,
+    required this.toStatusId,
+  });
+
+  final String id;
+  final String name;
+  final String fromStatusId;
+  final String toStatusId;
+
+  TrackStateWorkflowTransition copyWith({
+    String? id,
+    String? name,
+    String? fromStatusId,
+    String? toStatusId,
+  }) {
+    return TrackStateWorkflowTransition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      fromStatusId: fromStatusId ?? this.fromStatusId,
+      toStatusId: toStatusId ?? this.toStatusId,
+    );
+  }
+}
+
+class TrackStateWorkflowDefinition {
+  const TrackStateWorkflowDefinition({
+    required this.id,
+    required this.name,
+    this.statusIds = const [],
+    this.transitions = const [],
+  });
+
+  final String id;
+  final String name;
+  final List<String> statusIds;
+  final List<TrackStateWorkflowTransition> transitions;
+
+  TrackStateWorkflowDefinition copyWith({
+    String? id,
+    String? name,
+    List<String>? statusIds,
+    List<TrackStateWorkflowTransition>? transitions,
+  }) {
+    return TrackStateWorkflowDefinition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      statusIds: statusIds ?? this.statusIds,
+      transitions: transitions ?? this.transitions,
+    );
+  }
+}
+
+class ProjectSettingsCatalog {
+  const ProjectSettingsCatalog({
+    this.defaultLocale = 'en',
+    this.supportedLocales = const [],
+    this.statusDefinitions = const [],
+    this.workflowDefinitions = const [],
+    this.issueTypeDefinitions = const [],
+    this.fieldDefinitions = const [],
+    this.priorityDefinitions = const [],
+    this.versionDefinitions = const [],
+    this.componentDefinitions = const [],
+    this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
+  });
+
+  final String defaultLocale;
+  final List<String> supportedLocales;
+  final List<TrackStateConfigEntry> statusDefinitions;
+  final List<TrackStateWorkflowDefinition> workflowDefinitions;
+  final List<TrackStateConfigEntry> issueTypeDefinitions;
+  final List<TrackStateFieldDefinition> fieldDefinitions;
+  final List<TrackStateConfigEntry> priorityDefinitions;
+  final List<TrackStateConfigEntry> versionDefinitions;
+  final List<TrackStateConfigEntry> componentDefinitions;
+  final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
+
+  List<String> get effectiveSupportedLocales {
+    final locales = <String>[];
+    final normalizedDefaultLocale = defaultLocale.trim();
+    if (normalizedDefaultLocale.isNotEmpty) {
+      locales.add(normalizedDefaultLocale);
+    }
+    for (final locale in supportedLocales) {
+      final normalized = locale.trim();
+      if (normalized.isEmpty || locales.contains(normalized)) {
+        continue;
+      }
+      locales.add(normalized);
+    }
+    return locales;
+  }
+
+  ProjectSettingsCatalog copyWith({
+    String? defaultLocale,
+    List<String>? supportedLocales,
+    List<TrackStateConfigEntry>? statusDefinitions,
+    List<TrackStateWorkflowDefinition>? workflowDefinitions,
+    List<TrackStateConfigEntry>? issueTypeDefinitions,
+    List<TrackStateFieldDefinition>? fieldDefinitions,
+    List<TrackStateConfigEntry>? priorityDefinitions,
+    List<TrackStateConfigEntry>? versionDefinitions,
+    List<TrackStateConfigEntry>? componentDefinitions,
+    List<TrackStateConfigEntry>? resolutionDefinitions,
+    ProjectAttachmentStorageSettings? attachmentStorage,
+  }) {
+    return ProjectSettingsCatalog(
+      defaultLocale: defaultLocale ?? this.defaultLocale,
+      supportedLocales: supportedLocales ?? this.supportedLocales,
+      statusDefinitions: statusDefinitions ?? this.statusDefinitions,
+      workflowDefinitions: workflowDefinitions ?? this.workflowDefinitions,
+      issueTypeDefinitions: issueTypeDefinitions ?? this.issueTypeDefinitions,
+      fieldDefinitions: fieldDefinitions ?? this.fieldDefinitions,
+      priorityDefinitions: priorityDefinitions ?? this.priorityDefinitions,
+      versionDefinitions: versionDefinitions ?? this.versionDefinitions,
+      componentDefinitions: componentDefinitions ?? this.componentDefinitions,
+      resolutionDefinitions:
+          resolutionDefinitions ?? this.resolutionDefinitions,
+      attachmentStorage: attachmentStorage ?? this.attachmentStorage,
+    );
+  }
 }
 
 class DeletedIssueTombstone {
@@ -264,6 +929,17 @@ class RepositoryIssueIndexEntry {
     this.parentPath,
     this.epicPath,
     this.isArchived = false,
+    this.summary,
+    this.issueTypeId,
+    this.statusId,
+    this.priorityId,
+    this.assignee,
+    this.labels = const [],
+    this.updatedLabel,
+    this.progress,
+    this.resolutionId,
+    this.revision,
+    this.links = const [],
   });
 
   final String key;
@@ -274,12 +950,34 @@ class RepositoryIssueIndexEntry {
   final String? epicPath;
   final List<String> childKeys;
   final bool isArchived;
+  final String? summary;
+  final String? issueTypeId;
+  final String? statusId;
+  final String? priorityId;
+  final String? assignee;
+  final List<String> labels;
+  final String? updatedLabel;
+  final double? progress;
+  final String? resolutionId;
+  final String? revision;
+  final List<IssueLink> links;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
     String? epicPath,
     List<String>? childKeys,
     bool? isArchived,
+    String? summary,
+    String? issueTypeId,
+    String? statusId,
+    String? priorityId,
+    String? assignee,
+    List<String>? labels,
+    String? updatedLabel,
+    double? progress,
+    String? resolutionId,
+    String? revision,
+    List<IssueLink>? links,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -290,6 +988,17 @@ class RepositoryIssueIndexEntry {
       epicPath: epicPath ?? this.epicPath,
       childKeys: childKeys ?? this.childKeys,
       isArchived: isArchived ?? this.isArchived,
+      summary: summary ?? this.summary,
+      issueTypeId: issueTypeId ?? this.issueTypeId,
+      statusId: statusId ?? this.statusId,
+      priorityId: priorityId ?? this.priorityId,
+      assignee: assignee ?? this.assignee,
+      labels: labels ?? this.labels,
+      updatedLabel: updatedLabel ?? this.updatedLabel,
+      progress: progress ?? this.progress,
+      resolutionId: resolutionId ?? this.resolutionId,
+      revision: revision ?? this.revision,
+      links: links ?? this.links,
     );
   }
 }
@@ -325,10 +1034,13 @@ class ProjectConfig {
     required this.issueTypeDefinitions,
     required this.statusDefinitions,
     required this.fieldDefinitions,
+    this.supportedLocales = const [],
+    this.workflowDefinitions = const [],
     this.priorityDefinitions = const [],
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
     this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
   });
 
   final String key;
@@ -336,13 +1048,16 @@ class ProjectConfig {
   final String repository;
   final String branch;
   final String defaultLocale;
+  final List<String> supportedLocales;
   final List<TrackStateConfigEntry> issueTypeDefinitions;
   final List<TrackStateConfigEntry> statusDefinitions;
   final List<TrackStateFieldDefinition> fieldDefinitions;
+  final List<TrackStateWorkflowDefinition> workflowDefinitions;
   final List<TrackStateConfigEntry> priorityDefinitions;
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
   final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
 
   List<String> get issueTypes => [
     for (final definition in issueTypeDefinitions) definition.name,
@@ -356,59 +1071,229 @@ class ProjectConfig {
     for (final definition in fieldDefinitions) definition.name,
   ];
 
+  List<String> get effectiveSupportedLocales {
+    final locales = <String>[];
+    final normalizedDefaultLocale = defaultLocale.trim();
+    if (normalizedDefaultLocale.isNotEmpty) {
+      locales.add(normalizedDefaultLocale);
+    }
+    for (final locale in supportedLocales) {
+      final normalized = locale.trim();
+      if (normalized.isEmpty || locales.contains(normalized)) {
+        continue;
+      }
+      locales.add(normalized);
+    }
+    return locales;
+  }
+
+  ProjectSettingsCatalog get settingsCatalog => ProjectSettingsCatalog(
+    defaultLocale: defaultLocale,
+    supportedLocales: effectiveSupportedLocales,
+    statusDefinitions: statusDefinitions,
+    workflowDefinitions: workflowDefinitions,
+    issueTypeDefinitions: issueTypeDefinitions,
+    fieldDefinitions: _settingsFieldDefinitions(fieldDefinitions),
+    priorityDefinitions: priorityDefinitions,
+    versionDefinitions: versionDefinitions,
+    componentDefinitions: componentDefinitions,
+    resolutionDefinitions: resolutionDefinitions,
+    attachmentStorage: attachmentStorage,
+  );
+
   String issueTypeLabel(String id, {String? locale}) =>
-      _resolveLabel(issueTypeDefinitions, id, locale);
+      issueTypeLabelResolution(id, locale: locale).displayName;
 
   String statusLabel(String id, {String? locale}) =>
-      _resolveLabel(statusDefinitions, id, locale);
+      statusLabelResolution(id, locale: locale).displayName;
 
   String priorityLabel(String id, {String? locale}) =>
-      _resolveLabel(priorityDefinitions, id, locale);
+      priorityLabelResolution(id, locale: locale).displayName;
 
   String versionLabel(String id, {String? locale}) =>
-      _resolveLabel(versionDefinitions, id, locale);
+      versionLabelResolution(id, locale: locale).displayName;
 
   String componentLabel(String id, {String? locale}) =>
-      _resolveLabel(componentDefinitions, id, locale);
+      componentLabelResolution(id, locale: locale).displayName;
 
   String resolutionLabel(String id, {String? locale}) =>
-      _resolveLabel(resolutionDefinitions, id, locale);
+      resolutionLabelResolution(id, locale: locale).displayName;
 
   String fieldLabel(String id, {String? locale}) {
-    final language = locale ?? defaultLocale;
     for (final definition in fieldDefinitions) {
       if (definition.id == id) {
-        return definition.label(language);
+        return definition
+            .resolveLabel(
+              locale: locale ?? defaultLocale,
+              defaultLocale: defaultLocale,
+            )
+            .displayName;
       }
     }
     return id;
   }
 
-  String _resolveLabel(
+  LocalizedLabelResolution issueTypeLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(issueTypeDefinitions, id, locale);
+
+  LocalizedLabelResolution statusLabelResolution(String id, {String? locale}) =>
+      _resolveLabel(statusDefinitions, id, locale);
+
+  LocalizedLabelResolution priorityLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(priorityDefinitions, id, locale);
+
+  LocalizedLabelResolution versionLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(versionDefinitions, id, locale);
+
+  LocalizedLabelResolution componentLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(componentDefinitions, id, locale);
+
+  LocalizedLabelResolution resolutionLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(resolutionDefinitions, id, locale);
+
+  LocalizedLabelResolution fieldLabelResolution(String id, {String? locale}) {
+    for (final definition in fieldDefinitions) {
+      if (definition.id == id) {
+        return definition.resolveLabel(
+          locale: locale ?? defaultLocale,
+          defaultLocale: defaultLocale,
+        );
+      }
+    }
+    return LocalizedLabelResolution(
+      displayName: id,
+      usedFallback: locale != null && locale.trim().isNotEmpty,
+      requestedLocale: locale?.trim(),
+      fallbackLocale: defaultLocale,
+    );
+  }
+
+  LocalizedLabelResolution _resolveLabel(
     List<TrackStateConfigEntry> entries,
     String id,
     String? locale,
   ) {
-    final language = locale ?? defaultLocale;
     for (final entry in entries) {
       if (entry.id == id) {
-        return entry.label(language);
+        return entry.resolveLabel(
+          locale: locale ?? defaultLocale,
+          defaultLocale: defaultLocale,
+        );
       }
     }
-    return id;
+    return LocalizedLabelResolution(
+      displayName: id,
+      usedFallback: locale != null && locale.trim().isNotEmpty,
+      requestedLocale: locale?.trim(),
+      fallbackLocale: defaultLocale,
+    );
   }
 }
+
+List<TrackStateFieldDefinition> _settingsFieldDefinitions(
+  List<TrackStateFieldDefinition> fields,
+) {
+  final fieldIds = {for (final field in fields) field.id};
+  return [
+    ...fields,
+    for (final field in _reservedSettingsFieldDefinitions)
+      if (!fieldIds.contains(field.id)) field,
+  ];
+}
+
+const _reservedSettingsFieldDefinitions = [
+  TrackStateFieldDefinition(
+    id: 'summary',
+    name: 'Summary',
+    type: 'string',
+    required: true,
+    reserved: true,
+    localizedLabels: {'en': 'Summary'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'description',
+    name: 'Description',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Description'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'acceptanceCriteria',
+    name: 'Acceptance Criteria',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Acceptance Criteria'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'priority',
+    name: 'Priority',
+    type: 'option',
+    required: false,
+    options: _reservedPriorityFieldOptions,
+    reserved: true,
+    localizedLabels: {'en': 'Priority'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'assignee',
+    name: 'Assignee',
+    type: 'user',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Assignee'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'labels',
+    name: 'Labels',
+    type: 'array',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Labels'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'storyPoints',
+    name: 'Story Points',
+    type: 'number',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Story Points'},
+  ),
+];
+
+const _reservedPriorityFieldOptions = [
+  TrackStateFieldOption(id: 'highest', name: 'Highest'),
+  TrackStateFieldOption(id: 'high', name: 'High'),
+  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+  TrackStateFieldOption(id: 'low', name: 'Low'),
+];
 
 class TrackerSnapshot {
   const TrackerSnapshot({
     required this.project,
     required this.issues,
     this.repositoryIndex = const RepositoryIndex(),
+    this.loadWarnings = const [],
+    this.readiness = const TrackerBootstrapReadiness(),
+    this.startupRecovery,
   });
 
   final ProjectConfig project;
   final List<TrackStateIssue> issues;
   final RepositoryIndex repositoryIndex;
+  final List<String> loadWarnings;
+  final TrackerBootstrapReadiness readiness;
+  final TrackerStartupRecovery? startupRecovery;
 
   List<TrackStateIssue> get epics =>
       issues.where((issue) => issue.issueType == IssueType.epic).toList();
@@ -416,6 +1301,33 @@ class TrackerSnapshot {
   List<TrackStateIssue> childrenOf(String key) => issues
       .where((issue) => issue.parentKey == key || issue.epicKey == key)
       .toList();
+}
+
+class TrackStateIssueSearchPage {
+  const TrackStateIssueSearchPage({
+    required this.issues,
+    required this.startAt,
+    required this.maxResults,
+    required this.total,
+    this.nextStartAt,
+    this.nextPageToken,
+  });
+
+  const TrackStateIssueSearchPage.empty({this.maxResults = 0})
+    : issues = const [],
+      startAt = 0,
+      total = 0,
+      nextStartAt = null,
+      nextPageToken = null;
+
+  final List<TrackStateIssue> issues;
+  final int startAt;
+  final int maxResults;
+  final int total;
+  final int? nextStartAt;
+  final String? nextPageToken;
+
+  bool get hasMore => nextStartAt != null;
 }
 
 class RepositoryConnection {
@@ -438,11 +1350,32 @@ class GitHubConnection extends RepositoryConnection {
   });
 }
 
+class HostedRepositoryReference {
+  const HostedRepositoryReference({
+    required this.fullName,
+    required this.defaultBranch,
+  });
+
+  final String fullName;
+  final String defaultBranch;
+}
+
 class RepositoryUser {
-  const RepositoryUser({required this.login, required this.displayName});
+  const RepositoryUser({
+    required this.login,
+    required this.displayName,
+    this.accountId,
+    this.emailAddress,
+    this.timeZone,
+    this.active,
+  });
 
   final String login;
   final String displayName;
+  final String? accountId;
+  final String? emailAddress;
+  final String? timeZone;
+  final bool? active;
 
   String get initials {
     final source = displayName.trim().isNotEmpty ? displayName : login;
