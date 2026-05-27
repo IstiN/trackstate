@@ -1673,6 +1673,8 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
 Map<String, String> _githubHeaders(String? token) => {
   'accept': 'application/vnd.github+json',
   'X-GitHub-Api-Version': '2022-11-28',
+  'cache-control': 'no-cache, no-store, max-age=0',
+  'pragma': 'no-cache',
   if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
 };
 

@@ -128,6 +128,66 @@ void main() {
   );
 
   test(
+    'GitHub provider disables caching for hosted sync revision checks',
+    () async {
+      final branchRequestHeaders = <Map<String, String>>[];
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/branches/main':
+              branchRequestHeaders.add(Map<String, String>.from(request.headers));
+              return http.Response(
+                jsonEncode({
+                  'commit': <String, Object?>{'sha': 'new-revision'},
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await provider.checkSync();
+
+      expect(branchRequestHeaders, hasLength(1));
+      expect(branchRequestHeaders.single['cache-control'], contains('no-cache'));
+      expect(branchRequestHeaders.single['cache-control'], contains('no-store'));
+      expect(branchRequestHeaders.single['pragma'], 'no-cache');
+    },
+  );
+
+  test(
     'GitHub provider preserves explicit load_snapshot_delta=0 as a public bypass directive',
     () async {
       final provider = await _createAuthenticatedProvider(
