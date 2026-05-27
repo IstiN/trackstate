@@ -2014,8 +2014,7 @@ class LiveWorkspaceSwitcherPage:
                       : element.hasAttribute('disabled');
                   const keyboardReachable =
                     tabIndexValue >= 0
-                    && !disabled
-                    && ariaDisabled != 'true';
+                    && !disabled;
                   return {
                     domIndex,
                     element,
@@ -2225,15 +2224,14 @@ class LiveWorkspaceSwitcherPage:
                     const tabIndexValue = Number.isFinite(element.tabIndex)
                       ? element.tabIndex
                       : -1;
-                    const ariaDisabled = normalize(element.getAttribute('aria-disabled')).toLowerCase();
                     const disabled =
-                    typeof element.disabled === 'boolean'
+                      typeof element.disabled === 'boolean'
                       ? element.disabled
                       : element.hasAttribute('disabled');
                     if (tabIndexValue < 0) {
                     return false;
                     }
-                    if (disabled || ariaDisabled === 'true') {
+                    if (disabled) {
                     return false;
                     }
                     const elementLabel = labelFor(element);
