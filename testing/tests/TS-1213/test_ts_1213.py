@@ -162,6 +162,7 @@ class TrackStateCliLegacyLocalLinksJsonPurgeTest(unittest.TestCase):
 
         with self.subTest("step-2-verify-root-links-json"):
             root_links_payload = observation.root_links_json_payload
+            expected_legacy_payload = list(self.config.legacy_links_json_payload)
             self.assertIsInstance(
                 root_links_payload,
                 list,
@@ -183,11 +184,27 @@ class TrackStateCliLegacyLocalLinksJsonPurgeTest(unittest.TestCase):
                 f"Observed payload: {root_links_payload}\n"
                 f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
             )
+            for legacy_link in expected_legacy_payload:
+                self.assertIn(
+                    legacy_link,
+                    root_links_payload,
+                    "Step 2 failed: the repository-root `links.json` file did not "
+                    "preserve every seeded legacy relationship while consolidating "
+                    "metadata from the stale issue-local file.\n"
+                    f"Expected path: {observation.root_links_json_relative_path}\n"
+                    f"Missing legacy payload: {legacy_link}\n"
+                    f"Seeded legacy payloads: {expected_legacy_payload}\n"
+                    f"Observed payload: {root_links_payload}\n"
+                    "Observed files detail:\n"
+                    f"{self._format_links_json_snapshots(observation)}",
+                )
             self.assertGreaterEqual(
                 len(root_links_payload),
-                1,
-                "Step 2 failed: the repository-root `links.json` file was empty after "
-                "the live link command completed.\n"
+                len(expected_legacy_payload) + 1,
+                "Step 2 failed: the repository-root `links.json` file did not retain "
+                "both the live link and the migrated legacy metadata after the live "
+                "link command completed.\n"
+                f"Expected minimum entry count: {len(expected_legacy_payload) + 1}\n"
                 f"Observed payload: {root_links_payload}",
             )
             self.assertEqual(
