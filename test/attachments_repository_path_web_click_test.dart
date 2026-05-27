@@ -82,7 +82,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Project Settings'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Attachments'), findsWidgets);
+      expect(_settingsTab('Attachments'), findsWidgets);
       expect(find.text('Attachment storage mode'), findsOneWidget);
     },
   );
@@ -107,7 +107,7 @@ void main() {
 
       await tester.tap(find.text('Settings').first);
       await tester.pumpAndSettle();
-      final statusesTab = find.widgetWithText(Tab, 'Statuses').first;
+      final statusesTab = _settingsTab('Statuses').first;
       await tester.ensureVisible(statusesTab);
       await tester.tap(statusesTab);
       await tester.pumpAndSettle();
@@ -198,6 +198,9 @@ Finder _attachmentsRestrictionActionFinder(
   );
 }
 
+Finder _settingsTab(String label) =>
+    find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+
 class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
   const _RepositoryPathWebTestProvider();
 
@@ -211,6 +214,19 @@ class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
     canManageAttachments: true,
     attachmentUploadMode: AttachmentUploadMode.noLfs,
     canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: _revision,
+      sessionRevision: 'web-test',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
   );
 
   static const Map<String, String> _files = {

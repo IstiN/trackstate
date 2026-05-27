@@ -62,6 +62,13 @@ class LiveHostedCatalogEntry:
 
 
 @dataclass(frozen=True)
+class LiveHostedRepositoryFile:
+    path: str
+    sha: str
+    content: str
+
+
+@dataclass(frozen=True)
 class LiveHostedLocaleState:
     project_path: str
     locale: str
@@ -237,7 +244,7 @@ class LiveSetupRepositoryService:
             if entry_id and name
         ]
 
-    def fetch_repo_file(self, path: str) -> HostedRepositoryFile:
+    def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
         response = self._read_json(
             f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
         )
@@ -247,7 +254,7 @@ class LiveSetupRepositoryService:
         sha = str(response.get("sha", "")).strip()
         if not sha:
             raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
-        return HostedRepositoryFile(
+        return LiveHostedRepositoryFile(
             path=path,
             sha=sha,
             content=base64.b64decode(encoded).decode("utf-8"),
@@ -687,8 +694,16 @@ class LiveSetupRepositoryService:
                 continue
             prefix = f"{key}:"
             if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
+                return LiveSetupRepositoryService._normalize_front_matter_scalar(
+                    line.removeprefix(prefix).strip(),
+                )
         return None
+
+    @staticmethod
+    def _normalize_front_matter_scalar(value: str) -> str:
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            return value[1:-1]
+        return value
 
     @staticmethod
     def _markdown_section(markdown: str, *, heading: str) -> str:
@@ -742,7 +757,6 @@ class LiveSetupRepositoryService:
         while collected and not collected[0].strip():
             collected.pop(0)
         return collected
-
     def _read_json(self, path: str):
         request = urllib.request.Request(
             f"https://api.github.com{path}",

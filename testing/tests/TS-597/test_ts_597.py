@@ -679,17 +679,10 @@ def _write_review_replies() -> None:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3234673312,
-                        "threadId": "PRRT_kwDOSU6Gf86BxRVw",
+                        "inReplyToId": 3312749211,
+                        "threadId": "PRRT_kwDOSU6Gf86FLq7v",
                         "reply": (
-                            "Fixed: step 3 now passes only when `github_trackstate_provider.dart` contains a real `package:meta` import. Dart `required` usage is kept as diagnostic evidence only, so the rerun now correctly fails against the current repository state because `package:meta` is absent."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Fixed: added `testing/tests/TS-597/README.md` and tightened the test to the ticket's exact `package:meta` expectation. The rerun now reports the real product-visible mismatch instead of masking it with a synthetic pass."
+                            "Fixed: updated `testing/tests/TS-597/README.md` to document the PyYAML dependency and added the install command (`python3 -m pip install pyyaml`) because the test loads `config.yaml` with `yaml.safe_load(...)`."
                         ),
                     },
                 ]

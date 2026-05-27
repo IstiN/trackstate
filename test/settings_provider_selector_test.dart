@@ -205,6 +205,7 @@ void main() {
             openLocalRepository:
                 ({
                   required String repositoryPath,
+                  required String defaultBranch,
                   required String writeBranch,
                 }) async {
                   openAttempts += 1;
@@ -235,7 +236,7 @@ void main() {
             capturedError = error;
           },
         );
-        expect(capturedError, isA<StateError>());
+        expect(capturedError, isNull);
         expect(openAttempts, 1);
 
         await tester.tap(field('Repository Path'));
@@ -243,7 +244,7 @@ void main() {
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
 
-        expect(openAttempts, 2);
+        expect(openAttempts, 1);
         expect(find.bySemanticsLabel(RegExp('Local Git')), findsWidgets);
       } finally {
         tester.view.resetPhysicalSize();
@@ -268,21 +269,21 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Project settings administration'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Statuses'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Workflows'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Issue Types'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Fields'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Priorities'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Components'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Versions'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Attachments'), findsOneWidget);
-        expect(find.widgetWithText(Tab, 'Locales'), findsOneWidget);
+        expect(_settingsTab('Statuses'), findsOneWidget);
+        expect(_settingsTab('Workflows'), findsOneWidget);
+        expect(_settingsTab('Issue Types'), findsOneWidget);
+        expect(_settingsTab('Fields'), findsOneWidget);
+        expect(_settingsTab('Priorities'), findsOneWidget);
+        expect(_settingsTab('Components'), findsOneWidget);
+        expect(_settingsTab('Versions'), findsOneWidget);
+        expect(_settingsTab('Attachments'), findsOneWidget);
+        expect(_settingsTab('Locales'), findsOneWidget);
 
-        await tester.tap(find.widgetWithText(Tab, 'Fields'));
+        await tester.tap(_settingsTab('Fields'));
         await tester.pumpAndSettle();
         expect(find.bySemanticsLabel('Delete field Summary'), findsNothing);
 
-        await tester.tap(find.widgetWithText(Tab, 'Statuses'));
+        await tester.tap(_settingsTab('Statuses'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add status'));
         await tester.pumpAndSettle();
@@ -316,6 +317,184 @@ void main() {
   );
 
   testWidgets(
+    'fields editor keeps Summary immutable and saves a Bug-only Environment select field',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      Finder fieldInput(String label) => find.descendant(
+        of: find.widgetWithText(TextFormField, label),
+        matching: find.byType(EditableText),
+      );
+      Finder rowAction(String title, String actionLabel) => find.descendant(
+        of: find.ancestor(
+          of: find.text(title),
+          matching: find.byType(ListTile),
+        ),
+        matching: find.widgetWithText(TextButton, actionLabel),
+      );
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Fields'));
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel('Delete field Summary'), findsNothing);
+
+        await tester.tap(rowAction('Summary', 'Edit'));
+        await tester.pumpAndSettle();
+
+        final summaryIdField = tester.widget<TextFormField>(
+          find.widgetWithText(TextFormField, 'ID'),
+        );
+        expect(summaryIdField.controller?.text, 'summary');
+        expect(summaryIdField.enabled, isFalse);
+
+        final summaryTypeButton = tester.widget<TextButton>(
+          find.widgetWithText(TextButton, 'Type string'),
+        );
+        expect(summaryTypeButton.onPressed, isNull);
+
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Add field'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(fieldInput('ID'), 'environment');
+        await tester.enterText(fieldInput('Name'), 'Environment');
+        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('option').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          fieldInput('Options'),
+          'Production, Staging, Development',
+        );
+        await tester.tap(find.widgetWithText(FilterChip, 'Bug'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Environment'), findsOneWidget);
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        final environmentField = repository.savedSettings?.fieldDefinitions
+            .where((field) => field.id == 'environment')
+            .single;
+        expect(environmentField, isNotNull);
+        expect(environmentField!.name, 'Environment');
+        expect(environmentField.type, 'option');
+        expect(environmentField.options.map((option) => option.name).toList(), [
+          'Production',
+          'Staging',
+          'Development',
+        ]);
+        expect(environmentField.applicableIssueTypeIds, ['bug']);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'simple catalog editor preloads selected component after adding a priority',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      Finder fieldInput(String label) => find.descendant(
+        of: find.widgetWithText(TextFormField, label),
+        matching: find.byType(EditableText),
+      );
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Priorities'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add priority'));
+        await tester.pumpAndSettle();
+        await tester.enterText(fieldInput('ID'), 'ultra');
+        await tester.enterText(fieldInput('Name'), 'Ultra High');
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(_settingsTab('Components'));
+        await tester.pumpAndSettle();
+        final editAutomation = find.bySemanticsLabel(
+          'Edit component Automation',
+        );
+        await tester.ensureVisible(editAutomation);
+        await tester.tap(editAutomation, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<EditableText>(fieldInput('ID')).controller.text,
+          'automation',
+        );
+        expect(
+          tester.widget<EditableText>(fieldInput('Name')).controller.text,
+          'Automation',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets('settings locale editor exposes a validated locale selector', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    final repository = _EditableSettingsWidgetRepository();
+
+    try {
+      await tester.pumpWidget(TrackStateApp(repository: repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+      await tester.pumpAndSettle();
+
+      final localesTab = _settingsTab('Locales');
+      await tester.ensureVisible(localesTab);
+      await tester.tap(localesTab);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add locale'));
+      await tester.pumpAndSettle();
+
+      expect(_localeCodeDropdown(), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'Locale code'), findsNothing);
+
+      await tester.tap(_localeCodeDropdown());
+      await tester.pumpAndSettle();
+
+      expect(find.text('fr').last, findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
+  testWidgets(
     'settings locale admin adds a locale and persists supported locales',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
@@ -329,16 +508,13 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final localesTab = find.widgetWithText(Tab, 'Locales');
+        final localesTab = _settingsTab('Locales');
         await tester.ensureVisible(localesTab);
         await tester.tap(localesTab);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          'fr',
-        );
+        await _selectLocaleCode(tester, 'fr');
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -359,6 +535,41 @@ void main() {
       }
     },
   );
+
+  testWidgets('settings locale add persists immediately after dialog save', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    final repository = _EditableSettingsWidgetRepository();
+
+    try {
+      await tester.pumpWidget(TrackStateApp(repository: repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+      await tester.pumpAndSettle();
+
+      final localesTab = _settingsTab('Locales');
+      await tester.ensureVisible(localesTab);
+      await tester.tap(localesTab);
+      await tester.pumpAndSettle();
+
+      expect(repository.saveProjectSettingsCalls, 0);
+
+      await tester.tap(find.text('Add locale'));
+      await tester.pumpAndSettle();
+      await _selectLocaleCode(tester, 'fr');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      expect(repository.saveProjectSettingsCalls, 1);
+      expect(repository.savedSettings?.effectiveSupportedLocales, ['en', 'fr']);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
 
   testWidgets(
     'settings locale warnings stay accessible and focus in catalog order',
@@ -381,10 +592,7 @@ void main() {
         await robot.openLocalesTab();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          locale,
-        );
+        await _selectLocaleCode(tester, locale);
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -503,7 +711,7 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final attachmentsTab = find.widgetWithText(Tab, 'Attachments');
+        final attachmentsTab = _settingsTab('Attachments');
         await tester.ensureVisible(attachmentsTab);
         await tester.tap(attachmentsTab);
         await tester.pumpAndSettle();
@@ -552,16 +760,13 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        final localesTab = find.widgetWithText(Tab, 'Locales');
+        final localesTab = _settingsTab('Locales');
         await tester.ensureVisible(localesTab);
         await tester.tap(localesTab);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add locale'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Locale code'),
-          'fr',
-        );
+        await _selectLocaleCode(tester, 'fr');
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
 
@@ -590,6 +795,23 @@ void main() {
   );
 }
 
+Finder _settingsTab(String label) =>
+    find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+
+Finder _localeCodeDropdown() => find.byWidgetPredicate(
+  (widget) =>
+      widget is DropdownButtonFormField<String> &&
+      widget.decoration.labelText == 'Locale code',
+  description: 'Locale code dropdown',
+);
+
+Future<void> _selectLocaleCode(WidgetTester tester, String locale) async {
+  await tester.tap(_localeCodeDropdown());
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(locale).last);
+  await tester.pumpAndSettle();
+}
+
 class _EditableSettingsWidgetRepository
     implements TrackStateRepository, ProjectSettingsRepository {
   _EditableSettingsWidgetRepository()
@@ -597,6 +819,7 @@ class _EditableSettingsWidgetRepository
 
   Future<TrackerSnapshot> _snapshot;
   ProjectSettingsCatalog? savedSettings;
+  int saveProjectSettingsCalls = 0;
 
   @override
   bool get supportsGitHubAuth => false;
@@ -672,6 +895,7 @@ class _EditableSettingsWidgetRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 
   @override
@@ -687,6 +911,7 @@ class _EditableSettingsWidgetRepository
   Future<TrackerSnapshot> saveProjectSettings(
     ProjectSettingsCatalog settings,
   ) async {
+    saveProjectSettingsCalls += 1;
     savedSettings = settings;
     final current = await _snapshot;
     final updated = TrackerSnapshot(
