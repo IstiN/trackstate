@@ -1905,7 +1905,8 @@ class TrackerViewModel extends ChangeNotifier {
           }
         }
       }
-      await _runAutomaticRepositoryConnectionRestore(
+      final completedWithinTimeout =
+          await _runAutomaticRepositoryConnectionRestore(
         connect: () => _repository.connect(
           GitHubConnection(
             repository: target.repository,
@@ -1946,6 +1947,14 @@ class TrackerViewModel extends ChangeNotifier {
           _bindProviderSession();
         },
       );
+      if (!completedWithinTimeout &&
+          _startupHostedAccessModeOverride == null &&
+          _snapshot != null) {
+        _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
+        if (!_disposed) {
+          notifyListeners();
+        }
+      }
     } on Object catch (_) {
       _bindProviderSession();
       rethrow;
@@ -2037,7 +2046,7 @@ class TrackerViewModel extends ChangeNotifier {
     providerAdapter.startStartupAuthProbe(storedToken);
   }
 
-  Future<void> _runAutomaticRepositoryConnectionRestore({
+  Future<bool> _runAutomaticRepositoryConnectionRestore({
     required Future<RepositoryUser> Function() connect,
     required Future<void> Function(RepositoryUser user) onSuccess,
     required Future<void> Function(Object error) onError,
@@ -2079,13 +2088,14 @@ class TrackerViewModel extends ChangeNotifier {
     );
     try {
       await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
+      return true;
     } on TimeoutException {
       startupAuthProbeDiagnostics.recordTimeoutFallback(
         timeout: _startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
       _publishStartupShellReadyDiagnosticIfNeeded();
-      return;
+      return false;
     }
   }
 
