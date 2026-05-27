@@ -892,6 +892,7 @@ class TrackerViewModel extends ChangeNotifier {
       _isConnected = true;
       _hasLocalHostedAccessSession = usesLocalPersistence;
       _connectedUser = user;
+      _startupHostedAccessModeOverride = null;
       await _resumeStartupRecoveryAfterAuthentication();
       await _reloadHostedStartupShellFallbackIfNeeded();
       _message = TrackerMessage.githubConnectedDragCards(
@@ -1916,6 +1917,9 @@ class TrackerViewModel extends ChangeNotifier {
           _connectedUser = user;
           _isConnected = true;
           if (callbackToken != null) {
+            _startupHostedAccessModeOverride = null;
+          }
+          if (callbackToken != null) {
             await _authStore.saveToken(
               callbackToken,
               repository: _workspaceId == null ? target.repository : null,
@@ -2192,7 +2196,8 @@ class TrackerViewModel extends ChangeNotifier {
     );
     if (repository is ProviderBackedTrackStateRepository &&
         repository.usesHostedStartupShellFallback(snapshot)) {
-      _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
+      _startupHostedAccessModeOverride =
+          HostedRepositoryAccessMode.disconnected;
       startupAuthProbeDiagnostics.recordFallbackShellReady(
         timeout: _startupAccessRestoreTimeout,
       );

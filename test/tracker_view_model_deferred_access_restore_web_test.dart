@@ -204,6 +204,53 @@ void main() {
   );
 
   test(
+    'provider-backed hosted fallback clears the startup override when manual sign-in succeeds after timeout',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _AttachmentRestrictedDelayedProvider();
+      final repository = _SlowReloadingHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForAttachmentRestrictedRepository(
+          'trackstate/trackstate',
+        ),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+
+      final connectFuture = viewModel.connectGitHub('manual-token');
+      await Future<void>.delayed(Duration.zero);
+      provider.completeAuthentication();
+      await connectFuture;
+
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.connectedUser?.login, 'demo-user');
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.attachmentRestricted,
+        reason:
+            'Manual post-timeout sign-in must clear the hosted startup fallback override so the visible access state can leave Needs sign-in.',
+      );
+    },
+  );
+
+  test(
     'deferred access restore consumes handled token failures after publishing the snapshot',
     () async {
       final authStore = _FixedAuthStore();

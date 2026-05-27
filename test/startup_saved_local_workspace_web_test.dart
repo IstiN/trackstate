@@ -919,7 +919,10 @@ void main() {
       final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
       expect(trigger, findsOneWidget);
       expect(
-        find.descendant(of: trigger, matching: find.bySemanticsLabel(fallbackTriggerLabel)),
+        find.descendant(
+          of: trigger,
+          matching: find.bySemanticsLabel(fallbackTriggerLabel),
+        ),
         findsWidgets,
       );
 
@@ -928,11 +931,112 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.descendant(of: trigger, matching: find.bySemanticsLabel(fallbackTriggerLabel)),
+        find.descendant(
+          of: trigger,
+          matching: find.bySemanticsLabel(fallbackTriggerLabel),
+        ),
         findsWidgets,
       );
       expect(
-        find.descendant(of: trigger, matching: find.bySemanticsLabel(connectedTriggerLabel)),
+        find.descendant(
+          of: trigger,
+          matching: find.bySemanticsLabel(connectedTriggerLabel),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'web startup allows manual post-timeout sign-in to move the workspace trigger out of needs sign-in',
+    (tester) async {
+      const fallbackTriggerLabel =
+          'Workspace switcher: Hosted setup workspace, Hosted, Needs sign-in';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      final delayedRepository = _DelayedGitHubProbeRepository(
+        snapshot: await _snapshotForRepository('stable/repo'),
+      );
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => delayedRepository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      expect(
+        find.descendant(
+          of: trigger,
+          matching: find.bySemanticsLabel(fallbackTriggerLabel),
+        ),
+        findsWidgets,
+      );
+
+      await tester.tap(
+        find.widgetWithText(OutlinedButton, 'Connect GitHub').first,
+      );
+      await tester.pumpAndSettle();
+      final tokenField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Fine-grained token',
+      );
+      expect(tokenField, findsOneWidget);
+      await tester.enterText(tokenField, 'manual-token');
+      await tester.tap(find.widgetWithText(FilledButton, 'Connect token'));
+      await tester.pump();
+      delayedRepository.completeUserProbe();
+      await tester.pumpAndSettle();
+
+      expect(
+        delayedRepository.session?.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(
+        find.descendant(
+          of: trigger,
+          matching: find.bySemanticsLabel(fallbackTriggerLabel),
+        ),
         findsNothing,
       );
     },
