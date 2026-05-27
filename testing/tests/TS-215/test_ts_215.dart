@@ -107,234 +107,305 @@ void main() {
           'TS-215 post-delete artifact observation did not complete.',
         );
       }
+      final failures = <String>[];
 
-      expect(
-        deletedTombstones.map((tombstone) => tombstone.key).toList(),
-        unorderedEquals(
-          Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
-        ),
-        reason:
-            'Step 2 failed: concurrent delete should return one tombstone result per deleted issue.',
-      );
-      expect(
-        afterDeletionArtifacts.headRevision,
-        isNot(beforeDeletion.headRevision),
-        reason:
-            'Step 2 failed: the concurrent delete workflow should persist repository changes and move HEAD to a new revision.',
-      );
-      expect(
-        afterDeletionArtifacts.tombstoneIndexExists,
-        isTrue,
-        reason:
-            'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} was not created after the concurrent delete workflow completed.',
-      );
-      expect(
-        afterDeletionArtifacts.legacyDeletedIndexExists,
-        isTrue,
-        reason:
-            'Step 4 failed: ${afterDeletionArtifacts.legacyDeletedIndexPath} was removed by the concurrent delete workflow.',
-      );
-      expect(
-        afterDeletionArtifacts.legacyDeletedIndexContent,
-        beforeDeletion.legacyDeletedIndexContent,
-        reason:
-            'Step 4 failed: ${afterDeletionArtifacts.legacyDeletedIndexPath} changed during concurrent deletion.\n${_describeLegacyIndexMutation(beforeDeletion, afterDeletionArtifacts)}',
-      );
-      expect(
-        afterDeletionArtifacts.tombstoneIndexJson.length,
-        Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys.length,
-        reason:
-            'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} should contain exactly one tombstone entry per deleted issue, but found ${afterDeletionArtifacts.tombstoneIndexJson.length} entries.',
-      );
-      expect(
-        afterDeletionArtifacts.tombstoneIndexJson
-            .map((entry) => entry['key'])
-            .whereType<String>()
-            .toList(),
-        unorderedEquals(
-          Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
-        ),
-        reason:
-            'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} does not list the expected deleted issue keys.',
-      );
-      expect(
-        afterDeletionArtifacts.worktreeStatusLines,
-        isEmpty,
-        reason:
-            'Expected result mismatch: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletionArtifacts.worktreeStatusLines.join(' | ')}.',
-      );
-
+      _recordExpectation(failures, () {
+        expect(
+          deletedTombstones.map((tombstone) => tombstone.key).toList(),
+          unorderedEquals(
+            Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
+          ),
+          reason:
+              'Step 2 failed: concurrent delete should return one tombstone result per deleted issue.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.headRevision,
+          isNot(beforeDeletion.headRevision),
+          reason:
+              'Step 2 failed: the concurrent delete workflow should persist repository changes and move HEAD to a new revision.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.tombstoneIndexExists,
+          isTrue,
+          reason:
+              'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} was not created after the concurrent delete workflow completed.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.legacyDeletedIndexExists,
+          isTrue,
+          reason:
+              'Step 4 failed: ${afterDeletionArtifacts.legacyDeletedIndexPath} was removed by the concurrent delete workflow.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.legacyDeletedIndexContent,
+          beforeDeletion.legacyDeletedIndexContent,
+          reason:
+              'Step 4 failed: ${afterDeletionArtifacts.legacyDeletedIndexPath} changed during concurrent deletion.\n${_describeLegacyIndexMutation(beforeDeletion, afterDeletionArtifacts)}',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.tombstoneIndexJson.length,
+          Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys.length,
+          reason:
+              'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} should contain exactly one tombstone entry per deleted issue, but found ${afterDeletionArtifacts.tombstoneIndexJson.length} entries.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.tombstoneIndexJson
+              .map((entry) => entry['key'])
+              .whereType<String>()
+              .toList(),
+          unorderedEquals(
+            Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
+          ),
+          reason:
+              'Step 3 failed: ${afterDeletionArtifacts.tombstoneIndexPath} does not list the expected deleted issue keys.',
+        );
+      });
+      _recordExpectation(failures, () {
+        expect(
+          afterDeletionArtifacts.worktreeStatusLines,
+          isEmpty,
+          reason:
+              'Expected result mismatch: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletionArtifacts.worktreeStatusLines.join(' | ')}.',
+        );
+      });
       for (final key
           in Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys) {
         final target = afterDeletionArtifacts.target(key);
-        expect(
-          target.issueFileExists,
-          isFalse,
-          reason:
-              'Step 2 failed: deleting $key concurrently should remove ${target.issuePath} from active storage.',
-        );
-        expect(
-          target.tombstoneFileExists,
-          isTrue,
-          reason:
-              'Step 3 failed: deleting $key concurrently should create ${target.tombstonePath}.',
-        );
-        expect(
-          target.tombstoneJson,
-          isNotNull,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} exists but did not contain deletion metadata for $key.',
-        );
-        expect(
-          target.tombstoneJson?['key'],
-          key,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not record the expected deleted issue key.',
-        );
-        expect(
-          target.tombstoneJson?['formerPath'],
-          target.issuePath,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the expected formerPath for $key.',
-        );
-        expect(
-          target.tombstoneJson?['project'],
-          Ts215ConcurrentLegacyDeletedIndexFixture.projectKey,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the project key for $key.',
-        );
-        expect(
-          target.tombstoneJson?['summary'],
-          target.summary,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the visible summary for $key.',
-        );
-        expect(
-          () => DateTime.parse(target.tombstoneJson!['deletedAt']! as String),
-          returnsNormally,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not store a valid ISO-8601 deletedAt timestamp for $key.',
-        );
+        _recordExpectation(failures, () {
+          expect(
+            target.issueFileExists,
+            isFalse,
+            reason:
+                'Step 2 failed: deleting $key concurrently should remove ${target.issuePath} from active storage.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneFileExists,
+            isTrue,
+            reason:
+                'Step 3 failed: deleting $key concurrently should create ${target.tombstonePath}.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneJson,
+            isNotNull,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} exists but did not contain deletion metadata for $key.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneJson?['key'],
+            key,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} did not record the expected deleted issue key.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneJson?['formerPath'],
+            target.issuePath,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} did not preserve the expected formerPath for $key.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneJson?['project'],
+            Ts215ConcurrentLegacyDeletedIndexFixture.projectKey,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} did not preserve the project key for $key.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            target.tombstoneJson?['summary'],
+            target.summary,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} did not preserve the visible summary for $key.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            () => DateTime.parse(target.tombstoneJson!['deletedAt']! as String),
+            returnsNormally,
+            reason:
+                'Step 3 failed: ${target.tombstonePath} did not store a valid ISO-8601 deletedAt timestamp for $key.',
+          );
+        });
       }
 
-      final LocalGitRepositoryPort reloadedRepositoryPort = dependencies
-          .createLocalGitRepositoryPort(tester);
-      final afterRepository = await reloadedRepositoryPort.openRepository(
-        repositoryPath: fixture.directory.path,
-      );
-      final afterDeletion = await tester.runAsync(
-        () =>
-            fixture.observeReloadedRepositoryState(repository: afterRepository),
-      );
-      if (afterDeletion == null) {
-        throw StateError(
-          'TS-215 post-delete repository reload did not complete.',
+      if (failures.isEmpty) {
+        final LocalGitRepositoryPort reloadedRepositoryPort = dependencies
+            .createLocalGitRepositoryPort(tester);
+        final afterRepository = await reloadedRepositoryPort.openRepository(
+          repositoryPath: fixture.directory.path,
         );
+        final afterDeletion = await tester.runAsync(
+          () => fixture.observeReloadedRepositoryState(
+            repository: afterRepository,
+          ),
+        );
+        if (afterDeletion == null) {
+          throw StateError(
+            'TS-215 post-delete repository reload did not complete.',
+          );
+        }
+        _recordExpectation(failures, () {
+          expect(
+            afterDeletion.snapshot.repositoryIndex.deleted
+                .map((entry) => entry.key)
+                .toSet(),
+            containsAll(<String>{
+              Ts215ConcurrentLegacyDeletedIndexFixture.legacyDeletedIssueKey,
+              ...Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
+            }),
+            reason:
+                'Expected result mismatch: repository consumers should still reserve the legacy deleted key and all newly deleted keys after the concurrent workflow completes.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            afterDeletion.allVisibleIssueSearchResults
+                .map((issue) => issue.key)
+                .toList(),
+            [Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey],
+            reason:
+                'Human-style verification failed: repository search should show only the surviving issue after the concurrent delete workflow completes.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            afterDeletion.survivingIssueSearchResults
+                .map((issue) => issue.key)
+                .toList(),
+            [Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey],
+            reason:
+                'Human-style verification failed: searching for the surviving issue should still return ${Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey} after concurrent deletion.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            afterDeletion.survivingIssueSearchResults.isNotEmpty
+                ? afterDeletion.survivingIssueSearchResults.first.summary
+                : null,
+            'Surviving issue',
+            reason:
+                'Human-style verification failed: the surviving issue should still expose its visible summary after the concurrent delete workflow completes.',
+          );
+        });
+        _recordExpectation(failures, () {
+          expect(
+            afterDeletion.worktreeStatusLines,
+            isEmpty,
+            reason:
+                'Expected result mismatch: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletion.worktreeStatusLines.join(' | ')}.',
+          );
+        });
+
+        for (final key
+            in Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys) {
+          final target = afterDeletion.target(key);
+          _recordExpectation(failures, () {
+            expect(
+              target.issueFileExists,
+              isFalse,
+              reason:
+                  'Step 2 failed: deleting $key concurrently should remove ${target.issuePath} from active storage.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneFileExists,
+              isTrue,
+              reason:
+                  'Step 3 failed: deleting $key concurrently should create ${target.tombstonePath}.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneJson,
+              isNotNull,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} exists but did not contain deletion metadata for $key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneJson?['key'],
+              key,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} did not record the expected deleted issue key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneJson?['formerPath'],
+              target.issuePath,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} did not preserve the expected formerPath for $key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneJson?['project'],
+              Ts215ConcurrentLegacyDeletedIndexFixture.projectKey,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} did not preserve the project key for $key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.tombstoneJson?['summary'],
+              target.summary,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} did not preserve the visible summary for $key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              () =>
+                  DateTime.parse(target.tombstoneJson!['deletedAt']! as String),
+              returnsNormally,
+              reason:
+                  'Step 3 failed: ${target.tombstonePath} did not store a valid ISO-8601 deletedAt timestamp for $key.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              target.searchResults,
+              isEmpty,
+              reason:
+                  'Human-style verification failed: repository search should no longer return $key after the concurrent delete workflow completes.',
+            );
+          });
+          _recordExpectation(failures, () {
+            expect(
+              afterDeletion.snapshot.repositoryIndex.pathForKey(key),
+              isNull,
+              reason:
+                  'Expected result mismatch: the active repository index should no longer resolve $key after concurrent deletion.',
+            );
+          });
+        }
       }
 
-      expect(
-        afterDeletion.snapshot.repositoryIndex.deleted
-            .map((entry) => entry.key)
-            .toSet(),
-        containsAll(<String>{
-          Ts215ConcurrentLegacyDeletedIndexFixture.legacyDeletedIssueKey,
-          ...Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys,
-        }),
-        reason:
-            'Expected result mismatch: repository consumers should still reserve the legacy deleted key and all newly deleted keys after the concurrent workflow completes.',
-      );
-      expect(
-        afterDeletion.allVisibleIssueSearchResults
-            .map((issue) => issue.key)
-            .toList(),
-        [Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey],
-        reason:
-            'Human-style verification failed: repository search should show only the surviving issue after the concurrent delete workflow completes.',
-      );
-      expect(
-        afterDeletion.survivingIssueSearchResults
-            .map((issue) => issue.key)
-            .toList(),
-        [Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey],
-        reason:
-            'Human-style verification failed: searching for the surviving issue should still return ${Ts215ConcurrentLegacyDeletedIndexFixture.survivingIssueKey} after concurrent deletion.',
-      );
-      expect(
-        afterDeletion.survivingIssueSearchResults.single.summary,
-        'Surviving issue',
-        reason:
-            'Human-style verification failed: the surviving issue should still expose its visible summary after the concurrent delete workflow completes.',
-      );
-      expect(
-        afterDeletion.worktreeStatusLines,
-        isEmpty,
-        reason:
-            'Expected result mismatch: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletion.worktreeStatusLines.join(' | ')}.',
-      );
-
-      for (final key
-          in Ts215ConcurrentLegacyDeletedIndexFixture.deleteIssueKeys) {
-        final target = afterDeletion.target(key);
-        expect(
-          target.issueFileExists,
-          isFalse,
-          reason:
-              'Step 2 failed: deleting $key concurrently should remove ${target.issuePath} from active storage.',
-        );
-        expect(
-          target.tombstoneFileExists,
-          isTrue,
-          reason:
-              'Step 3 failed: deleting $key concurrently should create ${target.tombstonePath}.',
-        );
-        expect(
-          target.tombstoneJson,
-          isNotNull,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} exists but did not contain deletion metadata for $key.',
-        );
-        expect(
-          target.tombstoneJson?['key'],
-          key,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not record the expected deleted issue key.',
-        );
-        expect(
-          target.tombstoneJson?['formerPath'],
-          target.issuePath,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the expected formerPath for $key.',
-        );
-        expect(
-          target.tombstoneJson?['project'],
-          Ts215ConcurrentLegacyDeletedIndexFixture.projectKey,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the project key for $key.',
-        );
-        expect(
-          target.tombstoneJson?['summary'],
-          target.summary,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not preserve the visible summary for $key.',
-        );
-        expect(
-          () => DateTime.parse(target.tombstoneJson!['deletedAt']! as String),
-          returnsNormally,
-          reason:
-              'Step 3 failed: ${target.tombstonePath} did not store a valid ISO-8601 deletedAt timestamp for $key.',
-        );
-        expect(
-          target.searchResults,
-          isEmpty,
-          reason:
-              'Human-style verification failed: repository search should no longer return $key after the concurrent delete workflow completes.',
-        );
-        expect(
-          afterDeletion.snapshot.repositoryIndex.pathForKey(key),
-          isNull,
-          reason:
-              'Expected result mismatch: the active repository index should no longer resolve $key after concurrent deletion.',
-        );
+      if (failures.isNotEmpty) {
+        fail(failures.join('\n\n'));
       }
     },
     timeout: const Timeout(Duration(seconds: 20)),
@@ -357,4 +428,12 @@ String _describeLegacyIndexMutation(
       'afterExists=${afterDeletion.legacyDeletedIndexExists}, '
       'beforeContent=$beforeContent, '
       'afterContent=$afterContent';
+}
+
+void _recordExpectation(List<String> failures, void Function() expectation) {
+  try {
+    expectation();
+  } on TestFailure catch (error) {
+    failures.add(error.message ?? error.toString());
+  }
 }

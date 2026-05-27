@@ -59,10 +59,12 @@ BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
   required VoidCallback onBrowserFocusOutside,
+  VoidCallback? onBrowserEscape,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
   _keep(onBrowserTab);
   _keep(onBrowserFocusOutside);
+  _keep(onBrowserEscape);
   _keep(onBrowserBoundaryKey);
   return BrowserWorkspaceSwitcherFocusMonitorSubscription();
 }
