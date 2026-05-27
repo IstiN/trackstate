@@ -14,10 +14,11 @@ python3 -m unittest discover -s testing/tests/TS-269 -p 'test_*.py' -v
 
 No Python packages are required beyond the standard library. The repository
 under test must have a Dart SDK available on `PATH`, or `TRACKSTATE_DART_BIN`
-must point to the Dart executable used to run the repository-local CLI entry
-point. The probe seeds a disposable Local Git repository and executes
-`dart <repo>/bin/trackstate.dart --target local` from that repository working
-directory so it can verify the current-working-directory default.
+must point to the Dart executable used to compile a temporary TrackState CLI
+binary from this checkout. The probe seeds a disposable Local Git repository,
+compiles a repository-pinned executable, and runs `trackstate --target local`
+from that repository working directory so it can verify the current-working-
+directory default.
 
 ## Expected passing output
 
@@ -31,8 +32,9 @@ Ran 2 tests in <time>
 OK
 ```
 
-## Expected failing output for the current product defect
+## Expected failing output for a live product defect
 
-If the product bug is still present, `test_ts_269.py` fails because the root CLI
-treats `--target` as an unknown command instead of proceeding successfully from
-the current repository.
+If the product behavior regresses, `test_ts_269.py` fails with the captured
+command output from the seeded repository run, showing the exact CLI error that
+prevented `trackstate --target local` from resolving the current working
+directory.
