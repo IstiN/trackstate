@@ -71,18 +71,35 @@ AUTH_OBSERVATION_WAIT_SECONDS = 5
 SECONDARY_PROBE_START_WAIT_SECONDS = 60
 EVENTUAL_SHELL_WAIT_SECONDS = SECONDARY_PROBE_DELAY_SECONDS + 90
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-996"]
+LINKED_BUGS = [
+    "TS-1149",
+    "TS-1145",
+    "TS-1046",
+    "TS-1045",
+    "TS-1014",
+    "TS-1013",
+    "TS-1012",
+    "TS-996",
+    "TS-992",
+]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996. Its deployed fix made the `/user` startup timeout non-blocking "
-    "after 11 seconds, so this test waits past that window and delays a different "
-    "startup artifact (`DEMO/project.json`) to verify the timeout behavior applies "
-    "beyond the auth probe."
+    "Reviewed the linked startup bug chain from input/TS-1002/linked_bugs.md. "
+    "TS-996, TS-1013, TS-1045, and TS-1145 require the shell to become "
+    "interactive by the global 11-second timeout, TS-1012 plus TS-1046 extend "
+    "that guarantee to secondary critical-path probes such as "
+    "`DEMO/project.json`, TS-992 and TS-1014 require the live startup flow to "
+    "exercise the `/user` probe path promptly instead of skipping or deferring "
+    "it, and TS-1149 confirms the fallback session must remain safely "
+    "restricted once the timeout-driven shell is visible. This test therefore "
+    "keeps the `/user` delay short, delays the secondary probe for 31 seconds, "
+    "and samples the live page at the 12-second checkpoint while that "
+    "secondary probe is still pending."
 )
 REWORK_SUMMARY = (
-    "Reworked the TS-1002 startup regression so the 11-second checkpoint is sampled "
-    "inside the live page while the delayed `DEMO/project.json` probe is still "
-    "pending, kept `/user` and secondary-probe timings separate, and added the "
-    "ticket README."
+    "Reused the approved TS-1002 live startup regression, kept the timeout-window "
+    "sampling inside the browser while `DEMO/project.json` was still pending, and "
+    "now fail fast unless the live startup flow establishes the required prompt "
+    "`/user` probe precondition before the secondary-probe assertion runs."
 )
 CHECKPOINT_SAMPLE_TOLERANCE_SECONDS = 1.0
 
@@ -265,6 +282,26 @@ def main() -> None:
                         f"Observed GitHub requests: {json.dumps(secondary_probe_snapshot['github_request_urls'], ensure_ascii=True)}\n"
                         f"Observed body text:\n{secondary_probe_snapshot['body_text']}",
                     )
+                if not auth_probe_started_early or not auth_probe_released_early:
+                    auth_precondition_error = _build_auth_precondition_error(
+                        result=result,
+                        tracker_page=tracker_page,
+                        auth_probe_started_early=auth_probe_started_early,
+                        auth_probe_released_early=auth_probe_released_early,
+                    )
+                    result["precondition_failure"] = auth_precondition_error
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=auth_precondition_error,
+                    )
+                    _record_not_reached_steps(
+                        result,
+                        starting_step=2,
+                    )
+                    raise AssertionError(auth_precondition_error)
 
                 _record_step(
                     result,
@@ -275,7 +312,8 @@ def main() -> None:
                         "Opened the deployed TrackState app in Chromium with a preloaded "
                         "local plus hosted workspace profile state, a synthetic "
                         f"{SECONDARY_PROBE_DELAY_SECONDS}-second delay on `{SECONDARY_PROBE_PATH}`, "
-                        f"and an armed {AUTH_DELAY_SECONDS}-second `/user` probe.\n"
+                        f"an armed {AUTH_DELAY_SECONDS}-second `/user` probe, and a verified "
+                        f"prompt `/user` startup-path precondition.\n"
                         f"secondary_probe_started_after_start_seconds="
                         f"{result['secondary_probe_started_after_start_seconds']!r}; "
                         f"auth_probe_started_within_{AUTH_OBSERVATION_WAIT_SECONDS}_seconds="
@@ -882,6 +920,37 @@ def _assert_shell_components(observation: dict[str, Any]) -> None:
         )
 
 
+def _build_auth_precondition_error(
+    *,
+    result: dict[str, Any],
+    tracker_page: TrackStateTrackerPage,
+    auth_probe_started_early: bool,
+    auth_probe_released_early: bool,
+) -> str:
+    return (
+        "Step 1 failed: the live startup flow did not establish the required prompt "
+        f"`{PRIMARY_AUTH_PATH}` probe precondition before the delayed "
+        f"`{SECONDARY_PROBE_PATH}` timeout assertion.\n"
+        f"Required within {AUTH_OBSERVATION_WAIT_SECONDS} seconds: "
+        f"auth_probe_started=True and auth_probe_released=True.\n"
+        f"Observed: auth_probe_started={auth_probe_started_early!r}; "
+        f"auth_probe_released={auth_probe_released_early!r}; "
+        f"auth_probe_started_after_start_seconds="
+        f"{result.get('armed_auth_probe_started_after_start_seconds')!r}; "
+        f"auth_probe_released_after_start_seconds="
+        f"{result.get('armed_auth_probe_released_after_start_seconds')!r}; "
+        f"secondary_probe_started_after_start_seconds="
+        f"{result.get('secondary_probe_started_after_start_seconds')!r}.\n"
+        f"Observed GitHub requests: {json.dumps(result.get('github_request_urls', []), ensure_ascii=True)}\n"
+        f"Observed delayed auth requests: "
+        f"{json.dumps(result.get('delayed_auth_request_urls', []), ensure_ascii=True)}\n"
+        f"Observed body text:\n{tracker_page.body_text()}\n"
+        "The test cannot attribute a later shell-timeout failure solely to the "
+        "secondary critical-path probe until the deployed app exposes this prompt "
+        "startup `/user` capability."
+    )
+
+
 def _write_pass_outputs(result: dict[str, Any]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     write_test_automation_result(RESULT_PATH, passed=True)
@@ -892,6 +961,10 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
     error = str(result.get("error", f"AssertionError: {TICKET_KEY} failed"))
+    if not error.startswith(("AssertionError:", "RuntimeError:", "ValueError:")):
+        traceback_text = str(result.get("traceback", ""))
+        if "AssertionError:" in traceback_text:
+            error = f"AssertionError: {error}"
     write_test_automation_result(RESULT_PATH, passed=False, error=error)
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
@@ -1007,6 +1080,15 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
 
 def _build_bug_description(result: dict[str, Any]) -> str:
     annotated_steps = build_annotated_steps(result, request_steps=REQUEST_STEPS)
+    missing_capability = (
+        "The deployed startup flow must issue and complete the GitHub `/user` probe "
+        f"within {AUTH_OBSERVATION_WAIT_SECONDS} seconds before this ticket's delayed "
+        f"`{SECONDARY_PROBE_PATH}` scenario can prove the global secondary-probe timeout "
+        "behavior."
+        if result.get("precondition_failure")
+        else "The deployed app must render the interactive shell within the global "
+        f"11-second timeout window even while `{SECONDARY_PROBE_PATH}` remains pending."
+    )
     lines = [
         f"# {TICKET_KEY} bug report",
         "",
@@ -1021,6 +1103,7 @@ def _build_bug_description(result: dict[str, Any]) -> str:
         "## Actual vs Expected",
         f"- **Expected:** {EXPECTED_RESULT}",
         f"- **Actual:** {_actual_result_summary(result, passed=False)}",
+        f"- **Missing or broken production capability:** {missing_capability}",
         "",
         "## Environment details",
         f"- URL: {result.get('app_url')}",
@@ -1053,6 +1136,8 @@ def _actual_result_summary(result: dict[str, Any], *, passed: bool) -> str:
             "the full shell navigation, the TopBar workspace trigger, and visible "
             "TrackState branding."
         )
+    if result.get("precondition_failure"):
+        return str(result["precondition_failure"])
     timeout_window = result.get("timeout_window_observation", {})
     eventual = result.get("eventual_shell_ready_observation", {})
     return (

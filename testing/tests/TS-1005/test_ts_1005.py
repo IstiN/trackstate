@@ -19,6 +19,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
+    RuntimeObservation,
     StartupSurfaceObservation,
     TrackStateTrackerPage,
 )
@@ -26,7 +27,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
@@ -43,10 +43,20 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts1005-mismatched-workspace"
 LOCAL_DISPLAY_NAME = "Broken local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-995"]
+LINKED_BUGS = ["TS-1030", "TS-1011", "TS-995"]
 STARTUP_SETTLE_TIMEOUT_SECONDS = 30
 STARTUP_SETTLE_INTERVAL_SECONDS = 1
 STARTUP_STABILITY_SAMPLES = 3
+STARTUP_ENTRY_TIMEOUT_MS = 120_000
+STARTUP_ENTRY_SIGNALS = (
+    "Workspace switcher",
+    "Add workspace",
+    "Saved workspaces",
+    "Needs sign-in",
+    "Connect GitHub",
+    "Board",
+    *TrackStateTrackerPage.LOAD_ERROR_TEXT_VARIANTS,
+)
 SWITCHER_ROW_TIMEOUT_MS = 30_000
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 DASHBOARD_ONLY_SIGNAL_TEXTS = (
@@ -137,7 +147,7 @@ def main() -> None:
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                runtime_observation = _open_startup_entrypoint(tracker_page)
                 page.set_viewport(**DESKTOP_VIEWPORT)
                 result["runtime_state"] = runtime_observation.kind
                 result["runtime_body_text"] = runtime_observation.body_text
@@ -425,6 +435,18 @@ def _workspace_state(repository: str) -> dict[str, object]:
 
 def _cleanup_local_workspace() -> None:
     shutil.rmtree(LOCAL_TARGET, ignore_errors=True)
+
+
+def _open_startup_entrypoint(tracker_page: TrackStateTrackerPage) -> RuntimeObservation:
+    return tracker_page.open_startup_entrypoint(
+        wait_signals=STARTUP_ENTRY_SIGNALS,
+        timeout_ms=STARTUP_ENTRY_TIMEOUT_MS,
+        wait_until="domcontentloaded",
+        timeout_error_message=(
+            "Step 1 failed: the deployed app never reached an observable startup or landing "
+            "state."
+        ),
+    )
 
 
 def _capture_startup_state(

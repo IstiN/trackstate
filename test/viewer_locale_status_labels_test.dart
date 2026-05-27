@@ -158,6 +158,7 @@ void main() {
               'Timed out waiting for the cleared viewer-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
+        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,
@@ -236,6 +237,7 @@ void main() {
               'Timed out waiting for the cleared default-locale translation to persist.',
         );
         await screen.openSection('JQL Search');
+        await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
           Ts467LocaleResolutionFixture.issueKey,
           Ts467LocaleResolutionFixture.issueSummary,

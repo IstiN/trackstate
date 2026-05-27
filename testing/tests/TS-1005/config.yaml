@@ -10,4 +10,4 @@ notes:
   - Uses the ticket viewport of 1440x900 and waits for startup hydration to settle before asserting the visible surface.
   - Verifies the current view falls back to the default landing state instead of loading the dashboard for the broken workspace.
   - Reopens Workspace switcher and requires the broken local workspace to stay Unavailable without any visible Active selection indicator.
-  - Covers the deployed TS-995 fix path, so the test records both the current visible route and the final switcher row state.
+  - Covers the deployed TS-1030, TS-1011, and TS-995 startup mismatch fix path, so the test records both the current visible route and the final switcher row state.

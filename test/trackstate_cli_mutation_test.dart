@@ -52,6 +52,43 @@ void main() {
     });
 
     test(
+      'creates tickets from the top-level create alias with native hierarchy flags',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final result = await cli.run([
+          'create',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--summary',
+          'CLI created story',
+          '--issueType',
+          'Story',
+          '--epic',
+          'DEMO-10',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final issue = data['issue']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['command'], 'ticket-create');
+        expect(issue['key'], 'DEMO-11');
+        expect(issue['epic'], 'DEMO-10');
+        expect(issue['issueType'], 'story');
+        expect(
+          File('${repo.path}/DEMO/DEMO-10/DEMO-11/main.md').existsSync(),
+          isTrue,
+        );
+      },
+    );
+
+    test(
       'creates tickets from legacy jira_create_ticket_with_json project and fieldsJson arguments',
       () async {
         final repo = await _createCliMutationRepository();
@@ -652,15 +689,56 @@ void main() {
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
       );
+      expect(
+        File('${repo.path}/DEMO/DEMO-10/links.json').existsSync(),
+        isFalse,
+      );
       final storedLinks =
-          jsonDecode(
-                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
-              )
+          jsonDecode(File('${repo.path}/links.json').readAsStringSync())
               as List<dynamic>;
       expect(storedLinks, [
         {'type': 'blocks', 'target': 'DEMO-2', 'direction': 'outward'},
       ]);
     });
+
+    test(
+      'rejects mixed-case self-referencing links with validation output',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final linkResult = await cli.run([
+          'ticket',
+          'link',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--key',
+          'DEMO-2',
+          '--target-key',
+          'demo-2',
+          '--type',
+          'relates to',
+        ]);
+        final linkJson = jsonDecode(linkResult.stdout) as Map<String, Object?>;
+        final error = linkJson['error']! as Map<String, Object?>;
+
+        expect(linkResult.exitCode, 2);
+        expect(linkJson['ok'], isFalse);
+        expect(error['code'], 'INVALID_MUTATION');
+        expect(error['category'], 'validation');
+        expect(error['message'], contains('DEMO-2'));
+        expect(error['message'], contains('demo-2'));
+        expect(error['message'], contains('itself'));
+        expect(error['details'], containsPair('targetKey', 'demo-2'));
+        expect(
+          File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+          isFalse,
+        );
+      },
+    );
 
     test(
       'updates from jira JSON, archives explicitly, and deletes permanently',
@@ -714,11 +792,10 @@ void main() {
                 as Map<String, Object?>;
         expect(archiveResult.exitCode, 0);
         expect(archiveIssue['archived'], isTrue);
+        expect(File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(), isTrue);
         expect(
-          File(
-            '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
-          ).existsSync(),
-          isTrue,
+          File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
+          contains('archived: true'),
         );
 
         final createdDeleteTarget = await cli.run([
@@ -767,13 +844,84 @@ void main() {
         );
       },
     );
+
+    test(
+      'supports exact lifecycle ticket commands from the current repository',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli(workingDirectory: repo.path);
+
+        final archiveResult = await cli.run(['archive', 'DEMO-10']);
+        final archiveJson =
+            jsonDecode(archiveResult.stdout) as Map<String, Object?>;
+        final archiveData = archiveJson['data']! as Map<String, Object?>;
+        final archiveIssue = archiveData['issue']! as Map<String, Object?>;
+
+        expect(archiveResult.exitCode, 0);
+        expect(archiveData['command'], 'ticket-archive');
+        expect(archiveIssue['key'], 'DEMO-10');
+        expect(archiveIssue['archived'], isTrue);
+        expect(File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(), isTrue);
+        expect(
+          File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync(),
+          contains('archived: true'),
+        );
+        expect(
+          File(
+            '${repo.path}/DEMO/.trackstate/archive/DEMO-10/main.md',
+          ).existsSync(),
+          isFalse,
+        );
+
+        final createDeleteTarget = await cli.run([
+          'ticket',
+          'create',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--summary',
+          'Delete me',
+          '--issue-type',
+          'Story',
+        ]);
+        final createdIssue =
+            ((jsonDecode(createDeleteTarget.stdout)
+                        as Map<String, Object?>)['data']
+                    as Map<String, Object?>)['issue']!
+                as Map<String, Object?>;
+        final createdKey = createdIssue['key']! as String;
+
+        final deleteResult = await cli.run(['jira_delete_ticket', createdKey]);
+        final deleteJson =
+            jsonDecode(deleteResult.stdout) as Map<String, Object?>;
+        final deleteData = deleteJson['data']! as Map<String, Object?>;
+        final deletedIssue =
+            deleteData['deletedIssue']! as Map<String, Object?>;
+
+        expect(deleteResult.exitCode, 0);
+        expect(deleteData['command'], 'jira-delete-ticket');
+        expect(deletedIssue['key'], createdKey);
+        expect(
+          File('${repo.path}/DEMO/$createdKey/main.md').existsSync(),
+          isFalse,
+        );
+        expect(
+          File(
+            '${repo.path}/DEMO/.trackstate/tombstones/$createdKey.json',
+          ).existsSync(),
+          isTrue,
+        );
+      },
+    );
   });
 }
 
-TrackStateCli _createCli() => TrackStateCli(
-  environment: const TrackStateCliEnvironment(
+TrackStateCli _createCli({String workingDirectory = '.'}) => TrackStateCli(
+  environment: TrackStateCliEnvironment(
     resolvePath: _identityPath,
-    workingDirectory: '.',
+    workingDirectory: workingDirectory,
   ),
 );
 

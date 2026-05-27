@@ -55,14 +55,17 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
+      final preconditionRepository = ReactiveIssueDetailTrackStateRepository(
+        textFixtures: const <String, String>{_linksPath: _invalidLinksJson},
+      );
       final repository = ReactiveIssueDetailTrackStateRepository(
         textFixtures: const <String, String>{_linksPath: _invalidLinksJson},
       );
-      final logCapture = _UiWarningLogCapture()..install();
+      final logCapture = _UiWarningLogCapture();
       IssueDetailAccessibilityScreenHandle? screen;
 
       try {
-        final seededIssue = await _hydrateIssue(repository);
+        final seededIssue = await _hydrateIssue(preconditionRepository);
         result['hydrated_links'] = _formatIssueLinks(seededIssue.links);
         if (!_containsInvalidLink(seededIssue.links)) {
           throw AssertionError(
@@ -72,11 +75,14 @@ void main() {
           );
         }
 
+        screen = await launchIssueDetailAccessibilityFixture(
+          tester,
+          repository: repository,
+        );
+        await tester.pumpAndSettle();
+
+        logCapture.install();
         await logCapture.capture(() async {
-          screen = await launchIssueDetailAccessibilityFixture(
-            tester,
-            repository: repository,
-          );
           await screen!.openSearch();
           await screen!.selectIssue(_issueKey, _issueSummary);
           await tester.pump(const Duration(milliseconds: 300));
@@ -296,11 +302,12 @@ void _writeFailureOutputs(Map<String, Object?> result) {
 
 String _jiraComment(Map<String, Object?> result, {required bool passed}) {
   final status = passed ? 'PASSED' : 'FAILED';
+  final seededPayload = _inlineJson(_invalidLinksJson);
   final lines = <String>[
     'h3. $_ticketKey $status',
     '',
     '*Automation coverage*',
-    '* Pumped the production TrackState issue-detail UI with $_linksPath seeded as {code:json}${jsonEncode(const <String, String>{'type': 'blocks', 'target': _targetIssueKey, 'direction': 'inward'})}{code}.',
+    '* Pumped the production TrackState issue-detail UI with $_linksPath seeded as {code:json}$seededPayload{code}.',
     '* Opened $_issueKey through the JQL Search flow and captured visible issue-detail text, semantics, button labels, and system log output.',
     '* Checked the captured logs for the schema validation warning fragments {{warning}}, {{blocks}}, {{inward}}, and {{outward}}.',
     '',
@@ -330,11 +337,12 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
   final status = passed ? 'Passed' : 'Failed';
+  final seededPayload = _inlineJson(_invalidLinksJson);
   final lines = <String>[
     '## $_ticketKey $status',
     '',
     '### Automation',
-    '- Pumped the production TrackState issue-detail UI with `$_linksPath` seeded as `{"type":"blocks","target":"$_targetIssueKey","direction":"inward"}`.',
+    '- Pumped the production TrackState issue-detail UI with `$_linksPath` seeded as `$seededPayload`.',
     '- Opened `$_issueKey` through the JQL Search flow and captured visible issue-detail text, semantics, button labels, and system log output.',
     '- Checked the captured logs for the schema validation warning fragments `warning`, `blocks`, `inward`, and `outward`.',
     '',
@@ -388,6 +396,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _bugDescription(Map<String, Object?> result) {
+  final seededPayload = _inlineJson(_invalidLinksJson);
   return [
     '# TS-654 - Issue detail does not log a validation warning for non-canonical link metadata',
     '',
@@ -403,7 +412,7 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** opening issue detail for `$_issueKey` with `$_linksPath` containing `{"type":"blocks","target":"$_targetIssueKey","direction":"inward"}` should keep the UI visible and log a schema validation warning that mentions the non-canonical `blocks` / `inward` metadata and the expected `outward` direction.',
+    '- **Expected:** opening issue detail for `$_issueKey` with `$_linksPath` containing `$seededPayload` should keep the UI visible and log a schema validation warning that mentions the non-canonical `blocks` / `inward` metadata and the expected `outward` direction.',
     '- **Actual:** ${result['error'] ?? 'the issue detail scenario did not produce the expected warning.'}',
     '',
     '## Environment details',
@@ -509,6 +518,7 @@ String _formatLogBlock(List<String> lines) {
   return lines.join('\n');
 }
 
+String _inlineJson(String jsonSource) => jsonEncode(jsonDecode(jsonSource));
 bool _containsSnapshot(List<String> values, String expected) {
   return values.any((value) => value.contains(expected));
 }

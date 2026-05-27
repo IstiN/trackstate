@@ -6,5 +6,5 @@ dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
   - git CLI available on PATH for seeding a disposable Local Git repository
 notes:
-  - Executes the live canonical multi-field update flow through `trackstate jira_update_ticket --target local --issueKey TS-1 --json <fields-envelope>`.
+  - Executes the live public multi-field update flow through `trackstate ticket update --target local --key TS-1 --field summary=... --field priority=... --field labels=[...] --field assignee=...`.
   - Verifies one success envelope is returned, `TS/TS-1/main.md` reflects summary/priority/labels/assignee changes, and the mutation persists as exactly one Git commit.

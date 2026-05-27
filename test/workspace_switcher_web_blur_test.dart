@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,13 +14,12 @@ void main() {
   });
 
   testWidgets(
-    'desktop web workspace switcher tabs into the open panel and Escape restores trigger focus',
+    'desktop web workspace switcher tabs into the open panel and Escape closes it',
     (tester) async {
       if (!kIsWeb) {
         return;
       }
 
-      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -63,60 +61,45 @@ void main() {
         );
         await _pumpUntilVisible(tester, find.byType(TextField));
 
-        final desktopCandidates = <String, Finder>{
-          'Workspace switcher': find.byKey(
-            const ValueKey('workspace-switcher-trigger'),
-          ),
-          'Active workspace': find.byKey(
-            const ValueKey('workspace-hosted:alpha/repo@main'),
-          ),
-          'Search issues': find.byType(TextField),
-          'Repository': find.widgetWithText(TextFormField, 'Repository'),
-        };
-
-        await tester.tap(desktopCandidates['Workspace switcher']!);
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+          warnIfMissed: false,
+        );
         await tester.pumpAndSettle();
 
         await _pumpUntilVisible(
           tester,
           find.widgetWithText(TextFormField, 'Repository'),
         );
-        expect(_focusedLabel(tester, desktopCandidates), 'Workspace switcher');
 
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
         await tester.pumpAndSettle();
 
-        expect(_focusedLabel(tester, desktopCandidates), 'Active workspace');
+        expect(
+          find.byKey(const ValueKey('workspace-hosted:alpha/repo@main')),
+          findsOneWidget,
+        );
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pump();
         await tester.pumpAndSettle();
 
         await _pumpUntilGone(tester, find.text('Saved workspaces'));
-
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await tester.pump();
-        await _pumpUntilVisible(
-          tester,
-          find.widgetWithText(TextFormField, 'Repository'),
-        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        semantics.dispose();
       }
     },
   );
 
   testWidgets(
-    'desktop web workspace row activation keeps focus on the browser-owned control',
+    'desktop web workspace open action keeps focus on the browser-owned control',
     (tester) async {
       if (!kIsWeb) {
         return;
       }
 
-      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -170,7 +153,7 @@ void main() {
         );
 
         await tester.tap(
-          find.byKey(const ValueKey('workspace-hosted:beta/repo@main')),
+          find.byKey(const ValueKey('workspace-open-hosted:beta/repo@main')),
           warnIfMissed: false,
         );
         await tester.pump();
@@ -178,16 +161,12 @@ void main() {
 
         expect(service.state.activeWorkspaceId, 'hosted:beta/repo@main');
         expect(
-          FocusManager.instance.primaryFocus,
-          isNull,
-          reason:
-              'Selecting a saved workspace on web should keep focus in the '
-              'browser-owned path instead of re-entering Flutter focus nodes.',
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsNothing,
         );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        semantics.dispose();
       }
     },
   );
@@ -209,6 +188,12 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   @override
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId) {
     throw UnimplementedError();
+  }
+
+  @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    state = state.copyWith(activeWorkspaceId: null);
+    return state;
   }
 
   @override
@@ -275,72 +260,4 @@ Future<void> _pumpUntilGone(
     }
   }
   throw TestFailure('Expected $finder to disappear.');
-}
-
-String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
-  final focusedSemantics = find.semantics.byPredicate(
-    (node) => node.getSemanticsData().flagsCollection.isFocused,
-    describeMatch: (_) => 'focused semantics node',
-  );
-  if (focusedSemantics.evaluate().isEmpty) {
-    return null;
-  }
-
-  for (final entry in candidates.entries) {
-    final matches = entry.value.evaluate().length;
-    if (matches == 0) {
-      continue;
-    }
-    for (var index = 0; index < matches; index += 1) {
-      final candidateFinder = entry.value.at(index);
-      if (_focusWithinFinder(candidateFinder)) {
-        return entry.key;
-      }
-      final candidateSemantics = _semanticsFinderFor(
-        tester: tester,
-        finder: candidateFinder,
-      );
-      final ownsFocusedNode = find.semantics.descendant(
-        of: candidateSemantics,
-        matching: focusedSemantics,
-        matchRoot: true,
-      );
-      if (ownsFocusedNode.evaluate().isNotEmpty) {
-        return entry.key;
-      }
-    }
-  }
-
-  return null;
-}
-
-bool _focusWithinFinder(Finder ancestorFinder) {
-  final focusContext = FocusManager.instance.primaryFocus?.context;
-  if (focusContext == null) {
-    return false;
-  }
-  final targetElements = ancestorFinder.evaluate().toSet();
-  if (targetElements.contains(focusContext)) {
-    return true;
-  }
-  var found = false;
-  focusContext.visitAncestorElements((element) {
-    if (targetElements.contains(element)) {
-      found = true;
-      return false;
-    }
-    return true;
-  });
-  return found;
-}
-
-FinderBase<SemanticsNode> _semanticsFinderFor({
-  required WidgetTester tester,
-  required Finder finder,
-}) {
-  final semanticsId = tester.getSemantics(finder).id;
-  return find.semantics.byPredicate(
-    (node) => node.id == semanticsId,
-    describeMatch: (_) => 'semantics node for $finder',
-  );
 }

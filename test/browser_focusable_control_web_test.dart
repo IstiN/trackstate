@@ -8,20 +8,74 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
+import 'package:trackstate/data/repositories/browser_local_workspace_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_focusable_control_web.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:web/web.dart' as web;
 
 void main() {
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await clearRememberedBrowserLocalWorkspaceSelections();
+    addTearDown(() => clearRememberedBrowserLocalWorkspaceSelections());
   });
 
   testWidgets(
-    'web startup keeps the shell visible when the saved active local workspace has no browser handle',
+    'browser focus bridge suppresses late-added matching semantics nodes from tab order',
+    (tester) async {
+      const focusTargetId = 'trackstate-browser-focus-late-semantics';
+
+      await tester.pumpWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: 160,
+              height: 48,
+              child: BrowserFocusableControl(
+                label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+                focusTargetId: focusTargetId,
+                onPressed: null,
+                child: SizedBox.expand(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final lateSemanticsNode = web.HTMLDivElement()
+        ..setAttribute('flt-semantics-identifier', focusTargetId)
+        ..setAttribute('tabindex', '0');
+      web.document.body!.append(lateSemanticsNode);
+      addTearDown(() {
+        lateSemanticsNode.remove();
+      });
+
+      web.window.dispatchEvent(
+        web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        ),
+      );
+      await tester.pump();
+
+      expect(lateSemanticsNode.getAttribute('tabindex'), '-1');
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+
+      expect(lateSemanticsNode.getAttribute('tabindex'), '0');
+    },
+  );
+
+  testWidgets(
+    'web startup clears the saved active local workspace when the browser handle is missing',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       final workspaceProfiles = SharedPreferencesWorkspaceProfileService();
@@ -80,12 +134,29 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
       );
       expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
       final savedState = await workspaceProfiles.loadState();
-      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(savedState.activeWorkspaceId, isNull);
       expect(
         savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -94,7 +165,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup waits for delayed hosted auth before exposing the shell when the active local workspace has no browser handle',
+    'web startup clears a saved active local workspace with no browser handle before delayed hosted auth begins',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -166,46 +237,48 @@ void main() {
               ),
         ),
       );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
-        findsNothing,
-      );
-      expect(
-        find.text('Git-native. Jira-compatible. Team-proven.'),
-        findsNothing,
-      );
-      expect(find.text('Dashboard'), findsNothing);
-      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
-      expect(delayedRepository.connectCalled, isTrue);
-      expect(delayedRepository.connectCompleted, isFalse);
-
-      final savedState = await workspaceProfiles.loadState();
-      expect(savedState.activeWorkspaceId, activeLocalWorkspaceId);
-      expect(
-        savedState.unavailableLocalWorkspaceIds,
-        contains(activeLocalWorkspaceId),
-      );
-
-      delayedRepository.completeConnect();
-      await tester.pump();
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('workspace-switcher-trigger')),
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
         findsOneWidget,
       );
       expect(
         find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsNothing,
+      );
+      final localRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(localRow, findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
+      expect(
+        find.descendant(of: localRow, matching: find.text('Unavailable')),
         findsWidgets,
       );
-      expect(find.text('Dashboard'), findsWidgets);
-      final savedStateAfterConnect = await workspaceProfiles.loadState();
-      expect(savedStateAfterConnect.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        savedStateAfterConnect.unavailableLocalWorkspaceIds,
+        find.descendant(of: localRow, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: localRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(browserLocalRepositoryChecks, greaterThanOrEqualTo(1));
+      expect(delayedRepository.connectCalled, isFalse);
+      expect(delayedRepository.connectCompleted, isFalse);
+      expect(delayedRepository.session, isNotNull);
+      expect(
+        delayedRepository.session?.connectionState,
+        isNot(ProviderConnectionState.connected),
+      );
+      expect(delayedRepository.session?.canWrite, isFalse);
+      expect(delayedRepository.session?.canCreateBranch, isFalse);
+
+      final savedState = await workspaceProfiles.loadState();
+      expect(savedState.activeWorkspaceId, isNull);
+      expect(
+        savedState.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
       );
     },

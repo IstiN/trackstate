@@ -34,6 +34,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1006/test_ts_1006.py
 - Playwright for Python with Chromium installed
 - `GH_TOKEN` or `GITHUB_TOKEN` with access to `IstiN/trackstate-setup`
 - Defaults come from `testing/core/config/live_setup_test_config.py`
+- Linked bug fixes reviewed: `TS-1146`, `TS-1143`, `TS-1142`, `TS-1030`, `TS-1011`, `TS-995`, `TS-994`
 
 ## Expected result
 
@@ -46,4 +47,3 @@ Fail: the app cannot hold Workspace A as the active Local Git workspace through
 the setup/startup flow, startup drops back to a non-local workspace or landing
 surface, or Workspace B still clears/takes the Active selection during startup.
 ```
-
