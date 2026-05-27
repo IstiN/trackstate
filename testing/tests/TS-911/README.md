@@ -27,6 +27,6 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-911/test_ts_911.py
 ## Coverage notes
 
 - Uses the ticket-linked desktop viewport of `1440x900`.
-- Opens the live workspace switcher from a focused trigger and keeps the visible `Save and switch` footer control as the reverse-wrap fallback target.
+- Opens the live workspace switcher from a focused trigger and captures supporting forward-`Tab` evidence when available without making it a blocker for the ticketed `Shift+Tab` assertion.
 - Preserves the selected saved-workspace row as the first internal target when the live panel already opens with focus there; otherwise it focuses the derived first internal target directly through the page object.
-- Keeps the final pass/fail decision scoped to the ticketed single-step `Shift+Tab` assertion instead of any separate forward-`Tab` proof path.
+- Keeps the final pass/fail decision scoped to the ticketed single-step `Shift+Tab` assertion while deriving the reverse-wrap target from switcher-owned live keyboard-reachable controls only.
