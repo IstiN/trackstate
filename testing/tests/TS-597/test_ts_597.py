@@ -404,12 +404,46 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"package:meta matches={len(meta_matches)}, "
         f"required this. matches sampled={len(required_matches)}"
     )
+    replacement_observation = (
+        "The visible provider import block did not include `package:meta`; it only showed "
+        "the Dart/http/domain imports plus `foundation_compat.dart`."
+    )
 
     jira_lines = [
         "h3. Test Automation Result",
         "",
         "*Status:* ❌ FAILED",
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "h4. What was automated",
+        (
+            f"* Ran a repository-wide source scan across {{{search_roots}}} for the "
+            "{code}import 'package:flutter/{code} boundary."
+        ),
+        (
+            f"* Inspected {{{provider_relative_path}}} to confirm the visible import block "
+            "removed Flutter foundation and retained the compatibility shim."
+        ),
+        (
+            "* Checked the provider for the ticket's required non-Flutter replacement "
+            "evidence and compared the visible imports with the expected `package:meta` import."
+        ),
+        "",
+        "h4. Human-style verification",
+        (
+            "* Opened the provider file header and reviewed the visible imports exactly as a "
+            "reviewer would when confirming the dependency boundary manually."
+        ),
+        (
+            f"* Observed: {replacement_observation}"
+        ),
+        (
+            "* Expected match: the visible import block should also include `package:meta`; "
+            "it did not, so the human-style verification did not match the expected result."
+        ),
+        "{code:dart}",
+        provider_excerpt,
+        "{code}",
         "",
         "h4. Failure summary",
         f"* Error: {{{error_message}}}",
@@ -479,6 +513,34 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "**Status:** ❌ FAILED",
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## What was automated",
+        (
+            f"- Ran a repository-wide source scan across `{search_roots}` for the "
+            "`import 'package:flutter/` boundary."
+        ),
+        (
+            f"- Inspected `{provider_relative_path}` to confirm the visible import block "
+            "removed Flutter foundation and retained the compatibility shim."
+        ),
+        (
+            "- Checked the provider for the ticket's required non-Flutter replacement "
+            "evidence and compared the visible imports with the expected `package:meta` import."
+        ),
+        "",
+        "## Human-style verification",
+        (
+            "- Opened the provider file header and reviewed the visible imports exactly as a "
+            "reviewer would when confirming the dependency boundary manually."
+        ),
+        f"- Observed: {replacement_observation}",
+        (
+            "- Expected match: the visible import block should also include `package:meta`; "
+            "it did not, so the human-style verification did not match the expected result."
+        ),
+        "```dart",
+        provider_excerpt,
+        "```",
         "",
         "## Failure summary",
         f"- Error: `{error_message}`",
