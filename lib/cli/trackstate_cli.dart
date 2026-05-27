@@ -71,7 +71,9 @@ class TrackStateCli {
           normalizedArguments.skip(1).toList(),
           defaultTargetType: TrackStateCliTargetType.local,
         ),
-        'attachment' => await _runAttachment(normalizedArguments.skip(1).toList()),
+        'attachment' => await _runAttachment(
+          normalizedArguments.skip(1).toList(),
+        ),
         'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
           normalizedArguments.skip(1).toList(),
         ),
@@ -1099,6 +1101,7 @@ class TrackStateCli {
         'field',
         help:
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: arguments,
@@ -1152,6 +1155,7 @@ class TrackStateCli {
         'field',
         help:
             'Field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       )
       ..addMultiOption(
         'clear-field',
