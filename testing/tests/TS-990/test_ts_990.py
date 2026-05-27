@@ -74,20 +74,22 @@ LINKED_BUG_NOTES = (
     "past the timeout and continues observing through the delayed release."
 )
 REWORK_SUMMARY = (
-    "Resolved the main-branch merge conflict in the TS-990 live Playwright "
-    "regression while preserving the delayed startup probe timeout and shell "
-    "stability assertions."
+    "Removed the Step 2 early-pass shortcut so the timeout assertion stays "
+    "bound to the recorded post-timeout shell observation while preserving the "
+    "delayed startup probe stability coverage."
 )
 REWORK_FIXES = (
-    "Resolved the `testing/tests/TS-990/test_ts_990.py` merge conflict against `main`.",
-    "Preserved the approved hosted-startup flow coverage, including the linked "
-    "TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
-    "Kept bug artifact generation limited to confirmed product-visible failures.",
+    "Removed the Step 2 shortcut that could pass from the initial startup surface "
+    "without proving the post-timeout `shell_ready=true` condition.",
+    "Kept Step 2 tied to the timeout-window observation while preserving the "
+    "linked TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
+    "Updated review-thread replies so the current PR feedback is answered with the "
+    "exact Step 2 fix and rerun result.",
 )
 REWORK_RESPONSE_SUMMARY = (
-    "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py` "
-    "and preserved the approved hosted-startup delayed-probe assertions and "
-    "product-only bug artifact gating."
+    "Removed the Step 2 early-pass shortcut, kept the timeout assertion bound to "
+    "the recorded post-timeout observation, and updated the review reply for the "
+    "current thread."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -280,35 +282,11 @@ def main() -> None:
 
                 failures: list[str] = []
                 step_two_error: str | None = None
-                startup_shell_ready_before_timeout = (
-                    initial_shell_interactive
-                    and auth_probe_started_after_start_seconds is not None
-                    and float(auth_probe_started_after_start_seconds)
-                    < TIMEOUT_ASSERTION_SECONDS
-                )
                 if not timeout_reached:
                     step_two_error = (
                         "Step 2 failed: the test never reached the post-timeout "
                         "observation window while watching the delayed startup probe.\n"
                         f"Observed timeout window:\n{json.dumps(_sample_payload(timeout_window), indent=2)}"
-                    )
-                elif startup_shell_ready_before_timeout:
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed=(
-                            "The hosted shell was already interactive before the delayed "
-                            "GitHub `/user` probe fully resolved, so the user-visible app "
-                            "had reached the timeout-ready state well before the 11-second "
-                            "window elapsed.\n"
-                            f"auth_probe_started_after_start_seconds="
-                            f"{auth_probe_started_after_start_seconds!r}; "
-                            f"initial_trigger={json.dumps(result['initial_trigger_observation'], ensure_ascii=True)}; "
-                            f"initial_startup_buttons={startup_surface.get('button_labels', [])!r}; "
-                            f"late_window_shell_ready={timeout_window['shell_observation']['shell_ready']!r}"
-                        ),
                     )
                 elif (
                     not bool(timeout_window["auth_pending"])
@@ -344,7 +322,7 @@ def main() -> None:
                     except AssertionError as error:
                         step_two_error = f"Step 2 failed: {error}"
 
-                if step_two_error is None and not startup_shell_ready_before_timeout:
+                if step_two_error is None:
                     _record_step(
                         result,
                         step=2,
@@ -364,7 +342,7 @@ def main() -> None:
                             f"{timeout_window['shell_observation']['visible_navigation_labels']!r}"
                         ),
                     )
-                elif step_two_error is not None:
+                else:
                     failures.append(step_two_error)
                     _record_step(
                         result,
@@ -847,6 +825,8 @@ def _startup_surface_shows_interactive_shell(
         and initial_trigger is not None
         and "Connect GitHub" not in button_labels
     )
+
+
 def _safe_trigger_payload(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, Any] | None:
@@ -1116,10 +1096,17 @@ def _review_reply_text(
             "shell, never resolving the delayed probe, or destabilizing the shell after the "
             f"late release). {rerun_summary}"
         )
+    if comment_id == 3308990191:
+        return (
+            "Fixed: removed the `startup_shell_ready_before_timeout` shortcut, so Step 2 "
+            "now passes only from the recorded timeout-window observation after the "
+            "11-second mark while the delayed `/user` probe is still pending. "
+            f"{rerun_summary}"
+        )
     return (
-        "Fixed: updated TS-990 to start from the hosted workspace, set the required "
-        "viewport before launch, gate `bug_description.md` to confirmed product "
-        f"failures, and emit per-thread review replies. {rerun_summary}"
+        "Fixed: updated TS-990 to keep the timeout assertion tied to the recorded "
+        "post-timeout shell observation and emit per-thread review replies. "
+        f"{rerun_summary}"
     )
 
 
