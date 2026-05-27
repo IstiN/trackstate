@@ -157,41 +157,54 @@ class TrackStateCliReadTicketInwardSymmetricLinkTest(unittest.TestCase):
         )
 
         links = payload.get("links")
-        self.assertIsInstance(
-            links,
-            list,
-            "Step 2 failed: the read ticket response did not expose the expected "
-            "`links` array in the JSON payload.\n"
-            f"Observed payload: {payload}\n"
-            f"Observed stdout:\n{observation.read_ticket_observation.result.stdout}",
-        )
-        assert isinstance(links, list)
-        self.assertIn(
-            self.config.expected_inward_link_payload,
-            links,
-            "Expected result failed: the read ticket JSON did not report the "
-            f"canonical inward symmetric relationship for {self.config.issue_a_key}.\n"
-            f"Expected entry: {self.config.expected_inward_link_payload}\n"
-            f"Observed links: {links}\n"
-            f"Observed payload: {payload}",
-        )
-
-        for fragment in (
-            f'"key": "{self.config.issue_b_key}"',
-            '"links": [',
-            f'"type": "{self.config.expected_inward_link_payload["type"]}"',
-            f'"target": "{self.config.expected_inward_link_payload["target"]}"',
-            f'"direction": "{self.config.expected_inward_link_payload["direction"]}"',
-        ):
-            self.assertIn(
-                fragment,
-                observation.read_ticket_observation.result.stdout,
-                "Human-style verification failed: the visible CLI response did not "
-                "show the linked target issue and canonical inward relationship "
-                "details a user would expect to read in the terminal.\n"
-                f"Missing fragment: {fragment}\n"
+        with self.subTest("structured links array is present"):
+            self.assertIsInstance(
+                links,
+                list,
+                "Step 2 failed: the read ticket response did not expose the expected "
+                "`links` array in the JSON payload.\n"
+                f"Observed payload: {payload}\n"
                 f"Observed stdout:\n{observation.read_ticket_observation.result.stdout}",
             )
+        if isinstance(links, list):
+            with self.subTest("structured inward symmetric link is present"):
+                self.assertIn(
+                    self.config.expected_inward_link_payload,
+                    links,
+                    "Expected result failed: the read ticket JSON did not report the "
+                    f"canonical inward symmetric relationship for {self.config.issue_a_key}.\n"
+                    f"Expected entry: {self.config.expected_inward_link_payload}\n"
+                    f"Observed links: {links}\n"
+                    f"Observed payload: {payload}",
+                )
+
+        for label, fragment in (
+            ("visible issue key", f'"key": "{self.config.issue_b_key}"'),
+            ("visible top-level links block", '"links": ['),
+            (
+                "visible canonical link type",
+                f'"type": "{self.config.expected_inward_link_payload["type"]}"',
+            ),
+            (
+                "visible canonical link target",
+                f'"target": "{self.config.expected_inward_link_payload["target"]}"',
+            ),
+            (
+                "visible canonical link direction",
+                f'"direction": "{self.config.expected_inward_link_payload["direction"]}"',
+            ),
+        ):
+            with self.subTest(label):
+                self.assertIn(
+                    fragment,
+                    observation.read_ticket_observation.result.stdout,
+                    "Human-style verification failed: the visible CLI response did "
+                    "not show the linked target issue and canonical inward "
+                    "relationship details a user would expect to read in the "
+                    "terminal.\n"
+                    f"Missing fragment: {fragment}\n"
+                    f"Observed stdout:\n{observation.read_ticket_observation.result.stdout}",
+                )
 
     def _assert_command_was_executed_exactly(
         self,
