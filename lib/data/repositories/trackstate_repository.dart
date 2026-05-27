@@ -2235,7 +2235,7 @@ class ProviderBackedTrackStateRepository
     required List<String> issuePathsInTree,
   }) {
     if (repositoryIndex.entries.isEmpty) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
       );
     }
@@ -2244,7 +2244,7 @@ class ProviderBackedTrackStateRepository
           (entry.issueTypeId ?? '').trim().isEmpty ||
           (entry.statusId ?? '').trim().isEmpty ||
           (entry.updatedLabel ?? '').trim().isEmpty) {
-        throw TrackStateRepositoryException(
+        throw HostedBootstrapIndexValidationException(
           'Hosted bootstrap requires summary metadata for ${entry.key} in .trackstate/index/issues.json. Regenerate the tracker indexes and retry.',
         );
       }
@@ -2252,13 +2252,13 @@ class ProviderBackedTrackStateRepository
     final indexedPaths =
         repositoryIndex.entries.map((entry) => entry.path).toList()..sort();
     if (indexedPaths.length != issuePathsInTree.length) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
       );
     }
     for (var index = 0; index < indexedPaths.length; index += 1) {
       if (indexedPaths[index] != issuePathsInTree[index]) {
-        throw const TrackStateRepositoryException(
+        throw const HostedBootstrapIndexValidationException(
           'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
         );
       }
@@ -4014,6 +4014,11 @@ class DemoTrackStateRepository implements TrackStateRepository {
 
 class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
+}
+
+class HostedBootstrapIndexValidationException
+    extends TrackStateRepositoryException {
+  const HostedBootstrapIndexValidationException(super.message);
 }
 
 class TrackStatePartialHydrationException

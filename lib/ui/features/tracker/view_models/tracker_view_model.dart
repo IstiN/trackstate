@@ -2344,20 +2344,13 @@ class TrackerViewModel extends ChangeNotifier {
         retryAfter: error.retryAfter,
       );
     }
-    if (error is TrackStateRepositoryException &&
-        _isHostedBootstrapIndexRecoveryMessage(error.message)) {
+    if (error is HostedBootstrapIndexValidationException) {
       return TrackerStartupRecovery(
         kind: TrackerStartupRecoveryKind.hostedBootstrapIndex,
         detail: error.message,
       );
     }
     return null;
-  }
-
-  bool _isHostedBootstrapIndexRecoveryMessage(String message) {
-    return message.contains('Hosted bootstrap') &&
-        message.contains('.trackstate/index/issues.json') &&
-        message.contains('Regenerate the tracker indexes and retry.');
   }
 
   Future<({String repository, String branch})?> _connectionTarget() async {

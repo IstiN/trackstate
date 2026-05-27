@@ -144,9 +144,9 @@ void main() {
   );
 
   test(
-    'view model maps hosted bootstrap index failures into recovery instead of generic data-load failure',
+    'view model maps missing hosted bootstrap index failures into recovery instead of generic data-load failure',
     () async {
-      const missingIndexError = TrackStateRepositoryException(
+      const missingIndexError = HostedBootstrapIndexValidationException(
         'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
       );
       final viewModel = TrackerViewModel(
@@ -163,6 +163,30 @@ void main() {
         TrackerStartupRecoveryKind.hostedBootstrapIndex,
       );
       expect(viewModel.startupRecovery?.detail, missingIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
+    'view model maps inconsistent hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const inconsistentIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [inconsistentIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, inconsistentIndexError.message);
       expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
     },
   );
