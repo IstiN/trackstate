@@ -2028,11 +2028,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final prepared = await _prepareWorkspaceSwitch(
-      nextWorkspace,
-      previousViewModel: previousViewModel,
-      showFailureMessage: false,
-    );
+    final prepared =
+        await _prepareBrowserLocalWorkspaceSwitchWithLoader(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
+        ) ??
+        await _prepareWorkspaceSwitch(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          showFailureMessage: false,
+        );
     if (prepared != null) {
       var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
