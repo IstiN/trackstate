@@ -5659,6 +5659,8 @@ class _TopBar extends StatelessWidget {
                             );
                             if (kIsWeb) {
                               return Semantics(
+                                identifier:
+                                    browserDesktopSearchInputSemanticsIdentifier,
                                 label: l10n.searchIssues,
                                 textField: true,
                                 child: desktopSearchField,

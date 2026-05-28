@@ -21,8 +21,10 @@
   <meta name="description" content="Git-native Jira-compatible project tracker.">
   <meta name="theme-color" content="#CD5B3B">
   <style>
-    input[aria-label="Search issues"],
-    textarea[aria-label="Search issues"] {
+    input[flt-semantics-identifier="trackstate-desktop-search-input"],
+    textarea[flt-semantics-identifier="trackstate-desktop-search-input"],
+    [flt-semantics-identifier="trackstate-desktop-search-input"] input,
+    [flt-semantics-identifier="trackstate-desktop-search-input"] textarea {
       box-sizing: border-box;
       min-height: 32px;
       height: 32px;

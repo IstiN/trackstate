@@ -189,4 +189,46 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'desktop top bar search field exposes a stable semantics identifier',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final searchSemantics = find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          return widget.properties.identifier ==
+              'trackstate-desktop-search-input';
+        }, description: 'desktop search semantics identifier');
+
+        expect(searchSemantics, findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 }
