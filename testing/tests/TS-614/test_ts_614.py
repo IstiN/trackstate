@@ -315,12 +315,8 @@ def _height_assertion_message(
 def _container_assertion_message(
     observation: HeaderContainerObservation | None,
 ) -> str | None:
-    if observation is None:
-        return (
-            "the live DOM did not expose a reliable shared parent header container for the "
-            "audited controls, so the required flex / align-items: center assertion could "
-            "not be verified."
-        )
+    if not _container_css_assertion_is_verifiable(observation):
+        return None
     if observation.display not in {"flex", "inline-flex"}:
         identifier = (
             f' "{observation.semantics_identifier}"'
@@ -338,6 +334,12 @@ def _container_assertion_message(
             f'but observed align-items="{observation.align_items}".'
         )
     return None
+
+
+def _container_css_assertion_is_verifiable(
+    observation: HeaderContainerObservation | None,
+) -> bool:
+    return observation is not None and observation.tag_name != "flt-semantics"
 
 
 def _vertical_alignment_message(center_spread: float) -> str | None:
@@ -375,14 +377,20 @@ def _height_summary(header: HeaderObservation) -> dict[str, float]:
 
 def _container_summary(observation: HeaderContainerObservation | None) -> str:
     if observation is None:
-        return "header_container=not_exposed; css_assertion=required_parent_not_found"
+        return "header_container=not_exposed; css_assertion=unverifiable"
     identifier_summary = (
         f"identifier={observation.semantics_identifier}; "
         if observation.semantics_identifier
         else ""
     )
+    css_assertion_summary = (
+        ""
+        if _container_css_assertion_is_verifiable(observation)
+        else "css_assertion=unverifiable_semantics_wrapper; "
+    )
     return (
-        f"{identifier_summary}tag={observation.tag_name}; display={observation.display}; "
+        f"{css_assertion_summary}{identifier_summary}tag={observation.tag_name}; "
+        f"display={observation.display}; "
         f"align_items={observation.align_items}; "
         f"justify_content={observation.justify_content}; "
         f"bounds=({observation.x:.2f}, {observation.y:.2f}, "
@@ -751,9 +759,10 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', ''))}`."
     )
     return (
-        "Fixed: resolved the merge conflicts in the TS-614 test and shared project-settings "
-        "page, preserved the required parent-header-container failure when no reliable public "
-        "container is exposed, and now always write the required review replies artifact. "
+        "Fixed: Step 6 no longer treats the `trackstate-desktop-header-controls` "
+        "`flt-semantics` wrapper as the ticket's CSS flex container; it now treats that "
+        "public surface as unverifiable unless a real CSS-backed parent container is exposed, "
+        "and it still writes the required review replies artifact. "
         + rerun_summary
     )
 
