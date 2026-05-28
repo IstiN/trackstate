@@ -26,6 +26,7 @@ class HeaderControlObservation:
 @dataclass(frozen=True)
 class HeaderContainerObservation:
     tag_name: str
+    semantics_identifier: str
     display: str
     align_items: str
     justify_content: str
@@ -427,13 +428,14 @@ class LiveTrackerHeaderPage:
                 };
               };
               const describeContainer = (element) => {
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return {
-                  tagName: element.tagName.toLowerCase(),
-                  display: style.display,
-                  alignItems: style.alignItems,
-                  justifyContent: style.justifyContent,
+                 const rect = element.getBoundingClientRect();
+                 const style = window.getComputedStyle(element);
+                 return {
+                   tagName: element.tagName.toLowerCase(),
+                   semanticsIdentifier: element.getAttribute('flt-semantics-identifier') || '',
+                   display: style.display,
+                   alignItems: style.alignItems,
+                   justifyContent: style.justifyContent,
                   x: rect.x,
                   y: rect.y,
                   width: rect.width,
@@ -990,6 +992,7 @@ def _container_from_payload(payload: object) -> HeaderContainerObservation | Non
         )
     return HeaderContainerObservation(
         tag_name=str(payload.get("tagName", "")),
+        semantics_identifier=str(payload.get("semanticsIdentifier", "")),
         display=str(payload.get("display", "")),
         align_items=str(payload.get("alignItems", "")),
         justify_content=str(payload.get("justifyContent", "")),

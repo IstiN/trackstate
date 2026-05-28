@@ -269,11 +269,14 @@ void main() {
         _pressTab(orderedFocusTargets);
         expect(
           web.document.activeElement,
-          same(domEarlierActiveRow),
+          same(domEarlierSaveButton),
           reason:
-              'Forward tab should still treat the DOM-last Branch field as the '
-              'handoff boundary and wrap back to the selected row.',
+              'Forward tab should still reach the visually later disabled footer '
+              'even when the bridge button is earlier than Repository and Branch '
+              'in DOM order.',
         );
+        _pressTab(orderedFocusTargets);
+        expect(web.document.activeElement, same(domEarlierActiveRow));
       },
     );
   });

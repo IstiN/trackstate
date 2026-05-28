@@ -204,6 +204,65 @@ void main() {
   );
 
   test(
+    'provider-backed deferred auth timeout keeps hosted access disconnected after a late automatic auth success',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _AttachmentRestrictedDelayedProvider();
+      final repository = _DelayedFixtureRepository(
+        provider: provider,
+        snapshot: await _snapshotForAttachmentRestrictedRepository(
+          'trackstate/trackstate',
+        ),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
+      ]);
+
+      expect(
+        completedQuickly,
+        isTrue,
+        reason:
+            'The hosted shell should publish immediately from the loaded snapshot while automatic auth restore continues in the background.',
+      );
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+
+      await Future<void>.delayed(const Duration(seconds: 11));
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason:
+            'The visible hosted access mode must still be the startup disconnected state when the automatic auth restore times out.',
+      );
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason:
+            'Late automatic auth success after the startup timeout must not mutate the visible hosted access state once the interactive shell is already on screen.',
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 20)),
+  );
+
+  test(
     'provider-backed hosted fallback clears the startup override when manual sign-in succeeds after timeout',
     () async {
       const workspaceId = 'hosted:trackstate/trackstate@main';
@@ -270,7 +329,10 @@ void main() {
         viewModel.message?.kind,
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 

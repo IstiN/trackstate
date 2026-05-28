@@ -65,9 +65,9 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + POST_RELEASE_STABILITY_SECONDS + 20
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-1152", "TS-1145", "TS-1046", "TS-1045"]
+LINKED_BUGS = ["TS-1211", "TS-1152", "TS-1145", "TS-1045"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-1152, TS-1145, TS-1046, and TS-1045 from "
+    "Reviewed TS-1211, TS-1152, TS-1145, and TS-1045 from "
     "`input/TS-990/linked_bugs.md`. Those fixes require the hosted shell to "
     "reach `shell_ready` within the shared 11-second timeout window even while "
     "startup probes are still pending, and they require late `/user` probe "
@@ -76,16 +76,10 @@ LINKED_BUG_NOTES = (
     "GitHub `/user` probe is still pending and keeps observing until the late "
     "resolution finishes."
 )
-REWORK_SUMMARY = (
-    "Resolved the `main` merge conflict in TS-990 while preserving the approved "
-    "timeout-window assertion and late-probe stability coverage."
-)
 REWORK_FIXES = (
     "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py`.",
-    "Preserved the approved Step 2 timeout-window assertion instead of any "
-    "startup-surface shortcut.",
-    "Reran the live deployed scenario and kept failure artifacts focused on the "
-    "product-visible post-timeout stability result.",
+    "Preserved the approved timeout-window assertion so Step 2 still depends on the recorded post-timeout shell snapshot while the delayed `/user` probe is pending.",
+    "Reran the live delayed-probe stability scenario with the user-visible workspace trigger, branding, route, and navigation checks intact.",
 )
 REWORK_RESPONSE_SUMMARY = (
     "Resolved the `main` merge conflict in TS-990 and reran the live delayed-"
@@ -482,28 +476,32 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the hosted shell as soon as the app rendered and confirmed "
-                        "the user-facing navigation, branding, and workspace trigger were "
-                        "visible before the delayed probe finished."
+                        "Viewed the hosted shell after the timeout window while the delayed "
+                        "probe was still pending and confirmed the user-facing navigation, "
+                        "branding, and workspace trigger were visible where a user would "
+                        "see them."
                     ),
                     observed=(
-                        f"initial_body_excerpt={_snippet(str(startup_surface.get('body_text', '')))!r}; "
-                        f"initial_trigger_label={(result.get('initial_trigger_observation') or {}).get('semantic_label')!r}; "
-                        f"initial_shell_interactive={initial_shell_interactive!r}; "
-                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}"
+                        f"visible_navigation_labels={timeout_window['shell_observation']['visible_navigation_labels']!r}; "
+                        f"branding_visible={timeout_window['branding_visible']!r}; "
+                        f"workspace_trigger={(timeout_window['trigger'] or {}).get('semantic_label')!r}; "
+                        f"auth_pending={timeout_window['auth_pending']!r}; "
+                        f"shell_ready_after_start_seconds={timeout_window['shell_ready_after_start_seconds']!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Kept watching the live page through the delayed probe release and "
-                        "checked whether the hosted-workspace state stayed the same from the "
-                        "user's perspective."
+                        "confirmed the same route, branding, and hosted-workspace trigger "
+                        "state stayed visible without a reset."
                     ),
                     observed=(
+                        f"timeout_route={_route_signature(timeout_window)!r}; "
                         f"final_route={_route_signature(final_window)!r}; "
-                        f"initial_trigger_signature={_trigger_signature({'trigger': result.get('initial_trigger_observation')})!r}; "
-                        f"stable_trigger_signature={_trigger_signature(final_window)!r}; "
+                        f"timeout_trigger_signature={_trigger_signature(timeout_window)!r}; "
+                        f"final_trigger_signature={_trigger_signature(final_window)!r}; "
+                        f"final_branding_visible={final_window['branding_visible']!r}; "
                         f"shell_ready_after_start_seconds={final_window['shell_ready_after_start_seconds']!r}; "
                         f"auth_probe_released_after_start_seconds={release_after_start_seconds!r}; "
                         f"stability_sample_count={len(stability_samples)!r}"
@@ -948,9 +946,6 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} passed" if passed else f"## {TICKET_KEY} failed",
         "",
-        "## Rework summary",
-        *[f"- {item}" for item in REWORK_FIXES],
-        "",
         f"**Test case:** {TEST_CASE_TITLE}",
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
@@ -958,6 +953,9 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Linked bug review:** {LINKED_BUG_NOTES}",
         f"**Startup probe setup:** delayed GitHub `/user` probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds",
         f"**Timeout check:** interactive shell stays available after the `{SYNC_TIMEOUT_SECONDS}`-second window and through late probe resolution",
+        "",
+        "## Implementation notes",
+        *[f"- {item}" for item in REWORK_FIXES],
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",
