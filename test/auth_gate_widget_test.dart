@@ -1,10 +1,7 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
-import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/components/screens/settings_screen_robot.dart';
@@ -38,7 +35,9 @@ void main() {
 
         expect(find.text('GitHub write access is not connected'), findsWidgets);
         expect(
-          find.text('Current session flags: canWrite=false, canCreateBranch=false.'),
+          find.text(
+            'Current session flags: canWrite=false, canCreateBranch=false.',
+          ),
           findsWidgets,
         );
         expect(find.text('Summary'), findsNothing);
@@ -237,7 +236,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps release-backed uploads unavailable when hosted release writes are missing',
+    'attachment-restricted hosted release-backed flow becomes download-only for no-LFS sessions',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -279,18 +278,18 @@ void main() {
         );
         expect(
           find.textContaining(
-            'This project stores new attachments in GitHub Releases',
+            'This repository session is download-only for Git LFS attachments.',
           ),
           findsOneWidget,
         );
-        final chooseAttachment = tester.widget<OutlinedButton>(
+        expect(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
+          findsNothing,
         );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNotNull);
-        expect(uploadAttachment.onPressed, isNull);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -389,7 +388,7 @@ void main() {
   );
 
   testWidgets(
-    'release-backed hosted flow keeps upload controls available and queues inbox uploads when direct release writes are unavailable',
+    'release-backed hosted flow hides issue-detail upload controls when direct release writes are unavailable',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -406,22 +405,12 @@ void main() {
       );
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
-      Future<PickedAttachment?> pickAttachment() async => PickedAttachment(
-        name: 'release notes.pdf',
-        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
-      );
-
       try {
         final repository = ReactiveIssueDetailTrackStateRepository(
           permission: releaseRestrictedPermission,
           textFixtures: _githubReleasesProjectTextFixtures(),
         );
-        await tester.pumpWidget(
-          TrackStateApp(
-            repository: repository,
-            attachmentPicker: pickAttachment,
-          ),
-        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
         await tester.pumpAndSettle();
 
         await tester.tap(find.bySemanticsLabel(RegExp('^JQL Search\$')).first);
@@ -442,46 +431,14 @@ void main() {
           ),
           findsWidgets,
         );
-        final chooseAttachment = tester.widget<OutlinedButton>(
+        expect(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
+          findsNothing,
         );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNotNull);
-        expect(uploadAttachment.onPressed, isNull);
-
-        final chooseAttachmentAction = find.bySemanticsLabel(
-          RegExp('^Choose attachment\$'),
-        );
-        await tester.ensureVisible(chooseAttachmentAction);
-        await tester.tap(chooseAttachmentAction);
-        await tester.pumpAndSettle();
-
-        expect(find.text('release notes.pdf'), findsOneWidget);
-        expect(find.text('4 B'), findsOneWidget);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.widgetWithText(FilledButton, 'Upload attachment'),
-              )
-              .onPressed,
-          isNotNull,
-        );
-
-        final uploadAttachmentAction = find.bySemanticsLabel(
-          RegExp('^Upload attachment\$'),
-        );
-        await tester.ensureVisible(uploadAttachmentAction);
-        await tester.tap(uploadAttachmentAction);
-        await tester.pumpAndSettle();
-
-        expect(find.textContaining('Save failed:'), findsNothing);
-        expect(
-          find.text('Choose a file to review its size before upload.'),
-          findsOneWidget,
-        );
-        expect(find.text('release notes.pdf'), findsNothing);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

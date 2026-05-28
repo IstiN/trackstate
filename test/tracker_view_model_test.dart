@@ -1103,7 +1103,7 @@ void main() {
   );
 
   test(
-    'view model keeps release-backed hosted sessions upload-attempt ready while release writes remain restricted',
+    'view model keeps release-backed hosted sessions download-only while release writes remain restricted',
     () async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -1132,7 +1132,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
-      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.canUploadIssueAttachments, isFalse);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
   );
