@@ -327,14 +327,18 @@ class Ts381LocalAttachmentUploadScenario:
             step=2,
             status="passed" if not step_2_failures else "failed",
             action="Inspect the JSON output.",
-            observed=json.dumps(
-                {
-                    "ok": payload.get("ok"),
-                    "issue": data.get("issue"),
-                    "attachment": attachment,
-                },
-                indent=2,
-                sort_keys=True,
+            observed=(
+                json.dumps(
+                    {
+                        "ok": payload.get("ok"),
+                        "issue": data.get("issue"),
+                        "attachment": attachment,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                if not step_2_failures
+                else "\n\n".join(step_2_failures)
             ),
         )
         _record_human_verification(
