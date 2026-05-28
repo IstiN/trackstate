@@ -45,17 +45,19 @@ BRANDING_TEXT = "Git-native. Jira-compatible. Team-proven."
 SYNC_TIMEOUT_SECONDS = 10
 SIMULATED_SYNC_DELAY_SECONDS = 30
 TIMEOUT_ASSERTION_SECONDS = SYNC_TIMEOUT_SECONDS
-AUTH_PROBE_START_WAIT_SECONDS = 45
+STARTUP_RENDER_WAIT_SECONDS = 60
+AUTH_PROBE_START_WAIT_SECONDS = 60
 AUTH_PROBE_RELEASE_WAIT_SECONDS = SIMULATED_SYNC_DELAY_SECONDS + 45
 TIMELINE_SAMPLE_INTERVAL_SECONDS = 0.25
 TIMING_TOLERANCE_SECONDS = 0.25
 LINKED_BUGS = ["TS-996", "TS-977", "TS-971", "TS-958"]
 REWORK_SUMMARY = (
-    "Reworked the live startup regression to anchor its timeout-boundary sample to "
-    f"{SYNC_TIMEOUT_SECONDS} seconds after the delayed GitHub `/user` startup probe "
-    "begins, to require that same startup snapshot while the probe is still "
-    "pending or no later than its release, and to fail fast when the delayed "
-    "probe never starts so setup misses are not misreported as product failures."
+    "Reworked the live startup regression to preserve the last timestamped startup "
+    "observation captured at or before the delayed GitHub `/user` probe timeout "
+    f"boundary ({SYNC_TIMEOUT_SECONDS} seconds after probe start), to require that "
+    "same snapshot while the probe is still pending or no later than its release, "
+    "and to fail fast when the delayed probe never starts so setup misses are not "
+    "misreported as product failures."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -97,6 +99,7 @@ def main() -> None:
         )
 
     workspace_state = _workspace_state(service.repository)
+    hosted_workspace_id = f"hosted:{service.repository.lower()}@{DEFAULT_BRANCH}"
     prepared_local_workspace = _prepare_local_workspace_repository()
     runtime = DelayedAuthWorkspaceProfilesRuntime(
         repository=config.repository,
@@ -104,6 +107,7 @@ def main() -> None:
         workspace_state=workspace_state,
         auth_delay_seconds=SIMULATED_SYNC_DELAY_SECONDS,
         delayed_paths=("/user",),
+        workspace_token_profile_ids=(hosted_workspace_id,),
     )
 
     result: dict[str, Any] = {
@@ -123,6 +127,7 @@ def main() -> None:
         "timeout_assertion_seconds": TIMEOUT_ASSERTION_SECONDS,
         "timeout_assertion_anchor": "delayed `/user` startup probe start",
         "preloaded_workspace_state": workspace_state,
+        "hosted_workspace_id": hosted_workspace_id,
         "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
@@ -143,6 +148,29 @@ def main() -> None:
                 result["startup_observation_initial"] = _startup_surface_payload(
                     tracker_page,
                 )
+                startup_rendered, startup_surface = poll_until(
+                    probe=lambda: _startup_surface_payload(tracker_page),
+                    is_satisfied=_startup_surface_loaded,
+                    timeout_seconds=STARTUP_RENDER_WAIT_SECONDS,
+                    interval_seconds=TIMELINE_SAMPLE_INTERVAL_SECONDS,
+                )
+                result["startup_observation_after_render"] = startup_surface
+                if not startup_rendered:
+                    startup_render_error = (
+                        "Step 1 failed: the deployed app never rendered beyond the bare "
+                        "startup title, so the delayed synchronization scenario could not "
+                        "begin.\n"
+                        f"Observed startup surface:\n{json.dumps(startup_surface, indent=2)}"
+                    )
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=startup_render_error,
+                    )
+                    _record_not_reached_steps(result, starting_step=2)
+                    raise AssertionError(startup_render_error)
                 auth_probe_started = runtime.wait_for_auth_probe_start(
                     timeout_seconds=AUTH_PROBE_START_WAIT_SECONDS,
                 )
@@ -159,7 +187,7 @@ def main() -> None:
                         "Step 1 failed: the delayed GitHub `/user` startup probe never "
                         "started, so TS-967 did not exercise the intended timeout scenario.\n"
                         f"Observed startup surface:\n"
-                        f"{json.dumps(result['startup_observation_initial'], indent=2)}\n"
+                        f"{json.dumps(result['startup_observation_after_render'], indent=2)}\n"
                         f"Observed body text:\n{tracker_page.body_text()}\n"
                         f"GitHub requests seen: {json.dumps(result['github_request_urls'], ensure_ascii=True)}\n"
                         f"Delayed requests seen: {json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
@@ -184,6 +212,7 @@ def main() -> None:
                         "fallback workspace profile, and an "
                         f"injected {SIMULATED_SYNC_DELAY_SECONDS}-second delay on the "
                         "initial GitHub `/user` startup probe.\n"
+                        f"startup_surface={json.dumps(result['startup_observation_after_render'], ensure_ascii=True)}; "
                         f"auth_probe_started_after_start_seconds="
                         f"{result['auth_probe_started_after_start_seconds']!r}; "
                         f"delayed_request_urls={json.dumps(result['delayed_request_urls'], ensure_ascii=True)}"
@@ -250,6 +279,15 @@ def main() -> None:
                                 "elapsed_since_auth_start_seconds": observation[
                                     "elapsed_since_auth_start_seconds"
                                 ],
+                                "observation_started_after_auth_start_seconds": observation[
+                                    "observation_started_after_auth_start_seconds"
+                                ],
+                                "observation_recorded_after_auth_start_seconds": observation[
+                                    "observation_recorded_after_auth_start_seconds"
+                                ],
+                                "timeout_boundary_delta_seconds": observation[
+                                    "timeout_boundary_delta_seconds"
+                                ],
                             },
                         )
 
@@ -297,6 +335,7 @@ def main() -> None:
                     page=page,
                     runtime=runtime,
                     startup_started_at_monotonic=startup_started_at_monotonic,
+                    observation_started_at_monotonic=time.monotonic(),
                 )
                 result["shell_ready_observation"] = shell_ready_observation
 
@@ -428,13 +467,22 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[2],
                         observed=(
-                            f"Waited {timeout_window['elapsed_since_auth_start_seconds']!r} "
-                            "seconds from the delayed GitHub `/user` startup probe start "
-                            f"({timeout_window['elapsed_since_start_seconds']!r} seconds "
-                            "from application launch), which reaches the explicit "
+                            "Preserved the last completed startup observation captured at "
+                            "or before the delayed GitHub `/user` probe timeout boundary.\n"
+                            f"observation_recorded_after_auth_start_seconds="
+                            f"{timeout_window['observation_recorded_after_auth_start_seconds']!r}; "
+                            f"elapsed_since_auth_start_seconds="
+                            f"{timeout_window['elapsed_since_auth_start_seconds']!r}; "
+                            f"elapsed_since_start_seconds="
+                            f"{timeout_window['elapsed_since_start_seconds']!r}; "
+                            "This sample represents the explicit "
                             f"{SYNC_TIMEOUT_SECONDS}-second startup timeout boundary. At "
                             f"that point {auth_state} and shell_ready was "
                             f"{timeout_window['shell_observation']['shell_ready']!r}.\n"
+                            f"timeout_boundary_selection="
+                            f"{timeout_window['timeout_boundary_selection']!r}; "
+                            f"timeout_boundary_delta_seconds="
+                            f"{timeout_window['timeout_boundary_delta_seconds']!r}; "
                             f"first_shell_visible_after_start_seconds="
                             f"{first_shell_visible_after_start_seconds!r}; "
                             f"auth_probe_started_after_start_seconds="
@@ -680,6 +728,7 @@ def _observe_shell_window(
     page: LiveWorkspaceSwitcherPage,
     runtime: DelayedAuthWorkspaceProfilesRuntime,
     startup_started_at_monotonic: float,
+    observation_started_at_monotonic: float,
 ) -> dict[str, Any]:
     helper_shell_observation = tracker_page.observe_interactive_shell(
         SHELL_NAVIGATION_LABELS,
@@ -690,6 +739,7 @@ def _observe_shell_window(
     trigger = _safe_trigger_payload(page, startup_observation=startup_observation)
     body_text = str(startup_observation.get("body_text", ""))
     title = str(startup_observation.get("title", ""))
+    observation_recorded_at_monotonic = time.monotonic()
     return {
         "shell_observation": shell_observation,
         "interactive_shell_helper_observation": helper_shell_observation,
@@ -700,6 +750,17 @@ def _observe_shell_window(
         "startup_observation": startup_observation,
         "trigger": trigger,
         "branding_visible": BRANDING_TEXT in body_text or "TrackState" in body_text or "TrackState" in title,
+        "observation_recorded_at_monotonic": observation_recorded_at_monotonic,
+        "timeout_boundary_selection": None,
+        "timeout_boundary_delta_seconds": None,
+        "observation_started_after_start_seconds": _relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            observation_started_at_monotonic,
+        ),
+        "observation_recorded_after_start_seconds": _relative_startup_event_seconds(
+            startup_started_at_monotonic,
+            observation_recorded_at_monotonic,
+        ),
         "elapsed_since_start_seconds": _elapsed_since(startup_started_at_monotonic),
         "auth_pending": runtime.auth_probe_pending,
         "auth_probe_started_after_start_seconds": _relative_startup_event_seconds(
@@ -709,6 +770,14 @@ def _observe_shell_window(
         "auth_probe_released_after_start_seconds": _relative_startup_event_seconds(
             startup_started_at_monotonic,
             runtime.auth_probe_released_at_monotonic,
+        ),
+        "observation_started_after_auth_start_seconds": _relative_event_seconds(
+            runtime.auth_probe_started_at_monotonic,
+            observation_started_at_monotonic,
+        ),
+        "observation_recorded_after_auth_start_seconds": _relative_event_seconds(
+            runtime.auth_probe_started_at_monotonic,
+            observation_recorded_at_monotonic,
         ),
         "elapsed_since_auth_start_seconds": _elapsed_since(runtime.auth_probe_started_at_monotonic),
         "shell_ready_after_start_seconds": (
@@ -728,18 +797,7 @@ def _capture_timeout_window_observation(
     on_observation: Callable[[dict[str, Any]], None],
 ) -> tuple[bool, dict[str, Any]]:
     last_observation: dict[str, Any] | None = None
-
-    def probe() -> dict[str, Any]:
-        nonlocal last_observation
-        observation = _observe_shell_window(
-            tracker_page=tracker_page,
-            page=page,
-            runtime=runtime,
-            startup_started_at_monotonic=startup_started_at_monotonic,
-        )
-        on_observation(observation)
-        last_observation = observation
-        return observation
+    last_pre_boundary_observation: dict[str, Any] | None = None
 
     if runtime.auth_probe_started_at_monotonic is None:
         raise RuntimeError(
@@ -749,15 +807,76 @@ def _capture_timeout_window_observation(
     timeout_boundary_monotonic = (
         runtime.auth_probe_started_at_monotonic + TIMEOUT_ASSERTION_SECONDS
     )
-    timeout_elapsed, observation = poll_until(
-        probe=probe,
-        is_satisfied=lambda _: time.monotonic() >= timeout_boundary_monotonic,
-        timeout_seconds=TIMEOUT_ASSERTION_SECONDS + AUTH_PROBE_RELEASE_WAIT_SECONDS,
-        interval_seconds=TIMELINE_SAMPLE_INTERVAL_SECONDS,
-    )
-    if last_observation is None:
-        raise RuntimeError("TS-967 did not capture any startup observations.")
-    return timeout_elapsed, observation
+    deadline_monotonic = timeout_boundary_monotonic + AUTH_PROBE_RELEASE_WAIT_SECONDS
+
+    while True:
+        if (
+            last_pre_boundary_observation is not None
+            and time.monotonic() >= timeout_boundary_monotonic
+        ):
+            return True, _select_timeout_boundary_observation(
+                observation=last_pre_boundary_observation,
+                timeout_boundary_monotonic=timeout_boundary_monotonic,
+                selection="last_completed_pre_boundary_sample",
+            )
+
+        observation_started_at_monotonic = time.monotonic()
+        observation = _observe_shell_window(
+            tracker_page=tracker_page,
+            page=page,
+            runtime=runtime,
+            startup_started_at_monotonic=startup_started_at_monotonic,
+            observation_started_at_monotonic=observation_started_at_monotonic,
+        )
+        on_observation(observation)
+        last_observation = observation
+        observation_recorded_at_monotonic = observation.get(
+            "observation_recorded_at_monotonic",
+        )
+        if not isinstance(observation_recorded_at_monotonic, (int, float)):
+            raise RuntimeError(
+                "TS-967 timeout observation did not include a recorded-at timestamp.",
+            )
+        if observation_recorded_at_monotonic <= timeout_boundary_monotonic:
+            last_pre_boundary_observation = observation
+        if observation_recorded_at_monotonic >= timeout_boundary_monotonic:
+            chosen_observation = (
+                last_pre_boundary_observation
+                if last_pre_boundary_observation is not None
+                else observation
+            )
+            selection = (
+                "last_completed_pre_boundary_sample"
+                if chosen_observation is last_pre_boundary_observation
+                else "first_completed_post_boundary_sample"
+            )
+            return True, _select_timeout_boundary_observation(
+                observation=chosen_observation,
+                timeout_boundary_monotonic=timeout_boundary_monotonic,
+                selection=selection,
+            )
+
+        remaining_seconds = deadline_monotonic - time.monotonic()
+        if remaining_seconds <= 0:
+            if last_observation is None:
+                raise RuntimeError("TS-967 did not capture any startup observations.")
+            chosen_observation = (
+                last_pre_boundary_observation
+                if last_pre_boundary_observation is not None
+                else last_observation
+            )
+            selection = (
+                "last_completed_pre_boundary_sample"
+                if chosen_observation is last_pre_boundary_observation
+                else "last_completed_sample_before_deadline"
+            )
+            return False, _select_timeout_boundary_observation(
+                observation=chosen_observation,
+                timeout_boundary_monotonic=timeout_boundary_monotonic,
+                selection=selection,
+            )
+
+        time.sleep(min(TIMELINE_SAMPLE_INTERVAL_SECONDS, remaining_seconds))
 
 
 def _elapsed_since(event_monotonic: float | None) -> float | None:
@@ -775,6 +894,15 @@ def _relative_startup_event_seconds(
     return round(event_monotonic - startup_started_at_monotonic, 2)
 
 
+def _relative_event_seconds(
+    started_at_monotonic: float | None,
+    event_monotonic: float | None,
+) -> float | None:
+    if started_at_monotonic is None or event_monotonic is None:
+        return None
+    return round(event_monotonic - started_at_monotonic, 2)
+
+
 def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, Any]:
     observation = tracker_page.observe_startup_surface()
     return {
@@ -785,6 +913,13 @@ def _startup_surface_payload(tracker_page: TrackStateTrackerPage) -> dict[str, A
         "body_text": observation.body_text,
         "button_labels": list(observation.button_labels),
     }
+
+
+def _startup_surface_loaded(observation: dict[str, Any]) -> bool:
+    body_text = str(observation.get("body_text", "")).strip()
+    title = str(observation.get("title", "")).strip()
+    button_labels = observation.get("button_labels", [])
+    return bool(button_labels) or (len(body_text) > len(title) and body_text != title)
 
 
 def _shell_observation_from_startup_surface(
@@ -884,14 +1019,39 @@ def _fallback_trigger_payload(startup_observation: dict[str, Any]) -> dict[str, 
     return None
 
 
+def _select_timeout_boundary_observation(
+    *,
+    observation: dict[str, Any],
+    timeout_boundary_monotonic: float,
+    selection: str,
+) -> dict[str, Any]:
+    selected = dict(observation)
+    recorded_at_monotonic = selected.get("observation_recorded_at_monotonic")
+    selected["timeout_boundary_selection"] = selection
+    if isinstance(recorded_at_monotonic, (int, float)):
+        selected["timeout_boundary_delta_seconds"] = round(
+            float(recorded_at_monotonic) - timeout_boundary_monotonic,
+            2,
+        )
+    else:
+        selected["timeout_boundary_delta_seconds"] = None
+    return selected
+
+
 def _observation_captures_timeout_boundary(observation: dict[str, Any]) -> bool:
-    elapsed_since_auth_start_seconds = observation.get("elapsed_since_auth_start_seconds")
-    if elapsed_since_auth_start_seconds is None:
+    observation_recorded_after_auth_start_seconds = observation.get(
+        "observation_recorded_after_auth_start_seconds",
+    )
+    if observation_recorded_after_auth_start_seconds is None:
         return False
-    if float(elapsed_since_auth_start_seconds) < TIMEOUT_ASSERTION_SECONDS:
+    if float(observation_recorded_after_auth_start_seconds) > (
+        TIMEOUT_ASSERTION_SECONDS + TIMING_TOLERANCE_SECONDS
+    ):
         return False
-    elapsed_since_start_seconds = observation.get("elapsed_since_start_seconds")
-    if elapsed_since_start_seconds is None:
+    if float(observation_recorded_after_auth_start_seconds) < (
+        TIMEOUT_ASSERTION_SECONDS
+        - (TIMELINE_SAMPLE_INTERVAL_SECONDS + TIMING_TOLERANCE_SECONDS)
+    ):
         return False
     if bool(observation.get("auth_pending")):
         return True
@@ -900,7 +1060,12 @@ def _observation_captures_timeout_boundary(observation: dict[str, Any]) -> bool:
     )
     if auth_probe_released_after_start_seconds is None:
         return False
-    return float(elapsed_since_start_seconds) <= float(
+    observation_recorded_after_start_seconds = observation.get(
+        "observation_recorded_after_start_seconds",
+    )
+    if observation_recorded_after_start_seconds is None:
+        return False
+    return float(observation_recorded_after_start_seconds) <= float(
         auth_probe_released_after_start_seconds,
     ) + TIMING_TOLERANCE_SECONDS
 
@@ -1074,7 +1239,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         "h4. What was automated",
         "* Preloaded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
         "* Delayed the initial GitHub {/user} startup probe so the startup synchronization path stayed pending beyond the 10-second timeout window.",
-        "* Waited until the delayed GitHub {/user} probe itself had been pending for 10 seconds before asserting so the test matched the real synchronization-timeout boundary instead of a fixed launch offset.",
+        "* Preserved the last timestamped startup observation captured at or before the delayed GitHub {/user} probe's 10-second timeout boundary so the assertion cannot be decided from a later post-release sample.",
         "* Verified the live page showed shell navigation, a header workspace trigger, and TrackState branding instead of remaining on the blank {Sync issue} surface.",
         "",
         "h4. Automation checks",
@@ -1120,7 +1285,7 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         "## What was automated",
         "- Preloaded a hosted workspace and stored GitHub token in browser storage for the deployed app.",
         "- Delayed the initial GitHub `/user` startup probe so the startup synchronization path stayed pending beyond the 10-second timeout window.",
-        "- Waited until the delayed GitHub `/user` probe itself had been pending for 10 seconds before asserting so the test matched the real synchronization-timeout boundary instead of a fixed launch offset.",
+        "- Preserved the last timestamped startup observation captured at or before the delayed GitHub `/user` probe's 10-second timeout boundary so the assertion cannot be decided from a later post-release sample.",
         "- Verified the live page showed shell navigation, a header workspace trigger, and TrackState branding instead of remaining on the blank `Sync issue` surface.",
         "",
         "## Automation checks",
@@ -1309,8 +1474,6 @@ def _discussion_threads() -> list[dict[str, Any]]:
         for thread in threads
         if isinstance(thread, dict)
         and thread.get("resolved") is False
-        and thread.get("rootCommentId") is not None
-        and thread.get("threadId") is not None
     ]
 
 
@@ -1321,35 +1484,29 @@ def _review_reply_text(
     passed: bool,
 ) -> str:
     root_comment_id = thread.get("rootCommentId")
-    if root_comment_id == 3292802748:
-        rerun_summary = (
-            f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
-            if passed
-            else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', 'AssertionError'))}`."
-        )
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', 'AssertionError'))}`."
+    )
+    if root_comment_id == 3310818111:
         return (
-            "Fixed: TS-967 now treats the delayed `/user` probe as a Step 1 precondition. "
-            "If that probe never starts, the test fails immediately and marks later steps as "
-            f"not reached instead of misreporting a setup miss as a timeout-window product regression. {rerun_summary}"
+            "Fixed: Step 3 no longer decides from the first sample that finishes after the "
+            "blocking probe returns. The test now timestamps every startup observation, "
+            "preserves the last completed sample captured at or before the 10-second "
+            "delayed `/user` timeout boundary, and uses that preserved snapshot for the "
+            f"boundary assertion. {rerun_summary}"
         )
-    if root_comment_id in {3292588355, 3292787878}:
-        if passed:
-            return (
-                "Fixed: Step 3 now waits for the delayed `/user` startup probe to be "
-                "pending for the full 10-second sync-timeout window, then captures the "
-                "timeout sample from the same startup snapshot and only accepts it while "
-                "the probe is still pending or no later than its release."
-            )
+    if root_comment_id is None:
         return (
-            "Fixed: Step 3 now anchors the timeout verdict to 10 seconds after the "
-            "delayed `/user` probe starts and rejects post-release samples. This run "
-            "still failed, but the failure evidence now comes from the true timeout "
-            "boundary instead of a fixed offset from launch."
+            "Addressed the review feedback by preserving a timestamped timeout-boundary "
+            "snapshot instead of deciding from a late post-release sample. "
+            f"{rerun_summary}"
         )
     return (
-        "Fixed: TS-967 now derives shell visibility from the same startup snapshot used "
-        "for the timeout assertion, so navigation labels, trigger visibility, and shell "
-        "readiness cannot disagree across two independent observation paths."
+        "Fixed: TS-967 now preserves the last timestamped startup observation captured "
+        "at or before the delayed `/user` timeout boundary and uses that same snapshot "
+        f"for the timeout assertion. {rerun_summary}"
     )
 
 

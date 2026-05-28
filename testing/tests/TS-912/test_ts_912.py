@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import platform
 import re
@@ -31,7 +30,6 @@ from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
     Ts980RestorePersistenceRuntime,
-    install_restorable_directory_picker,
     read_manual_reauth_probe as _support_read_manual_reauth_probe,
     read_restorable_directory_picker_state,
 )
@@ -94,9 +92,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Reused the shared restore-persistence picker support so TS-912 stays on "
-    "the visible Retry flow and verifies the restored workspace becomes the "
-    "active Local Git workspace."
+    "Removed the synthetic directory-picker override so TS-912 stays bound to "
+    "the real visible manual re-authentication flow and reports product-gap "
+    "evidence when the live restore still cannot complete."
 )
 
 
@@ -300,16 +298,6 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
-                workspace_directory_snapshot = _workspace_directory_snapshot(
-                    Path(restored_local_workspace["path"]),
-                )
-                install_restorable_directory_picker(
-                    tracker_page=tracker_page,
-                    directory_snapshot=workspace_directory_snapshot,
-                )
-                result["manual_directory_picker_fixture"] = (
-                    _workspace_directory_snapshot_summary(workspace_directory_snapshot)
-                )
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
@@ -538,8 +526,7 @@ def main() -> None:
                     observed=(
                         "After the manual restore action, the workspace was visible as the "
                         "active `Local Git` workspace and the interactive shell remained loaded "
-                        "after the browser picker callback returned the recreated saved "
-                        "workspace directory snapshot.\n"
+                        "after the real browser directory-access flow completed.\n"
                         f"selected_row={json.dumps(selected_row_after, indent=2)}\n"
                         f"shell_after_restore={json.dumps(shell_after_restore, indent=2)}\n"
                         f"probe={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}\n"
@@ -803,6 +790,15 @@ def _assert_restored_local_workspace(
     switcher_text_confirms_restore = _switcher_text_shows_active_local_git(
         switcher.switcher_text,
     )
+    active_selection_confirmed = (
+        (selected_row is not None and selected_row.display_name == LOCAL_DISPLAY_NAME)
+        or switcher_text_confirms_restore
+        or (
+            local_row is not None
+            and local_row.display_name == LOCAL_DISPLAY_NAME
+            and local_row.state_label == "Local Git"
+        )
+    )
     if trigger.display_name != LOCAL_DISPLAY_NAME:
         raise AssertionError(
             "Step 4 failed: the header trigger did not switch to the restored local "
@@ -827,10 +823,7 @@ def _assert_restored_local_workspace(
             "state after the manual action.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if (
-        (selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME)
-        and not switcher_text_confirms_restore
-    ):
+    if not active_selection_confirmed:
         raise AssertionError(
             "Step 4 failed: the restored local workspace row did not become the active "
             "selection in the switcher.\n"
@@ -1248,41 +1241,6 @@ def _restorable_workspace_fixture_files() -> dict[str, str]:
         ),
     }
 
-
-def _workspace_directory_snapshot(local_path: Path) -> dict[str, object]:
-    files: list[dict[str, str]] = []
-    for absolute_path in sorted(
-        path for path in local_path.rglob("*") if path.is_file()
-    ):
-        files.append(
-            {
-                "path": absolute_path.relative_to(local_path).as_posix(),
-                "base64": base64.b64encode(absolute_path.read_bytes()).decode("ascii"),
-            },
-        )
-    return {
-        "rootName": local_path.name,
-        "rootPath": str(local_path),
-        "files": files,
-    }
-
-
-def _workspace_directory_snapshot_summary(
-    snapshot: dict[str, object],
-) -> dict[str, object]:
-    files = snapshot.get("files", [])
-    return {
-        "rootName": snapshot.get("rootName"),
-        "rootPath": snapshot.get("rootPath"),
-        "fileCount": len(files) if isinstance(files, list) else 0,
-        "paths": [
-            entry.get("path")
-            for entry in files
-            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
-        ],
-    }
-
-
 def _read_manual_reauth_probe(tracker_page) -> dict[str, object]:
     return _support_read_manual_reauth_probe(tracker_page)
 
@@ -1590,9 +1548,8 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"{TICKET_KEY} passed.\n\n"
             f"{REWORK_SUMMARY}\n\n"
             "The saved unavailable local workspace was restored through the real "
-            "manual re-auth flow, using the recreated saved workspace directory "
-            "snapshot at the browser picker boundary, and became the active "
-            "Local Git workspace while the shell stayed interactive.\n"
+            "manual re-auth flow and became the active Local Git workspace while "
+            "the shell stayed interactive.\n"
         )
     return (
         f"{TICKET_KEY} failed.\n\n"
@@ -1756,11 +1713,10 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     return (
-        "Updated: TS-912 now reuses the shared restore-persistence picker support, "
-        "keeps the visible Retry flow, and accepts the current compact-card switcher "
-        "state when the restored workspace is clearly shown as `Local Git`. The test "
-        "reports the live product gap when the app still fails to complete the restore, "
-        "and generates "
+        "Fixed: TS-912 no longer overrides `showDirectoryPicker()` or injects a "
+        "test-authored directory handle. The test stays on the real visible Retry "
+        "flow, keeps the compact-card Local Git fallback, reports the live product "
+        "gap when the restore still cannot complete, and generates "
         "`review_replies.json` from the unresolved threads in "
         f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
         f"{rerun_summary}"

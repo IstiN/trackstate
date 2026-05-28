@@ -1,6 +1,7 @@
 @TestOn('browser')
 library;
 
+import 'dart:async';
 import 'dart:js_interop';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +49,51 @@ void main() {
       expect(calls, 1);
       expect(selectedPath, '/tmp/demo');
       expect(persistedWorkspacePath, '/tmp/demo');
+    },
+  );
+
+  test(
+    'browser workspace picker waits for selection persistence before returning the restored path',
+    () async {
+      final persistenceStarted = Completer<void>();
+      final allowPersistence = Completer<void>();
+      var pickerCompleted = false;
+
+      browserDirectoryAccessRequester =
+          ({String? confirmButtonText, String? initialDirectory}) async {
+            expect(initialDirectory, '/tmp/demo');
+            return _FakeDirectoryHandle(kind: 'directory', name: 'demo');
+          };
+      browserWorkspaceSelectionPersister =
+          ({required String workspacePath, required Object selection}) async {
+            expect(workspacePath, '/tmp/demo');
+            if (!persistenceStarted.isCompleted) {
+              persistenceStarted.complete();
+            }
+            await allowPersistence.future;
+          };
+
+      final selectedPathFuture = pickWorkspaceDirectory(
+        initialDirectory: '/tmp/demo',
+      );
+      selectedPathFuture.then((_) {
+        pickerCompleted = true;
+      });
+
+      await Future<void>.delayed(Duration.zero);
+
+      expect(persistenceStarted.isCompleted, isTrue);
+      expect(
+        pickerCompleted,
+        isFalse,
+        reason:
+            'The picker must not return before the remembered directory handle is persisted.',
+      );
+
+      allowPersistence.complete();
+
+      expect(await selectedPathFuture, '/tmp/demo');
+      expect(pickerCompleted, isTrue);
     },
   );
 

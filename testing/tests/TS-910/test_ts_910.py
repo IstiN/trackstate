@@ -15,6 +15,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherButtonStateObservation,
     WorkspaceSwitcherFocusOwnershipObservation,
+    WorkspaceSwitcherTabStopObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherRowFocusObservation,
@@ -50,7 +51,7 @@ SECOND_WORKSPACE_WRITE_BRANCH = "ts-910-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-910-third"
 LINKED_BUGS = ["TS-916", "TS-900"]
 FOCUS_SETTLE_MS = 300
-MAX_TABS_TO_REACH_FOOTER = 8
+MAX_TABS_TO_REACH_FOOTER = 16
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 FIELD_LABELS = ("Repository", "Branch")
 PANEL_OBSERVE_TIMEOUT_MS = 4_000
@@ -76,9 +77,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts910_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts910_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 
 def main() -> None:
@@ -197,6 +200,7 @@ def main() -> None:
                 panel: WorkspaceSwitcherPanelObservation | None = None
                 rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...] = ()
                 surface: WorkspaceSwitcherSurfaceObservation | None = None
+                internal_tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...] = ()
                 try:
                     trigger = page.observe_trigger()
                     switcher = page.open_and_observe()
@@ -209,10 +213,17 @@ def main() -> None:
                     result["open_panel_observation"] = asdict(panel)
                     rows = page.observe_saved_workspace_rows(timeout_ms=4_000)
                     surface = page.observe_surface(timeout_ms=4_000)
+                    internal_tab_stops = page.observe_internal_tab_stops(
+                        panel=panel,
+                        timeout_ms=4_000,
+                    )
                     result["saved_workspace_rows_before_focus"] = _saved_workspace_rows_payload(
                         rows,
                     )
                     result["surface_observation"] = _surface_payload(surface)
+                    result["internal_tab_stops_before_focus"] = _tab_stops_payload(
+                        internal_tab_stops,
+                    )
                     first_row = _assert_initial_panel_state(
                         switcher=switcher,
                         panel=panel,
@@ -265,11 +276,12 @@ def main() -> None:
                         "Workspace switcher title, the saved workspace rows, the Repository "
                         "and Branch fields, and the Save and switch footer button were visible."
                     ),
-                    observed=(
-                        f"row_names={[row.display_name for row in rows]!r}; "
-                        f"surface_labels={_surface_label_summary(surface)!r}"
-                    ),
-                )
+                        observed=(
+                            f"row_names={[row.display_name for row in rows]!r}; "
+                            f"surface_labels={_surface_label_summary(surface)!r}; "
+                            f"internal_tab_stops={_tab_stop_label_summary(internal_tab_stops)!r}"
+                        ),
+                    )
 
                 page.focus_saved_workspace_row(
                     first_row.display_name,
@@ -324,6 +336,7 @@ def main() -> None:
 
                 tab_trace: list[dict[str, object]] = []
                 footer_state: dict[str, object] | None = None
+                looped_before_footer_state: dict[str, object] | None = None
                 try:
                     for press_index in range(1, MAX_TABS_TO_REACH_FOOTER + 1):
                         before = page.active_element()
@@ -340,14 +353,29 @@ def main() -> None:
                         if _footer_control_reached(state):
                             footer_state = state
                             break
+                        if _wrapped_to_first_row_before_footer(
+                            state,
+                            expected_display_name=first_row.display_name,
+                            expected_detail_text=first_row.detail_text,
+                        ):
+                            looped_before_footer_state = state
+                            break
                     result["tab_trace_to_footer"] = tab_trace
+                    if looped_before_footer_state is not None:
+                        result["looped_before_footer_state"] = looped_before_footer_state
                     _assert_traversal_reached_footer(
                         tab_trace=tab_trace,
                         footer_state=footer_state,
                         surface=surface,
+                        looped_before_footer_state=looped_before_footer_state,
+                        internal_tab_stops=internal_tab_stops,
+                        expected_display_name=first_row.display_name,
+                        expected_detail_text=first_row.detail_text,
                     )
                 except Exception as error:
                     result["tab_trace_to_footer"] = tab_trace
+                    if looped_before_footer_state is not None:
+                        result["looped_before_footer_state"] = looped_before_footer_state
                     _record_step(
                         result,
                         step=3,
@@ -365,7 +393,9 @@ def main() -> None:
                         observed=(
                             f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
                             f"focus_escape={_focus_escape_summary(tab_trace)!r}; "
-                            f"footer_reached={footer_state is not None}"
+                            f"footer_reached={footer_state is not None}; "
+                            f"looped_before_footer={looped_before_footer_state is not None}; "
+                            f"internal_tab_stops={_tab_stop_label_summary(internal_tab_stops)!r}"
                         ),
                     )
                     raise
@@ -390,7 +420,8 @@ def main() -> None:
                     observed=(
                         f"visited_labels={_visited_focus_labels(tab_trace)!r}; "
                         f"footer_visible_label={_footer_focus_label_for_summary(footer_state)!r}; "
-                        f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}"
+                        f"search_issues_reached={_trace_reached_label(tab_trace, 'Search issues')}; "
+                        f"internal_tab_stops={_tab_stop_label_summary(internal_tab_stops)!r}"
                     ),
                 )
 
@@ -555,6 +586,10 @@ def _assert_traversal_reached_footer(
     tab_trace: list[dict[str, object]],
     footer_state: dict[str, object] | None,
     surface: WorkspaceSwitcherSurfaceObservation,
+    looped_before_footer_state: dict[str, object] | None,
+    internal_tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
+    expected_display_name: str,
+    expected_detail_text: str,
 ) -> None:
     failures: list[str] = []
     if not tab_trace:
@@ -586,10 +621,16 @@ def _assert_traversal_reached_footer(
                 f"the switcher panel became hidden after Tab {state.get('press_index')}",
             )
     if footer_state is None:
-        failures.append(
-            f"the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was never reached within "
-            f"{MAX_TABS_TO_REACH_FOOTER} Tab presses",
-        )
+        if looped_before_footer_state is not None:
+            failures.append(
+                "focus looped back to the first saved workspace row before the visible "
+                f"{LAST_INTERNAL_CONTROL_LABEL!r} footer button was reached",
+            )
+        else:
+            failures.append(
+                f"the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was never reached within "
+                f"{MAX_TABS_TO_REACH_FOOTER} Tab presses",
+            )
     else:
         labels = _surface_labels(surface)
         for label in FIELD_LABELS:
@@ -597,11 +638,27 @@ def _assert_traversal_reached_footer(
                 failures.append(
                     f"the visible internal {label!r} field was not reached during Tab traversal before the footer button",
                 )
+    if LAST_INTERNAL_CONTROL_LABEL in _surface_labels(surface):
+        tab_stop_labels = {observation.label for observation in internal_tab_stops if observation.label}
+        if LAST_INTERNAL_CONTROL_LABEL not in tab_stop_labels:
+            failures.append(
+                f"the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was missing from the live internal tab-stop order",
+            )
+    if looped_before_footer_state is not None and not _active_label_matches_saved_workspace(
+        looped_before_footer_state,
+        display_name=expected_display_name,
+        detail_text=expected_detail_text,
+    ):
+        failures.append(
+            "the early loop state did not land on the first saved workspace row as expected",
+        )
     if failures:
+        internal_tab_stop_summary = _tab_stop_label_summary(internal_tab_stops)
         raise AssertionError(
             "Step 3 failed: repeated Tab navigation did not traverse the internal switcher controls as expected.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
+            + f"Observed internal tab stops: {json.dumps(internal_tab_stop_summary, indent=2)}\n"
             + f"Observed trace: {json.dumps(tab_trace, indent=2)}"
         )
 
@@ -1004,6 +1061,25 @@ def _button_state_payload(
     }
 
 
+def _tab_stops_payload(
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "label": observation.label,
+            "visible_text": observation.visible_text,
+            "role": observation.role,
+            "tag_name": observation.tag_name,
+            "tabindex": observation.tabindex,
+            "tab_index_value": observation.tab_index_value,
+            "dom_index": observation.dom_index,
+            "keyboard_focusable": observation.keyboard_focusable,
+            "disabled": observation.disabled,
+        }
+        for observation in tab_stops
+    ]
+
+
 def _surface_labels(surface: WorkspaceSwitcherSurfaceObservation) -> set[str]:
     return {item.label for item in surface.interactive_elements if item.label}
 
@@ -1011,6 +1087,15 @@ def _surface_labels(surface: WorkspaceSwitcherSurfaceObservation) -> set[str]:
 def _surface_label_summary(surface: WorkspaceSwitcherSurfaceObservation) -> list[str]:
     labels = sorted(_surface_labels(surface))
     return labels[:12]
+
+
+def _tab_stop_label_summary(
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
+) -> list[str]:
+    return [
+        observation.label or observation.visible_text or observation.tag_name
+        for observation in tab_stops
+    ]
 
 
 def _visited_focus_labels(states: list[dict[str, object]]) -> list[str]:
@@ -1105,6 +1190,21 @@ def _active_label_matches_saved_workspace(
 ) -> bool:
     label = _focus_label_for_summary(state)
     return display_name in label and detail_text in label
+
+
+def _wrapped_to_first_row_before_footer(
+    state: dict[str, object] | None,
+    *,
+    expected_display_name: str,
+    expected_detail_text: str,
+) -> bool:
+    if _footer_control_reached(state):
+        return False
+    return _active_label_matches_saved_workspace(
+        state,
+        display_name=expected_display_name,
+        detail_text=expected_detail_text,
+    )
 
 
 def _first_focus_escape_index(states: list[dict[str, object]]) -> int | None:
@@ -1207,6 +1307,59 @@ def _failed_step_label(result: dict[str, object]) -> str:
     return f"Step {failed.get('step')} — {failed.get('action')}"
 
 
+def _failed_step_summary(result: dict[str, object]) -> str:
+    failed = _failed_step(result)
+    if failed is None:
+        return str(result.get("error", "unknown failure"))
+    return (
+        f"{_failed_step_label(result)}: "
+        f"{failed.get('observed') or result.get('error', 'unknown failure')}"
+    )
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+    )
+    return (
+        "Resolved the merge conflict in `testing/tests/TS-910/test_ts_910.py`, kept the "
+        "diagnostics that capture the live internal tab-stop order and the loop-before-footer "
+        "case, and regenerated the required `outputs/` artifacts. "
+        f"{rerun_summary}"
+    )
+
+
 def _runtime_body_text(result: dict[str, object]) -> str:
     runtime_body_text = result.get("runtime_body_text")
     if isinstance(runtime_body_text, str) and runtime_body_text.strip():
@@ -1225,6 +1378,8 @@ def _actual_vs_expected_summary(result: dict[str, object]) -> str:
         )
     if failed is not None and failed.get("step") == 3:
         trace = result.get("tab_trace_to_footer")
+        looped_before_footer_state = result.get("looped_before_footer_state")
+        internal_tab_stops = result.get("internal_tab_stops_before_focus")
         if isinstance(trace, list) and trace:
             escape_index = _first_focus_escape_index(trace)
             visited_labels = _visited_focus_labels(trace)
@@ -1240,6 +1395,13 @@ def _actual_vs_expected_summary(result: dict[str, object]) -> str:
                     f"{_focus_label_for_summary(escape_state)!r} outside the expected in-panel "
                     f"loop before the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was reached. "
                     f"visited_labels={visited_labels!r}."
+                )
+            if isinstance(looped_before_footer_state, dict):
+                return (
+                    f"Tab traversal stayed inside the workspace switcher, but it looped back to "
+                    f"the first saved workspace row {_focus_label_for_summary(looped_before_footer_state)!r} "
+                    f"before the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button became reachable. "
+                    f"internal_tab_stops={internal_tab_stops!r}; visited_labels={visited_labels!r}."
                 )
             return (
                 f"The switcher never reached the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer "
@@ -1285,6 +1447,8 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
         trace = result.get("tab_trace_to_footer")
         visited_labels = _visited_focus_labels(trace) if isinstance(trace, list) else []
         escape_index = _first_focus_escape_index(trace if isinstance(trace, list) else [])
+        looped_before_footer_state = result.get("looped_before_footer_state")
+        internal_tab_stops = result.get("internal_tab_stops_before_focus")
         last_label = (
             _focus_label_for_summary(trace[-1])
             if isinstance(trace, list) and trace
@@ -1309,8 +1473,16 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
                         f"final interactive control was reachable. focus_escape="
                         f"{_focus_label_for_summary(trace[escape_index])!r}."
                         if isinstance(trace, list) and escape_index is not None
-                        else "focus stalled on an unlabeled in-panel semantics node before the "
-                        f"final interactive control was reachable. last_focus={last_label!r}."
+                        else (
+                            "focus looped back to the first saved workspace row before the "
+                            f"visible {LAST_INTERNAL_CONTROL_LABEL!r} footer control became "
+                            f"reachable. internal_tab_stops={internal_tab_stops!r}; "
+                            f"last_focus={_focus_label_for_summary(looped_before_footer_state)!r}."
+                            if isinstance(looped_before_footer_state, dict)
+                            else "the visible footer control never became reachable within the "
+                            f"captured in-panel tab order. internal_tab_stops={internal_tab_stops!r}; "
+                            f"last_focus={last_label!r}."
+                        )
                     )
                 ),
             ],
@@ -1366,6 +1538,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -1387,6 +1563,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 

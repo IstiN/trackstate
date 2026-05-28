@@ -101,6 +101,7 @@ void main() {
     expect(workflow, contains('ARCHS=arm64'));
     expect(workflow, contains('ONLY_ACTIVE_ARCH=YES'));
     expect(workflow, contains('EXCLUDED_ARCHS=x86_64'));
+    expect(workflow, contains('source ./tool/thin_macos_app_bundle.sh'));
     expect(workflow, contains('app_binary='));
     expect(workflow, contains(r'file "$binary_path"'));
     expect(workflow, contains('Mach-O 64-bit executable arm64'));
