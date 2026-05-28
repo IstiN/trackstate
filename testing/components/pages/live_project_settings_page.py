@@ -320,9 +320,9 @@ class LiveProjectSettingsPage:
         )
 
     def dismiss_connection_banner(self) -> None:
-        if self._session.count(self._close_selector) == 0:
+        if self._session.count(self._button_selector, has_text="Close") == 0:
             return
-        self._session.click(self._close_selector, timeout_ms=30_000)
+        self._session.click(self._button_selector, has_text="Close", timeout_ms=30_000)
 
     def dismiss_if_open(self, *, timeout_ms: int = 30_000) -> None:
         current_body = self.body_text()
