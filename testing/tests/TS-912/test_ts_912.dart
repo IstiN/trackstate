@@ -15,7 +15,7 @@ const String _runCommand =
 const String _expectedResult =
     "The workspace status is updated to 'Local Git'. The workspace becomes active and its contents are successfully loaded/indexed.";
 const String _reworkSummary =
-    'Moved TS-912 to the supported Flutter widget harness so the test completes the visible Retry/Re-authenticate plus directory-access grant flow through `workspaceDirectoryPicker` and verifies the workspace settles to `Local Git`.';
+    'Moved TS-912 to the supported Flutter widget harness, backed the restore path with the seeded local Git repository, and now require seeded local issue content to load after the visible Retry/Re-authenticate flow completes.';
 const List<String> _requestSteps = <String>[
   'Open the Workspace switcher from the application header.',
   "Locate the 'Local Unavailable' workspace entry.",
@@ -165,9 +165,16 @@ void main() {
           );
         }
 
-        await screen.waitForLocalRestored(
-          Ts912ManualReauthFixture.localDisplayName,
-        );
+        Object? restoreWaitError;
+        StackTrace? restoreWaitStackTrace;
+        try {
+          await screen.waitForLocalRestored(
+            Ts912ManualReauthFixture.localDisplayName,
+          );
+        } catch (error, stackTrace) {
+          restoreWaitError = error;
+          restoreWaitStackTrace = stackTrace;
+        }
         final workspaceStateAfterRetry = await fixture.loadWorkspaceState();
         await screen.openWorkspaceSwitcher();
         await screen.waitWithoutInteraction(const Duration(milliseconds: 200));
@@ -199,8 +206,40 @@ void main() {
         final activeLocalRetryVisible = await screen.retryActionLabel(
           fixture.localWorkspace.id,
         );
+        var localIssueOpened = false;
+        var localIssueDescriptionVisible = false;
+        var localIssueAcceptanceVisible = false;
+        Object? localIssueLoadError;
+        StackTrace? localIssueLoadStackTrace;
+        if (tappedRetry && restoreWaitError == null) {
+          try {
+            await screen.openIssue(
+              Ts912ManualReauthFixture.localIssueKey,
+              Ts912ManualReauthFixture.localIssueSummary,
+            );
+            localIssueOpened = true;
+            await screen.expectIssueDetailText(
+              Ts912ManualReauthFixture.localIssueKey,
+              Ts912ManualReauthFixture.localIssueDescription,
+            );
+            localIssueDescriptionVisible = true;
+            await screen.expectIssueDetailText(
+              Ts912ManualReauthFixture.localIssueKey,
+              Ts912ManualReauthFixture.localAcceptanceCriteria,
+            );
+            localIssueAcceptanceVisible = true;
+          } catch (error, stackTrace) {
+            localIssueLoadError = error;
+            localIssueLoadStackTrace = stackTrace;
+          }
+        }
+        final issueVisibleTexts = screen.visibleTexts();
+        final issueVisibleSemantics = screen.visibleSemanticsLabelsSnapshot();
+        result['visible_texts_after_issue_open'] = issueVisibleTexts;
+        result['visible_semantics_after_issue_open'] = issueVisibleSemantics;
         final step4Passed =
             tappedRetry &&
+            restoreWaitError == null &&
             fixture.directoryPickerCalls == 1 &&
             fixture.selectedDirectories.length == 1 &&
             fixture.selectedDirectories.single == fixture.localRepositoryPath &&
@@ -213,7 +252,10 @@ void main() {
             activeLocalRowVisible &&
             activeLocalRowHasLocalGit &&
             !activeLocalRowStillUnavailable &&
-            activeLocalRetryVisible == null;
+            activeLocalRetryVisible == null &&
+            localIssueOpened &&
+            localIssueDescriptionVisible &&
+            localIssueAcceptanceVisible;
         final step4Observed =
             'directory_picker_calls=${fixture.directoryPickerCalls}; '
             'directory_picker_confirm_buttons=${_formatList(fixture.directoryPickerConfirmButtons)}; '
@@ -224,12 +266,19 @@ void main() {
             'active_workspace_id=${workspaceStateAfterRetry.activeWorkspaceId}; '
             'trigger_has_local_name=${screen.triggerContainsText(Ts912ManualReauthFixture.localDisplayName)}; '
             'trigger_has_local_git=${screen.triggerContainsText('Local Git')}; '
+            'restore_wait_error=${restoreWaitError ?? '<none>'}; '
             'active_row_has_active=$activeLocalRowVisible; '
             'active_row_has_local_git=$activeLocalRowHasLocalGit; '
             'active_row_still_unavailable=$activeLocalRowStillUnavailable; '
             'active_row_retry_action=${activeLocalRetryVisible ?? '<none>'}; '
+            'local_issue_opened=$localIssueOpened; '
+            'local_issue_description_visible=$localIssueDescriptionVisible; '
+            'local_issue_acceptance_visible=$localIssueAcceptanceVisible; '
+            'local_issue_error=${localIssueLoadError ?? '<none>'}; '
             'visible_texts=${_formatList(restoredVisibleTexts)}; '
-            'visible_semantics=${_formatList(restoredVisibleSemantics)}';
+            'visible_semantics=${_formatList(restoredVisibleSemantics)}; '
+            'issue_visible_texts=${_formatList(issueVisibleTexts)}; '
+            'issue_visible_semantics=${_formatList(issueVisibleSemantics)}';
         _recordStep(
           result,
           step: 4,
@@ -240,7 +289,9 @@ void main() {
         if (!step4Passed) {
           failures.add(
             'Step 4 failed: granting directory access through the visible re-authentication flow did not restore the saved workspace as Local Git.\n'
-            'Observed: $step4Observed',
+            'Observed: $step4Observed'
+            '${restoreWaitStackTrace == null ? '' : '\nRestore-wait traceback: $restoreWaitStackTrace'}'
+            '${localIssueLoadStackTrace == null ? '' : '\nIssue-load traceback: $localIssueLoadStackTrace'}',
           );
         }
 
@@ -254,9 +305,9 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'After activating the visible Retry/Re-authenticate action, checked that the directory-access prompt completed once and the same workspace became active as Local Git.',
+              'After activating the visible Retry/Re-authenticate action, checked that the directory-access prompt completed once, the same workspace became active as Local Git, and seeded local issue content opened from the restored repository.',
           observed:
-              'directory_picker_calls=${fixture.directoryPickerCalls}; selected_directories=${_formatList(fixture.selectedDirectories)}; visible_texts=${_formatList(restoredVisibleTexts)}; visible_semantics=${_formatList(restoredVisibleSemantics)}',
+              'directory_picker_calls=${fixture.directoryPickerCalls}; selected_directories=${_formatList(fixture.selectedDirectories)}; local_issue_opened=$localIssueOpened; local_issue_description_visible=$localIssueDescriptionVisible; local_issue_acceptance_visible=$localIssueAcceptanceVisible; visible_texts=${_formatList(issueVisibleTexts)}; visible_semantics=${_formatList(issueVisibleSemantics)}',
         );
 
         if (failures.isNotEmpty) {
@@ -370,6 +421,9 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
         ? 'The Flutter widget harness completed the manual access-grant step and the saved workspace restored to `Local Git`.'
         : '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
     '',
+    passed
+        ? 'The restored workspace also loaded the seeded local issue detail (`DEMO-1`, `Local issue`, `Loaded from local git.`), so the result covers content loading rather than the state label alone.'
+        : '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
     'Run command: `$_runCommand`',
   ].join('\n');
 }
@@ -399,7 +453,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '## Actual result',
     passed
-        ? 'The visible Retry/Re-authenticate flow invoked the directory-access prompt once, granted access to the saved directory, and restored the workspace as active `Local Git`.'
+        ? 'The visible Retry/Re-authenticate flow invoked the directory-access prompt once, granted access to the saved directory, restored the workspace as active `Local Git`, and loaded seeded local issue content from the restored repository.'
         : '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
   ];
   if (!passed) {
@@ -437,7 +491,7 @@ String _reviewReplyText(Map<String, Object?> result, {required bool passed}) {
   final rerun = passed
       ? 'Re-ran TS-912 and it now passes (`1 passed, 0 failed`).'
       : 'Re-ran TS-912 and it still fails: ${_failureSummary(result)}';
-  return 'Fixed: TS-912 now runs in the supported Flutter widget harness instead of stopping at the live Playwright native-picker boundary. The test completes the visible Retry/Re-authenticate flow through `workspaceDirectoryPicker`, verifies the saved workspace becomes active `Local Git`, and the README now describes the old native-picker stop as an automation gap rather than the intended outcome. $rerun';
+  return 'Fixed: TS-912 now runs in the supported Flutter widget harness instead of stopping at the live Playwright native-picker boundary. The restore seam now opens the seeded local Git repository instead of demo data, and the final assertion requires seeded local content (`DEMO-1`, `Local issue`, `Loaded from local git.`) after the visible Retry/Re-authenticate flow completes, so the result covers content loading as well as the `Local Git` state transition. $rerun';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -454,7 +508,7 @@ String _bugDescription(Map<String, Object?> result) {
     '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
     '',
     '## Missing or broken production capability',
-    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the saved local workspace still did not settle to the active `Local Git` state afterward.',
+    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the saved local workspace still did not settle to the active `Local Git` state and load the seeded local issue content afterward.',
     '',
     '## Environment details',
     '- Runtime: flutter test',
@@ -480,6 +534,8 @@ String _bugDescription(Map<String, Object?> result) {
       'browser_open_attempts': result['browser_open_attempts'],
       'visible_texts_before_retry': result['visible_texts_before_retry'],
       'visible_texts_after_retry': result['visible_texts_after_retry'],
+      'visible_texts_after_issue_open':
+          result['visible_texts_after_issue_open'],
       'failed_step': _firstFailedStep(result),
     }),
     '```',

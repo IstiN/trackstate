@@ -8,9 +8,9 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../../components/factories/testing_dependencies.dart';
 import '../../../components/screens/settings_screen_robot.dart';
-import '../../../components/services/demo_local_workspace_repository.dart';
 import '../../../core/interfaces/trackstate_app_component.dart';
 import '../../../core/utils/local_git_test_repository.dart';
+import '../../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class Ts912ManualReauthFixture {
   Ts912ManualReauthFixture._({
@@ -25,6 +25,10 @@ class Ts912ManualReauthFixture {
   static const String hostedDisplayName = 'stable/repo';
   static const String hostedRepository = 'stable/repo';
   static const String branch = 'main';
+  static const String localIssueKey = 'DEMO-1';
+  static const String localIssueSummary = 'Local issue';
+  static const String localIssueDescription = 'Loaded from local git.';
+  static const String localAcceptanceCriteria = 'Can be loaded from local Git';
 
   final WidgetTester tester;
   final WorkspaceProfileService workspaceProfileService;
@@ -117,7 +121,8 @@ class Ts912ManualReauthFixture {
                 repositoryPath != localRepositoryPath) {
               return null;
             }
-            return createDemoLocalWorkspaceRepository(
+            return createLocalGitTestRepository(
+              tester: tester,
               repositoryPath: repositoryPath,
             );
           },
@@ -135,7 +140,9 @@ class Ts912ManualReauthFixture {
   }
 
   Future<void> dispose() async {
-    await _localRepositoryHandle.dispose();
+    // Let the flutter test process own the temporary repo lifetime so pending
+    // provider work cannot race with directory deletion after the assertion
+    // result has already been recorded.
   }
 }
 
@@ -196,6 +203,14 @@ class Ts912ManualReauthScreen {
       failureMessage:
           'TS-912 did not restore the unavailable local workspace as Local Git after the manual re-authentication flow.',
     );
+  }
+
+  Future<void> openIssue(String key, String summary) {
+    return _appScreen.openIssue(key, summary);
+  }
+
+  Future<void> expectIssueDetailText(String key, String text) {
+    return _appScreen.expectIssueDetailText(key, text);
   }
 
   bool get isWorkspaceSwitcherTriggerVisible =>

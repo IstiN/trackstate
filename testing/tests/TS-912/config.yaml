@@ -7,7 +7,7 @@ dependencies:
 notes:
   - Runs in the supported Flutter widget runtime at 1440x900.
   - Seeds one hosted active workspace plus one saved local workspace marked unavailable.
-  - Verifies the visible Retry or Re-authenticate action completes one directory-access prompt and restores the saved workspace to active Local Git.
+  - Verifies the visible Retry or Re-authenticate action completes one directory-access prompt, restores the saved workspace to active Local Git, and loads seeded local issue content from the restored repository.
 runtime_inputs:
   active_workspace_kind: hosted
   retry_workspace_kind: local unavailable
@@ -16,5 +16,5 @@ runtime_inputs:
     - Retry
     - Re-authenticate
   expected_directory_picker_calls: 1
-  expected_final_state: saved local workspace restored as active Local Git
+  expected_final_state: saved local workspace restored as active Local Git with seeded local issue content loaded
   run_command: flutter test testing/tests/TS-912/test_ts_912.dart --reporter expanded

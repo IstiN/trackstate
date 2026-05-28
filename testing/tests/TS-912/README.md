@@ -14,7 +14,8 @@ The automation:
 4. completes the directory-access grant through the app's
    `workspaceDirectoryPicker` seam without manufacturing the restored end state
 5. verifies the same saved workspace becomes active as `Local Git`, the retry
-   action disappears, and the directory-access prompt ran exactly once
+   action disappears, the directory-access prompt ran exactly once, and seeded
+   local issue content is visible from the restored repository
 
 The earlier live Playwright rework stopped at Chromium's native picker boundary.
 That boundary is an automation gap for that surface, not the intended TS-912
@@ -37,9 +38,11 @@ mkdir -p outputs && flutter test testing/tests/TS-912/test_ts_912.dart --reporte
 ```text
 Pass: the saved unavailable local workspace exposes a working Retry or
 Re-authenticate action, the directory-access prompt completes once for the
-saved folder, and the workspace becomes the active `Local Git` session.
+saved folder, the workspace becomes the active `Local Git` session, and the
+restored repository loads the seeded `DEMO-1` local issue content.
 
 Fail: the unavailable row is missing, the visible retry-style action cannot be
 activated, the directory-access prompt does not complete, or the workspace does
-not settle to active `Local Git` after access is granted.
+not settle to active `Local Git` with the seeded local content after access is
+granted.
 ```
