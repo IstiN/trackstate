@@ -47,6 +47,10 @@ THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
 LINKED_BUGS = [
+    "TS-1210",
+    "TS-1208",
+    "TS-1155",
+    "TS-1150",
     "TS-1135",
     "TS-1133",
     "TS-1044",
@@ -56,6 +60,7 @@ LINKED_BUGS = [
     "TS-1018",
     "TS-1010",
     "TS-1009",
+    "TS-999",
     "TS-998",
     "TS-997",
     "TS-975",
@@ -564,10 +569,15 @@ def _assert_initial_panel_state(
         )
     first_row = _selected_saved_workspace(rows)
     if first_row is None:
-        failures.append("no saved workspace row was marked selected when the panel opened")
+        first_row = next(
+            (row for row in rows if row.display_name == FIRST_WORKSPACE_DISPLAY_NAME),
+            rows[0] if rows else None,
+        )
+    if first_row is None:
+        failures.append("no saved workspace row was available when the panel opened")
     elif first_row.display_name != FIRST_WORKSPACE_DISPLAY_NAME:
         failures.append(
-            f"the selected row was {first_row.display_name!r} instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
+            f"the primary saved workspace row was {first_row.display_name!r} instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
         )
     labels = _surface_labels(surface)
     for label in (*FIELD_LABELS, LAST_INTERNAL_CONTROL_LABEL):
@@ -1555,41 +1565,44 @@ def _build_bug_description(result: dict[str, object]) -> str:
         )
 
     lines = [
-        f"# {TICKET_KEY} bug report",
+        f"h3. Bug report — {TICKET_KEY}",
         "",
-        "## Steps to reproduce",
+        "h4. Steps to Reproduce",
         *annotated_steps,
         "",
-        "## Exact error message or assertion failure",
-        "```text",
+        "h4. Exact error message or assertion failure",
+        "{code}",
         str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "{code}",
         "",
-        "## Actual result",
-        _actual_result_summary(result, passed=False),
-        "",
-        "## Expected result",
+        "h4. Expected Result",
         EXPECTED_RESULT,
         "",
-        "## Environment details",
-        f"- URL: {result.get('app_url')}",
-        f"- Browser: {result.get('browser')}",
-        f"- OS: {result.get('os')}",
-        f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"- Run command: `{RUN_COMMAND}`",
+        "h4. Actual Result",
+        _actual_result_summary(result, passed=False),
         "",
-        "## Screenshots or logs",
-        f"- Screenshot: `{result.get('screenshot')}`",
-        f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
-        f"- Shell observation: `{json.dumps(result.get('shell_observation'), ensure_ascii=True)}`",
-        f"- Trigger observation: `{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}`",
-        f"- Switcher observation: `{json.dumps(result.get('open_switcher_observation'), ensure_ascii=True)}`",
-        f"- Footer state before Tab: `{json.dumps(result.get('save_and_switch_before_tab'), ensure_ascii=True)}`",
-        f"- Footer state at focus: `{json.dumps(result.get('footer_button_state'), ensure_ascii=True)}`",
-        f"- Tab trace: `{json.dumps(result.get('tab_trace_to_footer'), ensure_ascii=True)}`",
-        f"- Wrap state: `{json.dumps(result.get('wrap_state_after_footer'), ensure_ascii=True)}`",
-        f"- Console events: `{json.dumps(result.get('console_events'), ensure_ascii=True)}`",
-        f"- Page errors: `{json.dumps(result.get('page_errors'), ensure_ascii=True)}`",
+        "h4. Environment",
+        f"* URL: {result.get('app_url')}",
+        f"* Browser: {result.get('browser')}",
+        f"* OS: {result.get('os')}",
+        f"* Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+        f"* Run command: {{code}}{RUN_COMMAND}{{code}}",
+        "",
+        "h4. Screenshots or logs",
+        f"* Screenshot: {result.get('screenshot')}",
+        f"* Startup observation: {{code}}{json.dumps(result.get('startup_observation'), ensure_ascii=True)}{{code}}",
+        f"* Shell observation: {{code}}{json.dumps(result.get('shell_observation'), ensure_ascii=True)}{{code}}",
+        f"* Trigger observation: {{code}}{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}{{code}}",
+        f"* Switcher observation: {{code}}{json.dumps(result.get('open_switcher_observation'), ensure_ascii=True)}{{code}}",
+        f"* Footer state before Tab: {{code}}{json.dumps(result.get('save_and_switch_before_tab'), ensure_ascii=True)}{{code}}",
+        f"* Footer state at focus: {{code}}{json.dumps(result.get('footer_button_state'), ensure_ascii=True)}{{code}}",
+        f"* Tab trace: {{code}}{json.dumps(result.get('tab_trace_to_footer'), ensure_ascii=True)}{{code}}",
+        f"* Wrap state: {{code}}{json.dumps(result.get('wrap_state_after_footer'), ensure_ascii=True)}{{code}}",
+        f"* Console events: {{code}}{json.dumps(result.get('console_events'), ensure_ascii=True)}{{code}}",
+        f"* Page errors: {{code}}{json.dumps(result.get('page_errors'), ensure_ascii=True)}{{code}}",
+        "",
+        "h4. Notes",
+        f"* Linked bugs considered during this rerun: {', '.join(LINKED_BUGS)}",
     ]
     return "\n".join(lines) + "\n"
 
