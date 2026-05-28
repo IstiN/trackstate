@@ -315,8 +315,25 @@ def _height_assertion_message(
 def _container_assertion_message(
     observation: HeaderContainerObservation | None,
 ) -> str | None:
-    if not _container_css_assertion_is_verifiable(observation):
-        return None
+    if observation is None:
+        return (
+            "the public DOM did not expose a shared CSS-backed parent header container for "
+            "the audited desktop controls, so the required display:flex / align-items:center "
+            "assertion could not be verified."
+        )
+    if observation.tag_name == "flt-semantics":
+        identifier = (
+            f' "{observation.semantics_identifier}"'
+            if observation.semantics_identifier
+            else ""
+        )
+        return (
+            "the public DOM only exposed the shared parent header container"
+            f"{identifier} as a Flutter semantics wrapper "
+            f'(tag="{observation.tag_name}", display="{observation.display}") rather than a '
+            "CSS-backed layout container, so the required display:flex / "
+            "align-items:center styling remains unverifiable."
+        )
     if observation.display not in {"flex", "inline-flex"}:
         identifier = (
             f' "{observation.semantics_identifier}"'
@@ -609,6 +626,7 @@ def _bug_description(result: dict[str, object]) -> str:
             + _step_outcome(steps, 6),
             "",
             "## Exact error message or assertion failure",
+            f"- Command: `{RUN_COMMAND}`",
             "```text",
             str(result.get("traceback", "")).rstrip(),
             "```",
@@ -620,6 +638,13 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"`{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}` "
                 f"with vertical center spread `{result.get('vertical_center_spread_px', '')}`; "
                 f"the exposed header container summary was `{result.get('header_container_summary', '')}`."
+            ),
+            (
+                "- **Missing production capability:** the hosted public DOM does not expose a "
+                "CSS-backed parent container for the desktop header controls. The only shared "
+                "surface exposed to automation is the Flutter semantics wrapper, so the ticket's "
+                "required `display:flex` / `align-items: center` assertion cannot be proven on a "
+                "public DOM node."
             ),
             "",
             "## Environment details",
@@ -759,10 +784,11 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
         else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', ''))}`."
     )
     return (
-        "Fixed: Step 6 no longer treats the `trackstate-desktop-header-controls` "
-        "`flt-semantics` wrapper as the ticket's CSS flex container; it now treats that "
-        "public surface as unverifiable unless a real CSS-backed parent container is exposed, "
-        "and it still writes the required review replies artifact. "
+        "Fixed: Step 6 no longer treats `css_assertion=unverifiable_semantics_wrapper` as a "
+        "synthetic pass. When the public DOM only exposes "
+        "`trackstate-desktop-header-controls` as a `flt-semantics` wrapper, the test now "
+        "fails as a clear product-gap/unverifiable-container result and still writes the "
+        "required review replies artifact. "
         + rerun_summary
     )
 
