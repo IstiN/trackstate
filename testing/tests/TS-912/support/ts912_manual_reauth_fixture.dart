@@ -1,14 +1,11 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../../components/factories/testing_dependencies.dart';
-import '../../../components/screens/settings_screen_robot.dart';
-import '../../../core/interfaces/trackstate_app_component.dart';
+import '../../../core/interfaces/manual_unavailable_workspace_reauth_component.dart';
 import '../../../core/utils/local_git_test_repository.dart';
 import '../../../frameworks/flutter/trackstate_test_runtime.dart';
 
@@ -25,8 +22,8 @@ class Ts912ManualReauthFixture {
   static const String hostedDisplayName = 'stable/repo';
   static const String hostedRepository = 'stable/repo';
   static const String branch = 'main';
-  static const String localIssueKey = 'DEMO-1';
-  static const String localIssueSummary = 'Local issue';
+  static const String localIssueKey = 'TRACK-1';
+  static const String localIssueSummary = 'Platform Foundation';
   static const String localIssueDescription = 'Loaded from local git.';
   static const String localAcceptanceCriteria = 'Can be loaded from local Git';
 
@@ -41,6 +38,9 @@ class Ts912ManualReauthFixture {
   final List<String?> selectedDirectories = <String?>[];
   final List<String> localOpenAttempts = <String>[];
   final List<String> browserOpenAttempts = <String>[];
+  final List<String> browserAccessRequestAttempts = <String>[];
+  final List<String> browserAccessRequestResults = <String>[];
+  final List<String> browserAccessRequestErrors = <String>[];
   int directoryPickerCalls = 0;
   bool _browserAccessGranted = false;
 
@@ -88,11 +88,9 @@ class Ts912ManualReauthFixture {
     return workspaceProfileService.loadState();
   }
 
-  Future<Ts912ManualReauthScreen> launch() async {
-    final screen = Ts912ManualReauthScreen(
-      tester,
-      defaultTestingDependencies.createTrackStateAppScreen(tester),
-    );
+  Future<ManualUnavailableWorkspaceReauthComponent> launch() async {
+    final screen = defaultTestingDependencies
+        .createManualUnavailableWorkspaceReauthScreen(tester);
     await screen.launchApp(
       workspaceProfileService: workspaceProfileService,
       openHostedRepository:
@@ -126,6 +124,30 @@ class Ts912ManualReauthFixture {
               repositoryPath: repositoryPath,
             );
           },
+      requestBrowserLocalRepositoryAccess:
+          ({
+            required String repositoryPath,
+            required String defaultBranch,
+            required String writeBranch,
+          }) async {
+            browserAccessRequestAttempts.add(repositoryPath);
+            if (!_browserAccessGranted ||
+                repositoryPath != localRepositoryPath) {
+              browserAccessRequestResults.add('null');
+              return null;
+            }
+            try {
+              final repository = await createLocalGitTestRepository(
+                tester: tester,
+                repositoryPath: repositoryPath,
+              );
+              browserAccessRequestResults.add('repository');
+              return repository;
+            } catch (error) {
+              browserAccessRequestErrors.add('$error');
+              rethrow;
+            }
+          },
       workspaceDirectoryPicker:
           ({String? confirmButtonText, String? initialDirectory}) async {
             directoryPickerCalls += 1;
@@ -143,172 +165,5 @@ class Ts912ManualReauthFixture {
     // Let the flutter test process own the temporary repo lifetime so pending
     // provider work cannot race with directory deletion after the assertion
     // result has already been recorded.
-  }
-}
-
-class Ts912ManualReauthScreen {
-  Ts912ManualReauthScreen(this._tester, this._appScreen)
-    : _robot = SettingsScreenRobot(_tester);
-
-  final WidgetTester _tester;
-  final TrackStateAppComponent _appScreen;
-  final SettingsScreenRobot _robot;
-
-  Finder get _workspaceSwitcherTrigger =>
-      find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
-
-  Future<void> launchApp({
-    required WorkspaceProfileService workspaceProfileService,
-    required HostedRepositoryLoader openHostedRepository,
-    required LocalRepositoryLoader openLocalRepository,
-    required BrowserLocalRepositoryLoader openBrowserLocalRepository,
-    required Future<String?> Function({
-      String? confirmButtonText,
-      String? initialDirectory,
-    })
-    workspaceDirectoryPicker,
-  }) async {
-    _tester.view.physicalSize = const Size(1440, 900);
-    _tester.view.devicePixelRatio = 1;
-    await _tester.pumpWidget(
-      TrackStateApp(
-        workspaceProfileService: workspaceProfileService,
-        openHostedRepository: openHostedRepository,
-        openLocalRepository: openLocalRepository,
-        openBrowserLocalRepository: openBrowserLocalRepository,
-        workspaceDirectoryPicker: workspaceDirectoryPicker,
-      ),
-    );
-    await _tester.pumpAndSettle();
-  }
-
-  Future<void> waitForReady(String workspaceName) {
-    return _pumpUntil(
-      condition: () =>
-          isWorkspaceSwitcherTriggerVisible &&
-          triggerContainsText(workspaceName),
-      timeout: const Duration(seconds: 10),
-      failureMessage:
-          'TS-912 did not finish rendering the initial workspace switcher trigger.',
-    );
-  }
-
-  Future<void> waitForLocalRestored(String workspaceName) {
-    return _pumpUntil(
-      condition: () =>
-          isWorkspaceSwitcherTriggerVisible &&
-          triggerContainsText(workspaceName) &&
-          triggerContainsText('Local Git'),
-      timeout: const Duration(seconds: 10),
-      failureMessage:
-          'TS-912 did not restore the unavailable local workspace as Local Git after the manual re-authentication flow.',
-    );
-  }
-
-  Future<void> openIssue(String key, String summary) {
-    return _appScreen.openIssue(key, summary);
-  }
-
-  Future<void> expectIssueDetailText(String key, String text) {
-    return _appScreen.expectIssueDetailText(key, text);
-  }
-
-  bool get isWorkspaceSwitcherTriggerVisible =>
-      _workspaceSwitcherTrigger.evaluate().isNotEmpty;
-
-  bool triggerContainsText(String text) => find
-      .descendant(
-        of: _workspaceSwitcherTrigger,
-        matching: find.textContaining(text, findRichText: true),
-      )
-      .evaluate()
-      .isNotEmpty;
-
-  Future<void> openWorkspaceSwitcher() => _appScreen.openWorkspaceSwitcher();
-
-  Future<bool> isWorkspaceSwitcherVisible() {
-    return _appScreen.isWorkspaceSwitcherVisible();
-  }
-
-  Future<bool> workspaceRowContainsText(String workspaceId, String text) {
-    return _appScreen.workspaceRowContainsText(workspaceId, text);
-  }
-
-  Future<bool> workspaceRowHasControl(String workspaceId, String label) {
-    return _appScreen.workspaceRowHasControl(workspaceId, label);
-  }
-
-  Future<bool> tapWorkspaceRowControl(String workspaceId, String label) {
-    return _appScreen.tapWorkspaceRowControl(workspaceId, label);
-  }
-
-  Future<String?> retryActionLabel(String workspaceId) async {
-    for (final label in const <String>['Retry', 'Re-authenticate']) {
-      if (await workspaceRowHasControl(workspaceId, label)) {
-        return label;
-      }
-    }
-    return null;
-  }
-
-  Future<bool> tapRetryAction(String workspaceId) async {
-    final label = await retryActionLabel(workspaceId);
-    if (label == null) {
-      return false;
-    }
-    return tapWorkspaceRowControl(workspaceId, label);
-  }
-
-  Future<void> waitWithoutInteraction(Duration duration) {
-    return _appScreen.waitWithoutInteraction(duration);
-  }
-
-  List<String> visibleTexts() => _robot.visibleTexts();
-
-  List<String> visibleSemanticsLabelsSnapshot() =>
-      _appScreen.visibleSemanticsLabelsSnapshot();
-
-  void dispose() {
-    _appScreen.resetView();
-  }
-
-  Future<void> _pumpUntil({
-    required bool Function() condition,
-    required Duration timeout,
-    required String failureMessage,
-    Duration step = const Duration(milliseconds: 100),
-  }) async {
-    final end = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(end)) {
-      if (condition()) {
-        await _tester.pump();
-        return;
-      }
-      await _tester.pump(step);
-    }
-    if (!condition()) {
-      throw TestFailure(
-        '$failureMessage Visible texts: ${_formatSnapshot(visibleTexts())}. '
-        'Visible semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
-      );
-    }
-  }
-
-  String _formatSnapshot(List<String> values, {int limit = 24}) {
-    final snapshot = <String>[];
-    for (final value in values) {
-      final trimmed = value.trim();
-      if (trimmed.isEmpty || snapshot.contains(trimmed)) {
-        continue;
-      }
-      snapshot.add(trimmed);
-      if (snapshot.length == limit) {
-        break;
-      }
-    }
-    if (snapshot.isEmpty) {
-      return '<none>';
-    }
-    return snapshot.join(' | ');
   }
 }

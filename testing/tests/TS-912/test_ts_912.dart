@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/interfaces/manual_unavailable_workspace_reauth_component.dart';
 import 'support/ts912_manual_reauth_fixture.dart';
 
 const String _ticketKey = 'TS-912';
@@ -15,7 +16,7 @@ const String _runCommand =
 const String _expectedResult =
     "The workspace status is updated to 'Local Git'. The workspace becomes active and its contents are successfully loaded/indexed.";
 const String _reworkSummary =
-    'Moved TS-912 to the supported Flutter widget harness, backed the restore path with the seeded local Git repository, and now require seeded local issue content to load after the visible Retry/Re-authenticate flow completes.';
+    'Moved the manual re-authentication screen logic behind a reusable testing component, kept TS-912 on the supported Flutter widget harness, and probed the seeded local Git restore path through the visible Retry/Re-authenticate flow.';
 const List<String> _requestSteps = <String>[
   'Open the Workspace switcher from the application header.',
   "Locate the 'Local Unavailable' workspace entry.",
@@ -67,7 +68,7 @@ void main() {
 
       final semantics = tester.ensureSemantics();
       Ts912ManualReauthFixture? fixture;
-      Ts912ManualReauthScreen? screen;
+      ManualUnavailableWorkspaceReauthComponent? screen;
 
       try {
         fixture = await Ts912ManualReauthFixture.create(tester);
@@ -192,6 +193,12 @@ void main() {
             fixture.selectedDirectories;
         result['local_open_attempts'] = fixture.localOpenAttempts;
         result['browser_open_attempts'] = fixture.browserOpenAttempts;
+        result['browser_access_request_attempts'] =
+            fixture.browserAccessRequestAttempts;
+        result['browser_access_request_results'] =
+            fixture.browserAccessRequestResults;
+        result['browser_access_request_errors'] =
+            fixture.browserAccessRequestErrors;
 
         final activeLocalRowVisible = await screen.workspaceRowContainsText(
           fixture.localWorkspace.id,
@@ -263,6 +270,9 @@ void main() {
             'directory_picker_selected_directories=${_formatList(fixture.selectedDirectories)}; '
             'local_open_attempts=${_formatList(fixture.localOpenAttempts)}; '
             'browser_open_attempts=${_formatList(fixture.browserOpenAttempts)}; '
+            'browser_access_request_attempts=${_formatList(fixture.browserAccessRequestAttempts)}; '
+            'browser_access_request_results=${_formatList(fixture.browserAccessRequestResults)}; '
+            'browser_access_request_errors=${_formatList(fixture.browserAccessRequestErrors)}; '
             'active_workspace_id=${workspaceStateAfterRetry.activeWorkspaceId}; '
             'trigger_has_local_name=${screen.triggerContainsText(Ts912ManualReauthFixture.localDisplayName)}; '
             'trigger_has_local_git=${screen.triggerContainsText('Local Git')}; '
@@ -307,7 +317,7 @@ void main() {
           check:
               'After activating the visible Retry/Re-authenticate action, checked that the directory-access prompt completed once, the same workspace became active as Local Git, and seeded local issue content opened from the restored repository.',
           observed:
-              'directory_picker_calls=${fixture.directoryPickerCalls}; selected_directories=${_formatList(fixture.selectedDirectories)}; local_issue_opened=$localIssueOpened; local_issue_description_visible=$localIssueDescriptionVisible; local_issue_acceptance_visible=$localIssueAcceptanceVisible; visible_texts=${_formatList(issueVisibleTexts)}; visible_semantics=${_formatList(issueVisibleSemantics)}',
+              'directory_picker_calls=${fixture.directoryPickerCalls}; selected_directories=${_formatList(fixture.selectedDirectories)}; browser_access_request_attempts=${_formatList(fixture.browserAccessRequestAttempts)}; browser_access_request_results=${_formatList(fixture.browserAccessRequestResults)}; browser_access_request_errors=${_formatList(fixture.browserAccessRequestErrors)}; local_issue_opened=$localIssueOpened; local_issue_description_visible=$localIssueDescriptionVisible; local_issue_acceptance_visible=$localIssueAcceptanceVisible; visible_texts=${_formatList(issueVisibleTexts)}; visible_semantics=${_formatList(issueVisibleSemantics)}',
         );
 
         if (failures.isNotEmpty) {
@@ -419,11 +429,11 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     passed
         ? 'The Flutter widget harness completed the manual access-grant step and the saved workspace restored to `Local Git`.'
-        : '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
+        : _failureResponseSummary(result),
     '',
     passed
-        ? 'The restored workspace also loaded the seeded local issue detail (`DEMO-1`, `Local issue`, `Loaded from local git.`), so the result covers content loading rather than the state label alone.'
-        : '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
+        ? 'The restored workspace also loaded the seeded local issue detail (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`), so the result covers content loading rather than the state label alone.'
+        : _failureResponseSummary(result),
     'Run command: `$_runCommand`',
   ].join('\n');
 }
@@ -491,7 +501,7 @@ String _reviewReplyText(Map<String, Object?> result, {required bool passed}) {
   final rerun = passed
       ? 'Re-ran TS-912 and it now passes (`1 passed, 0 failed`).'
       : 'Re-ran TS-912 and it still fails: ${_failureSummary(result)}';
-  return 'Fixed: TS-912 now runs in the supported Flutter widget harness instead of stopping at the live Playwright native-picker boundary. The restore seam now opens the seeded local Git repository instead of demo data, and the final assertion requires seeded local content (`DEMO-1`, `Local issue`, `Loaded from local git.`) after the visible Retry/Re-authenticate flow completes, so the result covers content loading as well as the `Local Git` state transition. $rerun';
+  return 'Fixed: moved the TS-912 manual re-auth screen logic behind a reusable testing component so the ticket no longer owns the framework-bound screen object. The Flutter widget harness still drives the visible Retry/Re-authenticate flow against a seeded local Git repository, and the final assertion is wired for seeded local content (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`). $rerun';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -508,7 +518,7 @@ String _bugDescription(Map<String, Object?> result) {
     '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
     '',
     '## Missing or broken production capability',
-    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the saved local workspace still did not settle to the active `Local Git` state and load the seeded local issue content afterward.',
+    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the production restore flow never completed a successful post-grant browser-local repository request. Two `requestBrowserLocalRepositoryAccess` attempts were observed for the same path; only the pre-grant attempt completed and returned `null`, and no successful post-grant repository access or surfaced error followed the picker grant.',
     '',
     '## Environment details',
     '- Runtime: flutter test',
@@ -532,6 +542,11 @@ String _bugDescription(Map<String, Object?> result) {
           result['directory_picker_selected_directories'],
       'local_open_attempts': result['local_open_attempts'],
       'browser_open_attempts': result['browser_open_attempts'],
+      'browser_access_request_attempts':
+          result['browser_access_request_attempts'],
+      'browser_access_request_results':
+          result['browser_access_request_results'],
+      'browser_access_request_errors': result['browser_access_request_errors'],
       'visible_texts_before_retry': result['visible_texts_before_retry'],
       'visible_texts_after_retry': result['visible_texts_after_retry'],
       'visible_texts_after_issue_open':
@@ -651,6 +666,10 @@ String _failureSummary(Map<String, Object?> result) {
     return '${result['error'] ?? 'No failed step recorded.'}';
   }
   return 'Step ${failedStep['step']} failed: ${failedStep['observed']}';
+}
+
+String _failureResponseSummary(Map<String, Object?> result) {
+  return 'The visible Retry/Re-authenticate flow opened the directory picker once, but the workspace stayed on `${result['hosted_workspace_id'] ?? 'the hosted workspace'}` instead of restoring to `Local Git`. The observed browser-local access requests never produced a successful post-grant repository load.';
 }
 
 String _formatList(Iterable<Object?> values, {int limit = 16}) {
