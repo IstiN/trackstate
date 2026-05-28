@@ -26,6 +26,7 @@ void main() {
           );
 
           await app.pump(fixture.repository);
+          await _waitForShellRecoveryWindow(tester, app);
 
           final scenario = fixture.artifactLabel;
           final visibleTexts = app.visibleTextsSnapshot();
@@ -159,6 +160,23 @@ Future<void> _waitForCondition(
     }
   }
   fail(failureMessage);
+}
+
+Future<void> _waitForShellRecoveryWindow(
+  WidgetTester tester,
+  TrackStateAppComponent app, {
+  Duration timeout = const Duration(seconds: 11),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (await app.isTextVisible('Project Settings') ||
+        await app.isSemanticsLabelVisible('Project Settings') ||
+        await app.isNavigationChromeVisible()) {
+      return;
+    }
+    await tester.pump(step);
+  }
 }
 
 bool _snapshotContains(List<String> values, String expected) {
