@@ -232,7 +232,12 @@ class Ts423ReadinessAccessibilityRepository
     required String name,
     required Uint8List bytes,
     String? sourceName,
-  }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) =>

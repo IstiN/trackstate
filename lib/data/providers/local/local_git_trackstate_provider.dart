@@ -226,6 +226,7 @@ class LocalGitTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: revision?.stdout.trim(),
+        createdCommit: false,
       );
     }
     await _runGit(['commit', '-m', request.message, '--', ...paths]);

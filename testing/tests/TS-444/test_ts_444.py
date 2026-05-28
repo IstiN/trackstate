@@ -124,24 +124,51 @@ def main() -> None:
                     result["first_blocked_request"] = _blocked_request_payload(
                         first_blocked_request,
                     )
-                    _record_step(
-                        result,
-                        step=1,
-                        status="passed",
-                        action=(
-                            "Trigger a 403 GitHub rate limit during deferred bootstrap after the "
-                            "mandatory hosted shell data has already loaded or partial bootstrap "
-                            "has already rendered the Settings recovery shell."
-                        ),
-                        observed=(
+                    if not _blocked_during_deferred_bootstrap(first_blocked_request):
+                        blocked_failure = (
+                            "Step 1 failed: the synthetic tombstones rate limit was "
+                            "intercepted before the hosted UI exposed any Settings shell "
+                            "markers, so the test did not prove a deferred-bootstrap "
+                            "recovery path where mandatory data was already available or "
+                            "partially rendered.\n"
                             f"{_blocked_request_summary(first_blocked_request)}\n"
-                            f"visible_navigation_labels={first_blocked_request.visible_navigation_labels}; "
-                            f"settings_selected={first_blocked_request.settings_selected}; "
-                            f"settings_heading_visible={first_blocked_request.settings_heading_visible}; "
-                            f"topbar_title_visible={first_blocked_request.topbar_title_visible}\n"
-                            + "\n".join(blocked_urls)
-                        ),
-                    )
+                            f"Observed blocked URLs: {list(blocked_urls)}\n"
+                            "Observed UI snapshot at interception:\n"
+                            f"{first_blocked_request.body_text_snapshot}\n"
+                            "Observed body text after startup settled:\n"
+                            f"{page.current_body_text()}"
+                        )
+                        _record_step(
+                            result,
+                            step=1,
+                            status="failed",
+                            action=(
+                                "Trigger a 403 GitHub rate limit during deferred bootstrap after the "
+                                "mandatory hosted shell data has already loaded or partial bootstrap "
+                                "has already rendered the Settings recovery shell."
+                            ),
+                            observed=blocked_failure,
+                        )
+                        step_failures.append(blocked_failure)
+                    else:
+                        _record_step(
+                            result,
+                            step=1,
+                            status="passed",
+                            action=(
+                                "Trigger a 403 GitHub rate limit during deferred bootstrap after the "
+                                "mandatory hosted shell data has already loaded or partial bootstrap "
+                                "has already rendered the Settings recovery shell."
+                            ),
+                            observed=(
+                                f"{_blocked_request_summary(first_blocked_request)}\n"
+                                f"visible_navigation_labels={first_blocked_request.visible_navigation_labels}; "
+                                f"settings_selected={first_blocked_request.settings_selected}; "
+                                f"settings_heading_visible={first_blocked_request.settings_heading_visible}; "
+                                f"topbar_title_visible={first_blocked_request.topbar_title_visible}\n"
+                                + "\n".join(blocked_urls)
+                            ),
+                        )
 
                 try:
                     shell_observation = page.wait_for_shell_routed_to_settings(
@@ -384,6 +411,18 @@ def _blocked_request_summary(
         f"settings_selected:{observation.settings_selected}, "
         f"settings_heading_visible:{observation.settings_heading_visible}, "
         f"topbar_title_visible:{observation.topbar_title_visible}"
+    )
+
+
+def _blocked_during_deferred_bootstrap(
+    observation: StartupRecoveryBlockedRequestObservation,
+) -> bool:
+    return bool(observation.visible_navigation_labels) or any(
+        (
+            observation.settings_selected,
+            observation.settings_heading_visible,
+            observation.topbar_title_visible,
+        ),
     )
 
 
