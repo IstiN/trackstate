@@ -25,6 +25,7 @@ void main() {
         }
 
         await robot.pumpApp(repository: repository);
+        await robot.resize(const Size(1440, 900));
         await robot.openSettings();
 
         final failures = <String>[];

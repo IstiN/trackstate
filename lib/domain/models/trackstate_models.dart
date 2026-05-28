@@ -15,18 +15,138 @@ enum TrackerDataDomain {
 
 enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
-enum TrackerStartupRecoveryKind { githubRateLimit }
+enum TrackerStartupRecoveryKind { githubRateLimit, hostedBootstrapIndex }
+
+enum WorkspaceSyncDomain {
+  projectMeta,
+  issueSummaries,
+  issueDetails,
+  comments,
+  attachments,
+  repositoryIndex,
+}
+
+enum WorkspaceSyncSignal {
+  localHead,
+  localWorktree,
+  hostedRepository,
+  hostedSnapshotReload,
+  hostedSession,
+}
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
+
+enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
+
+enum WorkspaceSyncHealth { synced, checking, attentionNeeded, unavailable }
+
+const _unsetWorkspaceSyncStatusValue = Object();
 
 class TrackerStartupRecovery {
   const TrackerStartupRecovery({
     required this.kind,
     this.failedPath,
     this.retryAfter,
+    this.detail,
   });
 
   final TrackerStartupRecoveryKind kind;
   final String? failedPath;
   final DateTime? retryAfter;
+  final String? detail;
+}
+
+class WorkspaceSyncDomainChange {
+  const WorkspaceSyncDomainChange({
+    required this.domain,
+    this.issueKeys = const <String>{},
+    this.paths = const <String>{},
+    this.isGlobal = false,
+  });
+
+  final WorkspaceSyncDomain domain;
+  final Set<String> issueKeys;
+  final Set<String> paths;
+  final bool isGlobal;
+
+  WorkspaceSyncDomainChange merge(WorkspaceSyncDomainChange other) {
+    if (domain != other.domain) {
+      throw ArgumentError('Cannot merge sync changes for different domains.');
+    }
+    return WorkspaceSyncDomainChange(
+      domain: domain,
+      issueKeys: {...issueKeys, ...other.issueKeys},
+      paths: {...paths, ...other.paths},
+      isGlobal: isGlobal || other.isGlobal,
+    );
+  }
+}
+
+class WorkspaceSyncResult {
+  const WorkspaceSyncResult({
+    this.trigger = WorkspaceSyncTrigger.automatic,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.domains = const <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{},
+  });
+
+  final WorkspaceSyncTrigger trigger;
+  final Set<WorkspaceSyncSignal> signals;
+  final Map<WorkspaceSyncDomain, WorkspaceSyncDomainChange> domains;
+
+  bool get hasChanges => domains.isNotEmpty;
+
+  Set<WorkspaceSyncDomain> get changedDomains => domains.keys.toSet();
+}
+
+class WorkspaceSyncStatus {
+  const WorkspaceSyncStatus({
+    this.health = WorkspaceSyncHealth.synced,
+    this.hasPendingRefresh = false,
+    this.lastCheckAt,
+    this.lastSuccessfulCheckAt,
+    this.nextRetryAt,
+    this.latestError,
+    this.lastResult,
+  });
+
+  final WorkspaceSyncHealth health;
+  final bool hasPendingRefresh;
+  final DateTime? lastCheckAt;
+  final DateTime? lastSuccessfulCheckAt;
+  final DateTime? nextRetryAt;
+  final String? latestError;
+  final WorkspaceSyncResult? lastResult;
+
+  WorkspaceSyncStatus copyWith({
+    WorkspaceSyncHealth? health,
+    bool? hasPendingRefresh,
+    Object? lastCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? lastSuccessfulCheckAt = _unsetWorkspaceSyncStatusValue,
+    Object? nextRetryAt = _unsetWorkspaceSyncStatusValue,
+    Object? latestError = _unsetWorkspaceSyncStatusValue,
+    Object? lastResult = _unsetWorkspaceSyncStatusValue,
+  }) {
+    return WorkspaceSyncStatus(
+      health: health ?? this.health,
+      hasPendingRefresh: hasPendingRefresh ?? this.hasPendingRefresh,
+      lastCheckAt: identical(lastCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastCheckAt
+          : lastCheckAt as DateTime?,
+      lastSuccessfulCheckAt:
+          identical(lastSuccessfulCheckAt, _unsetWorkspaceSyncStatusValue)
+          ? this.lastSuccessfulCheckAt
+          : lastSuccessfulCheckAt as DateTime?,
+      nextRetryAt: identical(nextRetryAt, _unsetWorkspaceSyncStatusValue)
+          ? this.nextRetryAt
+          : nextRetryAt as DateTime?,
+      latestError: identical(latestError, _unsetWorkspaceSyncStatusValue)
+          ? this.latestError
+          : latestError as String?,
+      lastResult: identical(lastResult, _unsetWorkspaceSyncStatusValue)
+          ? this.lastResult
+          : lastResult as WorkspaceSyncResult?,
+    );
+  }
 }
 
 class TrackerBootstrapReadiness {
@@ -132,6 +252,7 @@ class TrackStateIssue {
     bool? hasCommentsLoaded,
     bool? hasAttachmentsLoaded,
     List<IssueComment>? comments,
+    List<IssueLink>? links,
     List<IssueAttachment>? attachments,
   }) {
     return TrackStateIssue(
@@ -160,7 +281,7 @@ class TrackStateIssue {
       updatedLabel: updatedLabel ?? this.updatedLabel,
       acceptanceCriteria: acceptanceCriteria,
       comments: comments ?? this.comments,
-      links: links,
+      links: links ?? this.links,
       attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
       hasDetailLoaded: hasDetailLoaded ?? this.hasDetailLoaded,
@@ -255,6 +376,10 @@ class IssueAttachment {
     required this.createdAt,
     required this.storagePath,
     required this.revisionOrOid,
+    this.storageBackend = AttachmentStorageMode.repositoryPath,
+    this.repositoryPath,
+    this.githubReleaseTag,
+    this.githubReleaseAssetName,
   });
 
   final String id;
@@ -265,7 +390,118 @@ class IssueAttachment {
   final String createdAt;
   final String storagePath;
   final String revisionOrOid;
+  final AttachmentStorageMode storageBackend;
+  final String? repositoryPath;
+  final String? githubReleaseTag;
+  final String? githubReleaseAssetName;
+
+  IssueAttachment copyWith({
+    String? id,
+    String? name,
+    String? mediaType,
+    int? sizeBytes,
+    String? author,
+    String? createdAt,
+    String? storagePath,
+    String? revisionOrOid,
+    AttachmentStorageMode? storageBackend,
+    Object? repositoryPath = _issueAttachmentUnset,
+    Object? githubReleaseTag = _issueAttachmentUnset,
+    Object? githubReleaseAssetName = _issueAttachmentUnset,
+  }) {
+    return IssueAttachment(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      mediaType: mediaType ?? this.mediaType,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      storagePath: storagePath ?? this.storagePath,
+      revisionOrOid: revisionOrOid ?? this.revisionOrOid,
+      storageBackend: storageBackend ?? this.storageBackend,
+      repositoryPath: identical(repositoryPath, _issueAttachmentUnset)
+          ? this.repositoryPath
+          : repositoryPath as String?,
+      githubReleaseTag: identical(githubReleaseTag, _issueAttachmentUnset)
+          ? this.githubReleaseTag
+          : githubReleaseTag as String?,
+      githubReleaseAssetName:
+          identical(githubReleaseAssetName, _issueAttachmentUnset)
+          ? this.githubReleaseAssetName
+          : githubReleaseAssetName as String?,
+    );
+  }
+
+  String get resolvedRepositoryPath => repositoryPath ?? storagePath;
 }
+
+const Object _issueAttachmentUnset = Object();
+
+enum AttachmentStorageMode {
+  repositoryPath('repository-path'),
+  githubReleases('github-releases');
+
+  const AttachmentStorageMode(this.persistedValue);
+
+  final String persistedValue;
+
+  static AttachmentStorageMode? tryParse(Object? value) {
+    final normalized = value?.toString().trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    for (final mode in values) {
+      if (mode.persistedValue == normalized) {
+        return mode;
+      }
+    }
+    return null;
+  }
+}
+
+class GitHubReleasesAttachmentStorageSettings {
+  const GitHubReleasesAttachmentStorageSettings({required this.tagPrefix});
+
+  static const String defaultTagPrefix = 'trackstate-attachments-';
+
+  final String tagPrefix;
+
+  GitHubReleasesAttachmentStorageSettings copyWith({String? tagPrefix}) {
+    return GitHubReleasesAttachmentStorageSettings(
+      tagPrefix: tagPrefix ?? this.tagPrefix,
+    );
+  }
+
+  String releaseTagForIssue(String issueKey) =>
+      '$tagPrefix${issueKey.trim().toUpperCase()}';
+
+  String releaseTitleForIssue(String issueKey) =>
+      'Attachments for ${issueKey.trim().toUpperCase()}';
+}
+
+class ProjectAttachmentStorageSettings {
+  const ProjectAttachmentStorageSettings({
+    this.mode = AttachmentStorageMode.repositoryPath,
+    this.githubReleases,
+  });
+
+  final AttachmentStorageMode mode;
+  final GitHubReleasesAttachmentStorageSettings? githubReleases;
+
+  ProjectAttachmentStorageSettings copyWith({
+    AttachmentStorageMode? mode,
+    Object? githubReleases = _projectAttachmentStorageNoop,
+  }) {
+    return ProjectAttachmentStorageSettings(
+      mode: mode ?? this.mode,
+      githubReleases: identical(githubReleases, _projectAttachmentStorageNoop)
+          ? this.githubReleases
+          : githubReleases as GitHubReleasesAttachmentStorageSettings?,
+    );
+  }
+}
+
+const Object _projectAttachmentStorageNoop = Object();
 
 enum IssueHistoryChangeType {
   created,
@@ -602,6 +838,7 @@ class ProjectSettingsCatalog {
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
     this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
   });
 
   final String defaultLocale;
@@ -614,6 +851,7 @@ class ProjectSettingsCatalog {
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
   final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
 
   List<String> get effectiveSupportedLocales {
     final locales = <String>[];
@@ -642,6 +880,7 @@ class ProjectSettingsCatalog {
     List<TrackStateConfigEntry>? versionDefinitions,
     List<TrackStateConfigEntry>? componentDefinitions,
     List<TrackStateConfigEntry>? resolutionDefinitions,
+    ProjectAttachmentStorageSettings? attachmentStorage,
   }) {
     return ProjectSettingsCatalog(
       defaultLocale: defaultLocale ?? this.defaultLocale,
@@ -655,6 +894,7 @@ class ProjectSettingsCatalog {
       componentDefinitions: componentDefinitions ?? this.componentDefinitions,
       resolutionDefinitions:
           resolutionDefinitions ?? this.resolutionDefinitions,
+      attachmentStorage: attachmentStorage ?? this.attachmentStorage,
     );
   }
 }
@@ -701,6 +941,7 @@ class RepositoryIssueIndexEntry {
     this.progress,
     this.resolutionId,
     this.revision,
+    this.links = const [],
   });
 
   final String key;
@@ -721,6 +962,7 @@ class RepositoryIssueIndexEntry {
   final double? progress;
   final String? resolutionId;
   final String? revision;
+  final List<IssueLink> links;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
@@ -737,6 +979,7 @@ class RepositoryIssueIndexEntry {
     double? progress,
     String? resolutionId,
     String? revision,
+    List<IssueLink>? links,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -757,6 +1000,7 @@ class RepositoryIssueIndexEntry {
       progress: progress ?? this.progress,
       resolutionId: resolutionId ?? this.resolutionId,
       revision: revision ?? this.revision,
+      links: links ?? this.links,
     );
   }
 }
@@ -798,6 +1042,7 @@ class ProjectConfig {
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
     this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
   });
 
   final String key;
@@ -814,6 +1059,7 @@ class ProjectConfig {
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
   final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
 
   List<String> get issueTypes => [
     for (final definition in issueTypeDefinitions) definition.name,
@@ -849,11 +1095,12 @@ class ProjectConfig {
     statusDefinitions: statusDefinitions,
     workflowDefinitions: workflowDefinitions,
     issueTypeDefinitions: issueTypeDefinitions,
-    fieldDefinitions: fieldDefinitions,
+    fieldDefinitions: _settingsFieldDefinitions(fieldDefinitions),
     priorityDefinitions: priorityDefinitions,
     versionDefinitions: versionDefinitions,
     componentDefinitions: componentDefinitions,
     resolutionDefinitions: resolutionDefinitions,
+    attachmentStorage: attachmentStorage,
   );
 
   String issueTypeLabel(String id, {String? locale}) =>
@@ -955,6 +1202,84 @@ class ProjectConfig {
   }
 }
 
+List<TrackStateFieldDefinition> _settingsFieldDefinitions(
+  List<TrackStateFieldDefinition> fields,
+) {
+  final fieldIds = {for (final field in fields) field.id};
+  return [
+    ...fields,
+    for (final field in _reservedSettingsFieldDefinitions)
+      if (!fieldIds.contains(field.id)) field,
+  ];
+}
+
+const _reservedSettingsFieldDefinitions = [
+  TrackStateFieldDefinition(
+    id: 'summary',
+    name: 'Summary',
+    type: 'string',
+    required: true,
+    reserved: true,
+    localizedLabels: {'en': 'Summary'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'description',
+    name: 'Description',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Description'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'acceptanceCriteria',
+    name: 'Acceptance Criteria',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Acceptance Criteria'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'priority',
+    name: 'Priority',
+    type: 'option',
+    required: false,
+    options: _reservedPriorityFieldOptions,
+    reserved: true,
+    localizedLabels: {'en': 'Priority'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'assignee',
+    name: 'Assignee',
+    type: 'user',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Assignee'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'labels',
+    name: 'Labels',
+    type: 'array',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Labels'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'storyPoints',
+    name: 'Story Points',
+    type: 'number',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Story Points'},
+  ),
+];
+
+const _reservedPriorityFieldOptions = [
+  TrackStateFieldOption(id: 'highest', name: 'Highest'),
+  TrackStateFieldOption(id: 'high', name: 'High'),
+  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+  TrackStateFieldOption(id: 'low', name: 'Low'),
+];
+
 class TrackerSnapshot {
   const TrackerSnapshot({
     required this.project,
@@ -1025,6 +1350,16 @@ class GitHubConnection extends RepositoryConnection {
     required super.branch,
     required super.token,
   });
+}
+
+class HostedRepositoryReference {
+  const HostedRepositoryReference({
+    required this.fullName,
+    required this.defaultBranch,
+  });
+
+  final String fullName;
+  final String defaultBranch;
 }
 
 class RepositoryUser {

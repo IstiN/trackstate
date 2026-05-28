@@ -1,0 +1,41 @@
+test_id: TS-953
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts953_network_timeout_simulation.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts953-network-timeout
+  commit_message: "TS-953 probe: verify generic timeout remains generic"
+  pull_request_title: "TS-953 disposable probe: verify network timeout remains generic"
+  pull_request_body: "Disposable PR created by TS-953 automation to simulate a network-level timeout during the initial accessibility page load and verify that the live GitHub Actions log reports a standard Playwright/network timeout instead of a Flutter semantics initialization failure."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - timeout
+    - playwright
+  contrast_evidence_markers:
+    - timeout
+    - page.goto
+    - page.waitForLoadState
+    - networkidle
+    - playwright
+    - net::ERR_
+  semantic_evidence_markers:
+    - Flutter engine failed to render semantics nodes during initialization
+    - semantics initialization failure
+    - failed to expose or render semantics nodes
+    - page.waitForFunction
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files so the live PR accessibility workflow stalls the initial navigation request before Flutter semantics initialization starts.
+  - Verifies the contributor-visible GitHub Actions log preserves a generic network or Playwright timeout signal and does not incorrectly classify the failure as a Flutter semantics initialization error.
