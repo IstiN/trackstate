@@ -119,6 +119,119 @@ Hosted projects without explicit attachmentStorage should keep repository-path a
   );
 
   test(
+    'provider-backed project settings save reuses tree revisions for existing config files',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do', 'category': 'new'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/config/workflows.json': jsonEncode([
+            {
+              'id': 'story-flow',
+              'name': 'Story Flow',
+              'issueTypeIds': ['story'],
+              'statuses': ['todo'],
+              'transitions': [],
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'medium', 'name': 'Medium'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([
+            {'id': 'v1', 'name': 'v1'},
+          ]),
+          'DEMO/config/components.json': jsonEncode([
+            {'id': 'core', 'name': 'Core'},
+          ]),
+          'DEMO/config/resolutions.json': jsonEncode([
+            {'id': 'done', 'name': 'Done'},
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Settings fixture issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-13T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Settings fixture issue
+updated: 2026-05-13T00:00:00Z
+---
+
+# Description
+
+Minimal issue fixture for project settings tests.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+      final snapshot = await repository.loadSnapshot();
+      provider.readTextFilePaths.clear();
+
+      await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          priorityDefinitions: [
+            ...snapshot.project.priorityDefinitions,
+            const TrackStateConfigEntry(id: 'high', name: 'High'),
+          ],
+        ),
+      );
+
+      expect(
+        provider.readTextFilePaths,
+        equals(const ['DEMO/project.json', 'DEMO/config/fields.json']),
+      );
+      expect(provider.lastFileChangeRequest, isNotNull);
+      expect(
+        provider.lastFileChangeRequest!.changes
+            .whereType<RepositoryTextFileChange>()
+            .map((change) => change.expectedRevision)
+            .whereType<String>()
+            .every((revision) => revision.startsWith('tree:')),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'setup repository resolves github releases attachment storage and metadata',
     () async {
       final repository = _mockSetupRepository(
@@ -4197,6 +4310,7 @@ class _FakeReleaseAttachmentProvider
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final List<String> readTextFilePaths = <String>[];
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryFileChangeRequest? lastFileChangeRequest;
   RepositoryConnection? _connection;
@@ -4220,9 +4334,9 @@ class _FakeReleaseAttachmentProvider
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     return [
       for (final path in files.keys)
-        RepositoryTreeEntry(path: path, type: 'blob'),
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
       for (final path in binaryFiles.keys)
-        RepositoryTreeEntry(path: path, type: 'blob'),
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
     ];
   }
 
@@ -4231,6 +4345,7 @@ class _FakeReleaseAttachmentProvider
     String path, {
     required String ref,
   }) async {
+    readTextFilePaths.add(path);
     final content = files[path];
     if (content == null) {
       throw TrackStateProviderException('File not found: $path');
