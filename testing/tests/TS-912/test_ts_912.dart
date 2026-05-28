@@ -501,7 +501,7 @@ String _reviewReplyText(Map<String, Object?> result, {required bool passed}) {
   final rerun = passed
       ? 'Re-ran TS-912 and it now passes (`1 passed, 0 failed`).'
       : 'Re-ran TS-912 and it still fails: ${_failureSummary(result)}';
-  return 'Fixed: moved the TS-912 manual re-auth screen logic behind a reusable testing component so the ticket no longer owns the framework-bound screen object. The Flutter widget harness still drives the visible Retry/Re-authenticate flow against a seeded local Git repository, and the final assertion is wired for seeded local content (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`). $rerun';
+  return 'Fixed: `outputs/bug_description.md` now derives the browser access-request evidence from the captured runtime arrays/counts instead of hardcoding a specific number or order of `requestBrowserLocalRepositoryAccess` calls. The Flutter widget harness still drives the visible Retry/Re-authenticate flow against a seeded local Git repository, and the final assertion remains wired for seeded local content (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`). $rerun';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -518,7 +518,7 @@ String _bugDescription(Map<String, Object?> result) {
     '${result['error'] ?? 'The restore flow did not reach the expected Local Git state.'}',
     '',
     '## Missing or broken production capability',
-    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the production restore flow never completed a successful post-grant browser-local repository request. Two `requestBrowserLocalRepositoryAccess` attempts were observed for the same path; only the pre-grant attempt completed and returned `null`, and no successful post-grant repository access or surfaced error followed the picker grant.',
+    _missingCapabilitySummary(result),
     '',
     '## Environment details',
     '- Runtime: flutter test',
@@ -555,6 +555,30 @@ String _bugDescription(Map<String, Object?> result) {
     }),
     '```',
   ].join('\n');
+}
+
+String _missingCapabilitySummary(Map<String, Object?> result) {
+  final attempts = _stringList(result['browser_access_request_attempts']);
+  final results = _stringList(result['browser_access_request_results']);
+  final errors = _stringList(result['browser_access_request_errors']);
+  final selectedDirectories = _stringList(
+    result['directory_picker_selected_directories'],
+  );
+
+  final evidence = <String>[
+    'The supported Flutter widget runtime exposed the visible Retry/Re-authenticate action and completed one directory-access grant through `workspaceDirectoryPicker`, but the production restore flow never completed a successful browser-local repository request.',
+    'Recorded `requestBrowserLocalRepositoryAccess` attempts: ${attempts.length == 1 ? '1 attempt' : '${attempts.length} attempts'}${attempts.isEmpty ? '' : ' (${attempts.join(', ')})'}.',
+    'Recorded results: ${results.isEmpty ? '<none>' : results.join(', ')}.',
+    'Recorded surfaced errors: ${errors.isEmpty ? '<none>' : errors.join(', ')}.',
+  ];
+
+  if (selectedDirectories.isNotEmpty) {
+    evidence.add(
+      'The directory picker selected: ${selectedDirectories.join(', ')}.',
+    );
+  }
+
+  return evidence.join(' ');
 }
 
 List<String> _bugStepLines(Map<String, Object?> result) {
@@ -670,6 +694,16 @@ String _failureSummary(Map<String, Object?> result) {
 
 String _failureResponseSummary(Map<String, Object?> result) {
   return 'The visible Retry/Re-authenticate flow opened the directory picker once, but the workspace stayed on `${result['hosted_workspace_id'] ?? 'the hosted workspace'}` instead of restoring to `Local Git`. The observed browser-local access requests never produced a successful post-grant repository load.';
+}
+
+List<String> _stringList(Object? value) {
+  if (value is! List) {
+    return const <String>[];
+  }
+  return value
+      .map((entry) => '$entry'.trim())
+      .where((entry) => entry.isNotEmpty)
+      .toList(growable: false);
 }
 
 String _formatList(Iterable<Object?> values, {int limit = 16}) {
