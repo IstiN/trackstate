@@ -441,14 +441,26 @@ def _step5_failure_observation(
     error: Exception,
 ) -> str:
     requests = tuple(observation.failed_sync_requests)
-    if len(requests) >= 2:
-        retry_interval_seconds = (
-            requests[1].observed_at_monotonic - requests[0].observed_at_monotonic
+    if requests:
+        first_request = requests[0]
+        second_request = _matching_failed_request(
+            requests,
+            previous_request=first_request,
+            minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
         )
+        if second_request is not None:
+            retry_interval_seconds = (
+                second_request.observed_at_monotonic - first_request.observed_at_monotonic
+            )
+            return (
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"error={type(error).__name__}: {error}"
+            )
         return (
-            f"first_failed_sync_request={requests[0].url}; "
-            f"second_failed_sync_request={requests[1].url}; "
-            f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+            f"first_failed_sync_request={first_request.url}; "
+            f"observed_failed_sync_request_log={_request_log(requests)}; "
             f"error={type(error).__name__}: {error}"
         )
     return f"error={type(error).__name__}: {error}"
