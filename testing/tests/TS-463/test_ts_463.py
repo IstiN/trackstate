@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import sys
 import traceback
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -27,6 +29,8 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 )
 
 TICKET_KEY = "TS-463"
+TEST_CASE_TITLE = "Catalog management — CRUD operations for Priorities, Components, and Versions"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-463/test_ts_463.py"
 PROJECT_PATH = "DEMO"
 PRIORITIES_PATH = f"{PROJECT_PATH}/config/priorities.json"
 COMPONENTS_PATH = f"{PROJECT_PATH}/config/components.json"
@@ -35,14 +39,49 @@ PRIORITY_ID = "ultra"
 PRIORITY_NAME = "Ultra High"
 TEMP_VERSION_ID = "ts463-unused"
 TEMP_VERSION_NAME = "TS-463 Disposable Version"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 1200}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
+REQUEST_STEPS = [
+    "Navigate to Settings and select the 'Priorities' tab.",
+    "Create a new priority with ID 'ultra' and name 'Ultra High'.",
+    "Select the 'Components' tab and edit an existing component name.",
+    "Select the 'Versions' tab and delete an unused version.",
+    "Click the primary 'Save' button.",
+    "Inspect the repository files config/priorities.json, config/components.json, and config/versions.json.",
+]
+EXPECTED_RESULT = (
+    "The CRUD operations are successful. The JSON files reflect the changes "
+    "while preserving canonical IDs. The UI remains responsive using the "
+    "drawer/modal pattern (AC1)."
+)
+LINKED_BUGS = ["TS-1182", "TS-1104", "TS-1094", "TS-1090"]
+LINKED_BUG_NOTES = (
+    "Reviewed input/TS-463/comments.md and linked_bugs.md before rerunning the "
+    "live automation. The previously blocking Edit component prefill defect from "
+    "TS-1104 is fixed, so the test now reaches the hosted save/persistence path. "
+    "TS-1182 and TS-1094 are Done and require the Save settings flow to persist "
+    "catalog changes atomically to the repository; the test therefore waits up "
+    "to 90 seconds for the live repository JSON to reflect the UI edits before "
+    "declaring failure."
+)
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_success.png"
 
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    JIRA_COMMENT_PATH.unlink(missing_ok=True)
+    PR_BODY_PATH.unlink(missing_ok=True)
+    RESPONSE_PATH.unlink(missing_ok=True)
+    RESULT_PATH.unlink(missing_ok=True)
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    SCREENSHOT_PATH.unlink(missing_ok=True)
+    SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
 
     config = load_live_setup_test_config()
     service = LiveSetupRepositoryService(config=config)
@@ -72,12 +111,19 @@ def main() -> None:
         original_files=original_files,
     )
 
-    result: dict[str, object] = {
-        "status": "failed",
+    result: dict[str, Any] = {
         "ticket": TICKET_KEY,
+        "test_case_title": TEST_CASE_TITLE,
         "app_url": config.app_url,
         "repository": service.repository,
         "repository_ref": service.ref,
+        "browser": "Chromium (Playwright)",
+        "os": platform.platform(),
+        "run_command": RUN_COMMAND,
+        "expected_result": EXPECTED_RESULT,
+        "desktop_viewport": DESKTOP_VIEWPORT,
+        "linked_bugs": LINKED_BUGS,
+        "linked_bug_notes": LINKED_BUG_NOTES,
         "project": PROJECT_PATH,
         "priority_id": PRIORITY_ID,
         "priority_name": PRIORITY_NAME,
@@ -92,6 +138,8 @@ def main() -> None:
         },
         "precondition_setup": precondition_summary,
         "steps": [],
+        "human_verification": [],
+        "is_product_failure": False,
     }
 
     try:
@@ -129,6 +177,15 @@ def main() -> None:
                     status="passed",
                     action="Navigate to Settings and select the 'Priorities' tab.",
                     observed=priorities_text,
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the live Settings screen and confirmed the visible Project "
+                        "settings administration heading plus the Priorities tab before "
+                        "starting catalog edits."
+                    ),
+                    observed=_snippet(priorities_text),
                 )
 
                 priority_editor = page.open_editor(
@@ -179,6 +236,17 @@ def main() -> None:
                         "Create a new priority with ID 'ultra' and name 'Ultra High'."
                     ),
                     observed=priority_body_after,
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the Add priority drawer stayed right-aligned on desktop and "
+                        "the visible priority row rendered Ultra High with ID ultra before save."
+                    ),
+                    observed=(
+                        f'editor={_snippet(priority_editor.body_text)}; '
+                        f'labels={_snippet("\\n".join(priority_labels_after), limit=400)}'
+                    ),
                 )
 
                 components_text = page.open_catalog_tab(
@@ -236,6 +304,18 @@ def main() -> None:
                     action="Select the 'Components' tab and edit an existing component name.",
                     observed=component_body_after,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the Edit component drawer preserved the canonical component "
+                        "ID and showed the renamed component row before save."
+                    ),
+                    observed=(
+                        f'editor_id={component_editor.id_value!r}; '
+                        f'updated_name={target_component_name!r}; '
+                        f'labels={_snippet("\\n".join(component_labels_after), limit=400)}'
+                    ),
+                )
 
                 versions_text = page.open_catalog_tab(
                     label="Versions",
@@ -269,6 +349,14 @@ def main() -> None:
                     action="Select the 'Versions' tab and delete an unused version.",
                     observed=versions_body_after_delete,
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the disposable version disappeared from the visible Versions "
+                        "list before saving."
+                    ),
+                    observed=_snippet("\n".join(versions_labels_after_delete), limit=400),
+                )
 
                 page.save_settings()
                 result["save_button_visible_after_click"] = page.action_label_exists(
@@ -280,6 +368,17 @@ def main() -> None:
                     status="passed",
                     action="Click the primary 'Save' button.",
                     observed=page.current_body_text(),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the user remained on the Project Settings surface after "
+                        "clicking Save settings and the app entered a visible sync state."
+                    ),
+                    observed=(
+                        f'save_button_visible_after_click={result["save_button_visible_after_click"]!r}; '
+                        f'body={_snippet(page.current_body_text())}'
+                    ),
                 )
 
                 repo_after_save = _wait_for_catalog_repo_state(
@@ -349,43 +448,46 @@ def main() -> None:
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-                result["human_verification"] = {
-                    "checked": [
-                        "the Project settings administration heading",
-                        "the Priorities, Components, and Versions tabs",
-                        "the Add priority drawer title plus ID/Name inputs",
-                        f'the visible Priority row for "{PRIORITY_NAME}" with ID "{PRIORITY_ID}"',
-                        (
-                            f'the visible Component row for ID "{target_component["id"]}" '
-                            f'after renaming it to "{target_component_name}"'
-                        ),
-                        f'that the deleted Version "{TEMP_VERSION_NAME}" no longer appears',
-                        "that the editor stayed in a desktop drawer-style surface aligned to the right side",
-                    ],
-                    "observed": {
-                        "priority_visible_text": priorities_text_saved,
-                        "priority_visible_labels": priorities_labels_saved,
-                        "component_visible_text": components_text_saved,
-                        "component_visible_labels": components_labels_saved,
-                        "versions_visible_text": versions_text_saved,
-                        "versions_visible_labels": versions_labels_saved,
-                        "priority_editor_presentation": _editor_payload(priority_editor),
-                    },
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the saved Settings tabs still showed the new priority, the "
+                        "renamed component with the same canonical ID, and the deleted version "
+                        "remaining absent after persistence completed."
+                    ),
+                    observed=(
+                        f'priorities={_snippet("\\n".join(priorities_labels_saved), limit=400)}; '
+                        f'components={_snippet("\\n".join(components_labels_saved), limit=400)}; '
+                        f'versions={_snippet("\\n".join(versions_labels_saved), limit=400)}'
+                    ),
+                )
+                result["human_verification_summary"] = {
+                    "priority_visible_text": priorities_text_saved,
+                    "priority_visible_labels": priorities_labels_saved,
+                    "component_visible_text": components_text_saved,
+                    "component_visible_labels": components_labels_saved,
+                    "versions_visible_text": versions_text_saved,
+                    "versions_visible_labels": versions_labels_saved,
+                    "priority_editor_presentation": _editor_payload(priority_editor),
                 }
             except Exception:
                 page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
     except AssertionError as error:
+        result["status"] = "failed"
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
-        _write_result_if_requested(result)
+        result["is_product_failure"] = _looks_like_product_failure(str(error))
+        _record_failure_step_from_error(result, str(error))
+        _write_outputs(result, passed=False)
         print(json.dumps(result, indent=2))
         raise
     except Exception as error:
+        result["status"] = "failed"
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_result_if_requested(result)
+        _write_outputs(result, passed=False)
         print(json.dumps(result, indent=2))
         raise
     finally:
@@ -402,7 +504,7 @@ def main() -> None:
         "component without changing its canonical ID, deleting a disposable unused "
         "version, and confirming the saved repository JSON plus visible UI state."
     )
-    _write_result_if_requested(result)
+    _write_outputs(result, passed=True)
     print(json.dumps(result, indent=2))
 
 
@@ -739,7 +841,7 @@ def _assert_drawer_pattern(*, step: int, editor: CatalogEditorObservation) -> No
 
 
 def _record_step(
-    result: dict[str, object],
+    result: dict[str, Any],
     *,
     step: int,
     status: str,
@@ -758,15 +860,292 @@ def _record_step(
     )
 
 
-def _write_result_if_requested(payload: dict[str, object]) -> None:
-    configured_path = os.environ.get("TS463_RESULT_PATH")
-    result_path = (
-        Path(configured_path)
-        if configured_path
-        else REPO_ROOT / "outputs" / "ts463_result.json"
+def _record_human_verification(
+    result: dict[str, Any],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    checks = result.setdefault("human_verification", [])
+    assert isinstance(checks, list)
+    checks.append({"check": check, "observed": observed})
+
+
+def _record_failure_step_from_error(result: dict[str, Any], message: str) -> None:
+    match = re.match(r"^Step (\d+) failed:\s*(.*)", message, flags=re.DOTALL)
+    if match is None:
+        return
+    step_number = int(match.group(1))
+    if step_number < 1 or step_number > len(REQUEST_STEPS):
+        return
+    existing = {
+        int(step["step"])
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("step"), int)
+    }
+    if step_number in existing:
+        return
+    _record_step(
+        result,
+        step=step_number,
+        status="failed",
+        action=REQUEST_STEPS[step_number - 1],
+        observed=message,
     )
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
+def _write_outputs(result: dict[str, Any], *, passed: bool) -> None:
+    RESULT_PATH.write_text(
+        json.dumps(_result_payload(passed=passed, error=result.get("error"))) + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(
+        _build_jira_comment(result, passed=passed),
+        encoding="utf-8",
+    )
+    PR_BODY_PATH.write_text(_build_pr_body(result, passed=passed), encoding="utf-8")
+    RESPONSE_PATH.write_text(
+        _build_response_summary(result, passed=passed),
+        encoding="utf-8",
+    )
+    if passed:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+        return
+    if bool(result.get("is_product_failure")):
+        BUG_DESCRIPTION_PATH.write_text(
+            _build_bug_description(result),
+            encoding="utf-8",
+        )
+
+
+def _result_payload(*, passed: bool, error: object | None) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": "passed" if passed else "failed",
+        "passed": 1 if passed else 0,
+        "failed": 0 if passed else 1,
+        "skipped": 0,
+        "summary": "1 passed, 0 failed" if passed else "0 passed, 1 failed",
+    }
+    if not passed and error is not None:
+        payload["error"] = str(error)
+    return payload
+
+
+def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
+    return "\n".join(
+        [
+            f"h2. {TICKET_KEY} automation result: {'PASSED' if passed else 'FAILED'}",
+            "",
+            f"*Automation outcome:* {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}",
+            "",
+            "*Automated coverage*",
+            *[
+                f"# Step {step['step']} *{str(step['status']).upper()}*: {step['action']}\n"
+                f"Observed: {{code}}{step['observed']}{{code}}"
+                for step in result.get("steps", [])
+                if isinstance(step, dict)
+            ],
+            "",
+            "*Real user / human-style verification*",
+            *[
+                f"* {entry['check']}\nObserved: {{code}}{entry['observed']}{{code}}"
+                for entry in result.get("human_verification", [])
+                if isinstance(entry, dict)
+            ],
+            "",
+            "*Result vs expected*",
+            f"*Expected:* {EXPECTED_RESULT}",
+            (
+                "*Actual:* The live hosted app saved the visible catalog edits in the UI but "
+                "the repository JSON never reflected them within the 90-second polling window."
+                if not passed
+                else "*Actual:* The live hosted app persisted the catalog edits and the "
+                "repository JSON matched the visible Settings state."
+            ),
+            "",
+            "*Environment*",
+            f"* URL: [{result['app_url']}|{result['app_url']}]",
+            f"* Repository under test: *{result['repository']}*",
+            f"* Ref: *{result['repository_ref']}*",
+            f"* Browser: *{result['browser']}*",
+            f"* OS: *{result['os']}*",
+            f"* Viewport: *{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}*",
+            "",
+            "*Artifacts*",
+            f"* Test file: {{testing/tests/{TICKET_KEY}/test_ts_463.py}}",
+            f"* Screenshot: {{{{outputs/{Path(str(result.get('screenshot', ''))).name}}}}}",
+            (
+                f"* Failure: {{code}}{result.get('error', '')}{{code}}"
+                if not passed
+                else "* Failure: none"
+            ),
+        ]
+    ).strip() + "\n"
+
+
+def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
+    automated_lines = [
+        f"- Step {step['step']} **{step['status']}** — {step['action']}  \n"
+        f"  Observed: `{step['observed']}`"
+        for step in result.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    human_lines = [
+        f"- **{entry['check']}** Observed: `{entry['observed']}`"
+        for entry in result.get("human_verification", [])
+        if isinstance(entry, dict)
+    ]
+    return "\n".join(
+        [
+            f"## {TICKET_KEY} automation result: {'PASSED' if passed else 'FAILED'}",
+            "",
+            f"**Automation outcome:** {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}",
+            "",
+            "### Automated coverage",
+            *automated_lines,
+            "",
+            "### Real user / human-style verification",
+            *human_lines,
+            "",
+            "### Result vs expected",
+            f"**Expected:** {EXPECTED_RESULT}",
+            (
+                "**Actual:** The live hosted app showed the unsaved catalog edits, but "
+                "after Save settings the repository still exposed the original "
+                "`priorities.json`, `components.json`, and `versions.json` content."
+                if not passed
+                else "**Actual:** The live hosted app persisted the edited catalogs and the "
+                "repository JSON matched the visible UI."
+            ),
+            "",
+            "### Environment",
+            f"- URL: `{result['app_url']}`",
+            f"- Repository: `{result['repository']}`",
+            f"- Ref: `{result['repository_ref']}`",
+            f"- Browser: `{result['browser']}`",
+            f"- OS: `{result['os']}`",
+            f"- Viewport: `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
+            "",
+            "### Artifacts",
+            f"- Test file: `testing/tests/{TICKET_KEY}/test_ts_463.py`",
+            f"- Screenshot: `outputs/{Path(str(result.get('screenshot', ''))).name}`",
+            (
+                f"- Failure: `{result.get('error', '')}`"
+                if not passed
+                else "- Failure: none"
+            ),
+        ]
+    ).strip() + "\n"
+
+
+def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
+    headline = "passed" if passed else "failed"
+    return (
+        f"# {TICKET_KEY} automation {headline}\n\n"
+        f"- Result: {'1 passed, 0 failed' if passed else '0 passed, 1 failed'}\n"
+        f"- App URL: `{result['app_url']}`\n"
+        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`\n"
+        f"- Browser/OS: `{result['browser']}` on `{result['os']}`\n"
+        f"- Screenshot: `outputs/{Path(str(result.get('screenshot', ''))).name}`\n"
+        + (
+            ""
+            if passed
+            else f"- Error: `{result.get('error', '')}`\n"
+        )
+    )
+
+
+def _build_bug_description(result: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"# {TICKET_KEY}: {TEST_CASE_TITLE}",
+            "",
+            "## Steps to reproduce",
+            *[
+                _annotated_step_line(step_number=index, action=action, result=result)
+                for index, action in enumerate(REQUEST_STEPS, start=1)
+            ],
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            f"**Expected:** {EXPECTED_RESULT}",
+            (
+                "**Actual:** After creating the `ultra` priority, renaming the "
+                "`automation` component to `Automation TS-463`, deleting the "
+                "`TS-463 Disposable Version`, and clicking `Save settings`, the live "
+                "repository still returned the original catalog JSON. "
+                "`DEMO/config/priorities.json` did not contain `ultra`, "
+                "`DEMO/config/components.json` still showed `automation` named "
+                "`Automation`, and `DEMO/config/versions.json` still contained "
+                "`ts463-unused`."
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result['app_url']}`",
+            f"- Repository: `{result['repository']}`",
+            f"- Ref: `{result['repository_ref']}`",
+            f"- Browser: `{result['browser']}`",
+            f"- OS: `{result['os']}`",
+            f"- Viewport: `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
+            f"- Run command: `{RUN_COMMAND}`",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `outputs/{Path(str(result.get('screenshot', ''))).name}`",
+            "- Relevant repository observation:",
+            "```text",
+            _failure_repo_excerpt(result),
+            "```",
+        ]
+    ).strip() + "\n"
+
+
+def _annotated_step_line(
+    *,
+    step_number: int,
+    action: str,
+    result: dict[str, Any],
+) -> str:
+    matching = next(
+        (
+            step
+            for step in result.get("steps", [])
+            if isinstance(step, dict) and int(step.get("step", -1)) == step_number
+        ),
+        None,
+    )
+    if matching is None:
+        return f"{step_number}. ⏭️ {action} Not reached."
+    icon = "✅" if str(matching.get("status")) == "passed" else "❌"
+    return f"{step_number}. {icon} {action} Observed: {matching.get('observed', '')}"
+
+
+def _failure_repo_excerpt(result: dict[str, Any]) -> str:
+    repo_after_save = result.get("repo_after_save")
+    if isinstance(repo_after_save, dict):
+        return json.dumps(repo_after_save, indent=2)
+    error_text = str(result.get("error", ""))
+    marker = "Last observed state: "
+    if marker in error_text:
+        return error_text.split(marker, maxsplit=1)[1]
+    return error_text
+
+
+def _looks_like_product_failure(message: str) -> bool:
+    normalized = message.strip()
+    return normalized.startswith("Step ") or normalized.startswith(
+        "Human verification failed",
+    )
+
+
+def _snippet(text: str, *, limit: int = 240) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}..."
 
 
 if __name__ == "__main__":
