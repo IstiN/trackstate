@@ -76,6 +76,8 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+const _browserDesktopHeaderControlsSemanticsIdentifier =
+    'trackstate-desktop-header-controls';
 const _workspaceSwitcherTargetTypeHostedFocusId =
     'trackstate-workspace-switcher-target-type-hosted';
 const _workspaceSwitcherTargetTypeLocalFocusId =
@@ -5590,116 +5592,120 @@ class _TopBar extends StatelessWidget {
             );
           }
 
-          return Row(
-            children: [
-              if (showHostedConnectAction)
-                orderedControl(
-                  syncPillOrder ?? searchOrder + 1,
-                  _SecondaryButton(
-                    label: l10n.connectGitHub,
-                    icon: TrackStateIconGlyph.repository,
-                    onPressed: openHostedRepositoryAccess,
-                    height: _desktopTopBarControlHeight,
-                    semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+          return Semantics(
+            container: true,
+            explicitChildNodes: true,
+            identifier: _browserDesktopHeaderControlsSemanticsIdentifier,
+            child: Row(
+              children: [
+                if (showHostedConnectAction)
+                  orderedControl(
+                    syncPillOrder ?? searchOrder + 1,
+                    _SecondaryButton(
+                      label: l10n.connectGitHub,
+                      icon: TrackStateIconGlyph.repository,
+                      onPressed: openHostedRepositoryAccess,
+                      height: _desktopTopBarControlHeight,
+                      semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+                    ),
+                  )
+                else
+                  orderedControl(
+                    syncPillOrder ?? searchOrder + 1,
+                    _SyncPill(
+                      label: _workspaceSyncLabel(l10n, viewModel),
+                      semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                      tone: _workspaceSyncTone(viewModel),
+                      height: _desktopTopBarControlHeight,
+                      onPressed: () =>
+                          viewModel.selectSection(TrackerSection.settings),
+                      semanticsSortOrder: syncPillOrder,
+                    ),
                   ),
-                )
-              else
-                orderedControl(
-                  syncPillOrder ?? searchOrder + 1,
-                  _SyncPill(
-                    label: _workspaceSyncLabel(l10n, viewModel),
-                    semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
-                    tone: _workspaceSyncTone(viewModel),
+                const SizedBox(width: 12),
+                buildPrimaryHeaderActions(),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
                     height: _desktopTopBarControlHeight,
-                    onPressed: () =>
-                        viewModel.selectSection(TrackerSection.settings),
-                    semanticsSortOrder: syncPillOrder,
-                  ),
-                ),
-              const SizedBox(width: 12),
-              buildPrimaryHeaderActions(),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SizedBox(
-                  height: _desktopTopBarControlHeight,
-                  child: orderedControl(
-                    searchOrder,
-                    CallbackShortcuts(
-                      bindings: !kIsWeb
-                          ? <ShortcutActivator, VoidCallback>{
-                              const SingleActivator(
-                                LogicalKeyboardKey.tab,
-                                shift: true,
-                              ): () => workspaceSwitcherTriggerFocusNode
-                                  .requestFocus(),
-                            }
-                          : const <ShortcutActivator, VoidCallback>{},
-                      child: Builder(
-                        builder: (context) {
-                          final desktopSearchField = TextField(
-                            focusNode: desktopSearchFocusNode,
-                            controller: TextEditingController(
-                              text: viewModel.jql,
-                            ),
-                            onSubmitted: viewModel.updateQuery,
-                            maxLines: 1,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.copyWith(height: 1),
-                            textAlignVertical: TextAlignVertical.center,
-                            decoration: InputDecoration(
-                              isDense: true,
-                              isCollapsed: true,
-                              constraints: const BoxConstraints.tightFor(
-                                height: _desktopTopBarControlHeight,
+                    child: orderedControl(
+                      searchOrder,
+                      CallbackShortcuts(
+                        bindings: !kIsWeb
+                            ? <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(
+                                  LogicalKeyboardKey.tab,
+                                  shift: true,
+                                ): () => workspaceSwitcherTriggerFocusNode
+                                    .requestFocus(),
+                              }
+                            : const <ShortcutActivator, VoidCallback>{},
+                        child: Builder(
+                          builder: (context) {
+                            final desktopSearchField = TextField(
+                              focusNode: desktopSearchFocusNode,
+                              controller: TextEditingController(
+                                text: viewModel.jql,
                               ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              prefixIcon: Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: TrackStateIcon(
-                                  TrackStateIconGlyph.search,
-                                  color: colors.muted,
-                                  size: _desktopTopBarIconSize,
-                                  semanticLabel: l10n.searchIssues,
+                              onSubmitted: viewModel.updateQuery,
+                              maxLines: 1,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.copyWith(height: 1),
+                              textAlignVertical: TextAlignVertical.center,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                isCollapsed: true,
+                                constraints: const BoxConstraints.tightFor(
+                                  height: _desktopTopBarControlHeight,
                                 ),
-                              ),
-                              prefixIconConstraints:
-                                  const BoxConstraints.tightFor(
-                                    width: _desktopTopBarControlHeight,
-                                    height: _desktopTopBarControlHeight,
+                                contentPadding: const EdgeInsets.only(right: 10),
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: TrackStateIcon(
+                                    TrackStateIconGlyph.search,
+                                    color: colors.muted,
+                                    size: _desktopTopBarIconSize,
+                                    semanticLabel: l10n.searchIssues,
                                   ),
-                              hintText: l10n.jqlPlaceholder,
-                              hintStyle: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: colors.muted, height: 1),
-                            ),
-                          );
-                          if (kIsWeb) {
+                                ),
+                                prefixIconConstraints:
+                                    const BoxConstraints.tightFor(
+                                      width: _desktopTopBarControlHeight,
+                                      height: _desktopTopBarControlHeight,
+                                    ),
+                                hintText: l10n.jqlPlaceholder,
+                                hintStyle: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: colors.muted, height: 1),
+                              ),
+                            );
+                            if (kIsWeb) {
+                              return Semantics(
+                                identifier:
+                                    browserDesktopSearchInputSemanticsIdentifier,
+                                label: l10n.searchIssues,
+                                textField: true,
+                                child: desktopSearchField,
+                              );
+                            }
                             return Semantics(
+                              focusable: true,
+                              identifier:
+                                  browserDesktopSearchInputSemanticsIdentifier,
                               label: l10n.searchIssues,
+                              sortKey: OrdinalSortKey(searchOrder),
                               textField: true,
                               child: desktopSearchField,
                             );
-                          }
-                          return Semantics(
-                            focusable: true,
-                            identifier:
-                                browserDesktopSearchInputSemanticsIdentifier,
-                            label: l10n.searchIssues,
-                            sortKey: OrdinalSortKey(searchOrder),
-                            textField: true,
-                            child: desktopSearchField,
-                          );
-                        },
+                          },
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              buildTrailingHeaderActions(),
-            ],
+                buildTrailingHeaderActions(),
+              ],
+            ),
           );
         },
       ),
