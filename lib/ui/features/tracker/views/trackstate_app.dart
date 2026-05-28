@@ -871,17 +871,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       final loadFuture = fallbackViewModel.load(
         deferAccessRestore: deferAccessRestore,
       );
-      if (deferAccessRestore && kIsWeb) {
-        unawaited(loadFuture);
-        await Future<void>.microtask(() {});
-        final publishedFallback = await fallbackViewModel
-            .publishHostedStartupFallbackShell();
-        if (!publishedFallback) {
-          await loadFuture;
-        }
-      } else {
-        await loadFuture;
-      }
+      await _awaitStartupLoadWithHostedFallback(
+        fallbackViewModel,
+        loadFuture: loadFuture,
+        allowHostedFallback: deferAccessRestore && kIsWeb,
+        waitForLoadAfterHostedFallback: false,
+      );
       if (fallbackViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(
           fallbackViewModel.message,
@@ -902,6 +897,25 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       return null;
     }
+  }
+
+  Future<void> _awaitStartupLoadWithHostedFallback(
+    TrackerViewModel model, {
+    required Future<void> loadFuture,
+    required bool allowHostedFallback,
+    bool waitForLoadAfterHostedFallback = true,
+  }) async {
+    if (!allowHostedFallback) {
+      await loadFuture;
+      return;
+    }
+    unawaited(loadFuture);
+    await Future<void>.microtask(() {});
+    final publishedFallback = await model.publishHostedStartupFallbackShell();
+    if (publishedFallback && !waitForLoadAfterHostedFallback) {
+      return;
+    }
+    await loadFuture;
   }
 
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
@@ -1293,7 +1307,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         _workspaceProfilesReady = true;
       });
       _pendingStartupLocalFallbackWorkspaceId = null;
-      await viewModel.load(deferAccessRestore: true);
+      await _awaitStartupLoadWithHostedFallback(
+        viewModel,
+        loadFuture: viewModel.load(deferAccessRestore: true),
+        allowHostedFallback: kIsWeb,
+      );
       return;
     }
     if (_workspaceProfilesReady &&
@@ -1338,7 +1356,11 @@ class _TrackStateAppState extends State<TrackStateApp>
       _pendingStartupLocalFallbackWorkspaceId = null;
       return;
     }
-    await viewModel.load(deferAccessRestore: true);
+    await _awaitStartupLoadWithHostedFallback(
+      viewModel,
+      loadFuture: viewModel.load(deferAccessRestore: true),
+      allowHostedFallback: kIsWeb,
+    );
     await _ensureCurrentContextWorkspaceMigration();
     if (!mounted) {
       return;
