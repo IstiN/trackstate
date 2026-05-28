@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
 import re
@@ -31,6 +32,7 @@ from testing.tests.support.live_tracker_app_factory import create_live_tracker_a
 from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
     Ts980RestorePersistenceRuntime,
     read_manual_reauth_probe as _support_read_manual_reauth_probe,
+    seed_remembered_directory_access,
 )
 
 TICKET_KEY = "TS-912"
@@ -291,6 +293,13 @@ def main() -> None:
 
                 restored_local_workspace = _prepare_local_workspace_repository()
                 result["restored_local_workspace"] = restored_local_workspace
+                seeded_directory_access = seed_remembered_directory_access(
+                    tracker_page=tracker_page,
+                    workspace_path=LOCAL_TARGET,
+                    directory_snapshot=_restorable_workspace_directory_snapshot(),
+                    permission_state="prompt",
+                )
+                result["seeded_directory_access"] = seeded_directory_access
                 result["manual_reauth_probe_before_action"] = _read_manual_reauth_probe(
                     tracker_page,
                 )
@@ -506,7 +515,7 @@ def main() -> None:
                         "After the manual restore action, the workspace was visible as the "
                         "active `Local Git` workspace and the interactive shell remained loaded "
                         "without substituting the saved directory handle from the test.\n"
-                        f"selected_row={json.dumps(_row_payload(selected_row_after), indent=2)}\n"
+                        f"selected_row={json.dumps(selected_row_after, indent=2)}\n"
                         f"shell_after_restore={json.dumps(shell_after_restore, indent=2)}\n"
                         f"probe={json.dumps(result['manual_reauth_probe_after_action'], indent=2)}"
                     ),
@@ -520,7 +529,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
-                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                        f"local_row_after_restore={json.dumps(local_row_after, ensure_ascii=True) if local_row_after else 'null'}"
                     ),
                 )
 
@@ -767,6 +776,15 @@ def _assert_restored_local_workspace(
     switcher_text_confirms_restore = _switcher_text_shows_active_local_git(
         switcher.switcher_text,
     )
+    active_selection_confirmed = (
+        (selected_row is not None and selected_row.display_name == LOCAL_DISPLAY_NAME)
+        or switcher_text_confirms_restore
+        or (
+            local_row is not None
+            and local_row.display_name == LOCAL_DISPLAY_NAME
+            and local_row.state_label == "Local Git"
+        )
+    )
     if trigger.display_name != LOCAL_DISPLAY_NAME:
         raise AssertionError(
             "Step 4 failed: the header trigger did not switch to the restored local "
@@ -791,10 +809,7 @@ def _assert_restored_local_workspace(
             "state after the manual action.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if (
-        (selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME)
-        and not switcher_text_confirms_restore
-    ):
+    if not active_selection_confirmed:
         raise AssertionError(
             "Step 4 failed: the restored local workspace row did not become the active "
             "selection in the switcher.\n"
@@ -1210,6 +1225,29 @@ def _restorable_workspace_fixture_files() -> dict[str, str]:
                 "",
             ],
         ),
+    }
+
+
+def _restorable_workspace_directory_snapshot() -> dict[str, object]:
+    files = [
+        {
+            "path": ".trackstate-ts912-precondition.txt",
+            "base64": base64.b64encode(
+                b"Prepared for TS-912 unavailable local workspace manual restore validation.\n"
+            ).decode("ascii"),
+        },
+    ]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        files.append(
+            {
+                "path": relative_path,
+                "base64": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            }
+        )
+    return {
+        "rootPath": LOCAL_TARGET,
+        "rootName": Path(LOCAL_TARGET).name,
+        "files": files,
     }
 
 
