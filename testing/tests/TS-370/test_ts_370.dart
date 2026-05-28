@@ -83,37 +83,33 @@ void main() {
             );
           } else {
             await app.tapDialogControlWithoutSettling('Connect token');
-            await tester.pump();
-
-            final submitErrors = _drainFrameworkErrors(tester);
-            if (submitErrors.isNotEmpty) {
+            final submitErrors = await _pumpUntilReadOnlyTransition(
+              tester,
+              app: app,
+            );
+            final readOnlyTransitionVisible =
+                await _isTopBarLabelVisible(
+                  app,
+                  Ts370RepositoryAccessBannerFixture.readOnlyLabel,
+                ) &&
+                await app.isRepositoryAccessBannerVisible(
+                  title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+                  message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+                );
+            if (!readOnlyTransitionVisible) {
               failures.add(
-                'Step 4 failed: submitting a read-only PAT raised framework errors during the repository-access recovery flow, '
-                'so the read-only transition did not complete cleanly. '
-                'Observed framework errors: ${submitErrors.join(' || ')}. '
+                'Step 4 failed: submitting a read-only PAT did not update the global repository-access banner to the read-only state. '
+                'Observed framework errors: ${_formatErrors(submitErrors)}. '
+                'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
                 'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
-                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
+                'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
               );
             } else {
-              await _waitForCondition(
-                tester,
-                condition: () async =>
-                    await _isTopBarLabelVisible(
-                      app,
-                      Ts370RepositoryAccessBannerFixture.readOnlyLabel,
-                    ) &&
-                    await app.isRepositoryAccessBannerVisible(
-                      title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-                      message:
-                          Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-                    ),
-                failureMessage:
-                    'Step 4 failed: submitting a read-only PAT did not update the global repository-access banner to the read-only state. '
-                    'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
-                    'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
-                    'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
-              );
               readOnlyTransitionVerified = true;
+              if (await app.isDialogTextVisible('Cancel')) {
+                await app.closeDialog('Cancel');
+              }
             }
           }
         }
@@ -284,6 +280,31 @@ Future<bool> _isTopBarLabelVisible(
       await app.isTopBarTextVisible(label);
 }
 
+Future<List<String>> _pumpUntilReadOnlyTransition(
+  WidgetTester tester, {
+  required TrackStateAppComponent app,
+  Duration timeout = const Duration(seconds: 10),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final errors = <String>[];
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(step);
+    errors.addAll(_drainFrameworkErrors(tester, limit: 20 - errors.length));
+    if (await _isTopBarLabelVisible(
+          app,
+          Ts370RepositoryAccessBannerFixture.readOnlyLabel,
+        ) &&
+        await app.isRepositoryAccessBannerVisible(
+          title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+          message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+        )) {
+      break;
+    }
+  }
+  return errors;
+}
+
 Future<void> _waitForCondition(
   WidgetTester tester, {
   required Future<bool> Function() condition,
@@ -311,6 +332,13 @@ bool _snapshotContains(List<String> values, String expected) {
     }
   }
   return false;
+}
+
+String _formatErrors(List<String> errors) {
+  if (errors.isEmpty) {
+    return '<none>';
+  }
+  return errors.join(' || ');
 }
 
 String _formatSnapshot(List<String> values, {int limit = 24}) {
