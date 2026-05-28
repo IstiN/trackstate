@@ -5624,7 +5624,10 @@ class _TopBar extends StatelessWidget {
                     syncPillOrder ?? searchOrder + 1,
                     _SyncPill(
                       label: _workspaceSyncLabel(l10n, viewModel),
-                      semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                      semanticLabel: _workspaceSyncSemanticLabel(
+                        l10n,
+                        viewModel,
+                      ),
                       tone: _workspaceSyncTone(viewModel),
                       height: _desktopTopBarControlHeight,
                       onPressed: () =>
@@ -5669,7 +5672,9 @@ class _TopBar extends StatelessWidget {
                                 constraints: const BoxConstraints.tightFor(
                                   height: _desktopTopBarControlHeight,
                                 ),
-                                contentPadding: const EdgeInsets.only(right: 10),
+                                contentPadding: const EdgeInsets.only(
+                                  right: 10,
+                                ),
                                 prefixIcon: Padding(
                                   padding: const EdgeInsets.all(8),
                                   child: TrackStateIcon(
@@ -5685,7 +5690,9 @@ class _TopBar extends StatelessWidget {
                                       height: _desktopTopBarControlHeight,
                                     ),
                                 hintText: l10n.jqlPlaceholder,
-                                hintStyle: Theme.of(context).textTheme.bodyMedium
+                                hintStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
                                     ?.copyWith(color: colors.muted, height: 1),
                               ),
                             );
@@ -6751,12 +6758,7 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label: [
-        semanticLabel,
-        title,
-        message,
-        if (detailMessage != null) detailMessage!,
-      ].join(' '),
+      label: [semanticLabel, title, message].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -6801,12 +6803,16 @@ class _AccessCallout extends StatelessWidget {
             ),
             if (detailMessage != null) ...[
               const SizedBox(height: 8),
-              ExcludeSemantics(
-                child: Text(
-                  detailMessage!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: contentColor,
-                    fontFamily: 'JetBrains Mono',
+              Semantics(
+                readOnly: true,
+                label: detailMessage!,
+                child: ExcludeSemantics(
+                  child: Text(
+                    detailMessage!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: contentColor,
+                      fontFamily: 'JetBrains Mono',
+                    ),
                   ),
                 ),
               ),
