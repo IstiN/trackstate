@@ -873,6 +873,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         fallbackViewModel,
         loadFuture: loadFuture,
         allowHostedFallback: deferAccessRestore && kIsWeb,
+        waitForLoadAfterHostedFallback: false,
       );
       if (fallbackViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(
@@ -900,6 +901,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     TrackerViewModel model, {
     required Future<void> loadFuture,
     required bool allowHostedFallback,
+    bool waitForLoadAfterHostedFallback = true,
   }) async {
     if (!allowHostedFallback) {
       await loadFuture;
@@ -907,7 +909,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     unawaited(loadFuture);
     await Future<void>.microtask(() {});
-    await model.publishHostedStartupFallbackShell();
+    final publishedFallback = await model.publishHostedStartupFallbackShell();
+    if (publishedFallback && !waitForLoadAfterHostedFallback) {
+      return;
+    }
     await loadFuture;
   }
 
