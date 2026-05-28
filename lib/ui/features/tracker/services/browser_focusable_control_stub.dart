@@ -6,6 +6,7 @@ class BrowserFocusableControl extends StatelessWidget {
     required this.child,
     required this.label,
     required this.onPressed,
+    this.focusNode,
     this.focusTargetId,
     this.panelId,
     this.rowId,
@@ -19,6 +20,7 @@ class BrowserFocusableControl extends StatelessWidget {
   final Widget child;
   final String label;
   final VoidCallback? onPressed;
+  final FocusNode? focusNode;
   final String? focusTargetId;
   final String? panelId;
   final String? rowId;

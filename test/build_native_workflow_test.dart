@@ -101,10 +101,29 @@ void main() {
     expect(workflow, contains('ARCHS=arm64'));
     expect(workflow, contains('ONLY_ACTIVE_ARCH=YES'));
     expect(workflow, contains('EXCLUDED_ARCHS=x86_64'));
+    expect(workflow, contains('source ./tool/thin_macos_app_bundle.sh'));
     expect(workflow, contains('app_binary='));
     expect(workflow, contains(r'file "$binary_path"'));
     expect(workflow, contains('Mach-O 64-bit executable arm64'));
     expect(workflow, contains('universal binary'));
     expect(workflow, contains('x86_64'));
   });
+
+  test(
+    'apple release workflow can rebuild historical tags that predate the thinning helper',
+    () {
+      final workflow = repositoryFile(
+        '.github/workflows/build-native.yml',
+      ).readAsStringSync();
+
+      expect(
+        workflow,
+        contains('if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then'),
+      );
+      expect(workflow, contains('source ./tool/thin_macos_app_bundle.sh'));
+      expect(workflow, contains("read_file_mode() {"));
+      expect(workflow, contains("lipo -thin arm64"));
+      expect(workflow, contains("thin_app_bundle_to_arm64() {"));
+    },
+  );
 }

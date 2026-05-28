@@ -128,9 +128,10 @@ class SettingsScreenRobot {
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
     Widget Function(Widget child)? appWrapper,
+    Size viewportSize = const Size(1440, 960),
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
-    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.physicalSize = viewportSize;
     tester.view.devicePixelRatio = 1;
     final app = TrackStateApp(key: UniqueKey(), repository: repository);
     await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
@@ -530,7 +531,6 @@ class SettingsScreenRobot {
 
   bool showsAttachmentStorageModeSetting() =>
       isVisibleText('Attachment storage mode');
-
   bool statusSummaryVisible({
     required String name,
     required String id,

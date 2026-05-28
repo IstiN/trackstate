@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
 from testing.core.interfaces.web_app_session import WebAppSession, WebAppTimeoutError
@@ -79,10 +80,14 @@ class TrackStateTrackerPage:
     CONNECTED_BANNER_TEMPLATE = CONNECTED_BANNER_TEMPLATES[0]
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     DISCONNECTED_MARKERS = (
         "Needs sign-in",
         "GitHub write access is not connected",
+    )
+    WORKSPACE_PROFILE_STATE_KEYS = (
+        "trackstate.workspaceProfiles.state",
+        "flutter.trackstate.workspaceProfiles.state",
     )
 
     @classmethod
@@ -248,9 +253,31 @@ class TrackStateTrackerPage:
                 body_text=body_text,
             )
 
-        self._live_page.open_connect_dialog()
+        try:
+            self._live_page.open_connect_dialog()
+        except (AssertionError, WebAppTimeoutError):
+            body_text = self.body_text()
+            if self.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return ConnectionObservation(
+                    dialog_text=body_text,
+                    body_text=body_text,
+                )
+            raise
         dialog_state = self._live_page.read_connect_dialog_state()
         dialog_text = dialog_state.body_text
+        if self.body_has_authenticated_session(
+            dialog_text,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return ConnectionObservation(
+                dialog_text=dialog_text,
+                body_text=dialog_text,
+            )
         for expected_text in (
             "Connect GitHub",
             "Connect token",
@@ -692,6 +719,292 @@ class TrackStateTrackerPage:
         return {
             str(key): (None if value is None else str(value))
             for key, value in payload.items()
+        }
+
+    def observe_public_capability_surface(
+        self,
+        *,
+        expected_workspace_id: str,
+        expected_repository: str,
+    ) -> dict[str, Any]:
+        payload = self.session.evaluate(
+            """
+            ({ expectedWorkspaceId, expectedRepository, workspaceStateKeys }) => {
+              const normalizeText = (value) => String(value || '').trim();
+              const normalizeRepository = (value) => normalizeText(value).toLowerCase();
+              const parseNestedJson = (value) => {
+                let current = value;
+                for (let index = 0; index < 4; index += 1) {
+                  if (typeof current !== 'string') {
+                    return current;
+                  }
+                  try {
+                    current = JSON.parse(current);
+                  } catch (_error) {
+                    return current;
+                  }
+                }
+                return current;
+              };
+              const uniqueStrings = (values) => {
+                const seen = new Set();
+                const result = [];
+                for (const value of values) {
+                  const normalized = normalizeText(value);
+                  if (!normalized || seen.has(normalized)) {
+                    continue;
+                  }
+                  seen.add(normalized);
+                  result.push(normalized);
+                }
+                return result;
+              };
+              const mergeContract = (baseContract, extraContract) => ({
+                workspaceIds: uniqueStrings([
+                  ...baseContract.workspaceIds,
+                  ...extraContract.workspaceIds,
+                ]),
+                targets: uniqueStrings([
+                  ...baseContract.targets,
+                  ...extraContract.targets,
+                ]),
+                targetTypes: uniqueStrings([
+                  ...baseContract.targetTypes,
+                  ...extraContract.targetTypes,
+                ]),
+              });
+              const extractContract = (candidate) => {
+                if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+                  return {
+                    workspaceIds: [],
+                    targets: [],
+                    targetTypes: [],
+                  };
+                }
+                const workspaceIds = [];
+                const targets = [];
+                const targetTypes = [];
+                for (const key of ['id', 'workspaceId', 'activeWorkspaceId']) {
+                  if (typeof candidate[key] === 'string') {
+                    workspaceIds.push(candidate[key]);
+                  }
+                }
+                for (const key of ['target', 'repository', 'repo']) {
+                  if (typeof candidate[key] === 'string') {
+                    targets.push(candidate[key]);
+                  }
+                }
+                if (typeof candidate.targetType === 'string') {
+                  targetTypes.push(candidate.targetType);
+                }
+                return {
+                  workspaceIds: uniqueStrings(workspaceIds),
+                  targets: uniqueStrings(targets),
+                  targetTypes: uniqueStrings(targetTypes),
+                };
+              };
+              const readWorkspaceState = () => {
+                for (const key of workspaceStateKeys) {
+                  const rawValue = window.localStorage.getItem(key);
+                  if (typeof rawValue !== 'string' || !rawValue) {
+                    continue;
+                  }
+                  const parsedValue = parseNestedJson(rawValue);
+                  if (
+                    parsedValue
+                    && typeof parsedValue === 'object'
+                    && !Array.isArray(parsedValue)
+                  ) {
+                    return {
+                      key,
+                      parsedValue,
+                    };
+                  }
+                }
+                return null;
+              };
+              const workspaceState = readWorkspaceState();
+              const parsedWorkspaceState = workspaceState?.parsedValue;
+              const activeWorkspaceId =
+                typeof parsedWorkspaceState?.activeWorkspaceId === 'string'
+                  ? parsedWorkspaceState.activeWorkspaceId
+                  : '';
+              const hostedProfiles = Array.isArray(parsedWorkspaceState?.profiles)
+                ? parsedWorkspaceState.profiles.filter(
+                    (profile) =>
+                      profile
+                      && typeof profile === 'object'
+                      && profile.targetType === 'hosted',
+                  )
+                : [];
+              const activeHostedProfile =
+                hostedProfiles.find(
+                  (profile) =>
+                    typeof profile.id === 'string' && profile.id === activeWorkspaceId,
+                )
+                || hostedProfiles.find(
+                  (profile) =>
+                    typeof profile.id === 'string' && profile.id === expectedWorkspaceId,
+                )
+                || null;
+              const scopedWorkspaceId = normalizeText(
+                activeHostedProfile?.id || activeWorkspaceId || expectedWorkspaceId,
+              );
+              const scopedRepository = normalizeRepository(
+                activeHostedProfile?.target || expectedRepository,
+              );
+              const collectMatches = (storageKey, candidate) => {
+                const matches = [];
+                const queue = [
+                  {
+                    path: '$',
+                    value: candidate,
+                    contract: {
+                      workspaceIds: [],
+                      targets: [],
+                      targetTypes: [],
+                    },
+                  },
+                ];
+                const visited = new Set();
+                while (queue.length > 0 && matches.length < 40) {
+                  const item = queue.shift();
+                  if (!item || !item.value || typeof item.value !== 'object') {
+                    continue;
+                  }
+                  if (visited.has(item.value)) {
+                    continue;
+                  }
+                  visited.add(item.value);
+                  const nextContract = mergeContract(
+                    item.contract,
+                    extractContract(item.value),
+                  );
+                  if (Array.isArray(item.value)) {
+                    item.value.forEach((entry, index) => {
+                      queue.push({
+                        path: `${item.path}[${index}]`,
+                        value: entry,
+                        contract: nextContract,
+                      });
+                    });
+                    continue;
+                  }
+                  const hasCanWrite = Object.prototype.hasOwnProperty.call(item.value, 'canWrite');
+                  const hasCanCreateBranch = Object.prototype.hasOwnProperty.call(
+                    item.value,
+                    'canCreateBranch',
+                  );
+                  if (hasCanWrite || hasCanCreateBranch) {
+                    const normalizedTargets = nextContract.targets.map((target) =>
+                      normalizeRepository(target),
+                    );
+                    const normalizedTargetTypes = nextContract.targetTypes.map((targetType) =>
+                      normalizeText(targetType).toLowerCase(),
+                    );
+                    const workspaceIds = uniqueStrings(nextContract.workspaceIds);
+                    const matchesActiveWorkspace =
+                      scopedWorkspaceId.length > 0
+                      && workspaceIds.includes(scopedWorkspaceId);
+                    const matchesActiveRepository =
+                      scopedRepository.length > 0
+                      && normalizedTargets.includes(scopedRepository);
+                    const matchesHostedContract =
+                      matchesActiveWorkspace
+                      || (
+                        matchesActiveRepository
+                        && normalizedTargetTypes.includes('hosted')
+                      );
+                    matches.push({
+                      key: storageKey,
+                      path: item.path,
+                      canWrite: hasCanWrite ? item.value.canWrite : null,
+                      canCreateBranch: hasCanCreateBranch ? item.value.canCreateBranch : null,
+                      workspaceIds,
+                      targets: uniqueStrings(nextContract.targets),
+                      targetTypes: uniqueStrings(nextContract.targetTypes),
+                      matchesActiveWorkspace,
+                      matchesActiveRepository,
+                      matchesHostedContract,
+                    });
+                  }
+                  Object.entries(item.value).forEach(([key, value]) => {
+                    queue.push({
+                      path: `${item.path}.${key}`,
+                      value,
+                      contract: nextContract,
+                    });
+                  });
+                }
+                return matches;
+              };
+              const storageMatches = [];
+              const sameSessionStorageMatches = [];
+              for (let index = 0; index < window.localStorage.length; index += 1) {
+                const key = window.localStorage.key(index);
+                if (!key || key.includes('githubToken')) {
+                  continue;
+                }
+                const rawValue = window.localStorage.getItem(key);
+                if (typeof rawValue !== 'string' || !/(canWrite|canCreateBranch)/.test(rawValue)) {
+                  continue;
+                }
+                const matches = collectMatches(key, parseNestedJson(rawValue));
+                if (matches.length === 0) {
+                  continue;
+                }
+                storageMatches.push(...matches);
+                sameSessionStorageMatches.push(
+                  ...matches.filter((match) => match.matchesHostedContract),
+                );
+              }
+              const bodyText = document.body?.innerText || document.body?.textContent || '';
+              return {
+                bodyFlagValues: {
+                  canWriteFalse: /\\bcanWrite\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+                  canCreateBranchFalse: /\\bcanCreateBranch\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+                },
+                storageMatches,
+                sameSessionStorageMatches,
+                localStorageKeyCount: window.localStorage.length,
+                workspaceStateKey: workspaceState?.key || null,
+                activeWorkspaceId: scopedWorkspaceId || null,
+                activeWorkspaceTarget: scopedRepository || null,
+              };
+            }
+            """,
+            arg={
+                "expectedWorkspaceId": expected_workspace_id,
+                "expectedRepository": expected_repository,
+                "workspaceStateKeys": list(self.WORKSPACE_PROFILE_STATE_KEYS),
+            },
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Expected a structured public capability surface payload, got: {payload!r}",
+            )
+        return {
+            "body_flag_values": dict(payload.get("bodyFlagValues", {})),
+            "storage_matches": list(payload.get("storageMatches", [])),
+            "same_session_storage_matches": list(
+                payload.get("sameSessionStorageMatches", []),
+            ),
+            "local_storage_key_count": int(payload.get("localStorageKeyCount", 0) or 0),
+            "workspace_state_key": (
+                None
+                if payload.get("workspaceStateKey") is None
+                else str(payload.get("workspaceStateKey"))
+            ),
+            "active_workspace_id": (
+                None
+                if payload.get("activeWorkspaceId") is None
+                else str(payload.get("activeWorkspaceId"))
+            ),
+            "active_workspace_target": (
+                None
+                if payload.get("activeWorkspaceTarget") is None
+                else str(payload.get("activeWorkspaceTarget"))
+            ),
         }
 
     @staticmethod

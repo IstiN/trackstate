@@ -5,6 +5,13 @@ into the user-visible `Sync unavailable` state, surfaces an authentication error
 in the `Workspace sync` settings section, and schedules the next retry about one
 minute later.
 
+## Install dependencies
+
+```bash
+python3 -m pip install playwright
+python3 -m playwright install chromium
+```
+
 ## Run this test
 
 ```bash
