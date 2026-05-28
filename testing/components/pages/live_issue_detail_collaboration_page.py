@@ -52,6 +52,7 @@ class LiveIssueDetailCollaborationPage:
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
+    _connect_button_label = "Connect GitHub"
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = '[aria-label*="Choose attachment"]'
     _upload_attachment_button_selector = '[aria-label*="Upload attachment"]'
@@ -74,7 +75,7 @@ class LiveIssueDetailCollaborationPage:
         )
         if self._is_connected(connected_banner):
             return
-        if self._session.count(self._connect_button_selector) == 0:
+        if self._connect_button_count() == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
@@ -82,7 +83,7 @@ class LiveIssueDetailCollaborationPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
-        self._session.click(self._connect_button_selector, timeout_ms=30_000)
+        self._click_connect_button(timeout_ms=30_000)
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
         self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
         self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
@@ -1066,6 +1067,22 @@ class LiveIssueDetailCollaborationPage:
         return (
             self._session.count(self._connected_button_selector) > 0
             or connected_banner in self.current_body_text()
+        )
+
+    def _connect_button_count(self) -> int:
+        count = self._session.count(self._connect_button_selector)
+        if count > 0:
+            return count
+        return self._session.count(self._button_selector, has_text=self._connect_button_label)
+
+    def _click_connect_button(self, *, timeout_ms: int) -> None:
+        if self._session.count(self._connect_button_selector) > 0:
+            self._session.click(self._connect_button_selector, timeout_ms=timeout_ms)
+            return
+        self._session.click(
+            self._button_selector,
+            has_text=self._connect_button_label,
+            timeout_ms=timeout_ms,
         )
 
     @staticmethod
