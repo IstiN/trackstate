@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -10,8 +11,8 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
 import '../../core/models/workspace_onboarding_choice_observation.dart';
-import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 
 class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   FlutterWorkspaceOnboardingDriver(this._tester);
@@ -47,7 +48,13 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
             workspaceDirectoryPicker ?? pickWorkspaceDirectory,
       ),
     );
-    await _tester.pumpAndSettle();
+    await _tester.pump();
+    await _waitForAnyVisible(<Finder>[
+      find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+      find.byKey(const ValueKey('workspace-onboarding-open')),
+      find.text('Dashboard'),
+      find.bySemanticsLabel(RegExp('^Add workspace\$')),
+    ]);
   }
 
   @override
@@ -58,10 +65,16 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
-  Future<void> selectExistingFolder() async {
-    await _tapAndSettle(
+  Future<void> chooseOpenExistingFolder() async {
+    await _tap(
       find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
     );
+    await _waitForLocalWorkspaceDetailsForm();
+  }
+
+  @override
+  Future<void> selectExistingFolder() async {
+    await chooseOpenExistingFolder();
   }
 
   @override
@@ -85,6 +98,19 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  Future<void> enterLocalWorkspaceName(String value) async {
+    await _enterText(const ValueKey('local-workspace-onboarding-name'), value);
+  }
+
+  @override
+  Future<void> enterLocalWriteBranch(String value) async {
+    await _enterText(
+      const ValueKey('local-workspace-onboarding-write-branch'),
+      value,
+    );
+  }
+
+  @override
   Future<void> enterHostedRepository(String repository) async {
     await _enterText(
       const ValueKey('workspace-onboarding-hosted-repository'),
@@ -102,17 +128,59 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
 
   @override
   Future<void> submit() async {
-    await _tapAndSettle(_submitButtonFinder());
+    final localSubmit = find.byKey(
+      const ValueKey('local-workspace-onboarding-submit'),
+    );
+    if (localSubmit.evaluate().isNotEmpty) {
+      await _tap(localSubmit.first);
+      await _waitForAnyVisible(<Finder>[
+        find.text('Dashboard'),
+        find.text('Local Git'),
+        find.bySemanticsLabel(RegExp('^Add workspace\$')),
+      ]);
+      return;
+    }
+    await _tapAndSettle(
+      find.byKey(const ValueKey('workspace-onboarding-open')),
+    );
+  }
+
+  @override
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16}) {
+    return _collectFocusOrder(
+      candidates: <String, Finder>{
+        'Local folder': _targetChoiceControl('Local folder'),
+        'Hosted repository': _targetChoiceControl('Hosted repository'),
+        'Repository field': find.byKey(
+          const ValueKey('workspace-onboarding-hosted-repository'),
+        ),
+        'Branch field': find.byKey(
+          const ValueKey('workspace-onboarding-hosted-branch'),
+        ),
+        'Open': find.byKey(const ValueKey('workspace-onboarding-open')),
+      },
+      stopAt: 'Open',
+      maxTabs: maxTabs,
+    );
   }
 
   @override
   WorkspaceOnboardingState captureState() {
+    final localOnboardingVisible =
+        find
+            .byKey(const ValueKey('local-workspace-onboarding-open-existing'))
+            .evaluate()
+            .isNotEmpty ||
+        find
+            .byKey(const ValueKey('local-workspace-onboarding-submit'))
+            .evaluate()
+            .isNotEmpty;
     final submitFinder = _submitButtonFinder();
     return WorkspaceOnboardingState(
       isOnboardingVisible:
-          submitFinder.evaluate().isNotEmpty ||
+          localOnboardingVisible ||
           find
-              .byKey(const ValueKey('local-workspace-onboarding-open-existing'))
+              .byKey(const ValueKey('workspace-onboarding-open'))
               .evaluate()
               .isNotEmpty,
       isDashboardVisible: find.text('Dashboard').evaluate().isNotEmpty,
@@ -128,10 +196,11 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       localWriteBranchValue: _editableTextValue(
         const ValueKey('local-workspace-onboarding-write-branch'),
       ),
+      localFolderPath: _selectedFolderPath(),
       primaryActionLabel: _buttonLabel(submitFinder),
       isPrimaryActionEnabled: _isButtonEnabled(submitFinder),
       repositoryAccessTopBarLabel: _visibleAccessLabel(),
-      visibleTexts: _visibleTexts(),
+      visibleTexts: _uniqueVisibleTexts(),
       interactiveSemanticsLabels: _interactiveSemanticsLabels(),
     );
   }
@@ -387,6 +456,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   String? _visibleAccessLabel() {
+    final visibleTexts = _uniqueVisibleTexts();
     for (final label in const <String>[
       'Connect GitHub',
       'Read-only',
@@ -394,25 +464,25 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       'Attachments limited',
       'Local Git',
     ]) {
-      if (find.text(label).evaluate().isNotEmpty) {
+      if (find.text(label).evaluate().isNotEmpty ||
+          visibleTexts.any((text) => text == label || text.contains(label))) {
         return label;
       }
     }
     return null;
   }
 
-  List<String> _visibleTexts() {
-    final texts = _uniqueVisibleTexts(find.byType(Text));
+  String? _selectedFolderPath() {
     for (final widget in _tester.widgetList<SelectableText>(
       find.byType(SelectableText),
     )) {
-      final label = widget.data?.trim();
-      if (label == null || label.isEmpty || texts.contains(label)) {
-        continue;
+      final value =
+          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
       }
-      texts.add(label);
     }
-    return texts;
+    return null;
   }
 
   List<String> _interactiveSemanticsLabels() {
@@ -444,16 +514,150 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     return _dedupeConsecutive(labels);
   }
 
+  Future<void> _tap(Finder finder) async {
+    await _tester.ensureVisible(finder);
+    await _tester.tap(finder, warnIfMissed: false);
+    await _tester.pump();
+  }
+
   Future<void> _tapAndSettle(Finder finder) async {
     await _tester.ensureVisible(finder);
     await _tester.tap(finder, warnIfMissed: false);
     await _tester.pumpAndSettle();
   }
 
-  List<String> _uniqueVisibleTexts(Finder finder) {
+  Future<List<String>> _collectFocusOrder({
+    required Map<String, Finder> candidates,
+    required String stopAt,
+    required int maxTabs,
+  }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await _tester.pump();
+
+    final order = <String>[];
+    for (var i = 0; i < maxTabs; i += 1) {
+      await _tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await _tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null && (order.isEmpty || order.last != label)) {
+        order.add(label);
+        if (label == stopAt) {
+          break;
+        }
+      }
+    }
+    return order;
+  }
+
+  String? _focusedLabel(Map<String, Finder> candidates) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
+      return null;
+    }
+
+    for (final entry in candidates.entries) {
+      final matches = entry.value.evaluate().length;
+      if (matches == 0) {
+        continue;
+      }
+      for (var index = 0; index < matches; index += 1) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<void> _waitForAnyVisible(List<Finder> finders) async {
+    const step = Duration(milliseconds: 100);
+    const timeout = Duration(seconds: 5);
+    var elapsed = Duration.zero;
+    while (elapsed < timeout) {
+      if (finders.any((finder) => finder.evaluate().isNotEmpty)) {
+        return;
+      }
+      await _drainRealAsyncWork(step);
+      await _tester.pump(step);
+      elapsed += step;
+    }
+  }
+
+  Future<void> _waitForLocalWorkspaceDetailsForm() async {
+    final nameField = find.descendant(
+      of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
+      matching: find.byType(EditableText),
+    );
+    final submitButton = find.byKey(
+      const ValueKey('local-workspace-onboarding-submit'),
+    );
+    final changeFolderButton = find.byKey(
+      const ValueKey('local-workspace-onboarding-change-folder'),
+    );
+    final detailsTitle = find.text('Workspace details');
+    final loadingIndicator = find.text('Loading...');
+    const step = Duration(milliseconds: 100);
+    const timeout = Duration(seconds: 10);
+    var elapsed = Duration.zero;
+
+    while (elapsed < timeout) {
+      if (nameField.evaluate().isNotEmpty &&
+          submitButton.evaluate().isNotEmpty &&
+          changeFolderButton.evaluate().isNotEmpty &&
+          detailsTitle.evaluate().isNotEmpty) {
+        return;
+      }
+      await _drainRealAsyncWork(step);
+      await _tester.pump(step);
+      elapsed += step;
+    }
+
+    throw StateError(
+      'Local workspace details did not render within ${timeout.inSeconds}s after folder selection. '
+      'Observed loading=${loadingIndicator.evaluate().isNotEmpty}; '
+      'name_field=${nameField.evaluate().isNotEmpty}; '
+      'submit_button=${submitButton.evaluate().isNotEmpty}; '
+      'change_folder=${changeFolderButton.evaluate().isNotEmpty}; '
+      'details_title=${detailsTitle.evaluate().isNotEmpty}; '
+      'selected_folder=${_selectedFolderPath() ?? '<none>'}; '
+      'visible_texts=${_uniqueVisibleTexts().join(' | ')}',
+    );
+  }
+
+  Future<void> _drainRealAsyncWork(Duration step) async {
+    await _tester.runAsync(() async {
+      await Future<void>.delayed(step);
+    });
+  }
+
+  List<String> _uniqueVisibleTexts() {
     final texts = <String>[];
-    for (final widget in _tester.widgetList<Text>(finder)) {
+    for (final widget in _tester.widgetList<Text>(find.byType(Text))) {
       final label = widget.data?.trim();
+      if (label == null || label.isEmpty || texts.contains(label)) {
+        continue;
+      }
+      texts.add(label);
+    }
+    for (final widget in _tester.widgetList<SelectableText>(
+      find.byType(SelectableText),
+    )) {
+      final label =
+          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
       if (label == null || label.isEmpty || texts.contains(label)) {
         continue;
       }

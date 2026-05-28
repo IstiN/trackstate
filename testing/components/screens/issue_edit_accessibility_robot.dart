@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
+import '../../core/models/issue_edit_layout_observation.dart';
 import '../../core/models/issue_edit_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
@@ -75,12 +76,40 @@ class IssueEditAccessibilityRobot {
   );
 
   Finder controlWithinEditIssueSurface(String label) {
+    for (final buttonType in const [
+      TextButton,
+      FilledButton,
+      OutlinedButton,
+      DropdownButtonFormField<String>,
+    ]) {
+      final buttonMatch = find.descendant(
+        of: editIssueSurface.first,
+        matching: find.widgetWithText(buttonType, label),
+      );
+      if (buttonMatch.evaluate().isNotEmpty) {
+        return buttonMatch.first;
+      }
+    }
     final semanticsMatch = find.descendant(
       of: editIssueSurface.first,
       matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
     );
     if (semanticsMatch.evaluate().isNotEmpty) {
-      return semanticsMatch;
+      final interactiveDescendant = find.descendant(
+        of: semanticsMatch.first,
+        matching: find.byWidgetPredicate((widget) {
+          return widget is ButtonStyleButton ||
+              widget is DropdownButtonFormField<String> ||
+              widget is FilterChip ||
+              widget is InputChip ||
+              widget is Focus ||
+               widget is InkWell;
+        }, description: 'interactive control labeled $label'),
+      );
+      if (interactiveDescendant.evaluate().isNotEmpty) {
+        return interactiveDescendant.first;
+      }
+      return semanticsMatch.first;
     }
     return find.descendant(
       of: editIssueSurface.first,
@@ -92,6 +121,34 @@ class IssueEditAccessibilityRobot {
     if (editIssueSurface.evaluate().isEmpty) {
       throw StateError('The Edit issue surface is not visible.');
     }
+  }
+
+  Future<void> resizeToViewport({
+    required double width,
+    required double height,
+  }) async {
+    tester.view.physicalSize = Size(width, height);
+    tester.view.devicePixelRatio = 1;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+  }
+
+  IssueEditLayoutObservation observeLayout() {
+    expectEditIssueSurfaceVisible();
+    final rect = tester.getRect(editIssueSurface.first);
+    final viewportWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final viewportHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    return IssueEditLayoutObservation(
+      viewportWidth: viewportWidth,
+      viewportHeight: viewportHeight,
+      surfaceLeft: rect.left,
+      surfaceTop: rect.top,
+      surfaceWidth: rect.width,
+      surfaceHeight: rect.height,
+    );
   }
 
   bool showsText(String text) =>
@@ -168,7 +225,7 @@ class IssueEditAccessibilityRobot {
     for (var index = 0; index < maxTabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      final label = _focusedLabel(candidates);
+      final label = focusedSemanticsLabel() ?? _focusedLabel(candidates);
       if (label != null && (order.isEmpty || order.last != label)) {
         order.add(label);
       }
@@ -476,19 +533,19 @@ class IssueEditAccessibilityRobot {
       (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
-    if (focusedSemantics.evaluate().isEmpty) {
-      return null;
-    }
+    final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;
 
     for (final entry in candidates.entries) {
-      final exactFocusedMatch = find.semantics.byPredicate(
-        (node) =>
-            node.getSemanticsData().flagsCollection.isFocused &&
-            _normalizedLabel(node.label) == entry.key,
-        describeMatch: (_) => 'focused semantics labeled ${entry.key}',
-      );
-      if (exactFocusedMatch.evaluate().isNotEmpty) {
-        return entry.key;
+      if (hasFocusedSemantics) {
+        final exactFocusedMatch = find.semantics.byPredicate(
+          (node) =>
+              node.getSemanticsData().flagsCollection.isFocused &&
+              _normalizedLabel(node.label) == entry.key,
+          describeMatch: (_) => 'focused semantics labeled ${entry.key}',
+        );
+        if (exactFocusedMatch.evaluate().isNotEmpty) {
+          return entry.key;
+        }
       }
 
       final matches = entry.value.evaluate().length;
@@ -496,18 +553,48 @@ class IssueEditAccessibilityRobot {
         continue;
       }
       for (var index = 0; index < matches; index += 1) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        if (_widgetOwnsFocus(candidate)) {
           return entry.key;
+        }
+        if (hasFocusedSemantics) {
+          final candidateSemantics = _semanticsFinderFor(candidate);
+          final ownsFocusedNode = find.semantics.descendant(
+            of: candidateSemantics,
+            matching: focusedSemantics,
+            matchRoot: true,
+          );
+          if (ownsFocusedNode.evaluate().isNotEmpty) {
+            return entry.key;
+          }
         }
       }
     }
     return null;
+  }
+
+  bool _widgetOwnsFocus(Finder candidate) {
+    final editableDescendant = find.descendant(
+      of: candidate,
+      matching: find.byType(EditableText),
+    );
+    if (editableDescendant.evaluate().isNotEmpty) {
+      final editable = tester.widget<EditableText>(editableDescendant.first);
+      if (editable.focusNode.hasFocus) {
+        return true;
+      }
+    }
+    if (candidate.evaluate().isEmpty) {
+      return false;
+    }
+    final widget = tester.widget(candidate.first);
+    return switch (widget) {
+      final EditableText editable => editable.focusNode.hasFocus,
+      final TextButton button => button.focusNode?.hasFocus ?? false,
+      final FilledButton button => button.focusNode?.hasFocus ?? false,
+      final OutlinedButton button => button.focusNode?.hasFocus ?? false,
+      _ => false,
+    };
   }
 
   FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {

@@ -220,7 +220,6 @@ class WebAppSession(Protocol):
         arg: object | None = None,
         timeout_ms: int = 30_000,
     ) -> object: ...
-
     def active_element(self) -> FocusedElementObservation: ...
 
     def wait_for_download_after_keypress(
@@ -262,7 +261,7 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
-    def screenshot(self, path: str) -> None: ...
+    def screenshot(self, path: str, *, full_page: bool = True) -> None: ...
 
     def bounding_box(
         self,

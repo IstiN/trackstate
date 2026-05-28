@@ -38,6 +38,10 @@ EXPECTED_PUBLIC_ID = f"{ISSUE_PATH}/attachments/{ATTACHMENT_NAME}"
 RELEASE_TAG_PREFIX = "trackstate-attachments-"
 EXPECTED_RELEASE_TAG = f"{RELEASE_TAG_PREFIX}{ISSUE_KEY}"
 EXPECTED_RELEASE_TITLE = f"Attachments for {ISSUE_KEY}"
+TEST_CASE_SUMMARY = (
+    "Deterministic release-backed mapping — tag convention and asset replacement"
+)
+RUN_COMMAND = f"python3 testing/tests/{TICKET_KEY}/test_ts_484.py"
 
 FIRST_ATTACHMENT_BYTES = (
     b"\x89PNG\r\n\x1a\n"
@@ -1175,15 +1179,27 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    observed_result = (
+        f"Matched the expected result: the issue resolved to release tag "
+        f"{{{{{EXPECTED_RELEASE_TAG}}}}} with title {{{{{EXPECTED_RELEASE_TITLE}}}}}, "
+        f"the public identifier stayed {{{{{EXPECTED_PUBLIC_ID}}}}}, and the second "
+        "upload kept exactly one {{design_v1.png}} asset whose downloaded bytes "
+        "matched the replacement payload."
+        if passed
+        else "Did not match the expected result."
+    )
     lines = [
-        f"h3. {TICKET_KEY} {status}",
+        "h3. Test Automation Result",
         "",
-        "*Automation coverage*",
+        f"*Status:* {status}",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_SUMMARY}",
+        "",
+        "h4. What was tested",
         (
             f"* Seeded {{{{{ISSUE_PATH}}}}} in the live hosted repository and switched "
-            f"{{{{{PROJECT_JSON_PATH}}}}} to `github-releases` with tag prefix "
-            f"`{RELEASE_TAG_PREFIX}`."
+            f"{{{{{PROJECT_JSON_PATH}}}}} to {{github-releases}} with tag prefix "
+            f"{{{RELEASE_TAG_PREFIX}}}."
         ),
         (
             "* Executed the real hosted CLI upload flow twice with the same visible "
@@ -1195,27 +1211,29 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "verify deterministic mapping and replace-in-place behavior."
         ),
         "",
-        "*Observed result*",
-        (
-            f"* Matched the expected result: the issue resolved to release tag "
-            f"`{EXPECTED_RELEASE_TAG}` with title `{EXPECTED_RELEASE_TITLE}`, the public "
-            f"identifier stayed {{{{{EXPECTED_PUBLIC_ID}}}}}, and the second upload kept "
-            "exactly one `design_v1.png` asset whose downloaded bytes matched the "
-            "replacement payload."
-            if passed
-            else "* Did not match the expected result."
-        ),
+        "h4. Result",
+        f"* {observed_result}",
         (
             f"* Environment: repository {{{{{result['repository']}}}}} @ "
             f"{{{{{result['repository_ref']}}}}}, branch {{{{{result['repository_ref']}}}}}, "
             f"target URL {{{{{result['app_url']}}}}}, OS {{{{{platform.system()}}}}}."
         ),
         "",
-        "*Step results*",
+        "h4. Step results",
         *_step_lines(result, jira=True),
         "",
-        "*Human-style verification*",
+        "h4. Human-style verification",
         *_human_lines(result, jira=True),
+        "",
+        "h4. Test file",
+        "{code}",
+        f"testing/tests/{TICKET_KEY}/test_ts_484.py",
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        RUN_COMMAND,
+        "{code}",
     ]
     if not passed:
         lines.extend(
@@ -1231,11 +1249,22 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
-    status = "Passed" if passed else "Failed"
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    observed_result = (
+        f"Matched the expected result: the issue resolved to release tag "
+        f"`{EXPECTED_RELEASE_TAG}` with title `{EXPECTED_RELEASE_TITLE}`, the public "
+        f"identifier stayed `{EXPECTED_PUBLIC_ID}`, and the second upload kept exactly "
+        "one `design_v1.png` asset whose downloaded bytes matched the replacement payload."
+        if passed
+        else "Did not match the expected result."
+    )
     lines = [
-        f"## {TICKET_KEY} {status}",
+        "## Test Automation Result",
         "",
-        "### Automation",
+        f"**Status:** {status}",
+        f"**Test Case:** {TICKET_KEY} — {TEST_CASE_SUMMARY}",
+        "",
+        "## What was automated",
         (
             f"- Seeded `{ISSUE_PATH}` in the live hosted repository and switched "
             f"`{PROJECT_JSON_PATH}` to `github-releases` with tag prefix "
@@ -1251,26 +1280,26 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             "deterministic mapping and replace-in-place behavior."
         ),
         "",
-        "### Observed result",
-        (
-            f"- Matched the expected result: the issue resolved to release tag "
-            f"`{EXPECTED_RELEASE_TAG}` with title `{EXPECTED_RELEASE_TITLE}`, the public "
-            f"identifier stayed `{EXPECTED_PUBLIC_ID}`, and the second upload kept exactly "
-            "one `design_v1.png` asset whose downloaded bytes matched the replacement "
-            "payload."
-            if passed
-            else "- Did not match the expected result."
-        ),
+        "## Result",
+        f"- {observed_result}",
         (
             f"- Environment: repository `{result['repository']}` @ "
             f"`{result['repository_ref']}`, URL `{result['app_url']}`, OS `{platform.system()}`."
         ),
         "",
-        "### Step results",
+        "## Step results",
         *_step_lines(result, jira=False),
         "",
-        "### Human-style verification",
+        "## Human-style verification",
         *_human_lines(result, jira=False),
+        "",
+        "## Test file",
+        f"`testing/tests/{TICKET_KEY}/test_ts_484.py`",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
     ]
     if not passed:
         lines.extend(
@@ -1289,6 +1318,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "passed" if passed else "failed"
     lines = [
         f"# {TICKET_KEY} {status}",
+        "",
+        f"**Test Case:** {TICKET_KEY} — {TEST_CASE_SUMMARY}",
         "",
         (
             "Ran the live hosted CLI attachment flow twice for `design_v1.png` and "

@@ -14,7 +14,15 @@ abstract interface class LocalWorkspaceOnboardingDriver {
     Map<String, Object>? sharedPreferences,
   });
 
+  Future<void> chooseExistingFolder();
+
   Future<void> chooseInitializeFolder();
+
+  Future<void> enterWorkspaceName(String value);
+
+  Future<void> enterWriteBranch(String value);
+
+  Future<void> submit();
 
   LocalWorkspaceOnboardingState captureState();
 

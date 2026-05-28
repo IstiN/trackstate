@@ -15,7 +15,7 @@ enum TrackerDataDomain {
 
 enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
-enum TrackerStartupRecoveryKind { githubRateLimit }
+enum TrackerStartupRecoveryKind { githubRateLimit, hostedBootstrapIndex }
 
 enum WorkspaceSyncDomain {
   projectMeta,
@@ -30,8 +30,11 @@ enum WorkspaceSyncSignal {
   localHead,
   localWorktree,
   hostedRepository,
+  hostedSnapshotReload,
   hostedSession,
 }
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
 
 enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
 
@@ -44,11 +47,13 @@ class TrackerStartupRecovery {
     required this.kind,
     this.failedPath,
     this.retryAfter,
+    this.detail,
   });
 
   final TrackerStartupRecoveryKind kind;
   final String? failedPath;
   final DateTime? retryAfter;
+  final String? detail;
 }
 
 class WorkspaceSyncDomainChange {
@@ -936,6 +941,7 @@ class RepositoryIssueIndexEntry {
     this.progress,
     this.resolutionId,
     this.revision,
+    this.links = const [],
   });
 
   final String key;
@@ -956,6 +962,7 @@ class RepositoryIssueIndexEntry {
   final double? progress;
   final String? resolutionId;
   final String? revision;
+  final List<IssueLink> links;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
@@ -972,6 +979,7 @@ class RepositoryIssueIndexEntry {
     double? progress,
     String? resolutionId,
     String? revision,
+    List<IssueLink>? links,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -992,6 +1000,7 @@ class RepositoryIssueIndexEntry {
       progress: progress ?? this.progress,
       resolutionId: resolutionId ?? this.resolutionId,
       revision: revision ?? this.revision,
+      links: links ?? this.links,
     );
   }
 }
