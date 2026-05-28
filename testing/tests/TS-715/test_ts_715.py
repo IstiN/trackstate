@@ -29,7 +29,7 @@ from testing.tests.support.hosted_sync_auth_failure_runtime import (  # noqa: E4
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-715"
-RUN_COMMAND = "python testing/tests/TS-715/test_ts_715.py"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-715/test_ts_715.py"
 EXPECTED_SYNC_LABEL = "Sync unavailable"
 EXPECTED_RETRY_INTERVAL_SECONDS = 60
 RETRY_INTERVAL_TOLERANCE_SECONDS = 15
