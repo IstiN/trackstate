@@ -415,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
+  /// **'This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
