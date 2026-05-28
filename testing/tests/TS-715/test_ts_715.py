@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import sys
+import time
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -293,16 +294,22 @@ def _wait_for_failed_request(
     previous_request: HostedSyncAuthFailureRequest | None = None,
     minimum_gap_seconds: float = 0.0,
 ) -> HostedSyncAuthFailureRequest:
-    found, request = poll_until(
-        probe=lambda: _matching_failed_request(
+    deadline = time.monotonic() + timeout_seconds
+    request: HostedSyncAuthFailureRequest | None = None
+    found = False
+    while True:
+        request = _matching_failed_request(
             tuple(observation.failed_sync_requests),
             previous_request=previous_request,
             minimum_gap_seconds=minimum_gap_seconds,
-        ),
-        is_satisfied=lambda item: item is not None,
-        timeout_seconds=timeout_seconds,
-        interval_seconds=1.0,
-    )
+        )
+        if request is not None:
+            found = True
+            break
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            break
+        observation.pump(min(1.0, remaining_seconds))
     requests = tuple(observation.failed_sync_requests)
     if found and isinstance(request, HostedSyncAuthFailureRequest):
         return request
