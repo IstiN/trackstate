@@ -87,7 +87,7 @@
   "comment": "Comment",
   "comments": "Comments",
   "attachments": "Attachments",
-  "attachmentsDownloadOnlyMessage": "This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.",
+  "attachmentsDownloadOnlyMessage": "This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.",
   "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",

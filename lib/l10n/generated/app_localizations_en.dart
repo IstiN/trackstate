@@ -182,7 +182,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsDownloadOnlyMessage =>
-      'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.';
+      'This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.';
 
   @override
   String get attachmentsLimitedUploadMessage =>
