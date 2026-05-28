@@ -13,6 +13,7 @@ import '../../../../../data/repositories/browser_local_workspace_repository.dart
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/providers/trackstate_provider.dart';
 import '../../../../../data/services/local_workspace_onboarding_service.dart';
 import '../../../../../data/services/trackstate_auth_store.dart';
 import '../../../../../data/services/workspace_profile_service.dart';
@@ -5620,7 +5621,10 @@ class _TopBar extends StatelessWidget {
                     syncPillOrder ?? searchOrder + 1,
                     _SyncPill(
                       label: _workspaceSyncLabel(l10n, viewModel),
-                      semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
+                      semanticLabel: _workspaceSyncSemanticLabel(
+                        l10n,
+                        viewModel,
+                      ),
                       tone: _workspaceSyncTone(viewModel),
                       height: _desktopTopBarControlHeight,
                       onPressed: () =>
@@ -5665,7 +5669,9 @@ class _TopBar extends StatelessWidget {
                                 constraints: const BoxConstraints.tightFor(
                                   height: _desktopTopBarControlHeight,
                                 ),
-                                contentPadding: const EdgeInsets.only(right: 10),
+                                contentPadding: const EdgeInsets.only(
+                                  right: 10,
+                                ),
                                 prefixIcon: Padding(
                                   padding: const EdgeInsets.all(8),
                                   child: TrackStateIcon(
@@ -5681,7 +5687,9 @@ class _TopBar extends StatelessWidget {
                                       height: _desktopTopBarControlHeight,
                                     ),
                                 hintText: l10n.jqlPlaceholder,
-                                hintStyle: Theme.of(context).textTheme.bodyMedium
+                                hintStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
                                     ?.copyWith(color: colors.muted, height: 1),
                               ),
                             );
@@ -6375,6 +6383,9 @@ String _attachmentsAccessMessage(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
+  final uploadMode =
+      viewModel.providerSession?.attachmentUploadMode ??
+      AttachmentUploadMode.none;
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected =>
       l10n.attachmentsAccessMessageDisconnected,
@@ -6382,7 +6393,10 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.usesGitHubReleasesAttachmentStorage
+      viewModel.usesGitHubReleasesAttachmentStorage &&
+              uploadMode == AttachmentUploadMode.noLfs
+          ? l10n.attachmentsDownloadOnlyMessage
+          : viewModel.usesGitHubReleasesAttachmentStorage
           ? l10n.attachmentsGitHubReleasesUnsupportedMessage
           : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
