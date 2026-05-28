@@ -60,7 +60,7 @@ class GitHubTrackStateProvider
 
   static const defaultRepositoryName = String.fromEnvironment(
     'TRACKSTATE_REPOSITORY',
-    defaultValue: 'trackstate/trackstate',
+    defaultValue: 'IstiN/trackstate-setup',
   );
   static const defaultSourceRef = String.fromEnvironment(
     'TRACKSTATE_SOURCE_REF',

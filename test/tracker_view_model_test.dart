@@ -195,7 +195,7 @@ void main() {
     'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
     () async {
       final authStore = _TokenTrackingAuthStore(
-        repository: 'trackstate/trackstate',
+        repository: SetupTrackStateRepository.repositoryName,
         token: 'github-token',
       );
       final viewModel = TrackerViewModel(
@@ -212,7 +212,10 @@ void main() {
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
       expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 
@@ -444,10 +447,16 @@ void main() {
       expect(viewModel.isConnected, isTrue);
       expect(viewModel.connectedUser?.login, 'demo-user');
       expect(authStore.readScopes, [
-        (repository: 'trackstate/trackstate', workspaceId: workspaceId),
+        (
+          repository: SetupTrackStateRepository.repositoryName,
+          workspaceId: workspaceId,
+        ),
       ]);
       expect(repository.connectCount, 2);
-      expect(repository.lastConnection?.repository, 'trackstate/trackstate');
+      expect(
+        repository.lastConnection?.repository,
+        SetupTrackStateRepository.repositoryName,
+      );
       expect(repository.lastConnection?.token, 'legacy-token');
     },
   );
@@ -2080,7 +2089,11 @@ class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     readScopes.add((repository: repository, workspaceId: workspaceId));
-    if (repository == this.repository && workspaceId == this.workspaceId) {
+    final usesDefaultHostedRepository =
+        repository == SetupTrackStateRepository.repositoryName &&
+        this.repository == 'trackstate/trackstate';
+    if ((repository == this.repository || usesDefaultHostedRepository) &&
+        workspaceId == this.workspaceId) {
       return token;
     }
     return null;
