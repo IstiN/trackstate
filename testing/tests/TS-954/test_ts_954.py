@@ -71,7 +71,7 @@ LINKED_BUGS = [
 ]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FOCUS_SETTLE_MS = 300
-MAX_TABS_TO_REACH_FOOTER = 8
+FOOTER_TAB_BUDGET_BUFFER = 2
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 FIELD_LABELS = ("Repository", "Branch")
 
@@ -161,7 +161,7 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "linked_bugs": LINKED_BUGS,
         "focus_settle_ms": FOCUS_SETTLE_MS,
-        "max_tabs_to_reach_footer": MAX_TABS_TO_REACH_FOOTER,
+        "footer_tab_budget_buffer": FOOTER_TAB_BUDGET_BUFFER,
         "preloaded_workspace_state": workspace_state,
         "steps": [],
         "human_verification": [],
@@ -453,6 +453,14 @@ def _tab_to_footer_and_wrap(
     first_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> dict[str, object]:
     first_row_label = _saved_workspace_row_focus_label(first_row)
+    internal_tab_stops = page.observe_internal_tab_stops(
+        panel=panel,
+        timeout_ms=4_000,
+    )
+    tab_budget = max(
+        len(internal_tab_stops) + FOOTER_TAB_BUDGET_BUFFER,
+        8,
+    )
     initial_focus_state = _capture_tab_state(
         page=page,
         panel=panel,
@@ -465,7 +473,7 @@ def _tab_to_footer_and_wrap(
     tab_trace: list[dict[str, object]] = []
     footer_state: dict[str, object] | None = None
     footer_button_state: WorkspaceSwitcherButtonStateObservation | None = None
-    for press_index in range(1, MAX_TABS_TO_REACH_FOOTER + 1):
+    for press_index in range(1, tab_budget + 1):
         before = page.active_element()
         page.press_key("Tab", timeout_ms=4_000)
         _wait_for_switcher_stability_or_raise(
@@ -504,6 +512,7 @@ def _tab_to_footer_and_wrap(
         tab_trace=tab_trace,
         footer_state=footer_state,
         footer_button_state=footer_button_state,
+        tab_budget=tab_budget,
     )
 
     before_wrap = page.active_element()
@@ -537,6 +546,8 @@ def _tab_to_footer_and_wrap(
 
     return {
         "initial_focus_state": initial_focus_state,
+        "internal_tab_stops": [_tab_stop_payload(item) for item in internal_tab_stops],
+        "tab_budget": tab_budget,
         "tab_trace_to_footer": tab_trace,
         "footer_state": footer_state,
         "footer_button_state": _button_state_payload(footer_button_state),
@@ -657,6 +668,7 @@ def _assert_traversal_reached_footer(
     tab_trace: list[dict[str, object]],
     footer_state: dict[str, object] | None,
     footer_button_state: WorkspaceSwitcherButtonStateObservation | None,
+    tab_budget: int,
 ) -> None:
     failures: list[str] = []
     if not tab_trace:
@@ -683,7 +695,7 @@ def _assert_traversal_reached_footer(
     if footer_state is None:
         failures.append(
             f"the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was never reached within "
-            f"{MAX_TABS_TO_REACH_FOOTER} Tab presses",
+            f"{tab_budget} Tab presses",
         )
     elif footer_button_state is None:
         failures.append(
@@ -1049,6 +1061,21 @@ def _button_state_payload(
         "keyboard_focusable": observation.keyboard_focusable,
         "active_within": observation.active_within,
         "outer_html": observation.outer_html,
+    }
+
+
+def _tab_stop_payload(observation: object) -> dict[str, object]:
+    return {
+        "label": getattr(observation, "label", None),
+        "visible_text": getattr(observation, "visible_text", None),
+        "role": getattr(observation, "role", None),
+        "tag_name": getattr(observation, "tag_name", None),
+        "tabindex": getattr(observation, "tabindex", None),
+        "tab_index_value": getattr(observation, "tab_index_value", None),
+        "dom_index": getattr(observation, "dom_index", None),
+        "keyboard_focusable": getattr(observation, "keyboard_focusable", None),
+        "disabled": getattr(observation, "disabled", None),
+        "outer_html": getattr(observation, "outer_html", None),
     }
 
 
