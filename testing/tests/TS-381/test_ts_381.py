@@ -706,7 +706,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         (
             "- Result: matched the expected success envelope and repository side effect."
             if passed
-            else "- Result: the command succeeded, but Step 2 failed because the JSON payload returned `name: Spec-Document` and `mediaType: application/octet-stream` instead of `Spec Document` and `application/pdf`."
+            else f"- Result: {_failure_summary(result)}"
         ),
         f"- Observed attachment payload: `{json.dumps(attachment, sort_keys=True) if isinstance(attachment, dict) else '<missing>'}`",
     ]
@@ -736,6 +736,7 @@ def _bug_description(result: dict[str, object]) -> str:
         )
         or "<none>"
     )
+    failure_messages = _failure_messages(result)
     actual_payload = json.dumps(attachment, indent=2, sort_keys=True) if isinstance(attachment, dict) else "<missing>"
     return "\n".join(
         [
@@ -780,9 +781,18 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "h4. Actual Result",
             (
-                f"The command returned attachment metadata shown below and stored {{code}}{stored_file_summary}{{code}}. The stored file name was normalized to {{code}}{actual_name}{{code}} without the original {{code}}.pdf{{code}} extension, which also caused the reported media type to fall back to {{code}}{actual_media_type}{{code}} instead of {{code}}{expected_media_type}{{code}}."
+                f"The command returned attachment metadata shown below and stored {{code}}{stored_file_summary}{{code}}. The observed attachment name was {{code}}{actual_name}{{code}} and the observed media type was {{code}}{actual_media_type}{{code}} instead of the expected {{code}}{expected_name}{{code}} and {{code}}{expected_media_type}{{code}}."
                 if isinstance(attachment, dict)
                 else "The command did not return attachment metadata."
+            ),
+            (
+                "Observed mismatches:"
+                if failure_messages
+                else "Observed mismatches: <none recorded>"
+            ),
+            *(
+                f"* {message}"
+                for message in failure_messages
             ),
             "{code:json}",
             actual_payload,
@@ -836,6 +846,52 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         lines.append(f"{prefix} {check.get('check')}")
         lines.append(f"{prefix} Observed: {check.get('observed')}")
     return lines
+
+
+def _failure_messages(result: dict[str, object]) -> list[str]:
+    steps = result.get("steps")
+    messages: list[str] = []
+
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict) or step.get("status") != "failed":
+                continue
+            observed = str(step.get("observed", "")).strip()
+            if not observed:
+                continue
+            messages.extend(
+                block.strip()
+                for block in observed.split("\n\n")
+                if block.strip()
+            )
+
+    if messages:
+        return messages
+
+    error = str(result.get("error", "")).strip()
+    return [error] if error else []
+
+
+def _failure_summary(result: dict[str, object]) -> str:
+    messages = _failure_messages(result)
+    if not messages:
+        return "failed without a recorded step-level error."
+
+    summary = _first_non_empty_line(messages[0])
+    additional_failures = len(messages) - 1
+    if additional_failures <= 0:
+        return summary
+
+    failure_label = "failure" if additional_failures == 1 else "failures"
+    return f"{summary} (+{additional_failures} more {failure_label})."
+
+
+def _first_non_empty_line(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return text.strip()
 
 
 def main() -> None:
