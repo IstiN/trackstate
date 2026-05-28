@@ -12,6 +12,13 @@ import 'github_auth_probe_stub.dart'
     if (dart.library.js_interop) 'github_auth_probe_web.dart'
     as github_auth_probe;
 
+typedef GitHubGetResponseFetcher =
+    Future<github_auth_probe.GitHubAuthProbeResponse> Function(
+      Uri uri, {
+      required Map<String, String> headers,
+      http.Client? client,
+    });
+
 class GitHubTrackStateProvider
     implements
         TrackStateProviderAdapter,
@@ -40,11 +47,20 @@ class GitHubTrackStateProvider
     this.repositoryName = defaultRepositoryName,
     this.sourceRef = defaultSourceRef,
     this.dataRef = defaultDataRef,
-  }) : _client = client;
+    bool disableHostedSyncRequestCaching = kIsWeb,
+    String Function()? hostedSyncCacheBustTokenFactory,
+    GitHubGetResponseFetcher? getResponseFetcher,
+  }) : _client = client,
+       _disableHostedSyncRequestCaching = disableHostedSyncRequestCaching,
+       _hostedSyncCacheBustTokenFactory =
+           hostedSyncCacheBustTokenFactory ?? _defaultHostedSyncCacheBustToken,
+       _getResponseFetcher =
+           getResponseFetcher ?? github_auth_probe.fetchGitHubAuthProbeResponse,
+       _useGetResponseFetcher = kIsWeb || getResponseFetcher != null;
 
   static const defaultRepositoryName = String.fromEnvironment(
     'TRACKSTATE_REPOSITORY',
-    defaultValue: 'trackstate/trackstate',
+    defaultValue: 'IstiN/trackstate-setup',
   );
   static const defaultSourceRef = String.fromEnvironment(
     'TRACKSTATE_SOURCE_REF',
@@ -61,6 +77,10 @@ class GitHubTrackStateProvider
       <String, Future<Map<String, Object?>>>{};
   final String repositoryName;
   final String sourceRef;
+  final bool _disableHostedSyncRequestCaching;
+  final String Function() _hostedSyncCacheBustTokenFactory;
+  final GitHubGetResponseFetcher _getResponseFetcher;
+  final bool _useGetResponseFetcher;
 
   RepositoryConnection? _connection;
 
@@ -383,6 +403,7 @@ class GitHubTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: headCommitSha,
+        createdCommit: false,
       );
     }
 
@@ -440,6 +461,7 @@ class GitHubTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: headCommitSha,
+        createdCommit: false,
       );
     }
 
@@ -585,6 +607,10 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repository/branches/$branch',
+              queryParameters: _hostedSyncRevisionQueryParameters(
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
               token: _connection?.token,
             )
             as Map<String, Object?>;
@@ -1565,10 +1591,22 @@ class GitHubTrackStateProvider
     Map<String, String>? queryParameters,
     String? token,
   }) async {
-    final response = await _http.get(
-      _githubUri(path, queryParameters),
-      headers: _githubHeaders(token ?? _connection?.token),
-    );
+    final uri = _githubUri(path, queryParameters);
+    final headers = _githubHeaders(token ?? _connection?.token);
+    final response = await (_useGetResponseFetcher
+        ? () async {
+            final fetched = await _getResponseFetcher(
+              uri,
+              headers: headers,
+              client: _client,
+            );
+            return http.Response(
+              fetched.body,
+              fetched.statusCode,
+              headers: fetched.headers,
+            );
+          }()
+        : _http.get(uri, headers: headers));
     if (response.statusCode != 200) {
       _throwGitHubResponseException(
         path: path,
@@ -1673,6 +1711,28 @@ Map<String, String> _githubHeaders(String? token) => {
   'X-GitHub-Api-Version': '2022-11-28',
   if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
 };
+
+@visibleForTesting
+Map<String, String>? hostedSyncRevisionQueryParametersForTesting({
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) => _hostedSyncRevisionQueryParameters(
+  disableCache: disableCache,
+  cacheBustTokenFactory: cacheBustTokenFactory,
+);
+
+Map<String, String>? _hostedSyncRevisionQueryParameters({
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) {
+  if (!disableCache) {
+    return null;
+  }
+  return <String, String>{'_trackstate_refresh': cacheBustTokenFactory()};
+}
+
+String _defaultHostedSyncCacheBustToken() =>
+    DateTime.now().toUtc().microsecondsSinceEpoch.toString();
 
 Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
     Uri.https('api.github.com', path, queryParameters);

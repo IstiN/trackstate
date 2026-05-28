@@ -254,6 +254,8 @@ jobs:
             fi
           }
 
+          source ./tool/thin_macos_app_bundle.sh
+
           app_path="build/macos/Build/Products/Release/trackstate.app"
           if [[ ! -d "$app_path" ]]; then
             app_path=""
@@ -267,6 +269,8 @@ jobs:
             echo "::error::macOS app bundle was not produced by flutter build macos."
             exit 1
           fi
+
+          thin_app_bundle_to_arm64 "$app_path"
 
           app_binary=""
           while IFS= read -r candidate_app_binary; do

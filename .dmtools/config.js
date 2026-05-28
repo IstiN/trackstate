@@ -48,7 +48,7 @@ const FLUTTER_FEEDBACK = {
 
 module.exports = {
     // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
-    smMaxWorkflows: 2,
+    smMaxWorkflows: 1,
 
     repository: {
         owner: 'IstiN',

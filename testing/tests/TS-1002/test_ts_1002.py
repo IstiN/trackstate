@@ -71,16 +71,29 @@ AUTH_OBSERVATION_WAIT_SECONDS = 5
 SECONDARY_PROBE_START_WAIT_SECONDS = 60
 EVENTUAL_SHELL_WAIT_SECONDS = SECONDARY_PROBE_DELAY_SECONDS + 90
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-1014", "TS-1013", "TS-1012", "TS-996", "TS-992"]
+LINKED_BUGS = [
+    "TS-1149",
+    "TS-1145",
+    "TS-1046",
+    "TS-1045",
+    "TS-1014",
+    "TS-1013",
+    "TS-1012",
+    "TS-996",
+    "TS-992",
+]
 LINKED_BUG_NOTES = (
     "Reviewed the linked startup bug chain from input/TS-1002/linked_bugs.md. "
-    "TS-996 and TS-1013 require the shell to become interactive by the global "
-    "11-second timeout, TS-1012 extends that guarantee to secondary critical-path "
-    "probes such as `DEMO/project.json`, and TS-992 plus TS-1014 require the live "
-    "startup flow to exercise the `/user` probe path promptly instead of skipping or "
-    "deferring it. This test therefore keeps the `/user` delay short, delays the "
-    "secondary probe for 31 seconds, and samples the live page at the 12-second "
-    "checkpoint while that secondary probe is still pending."
+    "TS-996, TS-1013, TS-1045, and TS-1145 require the shell to become "
+    "interactive by the global 11-second timeout, TS-1012 plus TS-1046 extend "
+    "that guarantee to secondary critical-path probes such as "
+    "`DEMO/project.json`, TS-992 and TS-1014 require the live startup flow to "
+    "exercise the `/user` probe path promptly instead of skipping or deferring "
+    "it, and TS-1149 confirms the fallback session must remain safely "
+    "restricted once the timeout-driven shell is visible. This test therefore "
+    "keeps the `/user` delay short, delays the secondary probe for 31 seconds, "
+    "and samples the live page at the 12-second checkpoint while that "
+    "secondary probe is still pending."
 )
 REWORK_SUMMARY = (
     "Reused the approved TS-1002 live startup regression, kept the timeout-window "

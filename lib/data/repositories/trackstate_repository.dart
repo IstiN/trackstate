@@ -54,6 +54,9 @@ abstract interface class ProjectSettingsRepository {
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
 }
 
+const String projectSettingsNoCommitProducedMessage =
+    'No Git commit was produced for the project settings save.';
+
 class ProjectMetadataRefresh {
   const ProjectMetadataRefresh({
     required this.project,
@@ -176,11 +179,83 @@ class ProviderBackedTrackStateRepository
       Queue<Completer<void>>();
   bool _deleteMutationInProgress = false;
   TrackerStartupRecovery? _startupRecovery;
+  static const String hostedStartupShellFallbackWarningPrefix =
+      'Hosted startup deferred repository bootstrap after ';
   DateTime? _hostedStartupProbeDeadline;
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
   TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  bool usesHostedStartupShellFallback(TrackerSnapshot? snapshot) =>
+      snapshot?.loadWarnings.any(
+        (warning) =>
+            warning.startsWith(hostedStartupShellFallbackWarningPrefix),
+      ) ??
+      false;
+
+  TrackerSnapshot buildHostedStartupFallbackSnapshot() {
+    final currentSnapshot = _snapshot;
+    final warning =
+        '$hostedStartupShellFallbackWarningPrefix${_formatStartupProbeTimeout(hostedStartupProbeTimeout)}. '
+        'TrackState.AI loaded a fallback shell snapshot so the shell can open while repository data keeps loading.';
+    if (currentSnapshot != null) {
+      final snapshot = TrackerSnapshot(
+        project: currentSnapshot.project,
+        issues: currentSnapshot.issues,
+        repositoryIndex: currentSnapshot.repositoryIndex,
+        loadWarnings: [
+          ...currentSnapshot.loadWarnings,
+          if (!currentSnapshot.loadWarnings.contains(warning)) warning,
+        ],
+        readiness: currentSnapshot.readiness,
+        startupRecovery: currentSnapshot.startupRecovery,
+      );
+      _snapshot = snapshot;
+      return snapshot;
+    }
+    final workspaceName = _repositoryWorkspaceName(_provider.repositoryLabel);
+    final snapshot = TrackerSnapshot(
+      project: ProjectConfig(
+        key: _deriveFallbackProjectKey(workspaceName),
+        name: workspaceName,
+        repository: _provider.repositoryLabel,
+        branch: _provider.dataRef,
+        defaultLocale: 'en',
+        supportedLocales: const <String>['en'],
+        issueTypeDefinitions: _issueTypeDefinitions,
+        statusDefinitions: _statusDefinitions,
+        fieldDefinitions: _fieldDefinitions,
+        workflowDefinitions: _workflowDefinitions,
+        priorityDefinitions: _priorityDefinitions,
+        versionDefinitions: _versionDefinitions,
+        componentDefinitions: _componentDefinitions,
+        resolutionDefinitions: _resolutionDefinitions,
+        attachmentStorage: const ProjectAttachmentStorageSettings(),
+      ),
+      issues: const <TrackStateIssue>[],
+      repositoryIndex: const RepositoryIndex(),
+      loadWarnings: <String>[warning],
+      readiness: const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.partial,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.partial,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.partial,
+          TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.partial,
+          TrackerSectionKey.board: TrackerLoadState.partial,
+          TrackerSectionKey.search: TrackerLoadState.partial,
+          TrackerSectionKey.hierarchy: TrackerLoadState.partial,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      ),
+      startupRecovery: _startupRecovery,
+    );
+    _snapshot = snapshot;
+    return snapshot;
+  }
 
   @override
   Future<RepositorySyncCheck> checkSync({
@@ -401,8 +476,15 @@ class ProviderBackedTrackStateRepository
                 : currentIssue.comments,
           )
         : _CommentHydrationResult(comments: currentIssue.comments);
+    final repositoryIndexEntry = currentSnapshot.repositoryIndex.entryForKey(
+      currentIssue.key,
+    );
     final links = shouldLoadDetail
-        ? await _loadLinks(blobPaths: _snapshotBlobPaths, issueRoot: issueRoot)
+        ? await _loadLinks(
+            blobPaths: _snapshotBlobPaths,
+            issueRoot: issueRoot,
+            repositoryIndexEntry: repositoryIndexEntry,
+          )
         : currentIssue.links;
     final attachments = shouldLoadAttachments
         ? await _loadAttachments(tree: _snapshotTree, issueRoot: issueRoot)
@@ -415,9 +497,7 @@ class ProviderBackedTrackStateRepository
           comments: commentsResult.comments,
           links: links,
           attachments: attachments,
-          repositoryIndexEntry: currentSnapshot.repositoryIndex.entryForKey(
-            currentIssue.key,
-          ),
+          repositoryIndexEntry: repositoryIndexEntry,
           issueTypeDefinitions: currentSnapshot.project.issueTypeDefinitions,
           statusDefinitions: currentSnapshot.project.statusDefinitions,
           priorityDefinitions: currentSnapshot.project.priorityDefinitions,
@@ -643,13 +723,18 @@ class ProviderBackedTrackStateRepository
         }
       }
     } else {
-      await mutator.applyFileChanges(
+      final commitResult = await mutator.applyFileChanges(
         RepositoryFileChangeRequest(
           branch: writeBranch,
           message: 'Update project settings',
           changes: changes,
         ),
       );
+      if (!commitResult.createdCommit) {
+        throw const TrackStateRepositoryException(
+          projectSettingsNoCommitProducedMessage,
+        );
+      }
     }
     final currentSnapshot = _snapshot;
     if (currentSnapshot == null) {
@@ -1726,21 +1811,7 @@ class ProviderBackedTrackStateRepository
           summaryIssues,
         ),
         loadWarnings: loadWarnings,
-        readiness: const TrackerBootstrapReadiness(
-          domainStates: {
-            TrackerDataDomain.projectMeta: TrackerLoadState.ready,
-            TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
-            TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
-            TrackerDataDomain.issueDetails: TrackerLoadState.partial,
-          },
-          sectionStates: {
-            TrackerSectionKey.dashboard: TrackerLoadState.ready,
-            TrackerSectionKey.board: TrackerLoadState.ready,
-            TrackerSectionKey.search: TrackerLoadState.partial,
-            TrackerSectionKey.hierarchy: TrackerLoadState.ready,
-            TrackerSectionKey.settings: TrackerLoadState.ready,
-          },
-        ),
+        readiness: _hostedBootstrapReadiness(),
         startupRecovery: _startupRecovery,
       );
     }
@@ -1809,6 +1880,7 @@ class ProviderBackedTrackStateRepository
       final links = await _loadLinks(
         blobPaths: blobPaths,
         issueRoot: issueRoot,
+        repositoryIndexEntry: indexEntriesByPath[path],
       );
       final attachments = await _loadAttachments(
         tree: tree,
@@ -1869,7 +1941,21 @@ class ProviderBackedTrackStateRepository
 
   Future<_LoadedSnapshotInputs> _loadSnapshotInputs() async {
     final loadWarnings = <String>[];
-    final tree = await _provider.listTree(ref: _provider.dataRef);
+    List<RepositoryTreeEntry> tree;
+    try {
+      tree = await _loadHostedStartupProbe<List<RepositoryTreeEntry>>(
+        'listTree(${_provider.dataRef})',
+        () => _provider.listTree(ref: _provider.dataRef),
+      );
+    } on _HostedStartupProbeTimeout catch (error) {
+      loadWarnings.add(
+        _hostedStartupTimeoutWarning(
+          error.path,
+          fallbackDescription: 'repository tree',
+        ),
+      );
+      tree = const <RepositoryTreeEntry>[];
+    }
     _snapshotTree = tree;
     final blobPaths = tree
         .where((entry) => entry.type == 'blob')
@@ -1881,7 +1967,7 @@ class ProviderBackedTrackStateRepository
       orElse: () => '',
     );
     if (projectPath.isEmpty) {
-      if (!usesLocalPersistence) {
+      if (!usesLocalPersistence && loadWarnings.isEmpty) {
         throw const TrackStateRepositoryException(
           'project.json was not found in the repository.',
         );
@@ -1895,7 +1981,9 @@ class ProviderBackedTrackStateRepository
           key: _deriveFallbackProjectKey(workspaceName),
           name: workspaceName,
           repository: _provider.repositoryLabel,
-          branch: await _provider.resolveWriteBranch(),
+          branch: usesLocalPersistence
+              ? await _provider.resolveWriteBranch()
+              : _provider.dataRef,
           defaultLocale: 'en',
           supportedLocales: const <String>['en'],
           issueTypeDefinitions: _issueTypeDefinitions,
@@ -1930,6 +2018,8 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'project metadata',
         ),
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
     }
     final configRoot = projectJson == null
         ? _defaultConfigRoot(dataRoot)
@@ -2010,6 +2100,7 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       dataRoot: dataRoot,
       issueTypeDefinitions: issueTypes,
+      loadWarnings: loadWarnings,
     );
     final statuses = await statusesFuture;
     final workflowsFuture = _loadWorkflowDefinitions(
@@ -2104,12 +2195,47 @@ class ProviderBackedTrackStateRepository
     ];
   }
 
+  TrackerBootstrapReadiness _hostedBootstrapReadiness() {
+    if (_startupRecovery == null) {
+      return const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+          TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.ready,
+          TrackerSectionKey.board: TrackerLoadState.ready,
+          TrackerSectionKey.search: TrackerLoadState.partial,
+          TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      );
+    }
+    return const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.partial,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.loading,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.partial,
+        TrackerSectionKey.board: TrackerLoadState.partial,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.partial,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    );
+  }
+
   void _validateHostedBootstrapIndex({
     required RepositoryIndex repositoryIndex,
     required List<String> issuePathsInTree,
   }) {
     if (repositoryIndex.entries.isEmpty) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
       );
     }
@@ -2118,7 +2244,7 @@ class ProviderBackedTrackStateRepository
           (entry.issueTypeId ?? '').trim().isEmpty ||
           (entry.statusId ?? '').trim().isEmpty ||
           (entry.updatedLabel ?? '').trim().isEmpty) {
-        throw TrackStateRepositoryException(
+        throw HostedBootstrapIndexValidationException(
           'Hosted bootstrap requires summary metadata for ${entry.key} in .trackstate/index/issues.json. Regenerate the tracker indexes and retry.',
         );
       }
@@ -2126,13 +2252,13 @@ class ProviderBackedTrackStateRepository
     final indexedPaths =
         repositoryIndex.entries.map((entry) => entry.path).toList()..sort();
     if (indexedPaths.length != issuePathsInTree.length) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
       );
     }
     for (var index = 0; index < indexedPaths.length; index += 1) {
       if (indexedPaths[index] != issuePathsInTree[index]) {
-        throw const TrackStateRepositoryException(
+        throw const HostedBootstrapIndexValidationException(
           'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
         );
       }
@@ -2426,6 +2552,9 @@ class ProviderBackedTrackStateRepository
           ),
         );
         continue;
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        continue;
       }
       if (json is! Map) {
         continue;
@@ -2493,6 +2622,9 @@ class ProviderBackedTrackStateRepository
         ),
       );
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
   }
 
@@ -2516,6 +2648,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: warningSubject,
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
   }
@@ -2606,6 +2741,12 @@ class ProviderBackedTrackStateRepository
         _fieldDefinitions,
         growable: false,
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
     }
   }
 
@@ -2631,6 +2772,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'workflows',
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
     if (json is! Map) {
@@ -2706,17 +2850,44 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String dataRoot,
     required List<TrackStateConfigEntry> issueTypeDefinitions,
+    required List<String> loadWarnings,
   }) async {
     final issuesPath = _joinPath(dataRoot, '.trackstate/index/issues.json');
     final entries = <RepositoryIssueIndexEntry>[];
     if (blobPaths.contains(issuesPath)) {
-      final json = await _getRepositoryJson(issuesPath);
-      if (json is List) {
+      try {
+        final json = await _loadHostedStartupProbe<Object?>(
+          issuesPath,
+          () => _getRepositoryJson(issuesPath),
+        );
+        if (json is List) {
+          entries.addAll(
+            json
+                .whereType<Map>()
+                .map((entry) => _repositoryIndexEntry(entry))
+                .where((entry) => blobPaths.contains(entry.path)),
+          );
+        }
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'summary issue index',
+          ),
+        );
         entries.addAll(
-          json
-              .whereType<Map>()
-              .map((entry) => _repositoryIndexEntry(entry))
-              .where((entry) => blobPaths.contains(entry.path)),
+          _fallbackHostedRepositoryIndexEntries(
+            blobPaths: blobPaths,
+            dataRoot: dataRoot,
+          ),
+        );
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        entries.addAll(
+          _fallbackHostedRepositoryIndexEntries(
+            blobPaths: blobPaths,
+            dataRoot: dataRoot,
+          ),
         );
       }
     }
@@ -2724,6 +2895,7 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       dataRoot: dataRoot,
       issueTypeDefinitions: issueTypeDefinitions,
+      loadWarnings: loadWarnings,
     );
     return RepositoryIndex(entries: entries, deleted: deleted);
   }
@@ -2732,6 +2904,7 @@ class ProviderBackedTrackStateRepository
     required Set<String> blobPaths,
     required String dataRoot,
     required List<TrackStateConfigEntry> issueTypeDefinitions,
+    required List<String> loadWarnings,
     bool includeLegacyDeletedIndex = true,
   }) async {
     final tombstonesPath = _joinPath(
@@ -2743,7 +2916,18 @@ class ProviderBackedTrackStateRepository
     if (blobPaths.contains(tombstonesPath)) {
       Object? json;
       try {
-        json = await _getRepositoryJson(tombstonesPath);
+        json = await _loadHostedStartupProbe<Object?>(
+          tombstonesPath,
+          () => _getRepositoryJson(tombstonesPath),
+        );
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'deleted issue index',
+          ),
+        );
+        return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
         return _dedupeDeletedIssueTombstones(deleted);
@@ -2763,7 +2947,18 @@ class ProviderBackedTrackStateRepository
           }
           Object? tombstoneJson;
           try {
-            tombstoneJson = await _getRepositoryJson(tombstonePath);
+            tombstoneJson = await _loadHostedStartupProbe<Object?>(
+              tombstonePath,
+              () => _getRepositoryJson(tombstonePath),
+            );
+          } on _HostedStartupProbeTimeout catch (error) {
+            loadWarnings.add(
+              _hostedStartupTimeoutWarning(
+                error.path,
+                fallbackDescription: 'deleted issue metadata',
+              ),
+            );
+            return _dedupeDeletedIssueTombstones(deleted);
           } on GitHubRateLimitException catch (error) {
             _captureHostedStartupRecovery(error);
             return _dedupeDeletedIssueTombstones(deleted);
@@ -2785,7 +2980,18 @@ class ProviderBackedTrackStateRepository
     if (includeLegacyDeletedIndex && blobPaths.contains(deletedPath)) {
       Object? json;
       try {
-        json = await _getRepositoryJson(deletedPath);
+        json = await _loadHostedStartupProbe<Object?>(
+          deletedPath,
+          () => _getRepositoryJson(deletedPath),
+        );
+      } on _HostedStartupProbeTimeout catch (error) {
+        loadWarnings.add(
+          _hostedStartupTimeoutWarning(
+            error.path,
+            fallbackDescription: 'legacy deleted issue index',
+          ),
+        );
+        return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
         return _dedupeDeletedIssueTombstones(deleted);
@@ -2802,6 +3008,65 @@ class ProviderBackedTrackStateRepository
       }
     }
     return _dedupeDeletedIssueTombstones(deleted);
+  }
+
+  List<RepositoryIssueIndexEntry> _fallbackHostedRepositoryIndexEntries({
+    required Set<String> blobPaths,
+    required String dataRoot,
+  }) {
+    final issuePaths =
+        blobPaths
+            .where(
+              (path) =>
+                  path.startsWith(dataRoot.isEmpty ? '' : '$dataRoot/') &&
+                  path.endsWith('/main.md'),
+            )
+            .toList()
+          ..sort();
+    final fallbackEntries = <RepositoryIssueIndexEntry>[];
+    for (final path in issuePaths) {
+      final segments = path.split('/');
+      if (segments.length < 3) {
+        continue;
+      }
+      final issueSegments = segments.sublist(1, segments.length - 1);
+      if (issueSegments.isEmpty) {
+        continue;
+      }
+      final key = issueSegments.last;
+      final issueRoot = _issueRoot(path);
+      final hasChildren = issuePaths.any(
+        (candidate) => candidate != path && candidate.startsWith('$issueRoot/'),
+      );
+      final parentKey = issueSegments.length >= 3
+          ? issueSegments[issueSegments.length - 2]
+          : null;
+      final epicKey = issueSegments.length >= 2 ? issueSegments.first : null;
+      final issueTypeId = switch (issueSegments.length) {
+        >= 3 => 'subtask',
+        _ when hasChildren => 'epic',
+        _ => 'story',
+      };
+      fallbackEntries.add(
+        RepositoryIssueIndexEntry(
+          key: key,
+          path: path,
+          parentKey: parentKey,
+          epicKey: epicKey == key ? null : epicKey,
+          childKeys: const [],
+          isArchived: false,
+          summary: key,
+          issueTypeId: issueTypeId,
+          statusId: 'todo',
+          priorityId: 'medium',
+          labels: const <String>[],
+          updatedLabel: 'loading...',
+          progress: issueTypeId == 'subtask' ? 0 : .35,
+          revision: null,
+        ),
+      );
+    }
+    return fallbackEntries;
   }
 
   void _captureHostedStartupRecovery(GitHubRateLimitException error) {
@@ -2849,29 +3114,17 @@ class ProviderBackedTrackStateRepository
   Future<List<IssueLink>> _loadLinks({
     required Set<String> blobPaths,
     required String issueRoot,
+    RepositoryIssueIndexEntry? repositoryIndexEntry,
   }) async {
     final linksPath = _joinPath(issueRoot, 'links.json');
-    if (!blobPaths.contains(linksPath)) return const [];
+    if (!blobPaths.contains(linksPath)) {
+      return repositoryIndexEntry?.links ?? const [];
+    }
     final json = await _getRepositoryJson(linksPath);
     if (json is! List) return const [];
     return json
         .whereType<Map>()
-        .map((entry) {
-          final link = IssueLink(
-            type: entry['type']?.toString() ?? 'relates-to',
-            targetKey:
-                entry['target']?.toString() ??
-                entry['targetKey']?.toString() ??
-                '',
-            direction: entry['direction']?.toString() ?? 'outward',
-          );
-          final warning = nonCanonicalIssueLinkMetadataWarning(link);
-          if (warning != null) {
-            // ignore: avoid_print
-            print(warning);
-          }
-          return link;
-        })
+        .map(_issueLinkFromStoredJsonMap)
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
   }
@@ -3761,6 +4014,11 @@ class DemoTrackStateRepository implements TrackStateRepository {
 
 class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
+}
+
+class HostedBootstrapIndexValidationException
+    extends TrackStateRepositoryException {
+  const HostedBootstrapIndexValidationException(super.message);
 }
 
 class TrackStatePartialHydrationException
@@ -5008,6 +5266,7 @@ bool _isTrackStateMetadataPath(String path) =>
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   final childKeys = entry['children'];
   final labels = entry['labels'];
+  final links = entry['links'];
   return RepositoryIssueIndexEntry(
     key: entry['key']?.toString() ?? '',
     path: entry['path']?.toString() ?? '',
@@ -5037,7 +5296,29 @@ RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
       _ => null,
     },
     resolutionId: _nullable(entry['resolution']?.toString()),
+    links: links is List
+        ? links
+              .whereType<Map>()
+              .map(_issueLinkFromStoredJsonMap)
+              .where((link) => link.targetKey.isNotEmpty)
+              .toList(growable: false)
+        : const [],
   );
+}
+
+IssueLink _issueLinkFromStoredJsonMap(Map entry) {
+  final link = IssueLink(
+    type: entry['type']?.toString() ?? 'relates-to',
+    targetKey:
+        entry['target']?.toString() ?? entry['targetKey']?.toString() ?? '',
+    direction: entry['direction']?.toString() ?? 'outward',
+  );
+  final warning = nonCanonicalIssueLinkMetadataWarning(link);
+  if (warning != null) {
+    // ignore: avoid_print
+    print(warning);
+  }
+  return link;
 }
 
 DeletedIssueTombstone _deletedIssueTombstone(
@@ -5091,6 +5372,15 @@ List<Map<String, Object?>> _repositoryIndexEntriesJson(
       'updated': entry.updatedLabel,
       'revision': entry.revision,
       'progress': entry.progress,
+      if (entry.links.isNotEmpty)
+        'links': [
+          for (final link in entry.links)
+            {
+              'type': link.type,
+              'target': link.targetKey,
+              'direction': link.direction,
+            },
+        ],
       'resolution': entry.resolutionId,
       'children': entry.childKeys,
       'archived': entry.isArchived,
@@ -5153,6 +5443,9 @@ RepositoryIndex _deriveRepositoryIndex(
         progress: issue.progress,
         resolutionId: issue.resolutionId,
         revision: null,
+        links: issue.links
+            .where((link) => link.direction == 'outward')
+            .toList(growable: false),
       ),
   ]..sort((a, b) => a.key.compareTo(b.key));
   return RepositoryIndex(entries: entries, deleted: deleted);
@@ -5163,18 +5456,33 @@ RepositoryIndex _normalizeRepositoryIndex(
   List<TrackStateIssue> issues,
 ) {
   final issueByKey = {for (final issue in issues) issue.key: issue};
-  final entriesByKey = {
-    for (final entry in index.entries) entry.key: entry,
-    for (final issue in issues)
-      issue.key: RepositoryIssueIndexEntry(
-        key: issue.key,
-        path: issue.storagePath,
-        parentKey: issue.parentKey,
-        epicKey: issue.epicKey,
-        childKeys: const [],
-        isArchived: issue.isArchived,
-      ),
-  };
+  final entriesByKey = {for (final entry in index.entries) entry.key: entry};
+  for (final issue in issues) {
+    final existingEntry = entriesByKey[issue.key];
+    entriesByKey[issue.key] = RepositoryIssueIndexEntry(
+      key: issue.key,
+      path: issue.storagePath,
+      parentKey: issue.parentKey,
+      epicKey: issue.epicKey,
+      childKeys: const [],
+      isArchived: existingEntry?.isArchived ?? issue.isArchived,
+      summary: existingEntry?.summary ?? issue.summary,
+      issueTypeId: existingEntry?.issueTypeId ?? issue.issueTypeId,
+      statusId: existingEntry?.statusId ?? issue.statusId,
+      priorityId: existingEntry?.priorityId ?? issue.priorityId,
+      assignee: existingEntry?.assignee ?? _nullable(issue.assignee),
+      labels: existingEntry?.labels ?? issue.labels,
+      updatedLabel: existingEntry?.updatedLabel ?? issue.updatedLabel,
+      progress: existingEntry?.progress ?? issue.progress,
+      resolutionId: existingEntry?.resolutionId ?? issue.resolutionId,
+      revision: existingEntry?.revision,
+      links:
+          existingEntry?.links ??
+          issue.links
+              .where((link) => link.direction == 'outward')
+              .toList(growable: false),
+    );
+  }
   final pathByKey = {
     for (final entry in entriesByKey.values) entry.key: entry.path,
   };
