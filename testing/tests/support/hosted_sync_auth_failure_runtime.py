@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Callable
 from urllib.parse import urlparse
 
 from playwright.sync_api import Route
@@ -27,7 +26,6 @@ class HostedSyncAuthFailureObservation:
     failed_sync_requests: list[HostedSyncAuthFailureRequest] = field(default_factory=list)
     post_revocation_requests: list[HostedSyncAuthFailureRequest] = field(default_factory=list)
     post_revocation_request_urls: list[str] = field(default_factory=list)
-    pump_page_events: Callable[[float], None] | None = None
 
     def mark_revoked(self) -> float:
         if self.revoked_at_monotonic is None:
@@ -56,12 +54,6 @@ class HostedSyncAuthFailureObservation:
         self.post_revocation_requests.append(observation)
         self.post_revocation_request_urls.append(url)
         return observation
-
-    def pump(self, seconds: float) -> None:
-        if self.pump_page_events is None:
-            time.sleep(seconds)
-            return
-        self.pump_page_events(seconds)
 
 
 class HostedSyncAuthFailureRuntime(PlaywrightStoredTokenWebAppRuntime):
@@ -98,11 +90,6 @@ class HostedSyncAuthFailureRuntime(PlaywrightStoredTokenWebAppRuntime):
                 "}"
                 "})();"
             ),
-        )
-        if self._page is None:
-            raise RuntimeError("HostedSyncAuthFailureRuntime expected a page.")
-        self._observation.pump_page_events = (
-            lambda seconds: self._page.wait_for_timeout(max(0, seconds) * 1000)
         )
         return session
 
