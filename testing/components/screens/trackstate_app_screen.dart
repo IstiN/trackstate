@@ -1196,8 +1196,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           '$hasTapAction, isEnabled=$isEnabled.',
     );
   }
-
-  @override
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;
@@ -1670,10 +1668,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       FontWeight.w700 => 'w700',
       FontWeight.w800 => 'w800',
       FontWeight.w900 => 'w900',
-      _ => '$weight',
-    };
+        _ => '$weight',
+      };
   }
-
   bool _snapshotContains(List<String> values, String expected) {
     for (final value in values) {
       final trimmed = value.trim();
