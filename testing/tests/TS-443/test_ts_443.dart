@@ -35,147 +35,173 @@ void main() {
           final viewModel = TrackerViewModel(
             repository: metadataFixture.repository,
           );
-          await viewModel.load();
-          final loadFinishedAt = DateTime.now().toUtc();
+          try {
+            await viewModel.load();
+            final loadFinishedAt = DateTime.now().toUtc();
 
-          if (metadataFixture.requestCount(
-                metadataFixture.failingRequestPath,
-              ) !=
-              1) {
-            failures.add(
-              'Step 1 failed for $scenario: the mocked hosted bootstrap did not exercise exactly one 403 rate-limit response for ${metadataFixture.failingContentPath}. '
-              'Observed requests: ${_formatSnapshot(metadataFixture.requestedPaths)}.',
-            );
-          }
-
-          final recovery = viewModel.startupRecovery;
-          if (recovery == null) {
-            failures.add(
-              'Step 3 failed for $scenario: TrackerViewModel.load() did not publish startupRecovery metadata after the mandatory bootstrap GitHub rate-limit response. '
-              'Message=${viewModel.message}, snapshot=${viewModel.snapshot == null ? 'null' : 'present'}.',
-            );
-          } else {
-            if (recovery.kind != TrackerStartupRecoveryKind.githubRateLimit) {
+            if (metadataFixture.requestCount(
+                  metadataFixture.failingRequestPath,
+                ) !=
+                1) {
               failures.add(
-                'Expected Result failed for $scenario: startupRecovery.kind was ${recovery.kind} instead of TrackerStartupRecoveryKind.githubRateLimit.',
-              );
-            }
-            if (recovery.failedPath != metadataFixture.failingRequestPath) {
-              failures.add(
-                'Step 3 failed for $scenario: startupRecovery.failedPath was "${recovery.failedPath ?? '<missing>'}" instead of the blocked bootstrap request "${metadataFixture.failingRequestPath}".',
+                'Step 1 failed for $scenario: the mocked hosted bootstrap did not exercise exactly one 403 rate-limit response for ${metadataFixture.failingContentPath}. '
+                'Observed requests: ${_formatSnapshot(metadataFixture.requestedPaths)}.',
               );
             }
 
-            final retryAfter = recovery.retryAfter;
-            final earliestExpected = loadStartedAt.add(
-              const Duration(seconds: 55),
-            );
-            final latestExpected = loadFinishedAt.add(
-              const Duration(seconds: 65),
-            );
-            if (retryAfter == null) {
+            final recovery = viewModel.startupRecovery;
+            if (recovery == null) {
               failures.add(
-                'Step 3 failed for $scenario: startupRecovery.retryAfter was missing, so the blocking rate-limit recovery did not expose a valid reset time.',
+                'Step 3 failed for $scenario: TrackerViewModel.load() did not publish startupRecovery metadata after the mandatory bootstrap GitHub rate-limit response. '
+                'Message=${viewModel.message}, snapshot=${viewModel.snapshot == null ? 'null' : 'present'}.',
               );
-            } else if (retryAfter.isBefore(earliestExpected) ||
-                retryAfter.isAfter(latestExpected)) {
+            } else {
+              if (recovery.kind != TrackerStartupRecoveryKind.githubRateLimit) {
+                failures.add(
+                  'Expected Result failed for $scenario: startupRecovery.kind was ${recovery.kind} instead of TrackerStartupRecoveryKind.githubRateLimit.',
+                );
+              }
+              if (recovery.failedPath != metadataFixture.failingRequestPath) {
+                failures.add(
+                  'Step 3 failed for $scenario: startupRecovery.failedPath was "${recovery.failedPath ?? '<missing>'}" instead of the blocked bootstrap request "${metadataFixture.failingRequestPath}".',
+                );
+              }
+
+              final retryAfter = recovery.retryAfter;
+              final earliestExpected = loadStartedAt.add(
+                const Duration(seconds: 55),
+              );
+              final latestExpected = loadFinishedAt.add(
+                const Duration(seconds: 65),
+              );
+              if (retryAfter == null) {
+                failures.add(
+                  'Step 3 failed for $scenario: startupRecovery.retryAfter was missing, so the blocking rate-limit recovery did not expose a valid reset time.',
+                );
+              } else if (retryAfter.isBefore(earliestExpected) ||
+                  retryAfter.isAfter(latestExpected)) {
+                failures.add(
+                  'Step 3 failed for $scenario: startupRecovery.retryAfter was $retryAfter, outside the expected retry window ${earliestExpected.toIso8601String()} - ${latestExpected.toIso8601String()} derived from the mocked retry-after: 60 header.',
+                );
+              }
+            }
+
+            if (viewModel.message != null) {
               failures.add(
-                'Step 3 failed for $scenario: startupRecovery.retryAfter was $retryAfter, outside the expected retry window ${earliestExpected.toIso8601String()} - ${latestExpected.toIso8601String()} derived from the mocked retry-after: 60 header.',
+                'Expected Result failed for $scenario: TrackerViewModel reported a generic load message instead of relying on startupRecovery metadata. '
+                'Observed message kind=${viewModel.message!.kind}, error=${viewModel.message!.error ?? '<none>'}.',
               );
             }
-          }
 
-          if (viewModel.message != null) {
-            failures.add(
-              'Expected Result failed for $scenario: TrackerViewModel reported a generic load message instead of relying on startupRecovery metadata. '
-              'Observed message kind=${viewModel.message!.kind}, error=${viewModel.message!.error ?? '<none>'}.',
-            );
-          }
-
-          if (viewModel.snapshot != null) {
-            failures.add(
-              'Step 3 failed for $scenario: mandatory bootstrap recovery should remain in the blocking bootstrap phase, but TrackerViewModel published a bootstrap snapshot instead of keeping snapshot null.',
-            );
-          }
-
-          if (viewModel.hasLoadedInitialSearchResults) {
-            failures.add(
-              'Precondition failed for $scenario: the initial search completed even though mandatory bootstrap failed before search hydration should start.',
-            );
-          }
-          if (viewModel.hasPublishedBootstrapSnapshot) {
-            failures.add(
-              'Step 3 failed for $scenario: mandatory bootstrap should remain blocked before publishing a bootstrap snapshot, but hasPublishedBootstrapSnapshot was true.',
-            );
-          }
-          if (viewModel.showsInitialBootstrapPlaceholders) {
-            failures.add(
-              'Step 3 failed for $scenario: blocking mandatory bootstrap should not expose partial placeholder content, but showsInitialBootstrapPlaceholders was true.',
-            );
-          }
-          if (viewModel.shouldUseBootstrapSearchFallback) {
-            failures.add(
-              'Step 3 failed for $scenario: blocking mandatory bootstrap should not publish fallback bootstrap search data, but shouldUseBootstrapSearchFallback was true.',
-            );
-          }
-          if (!viewModel.supportsGitHubAuth) {
-            failures.add(
-              'Expected Result failed for $scenario: the hosted recovery model did not advertise GitHub auth support, so the Connect GitHub recovery action was unavailable on the model surface.',
-            );
-          }
-          if (viewModel.repositoryAccessState !=
-              RepositoryAccessState.connectGitHub) {
-            failures.add(
-              'Expected Result failed for $scenario: repositoryAccessState was ${viewModel.repositoryAccessState} instead of RepositoryAccessState.connectGitHub while startup recovery was active.',
-            );
-          }
-
-          final blockingDomainStates = {
-            for (final domain in TrackerDataDomain.values)
-              domain: viewModel.loadStateForDomain(domain),
-          };
-          final blockingSectionStates = {
-            for (final section in TrackerSection.values)
-              section: viewModel.loadStateForSection(section),
-          };
-          for (final entry in blockingDomainStates.entries) {
-            if (entry.value != TrackerLoadState.loading) {
+            if (viewModel.snapshot == null) {
               failures.add(
-                'Step 3 failed for $scenario: mandatory bootstrap recovery should keep ${entry.key} in TrackerLoadState.loading, but observed ${entry.value}. '
-                'Observed readiness: ${_formatReadiness(blockingDomainStates, blockingSectionStates)}.',
+                'Step 3 failed for $scenario: mandatory bootstrap recovery should publish a shell snapshot so Settings can stay visible, but TrackerViewModel kept snapshot null.',
               );
             }
-          }
-          for (final entry in blockingSectionStates.entries) {
-            if (entry.value != TrackerLoadState.loading) {
+
+            if (!viewModel.hasPublishedBootstrapSnapshot) {
               failures.add(
-                'Step 3 failed for $scenario: mandatory bootstrap recovery should keep ${entry.key} in TrackerLoadState.loading, but observed ${entry.value}. '
-                'Observed readiness: ${_formatReadiness(blockingDomainStates, blockingSectionStates)}.',
+                'Step 3 failed for $scenario: mandatory bootstrap recovery did not report a published bootstrap snapshot even though the shell should remain visible.',
               );
             }
-          }
+            if (viewModel.section != TrackerSection.settings) {
+              failures.add(
+                'Step 3 failed for $scenario: startup recovery should keep Settings selected, but TrackerViewModel.section was ${viewModel.section}.',
+              );
+            }
+            final snapshot = viewModel.snapshot;
+            if (snapshot != null) {
+              final settingsState = viewModel.loadStateForSection(
+                TrackerSection.settings,
+              );
+              if (settingsState != TrackerLoadState.ready) {
+                failures.add(
+                  'Step 3 failed for $scenario: Settings should remain ready during shell-first recovery, but observed $settingsState.',
+                );
+              }
+              for (final lockedSection in const [
+                TrackerSection.dashboard,
+                TrackerSection.board,
+              ]) {
+                viewModel.selectSection(lockedSection);
+                if (viewModel.section != TrackerSection.settings) {
+                  failures.add(
+                    'Step 3 failed for $scenario: ${lockedSection.name} remained selectable during startup recovery even though non-Settings navigation should stay disabled.',
+                  );
+                }
+              }
+            }
 
-          await viewModel.retryStartupRecovery();
+            if (viewModel.showsInitialBootstrapPlaceholders) {
+              failures.add(
+                'Step 3 failed for $scenario: shell-first recovery should not keep startup placeholders visible after the shell snapshot has settled.',
+              );
+            }
+            if (!viewModel.supportsGitHubAuth) {
+              failures.add(
+                'Expected Result failed for $scenario: the hosted recovery model did not advertise GitHub auth support, so the Connect GitHub recovery action was unavailable on the model surface.',
+              );
+            }
+            if (viewModel.repositoryAccessState !=
+                RepositoryAccessState.connectGitHub) {
+              failures.add(
+                'Expected Result failed for $scenario: repositoryAccessState was ${viewModel.repositoryAccessState} instead of RepositoryAccessState.connectGitHub while startup recovery was active.',
+              );
+            }
 
-          if (metadataFixture.requestCount(
-                metadataFixture.failingRequestPath,
-              ) !=
-              2) {
-            failures.add(
-              'Expected Result failed for $scenario: invoking the model-level Retry recovery action did not re-run the blocked bootstrap request exactly once. '
-              'Observed requests: ${_formatSnapshot(metadataFixture.requestedPaths)}.',
-            );
-          }
-          if (viewModel.startupRecovery != null) {
-            failures.add(
-              'Expected Result failed for $scenario: retryStartupRecovery() should clear startupRecovery after the second bootstrap attempt succeeded, but recovery remained ${viewModel.startupRecovery}.',
-            );
-          }
-          if (viewModel.snapshot == null ||
-              !viewModel.hasPublishedBootstrapSnapshot) {
-            failures.add(
-              'Expected Result failed for $scenario: retryStartupRecovery() did not publish a bootstrap snapshot after the hosted rate-limit fixture recovered.',
-            );
+            final recoveryDomainStates = {
+              for (final domain in TrackerDataDomain.values)
+                domain: viewModel.loadStateForDomain(domain),
+            };
+            final recoverySectionStates = {
+              for (final section in TrackerSection.values)
+                section: viewModel.loadStateForSection(section),
+            };
+            if (recoverySectionStates[TrackerSection.settings] !=
+                TrackerLoadState.ready) {
+              failures.add(
+                'Step 3 failed for $scenario: Settings should stay ready during shell-first recovery. '
+                'Observed readiness: ${_formatReadiness(recoveryDomainStates, recoverySectionStates)}.',
+              );
+            }
+            for (final section in const [
+              TrackerSection.dashboard,
+              TrackerSection.board,
+              TrackerSection.search,
+              TrackerSection.hierarchy,
+            ]) {
+              if (recoverySectionStates[section] == TrackerLoadState.ready) {
+                failures.add(
+                  'Step 3 failed for $scenario: ${section.name} should remain incomplete during shell-first recovery. '
+                  'Observed readiness: ${_formatReadiness(recoveryDomainStates, recoverySectionStates)}.',
+                );
+              }
+            }
+
+            await viewModel.retryStartupRecovery();
+
+            if (metadataFixture.requestCount(
+                  metadataFixture.failingRequestPath,
+                ) !=
+                2) {
+              failures.add(
+                'Expected Result failed for $scenario: invoking the model-level Retry recovery action did not re-run the blocked bootstrap request exactly once. '
+                'Observed requests: ${_formatSnapshot(metadataFixture.requestedPaths)}.',
+              );
+            }
+            if (viewModel.startupRecovery != null) {
+              failures.add(
+                'Expected Result failed for $scenario: retryStartupRecovery() should clear startupRecovery after the second bootstrap attempt succeeded, but recovery remained ${viewModel.startupRecovery}.',
+              );
+            }
+            if (viewModel.snapshot == null ||
+                !viewModel.hasPublishedBootstrapSnapshot) {
+              failures.add(
+                'Expected Result failed for $scenario: retryStartupRecovery() did not publish a bootstrap snapshot after the hosted rate-limit fixture recovered.',
+              );
+            }
+          } finally {
+            viewModel.dispose();
           }
 
           final uiFixture =
@@ -188,7 +214,7 @@ void main() {
 
           const expectedTitle = 'GitHub startup limit reached';
           const expectedMessage =
-              'Hosted startup hit GitHub\'s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.';
+              'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
 
           if (!await app.isTextVisible('TrackState.AI')) {
             failures.add(

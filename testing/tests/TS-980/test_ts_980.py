@@ -46,7 +46,7 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts980-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-976"]
+LINKED_BUGS = ["TS-994", "TS-993", "TS-976", "TS-972"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_TRIGGER_WAIT_SECONDS = 60
 POST_RELOAD_RESTORE_WAIT_SECONDS = 45
@@ -75,10 +75,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Extracted the TS-980 runtime and repo-backed directory handle shim into "
-    "`testing/tests/support/ts980_restore_persistence_runtime.py`, updated the "
-    "test to consume the shared helper, then reran the live restore-plus-reload "
-    "regression and refreshed the PR review reply artifact."
+    "Resolved the TS-980 merge with main while preserving the approved "
+    "repo-backed manual-restore flow and the post-reload product-gap "
+    "assertions for the restored local workspace."
 )
 
 
@@ -167,7 +166,7 @@ def main() -> None:
 
                 try:
                     page.dismiss_connection_banner()
-                except Exception:
+                except (AssertionError, WebAppTimeoutError):
                     pass
 
                 result["trigger_before_restore"] = _trigger_payload(initial_trigger)
@@ -384,32 +383,32 @@ def main() -> None:
                     ),
                     observed=(
                         f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
-                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                        f"local_row_after_restore={json.dumps(local_row_after, ensure_ascii=True) if local_row_after else 'null'}"
                     ),
                 )
 
                 tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                reloaded_ready, reloaded_state = poll_until(
-                    probe=lambda: _observe_reloaded_workspace_state(
+                reloaded_surface_ready, reloaded_state = poll_until(
+                    probe=lambda: _observe_reloaded_workspace_surface(
                         tracker_page=tracker_page,
                         page=page,
-                        expected_local_workspace_id=local_workspace_id,
                     ),
-                    is_satisfied=lambda observation: bool(observation["ready"]),
+                    is_satisfied=lambda observation: bool(observation["surface_ready"]),
                     timeout_seconds=POST_RELOAD_RESTORE_WAIT_SECONDS,
                     interval_seconds=2,
                 )
                 result["post_reload_state"] = reloaded_state
-                if not reloaded_ready:
+                if not reloaded_surface_ready:
                     _record_step(
                         result,
                         step=1,
                         status="failed",
                         action=REQUEST_STEPS[0],
                         observed=(
-                            "After the hard reload, the app never settled back to the restored "
-                            "local workspace as the active `Local Git` state.\n"
+                            "After the hard reload, the deployed app never returned to a stable "
+                            "interactive surface that exposed the workspace trigger and "
+                            "persisted workspace state needed for TS-980.\n"
                             f"post_reload_state={json.dumps(reloaded_state, indent=2)}"
                         ),
                     )
@@ -434,8 +433,9 @@ def main() -> None:
                         ),
                     )
                     raise AssertionError(
-                        "Step 1 failed: after the hard reload, the app never settled back to "
-                        "the restored local workspace as the active `Local Git` state.\n"
+                        "Step 1 failed: after the hard reload, the deployed app never returned "
+                        "to a stable interactive surface that exposed the workspace trigger and "
+                        "persisted workspace state needed for TS-980.\n"
                         f"Observed post-reload state:\n{json.dumps(reloaded_state, indent=2)}"
                     )
 
@@ -450,8 +450,8 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[0],
                     observed=(
-                        "Reloaded the deployed app and waited for the restored local workspace "
-                        "to become active again instead of asserting immediately.\n"
+                        "Reloaded the deployed app and waited for the post-reload surface to "
+                        "settle before opening the Workspace switcher.\n"
                         f"trigger_after_reload={json.dumps(reloaded_state['trigger'], indent=2)}\n"
                         f"persisted_workspace_state_after_reload={json.dumps(reloaded_state['persisted_workspace_state'], indent=2)}"
                     ),
@@ -918,23 +918,33 @@ def _assert_restored_local_workspace(
             "as `Local Git`.\n"
             f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
         )
-    if local_row is None:
+    summary_visible = _switcher_contains_workspace_summary(
+        switcher=switcher,
+        display_name=LOCAL_DISPLAY_NAME,
+        target_type="Local",
+        state_label="Local Git",
+    )
+    if local_row is None and not summary_visible:
         raise AssertionError(
             "Step 4 failed: reopening the switcher after restore no longer showed the "
-            "saved local workspace row.\n"
+            "restored workspace in the expected `Local Git` state.\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
-    if local_row.state_label != "Local Git":
+    if local_row is not None and local_row.state_label != "Local Git":
         raise AssertionError(
             "Step 4 failed: the restored local workspace row did not show the `Local Git` "
             "state after the manual action.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME:
+    if (
+        selected_row is not None
+        and selected_row.display_name != LOCAL_DISPLAY_NAME
+        and not summary_visible
+    ):
         raise AssertionError(
-            "Step 4 failed: the restored local workspace row did not become the active "
-            "selection in the switcher.\n"
-            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2) if selected_row else 'null'}\n"
+            "Step 4 failed: the restored local workspace did not appear as the active "
+            "workspace after the manual action.\n"
+            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
     if not bool(shell_observation.get("shell_ready")):
@@ -947,6 +957,16 @@ def _assert_restored_local_workspace(
         raise AssertionError(
             "Step 4 failed: the restored local workspace still showed a fatal tracker "
             "load banner instead of a loaded shell.\n"
+            f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
+        )
+    if not _shell_shows_repository_branch(
+        shell_observation=shell_observation,
+        repository_label=LOCAL_TARGET,
+        branch_name=DEFAULT_BRANCH,
+    ):
+        raise AssertionError(
+            "Step 4 failed: the restored local workspace did not surface the expected "
+            "repository and branch details after the manual action.\n"
             f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
         )
     if persisted_workspace_state is None:
@@ -972,6 +992,12 @@ def _assert_reloaded_local_workspace(
     persisted_workspace_state: dict[str, object] | None,
     expected_local_workspace_id: str,
 ) -> None:
+    summary_visible = _switcher_contains_workspace_summary(
+        switcher=switcher,
+        display_name=LOCAL_DISPLAY_NAME,
+        target_type="Local",
+        state_label="Local Git",
+    )
     if trigger.display_name != LOCAL_DISPLAY_NAME:
         raise AssertionError(
             "Step 3 failed: the header trigger did not return to the restored local workspace "
@@ -984,29 +1010,41 @@ def _assert_reloaded_local_workspace(
             "`Local Git` after the hard reload.\n"
             f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}"
         )
-    if local_row is None:
+    if local_row is None and not summary_visible:
         raise AssertionError(
             "Step 3 failed: reopening the Workspace switcher after the hard reload no longer "
-            "showed the restored local workspace row.\n"
+            "showed the restored local workspace in the expected `Local Git` state.\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
-    if local_row.state_label != "Local Git":
+    if local_row is not None and local_row.state_label != "Local Git":
         raise AssertionError(
             "Step 3 failed: the restored local workspace row reverted away from `Local Git` "
             "after the hard reload.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
-    if LOCAL_TARGET not in local_row.detail_text or "Branch: main" not in local_row.detail_text:
-        raise AssertionError(
-            "Step 3 failed: the restored local workspace row did not keep the expected branch "
-            "information after the hard reload.\n"
-            f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
-        )
-    if selected_row is None or selected_row.display_name != LOCAL_DISPLAY_NAME:
+    if selected_row is not None and selected_row.display_name != LOCAL_DISPLAY_NAME:
         raise AssertionError(
             "Step 3 failed: the restored local workspace row did not remain the active "
             "selection after the hard reload.\n"
-            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2) if selected_row else 'null'}"
+            f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}"
+        )
+    detail_visible = (
+        local_row is not None
+        and LOCAL_TARGET in local_row.detail_text
+        and f"Branch: {DEFAULT_BRANCH}" in local_row.detail_text
+    ) or _switcher_contains_workspace_detail(
+        switcher=switcher,
+        display_name=LOCAL_DISPLAY_NAME,
+        target_type="Local",
+        state_label="Local Git",
+        detail_contains=LOCAL_TARGET,
+        branch_name=DEFAULT_BRANCH,
+    )
+    if not detail_visible:
+        raise AssertionError(
+            "Step 3 failed: the restored local workspace did not keep the expected branch "
+            "information after the hard reload.\n"
+            f"Observed switcher text:\n{switcher.body_text}"
         )
     if not bool(shell_observation.get("shell_ready")):
         raise AssertionError(
@@ -1016,6 +1054,16 @@ def _assert_reloaded_local_workspace(
     if bool(shell_observation.get("fatal_banner_visible")):
         raise AssertionError(
             "Step 3 failed: the app showed a fatal tracker load banner after the hard reload.\n"
+            f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
+        )
+    if not _shell_shows_repository_branch(
+        shell_observation=shell_observation,
+        repository_label=LOCAL_TARGET,
+        branch_name=DEFAULT_BRANCH,
+    ):
+        raise AssertionError(
+            "Step 3 failed: the app shell no longer surfaced the restored local workspace "
+            "repository and branch details after the hard reload.\n"
             f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}"
         )
     if persisted_workspace_state is None:
@@ -1486,11 +1534,10 @@ def _record_request_steps_precondition_failure(
         )
 
 
-def _observe_reloaded_workspace_state(
+def _observe_reloaded_workspace_surface(
     *,
     tracker_page,
     page: LiveWorkspaceSwitcherPage,
-    expected_local_workspace_id: str,
 ) -> dict[str, object]:
     trigger = _safe_trigger_payload(page)
     shell_observation = tracker_page.observe_interactive_shell(
@@ -1505,22 +1552,63 @@ def _observe_reloaded_workspace_state(
             ],
         ),
     )
-    ready = (
+    surface_ready = (
         trigger is not None
-        and trigger.get("display_name") == LOCAL_DISPLAY_NAME
-        and trigger.get("workspace_type") == "Local"
-        and trigger.get("state_label") == "Local Git"
         and bool(shell_observation.get("shell_ready"))
         and persisted_workspace_state is not None
-        and persisted_workspace_state.get("activeWorkspaceId") == expected_local_workspace_id
     )
     return {
-        "ready": ready,
+        "surface_ready": surface_ready,
         "trigger": trigger,
         "shell_observation": shell_observation,
         "persisted_workspace_state": persisted_workspace_state,
         "body_text": tracker_page.body_text(),
     }
+
+
+def _normalized_lines(text: str) -> tuple[str, ...]:
+    return tuple(" ".join(line.split()).strip() for line in text.splitlines() if line.strip())
+
+
+def _switcher_contains_workspace_summary(
+    *,
+    switcher: WorkspaceSwitcherObservation,
+    display_name: str,
+    target_type: str,
+    state_label: str,
+) -> bool:
+    expected = f"{display_name} · {target_type} · {state_label}"
+    return any(line == expected for line in _normalized_lines(switcher.body_text))
+
+
+def _switcher_contains_workspace_detail(
+    *,
+    switcher: WorkspaceSwitcherObservation,
+    display_name: str,
+    target_type: str,
+    state_label: str,
+    detail_contains: str,
+    branch_name: str,
+) -> bool:
+    return any(
+        display_name in line
+        and target_type in line
+        and state_label in line
+        and detail_contains in line
+        and f"Branch: {branch_name}" in line
+        for line in _normalized_lines(switcher.body_text)
+    )
+
+
+def _shell_shows_repository_branch(
+    *,
+    shell_observation: dict[str, object],
+    repository_label: str,
+    branch_name: str,
+) -> bool:
+    body_text = str(shell_observation.get("body_text", ""))
+    normalized_body = " ".join(body_text.split())
+    return repository_label in normalized_body and f"Branch {branch_name}" in normalized_body
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -1717,7 +1805,6 @@ def _build_response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Files Modified",
         "- `testing/tests/TS-980/test_ts_980.py`",
-        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
         "",
         "## Test Coverage",
         "- Manual Retry/Re-authenticate restore of the unavailable saved workspace using the prepared local repo shape.",

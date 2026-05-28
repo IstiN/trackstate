@@ -50,6 +50,10 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
   Future<void> submit() => _driver.submit();
 
   @override
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16}) =>
+      _driver.collectHostedRepositoryFocusOrder(maxTabs: maxTabs);
+
+  @override
   WorkspaceOnboardingState captureState() => _driver.captureState();
 
   @override

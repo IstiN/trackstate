@@ -653,6 +653,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
 
   @override
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  ) {
+    return 'Current session flags: canWrite=$canWrite, canCreateBranch=$canCreateBranch.';
+  }
+
+  @override
   String get repositoryAccessAttachmentRestrictedTitle =>
       'Attachments stay download-only in the browser';
 
@@ -706,6 +714,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get workspaceOnboardingFirstRunDescription =>
       'Choose a local folder to open an existing workspace or initialize TrackState in a new one.';
+
+  @override
+  String get workspaceOnboardingFirstLaunchDescription =>
+      'Choose a local folder or hosted repository to get started.';
 
   @override
   String get localWorkspaceOnboardingOpenExisting => 'Open existing folder';
@@ -831,6 +843,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workspaceStateReadOnly => 'Read-only';
 
   @override
+  String get workspaceStateSyncIssue => 'Sync issue';
+
+  @override
   String get workspaceStateNeedsSignIn => 'Needs sign-in';
 
   @override
@@ -860,6 +875,14 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get startupRateLimitRecoveryShellMessage =>
       'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
+
+  @override
+  String get startupHostedBootstrapIndexRecoveryTitle =>
+      'Hosted issue index needs regeneration';
+
+  @override
+  String get startupHostedBootstrapIndexRecoveryMessage =>
+      'Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.';
 
   @override
   String get repositoryPath => 'Repository Path';

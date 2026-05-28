@@ -5,10 +5,11 @@ deployed desktop shell.
 
 The automation:
 1. seeds a hosted workspace and stored GitHub token into browser storage
-2. injects a one-time `500 Internal Server Error` on the second repository
-   metadata request so the startup workspace-sync path fails after initial data
-   hydration begins
-3. waits for the visible failure message instead of asserting immediately
+2. injects a one-time `500 Internal Server Error` on the live startup
+   branch-sync request so the startup workspace-sync path fails after initial
+   data hydration begins
+3. waits for the async post-failure state to settle instead of asserting
+   immediately
 4. verifies the shell still exposes the desktop navigation and workspace
    switcher trigger
 5. opens the workspace switcher and confirms the saved hosted workspace shows

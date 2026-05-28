@@ -55,7 +55,7 @@ RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1023/te
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 BLOCKED_BOOTSTRAP_PATH = "DEMO/.trackstate/index/tombstones.json"
 LINKED_BUGS = ["TS-1018", "TS-1026", "TS-1028", "TS-1039"]
-RECOVERY_ACTION_LABELS = ("Sync issue", "Retry")
+RECOVERY_ACTION_LABELS = ("Sync issue", "Retry", "Retry startup")
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 REQUEST_STEPS = [
     "Click the Retry button in the workspace switcher panel.",

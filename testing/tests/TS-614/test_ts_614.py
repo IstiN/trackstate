@@ -36,11 +36,14 @@ HEIGHT_TOLERANCE = 1.0
 VERTICAL_CENTER_TOLERANCE = 1.0
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUTS_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts614_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts614_failure.png"
 
@@ -445,6 +448,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, status="PASSED"), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, status="PASSED"), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_markdown(result, status="PASSED"), encoding="utf-8")
+    _write_review_replies(result, passed=True)
     if BUG_DESCRIPTION_PATH.exists():
         BUG_DESCRIPTION_PATH.unlink()
 
@@ -468,6 +472,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, status="FAILED"), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, status="FAILED"), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_markdown(result, status="FAILED"), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -704,6 +709,52 @@ def _human_summary_sentence(human_checks: list[dict[str, object]]) -> str:
         return "no additional human-style observations were recorded."
     return " / ".join(
         f"{entry['check']} Observed: {entry['observed']}" for entry in human_checks
+    )
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', ''))}`."
+    )
+    return (
+        "Fixed: resolved the merge conflicts in the TS-614 test and shared project-settings "
+        "page, preserved the required parent-header-container failure when no reliable public "
+        "container is exposed, and now always write the required review replies artifact. "
+        + rerun_summary
     )
 
 
