@@ -1,0 +1,10 @@
+test_id: TS-389
+type: web
+framework: playwright
+platform: chrome
+dependencies:
+  - GH_TOKEN or GITHUB_TOKEN with access to the hosted live setup repository
+  - TRACKSTATE_LIVE_APP_URL targeting the deployed hosted TrackState app
+notes:
+  - Seeds a temporary `design_doc.pdf` attachment in the hosted demo repository when needed.
+  - Verifies the live Attachments tab requires explicit confirmation before replacing an attachment with the same sanitized storage name.

@@ -1,0 +1,9 @@
+test_id: TS-886
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses the shared SettingsScreenRobot component flow so the ticket exercises the same canonical settings surface that owns the approved desktop golden.
+  - Verifies the user-visible Settings admin headings, tabs, primary actions, and repository-backed admin description before comparing the full desktop surface with the approved baseline in test/goldens/settings_admin_desktop.png.
+  - Uses the repo-approved desktop golden dimensions of 1440x960 that correspond to the stored baseline asset.
