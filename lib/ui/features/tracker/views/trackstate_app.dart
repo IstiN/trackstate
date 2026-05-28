@@ -13,6 +13,7 @@ import '../../../../../data/repositories/browser_local_workspace_repository.dart
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/providers/trackstate_provider.dart';
 import '../../../../../data/services/local_workspace_onboarding_service.dart';
 import '../../../../../data/services/trackstate_auth_store.dart';
 import '../../../../../data/services/workspace_profile_service.dart';
@@ -6386,6 +6387,9 @@ String _attachmentsAccessMessage(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
+  final uploadMode =
+      viewModel.providerSession?.attachmentUploadMode ??
+      AttachmentUploadMode.none;
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected =>
       l10n.attachmentsAccessMessageDisconnected,
@@ -6393,7 +6397,10 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.usesGitHubReleasesAttachmentStorage
+      viewModel.usesGitHubReleasesAttachmentStorage &&
+              uploadMode == AttachmentUploadMode.noLfs
+          ? l10n.attachmentsDownloadOnlyMessage
+          : viewModel.usesGitHubReleasesAttachmentStorage
           ? l10n.attachmentsGitHubReleasesUnsupportedMessage
           : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
