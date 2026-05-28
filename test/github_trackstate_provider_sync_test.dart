@@ -467,6 +467,98 @@ void main() {
       expect(contentsRequestCount, 0);
     },
   );
+
+  test(
+    'GitHub provider falls back to per-path revision lookups when the tree snapshot is truncated',
+    () async {
+      var contentsRequestCount = 0;
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/ref/heads/main':
+              return http.Response(
+                jsonEncode({
+                  'object': <String, Object?>{'sha': 'head-commit'},
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/commits/head-commit':
+              return http.Response(
+                jsonEncode({
+                  'tree': <String, Object?>{'sha': 'base-tree'},
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/trees/base-tree':
+              return http.Response(
+                jsonEncode({'truncated': true, 'tree': const <Object?>[]}),
+                200,
+              );
+            case '/repos/owner/current/git/trees':
+              return http.Response(jsonEncode({'sha': 'updated-tree'}), 201);
+            case '/repos/owner/current/git/commits':
+              return http.Response(jsonEncode({'sha': 'new-commit'}), 201);
+            case '/repos/owner/current/git/refs/heads/main':
+              return http.Response(jsonEncode(<String, Object?>{}), 200);
+            case '/repos/owner/current/contents/DEMO/config/priorities.json':
+              contentsRequestCount += 1;
+              expect(request.url.queryParameters['ref'], 'head-commit');
+              return http.Response(jsonEncode({'sha': 'priority-sha'}), 200);
+          }
+
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final result = await provider.applyFileChanges(
+        const RepositoryFileChangeRequest(
+          branch: 'main',
+          message: 'Update priorities',
+          changes: <RepositoryFileChange>[
+            RepositoryTextFileChange(
+              path: 'DEMO/config/priorities.json',
+              content: '[{"id":"high","name":"High"}]\n',
+              expectedRevision: 'priority-sha',
+            ),
+          ],
+        ),
+      );
+
+      expect(result.revision, 'new-commit');
+      expect(contentsRequestCount, 1);
+    },
+  );
 }
 
 Future<GitHubTrackStateProvider> _createAuthenticatedProvider({

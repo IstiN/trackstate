@@ -415,6 +415,8 @@ class GitHubTrackStateProvider
     final currentPathRevisions = await _treePathRevisions(
       repository: connection.repository,
       treeSha: baseTreeSha,
+      ref: headCommitSha,
+      changes: request.changes,
     );
     for (final change in request.changes) {
       _ensureExpectedRevisionMatches(
@@ -1421,6 +1423,8 @@ class GitHubTrackStateProvider
   Future<Map<String, String?>> _treePathRevisions({
     required String repository,
     required String treeSha,
+    required String ref,
+    required Iterable<RepositoryFileChange> changes,
   }) async {
     final json =
         await _sendGitHubJson(
@@ -1435,6 +1439,13 @@ class GitHubTrackStateProvider
         'GitHub tree response did not contain a file list.',
       );
     }
+    if (json['truncated'] == true) {
+      return _pathRevisionsFromContents(
+        repository: repository,
+        ref: ref,
+        changes: changes,
+      );
+    }
     final revisions = <String, String?>{};
     for (final entry in tree.whereType<Map<String, Object?>>()) {
       final path = entry['path']?.toString().trim() ?? '';
@@ -1444,6 +1455,48 @@ class GitHubTrackStateProvider
       revisions[path] = entry['sha']?.toString();
     }
     return revisions;
+  }
+
+  Future<Map<String, String?>> _pathRevisionsFromContents({
+    required String repository,
+    required String ref,
+    required Iterable<RepositoryFileChange> changes,
+  }) async {
+    final revisions = await Future.wait(
+      {for (final change in changes) change.path}.map((path) async {
+        return MapEntry(
+          path,
+          await _currentPathRevision(
+            repository: repository,
+            path: path,
+            ref: ref,
+          ),
+        );
+      }),
+    );
+    return Map<String, String?>.fromEntries(revisions);
+  }
+
+  Future<String?> _currentPathRevision({
+    required String repository,
+    required String path,
+    required String ref,
+  }) async {
+    final response = await _http.get(
+      _githubUri('/repos/$repository/contents/$path', {'ref': ref}),
+      headers: _githubHeaders(_connection?.token),
+    );
+    if (response.statusCode == 404) {
+      return null;
+    }
+    if (response.statusCode != 200) {
+      throw TrackStateProviderException(
+        'GitHub API request failed for /repos/$repository/contents/$path '
+        '(${response.statusCode}): ${response.body}',
+      );
+    }
+    final json = jsonDecode(response.body) as Map<String, Object?>;
+    return json['sha']?.toString();
   }
 
   Future<String> _gitRefSha({
