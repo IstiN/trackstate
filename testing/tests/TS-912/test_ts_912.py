@@ -92,9 +92,9 @@ EXPECTED_RESULT = (
 MANUAL_REAUTH_CALLBACK_WAIT_SECONDS = 15
 RESTORE_COMPLETION_WAIT_SECONDS = 45
 REWORK_SUMMARY = (
-    "Removed the synthetic directory-picker override so TS-912 stays bound to "
-    "the real visible manual re-authentication flow and reports product-gap "
-    "evidence when the live restore still cannot complete."
+    "Removed the synthetic directory-picker override and changed TS-912 to stop "
+    "at the real native browser access prompt as an unautomated boundary "
+    "instead of claiming post-prompt product-gap evidence it cannot prove."
 )
 
 
@@ -368,6 +368,7 @@ def main() -> None:
                     restore_attempt_observation["directory_picker_state"]
                 )
                 if not callback_observed:
+                    result["failure_kind"] = "missing-directory-access-callback"
                     _record_human_verification(
                         result,
                         check=(
@@ -405,7 +406,55 @@ def main() -> None:
                         f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
                         f"Observed body text:\n{restore_attempt_observation['body_text']}"
                     )
+                if restore_attempt_observation["probe"]["showDirectoryPickerCalls"]:
+                    result["failure_kind"] = "native-browser-prompt-boundary"
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "After pressing the visible Retry action, confirmed the deployed app "
+                            "reached the real browser directory picker boundary before any "
+                            "restore assertion was made."
+                        ),
+                        observed=(
+                            f"action_label={exact_action_label!r}; "
+                            f"probe={json.dumps(restore_attempt_observation['probe'], ensure_ascii=True)}; "
+                            "picker_state="
+                            f"{json.dumps(restore_attempt_observation['directory_picker_state'], ensure_ascii=True)}; "
+                            f"body_text={restore_attempt_observation['body_text']!r}"
+                        ),
+                    )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "The visible Retry action reached the real browser "
+                            "`showDirectoryPicker()` boundary, but Chromium's native directory "
+                            "chooser cannot be completed from the supported Playwright surface "
+                            "without substituting the handle. This run stops at that "
+                            "unautomated access-grant boundary and does not claim post-grant "
+                            "restore evidence.\n"
+                            f"action_label={exact_action_label!r}\n"
+                            f"probe_state={json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                            "directory_picker_state="
+                            f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 4 failed: the visible Retry action reached the real browser "
+                        "`showDirectoryPicker()` boundary, but the native directory chooser "
+                        "cannot be completed from the supported Playwright surface without "
+                        "substituting the handle. This run stops at the unautomated browser "
+                        "prompt boundary and does not claim post-grant restore evidence.\n"
+                        f"Observed action label: {exact_action_label!r}\n"
+                        f"Observed probe state:\n{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+                        "Observed directory picker state:\n"
+                        f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
+                        f"Observed body text:\n{restore_attempt_observation['body_text']}"
+                    )
                 if restore_attempt_observation["failure_message"] is not None:
+                    result["failure_kind"] = "visible-manual-restore-failure"
                     _record_human_verification(
                         result,
                         check=(
@@ -458,6 +507,7 @@ def main() -> None:
                 )
                 result["restored_workspace_observation"] = restored_observation
                 if not restored:
+                    result["failure_kind"] = "restore-did-not-complete"
                     _record_step(
                         result,
                         step=4,
@@ -1082,6 +1132,7 @@ def _raise_startup_failure(
     runtime_context: Ts912ManualReauthRuntime,
     reason: str,
 ) -> None:
+    result["failure_kind"] = "startup-boundary-not-reached"
     startup_observation = _observe_startup_surface(tracker_page)
     result["runtime_state"] = "startup-failed"
     result["startup_observation"] = startup_observation
@@ -1598,9 +1649,11 @@ def _build_bug_description(result: dict[str, object]) -> str:
     local_before = result.get("local_row_before_restore")
     local_after = result.get("local_row_after_restore")
     probe_after_action = result.get("manual_reauth_probe_after_action")
+    directory_picker_after_action = result.get("manual_directory_picker_state_after_action")
     manual_action_label = result.get("manual_restore_action_label")
     startup_observation = result.get("startup_observation")
     boundary_reached = bool(result.get("ticket_boundary_reached"))
+    failure_kind = str(result.get("failure_kind", "")).strip()
     callback_observed = bool(
         isinstance(probe_after_action, dict)
         and (
@@ -1614,22 +1667,32 @@ def _build_bug_description(result: dict[str, object]) -> str:
         "before the unavailable-workspace restore path was visible, so it should be treated "
         "as a separate startup/app-shell issue rather than evidence that the TS-912 manual "
         "re-authentication capability itself is broken."
-        if not boundary_reached
+        if failure_kind == "startup-boundary-not-reached" or not boundary_reached
         else (
             (
-                "The deployed web build reaches the native browser directory-access boundary "
-                "for the saved unavailable local workspace, but it does not provide any "
-                "production-backed way to re-bind the actual saved directory from the current "
-                "TS-912 preload/runtime surface. Remembered directory handles live only in the "
-                "browser's in-memory map, so the restore cannot complete without substituting "
-                "the handle from the test."
-                if callback_observed
+                "The run reached Chromium's native `showDirectoryPicker()` boundary from the "
+                "visible Retry action, but the supported Playwright surface cannot complete "
+                "that browser-owned directory chooser without substituting the returned "
+                "handle. This result is an automation-boundary failure, not evidence that "
+                "the post-grant restore path is broken."
+                if failure_kind == "native-browser-prompt-boundary"
                 else (
-                    "The deployed web build does not expose a working manual re-authentication / "
-                    "directory-access grant flow for the saved unavailable local workspace from the "
-                    "Workspace switcher. The closest visible saved-workspace action remains "
-                    f"`{manual_action_label}` and it fails before any browser directory-access "
-                    "callback is triggered."
+                    (
+                        "The deployed web build reaches the native browser directory-access boundary "
+                        "for the saved unavailable local workspace, but it does not provide any "
+                        "production-backed way to re-bind the actual saved directory from the current "
+                        "TS-912 preload/runtime surface. Remembered directory handles live only in the "
+                        "browser's in-memory map, so the restore cannot complete without substituting "
+                        "the handle from the test."
+                        if callback_observed
+                        else (
+                            "The deployed web build does not expose a working manual re-authentication / "
+                            "directory-access grant flow for the saved unavailable local workspace from the "
+                            "Workspace switcher. The closest visible saved-workspace action remains "
+                            f"`{manual_action_label}` and it fails before any browser directory-access "
+                            "callback is triggered."
+                        )
+                    )
                 )
             )
             if manual_action_label
@@ -1673,6 +1736,7 @@ def _build_bug_description(result: dict[str, object]) -> str:
         f"- Local row after restore: `{json.dumps(local_after, ensure_ascii=True)}`",
         f"- Manual action label: `{manual_action_label}`",
         f"- Manual re-auth probe after action: `{json.dumps(probe_after_action, ensure_ascii=True)}`",
+        f"- Manual directory picker state after action: `{json.dumps(directory_picker_after_action, ensure_ascii=True)}`",
     ]
     if screenshot:
         lines.extend(["", "## Screenshots or logs", f"- Screenshot: `{screenshot}`"])
@@ -1712,11 +1776,21 @@ def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
             f"{_snippet(_current_failure_summary(result), limit=260)}"
         )
     )
+    failure_kind = str(result.get("failure_kind", "")).strip()
+    if failure_kind == "native-browser-prompt-boundary":
+        return (
+            "Fixed: TS-912 no longer treats the post-picker timeout as product-gap "
+            "evidence. When the visible Retry action reaches the real "
+            "`showDirectoryPicker()` boundary, the test now stops there as an "
+            "unautomated native-browser prompt instead of claiming the restore is "
+            "broken after access was granted. "
+            f"{rerun_summary}"
+        )
     return (
         "Fixed: TS-912 no longer overrides `showDirectoryPicker()` or injects a "
         "test-authored directory handle. The test stays on the real visible Retry "
-        "flow, keeps the compact-card Local Git fallback, reports the live product "
-        "gap when the restore still cannot complete, and generates "
+        "flow, keeps the compact-card Local Git fallback, scopes failures to the "
+        "boundary actually reached, and generates "
         "`review_replies.json` from the unresolved threads in "
         f"`{DISCUSSIONS_RAW_PATH.relative_to(REPO_ROOT)}`. "
         f"{rerun_summary}"

@@ -47,6 +47,7 @@ the workspace becomes the active `Local Git` workspace.
 
 Fail: the saved workspace action never triggers a directory-access callback, the
 deployed app reports an access/open error instead of a re-authentication flow,
-or the app reaches only the native browser prompt boundary with no production-
-backed way to re-bind the real saved directory from the current runtime surface.
+or the app reaches Chromium's native browser prompt boundary, which this
+Playwright flow can record but cannot complete without substituting the picker
+result.
 ```
