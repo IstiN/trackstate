@@ -241,37 +241,40 @@ void main() {
         repositoryName: 'owner/current',
         dataRef: 'main',
         sourceRef: 'main',
-        getResponseFetcher: (uri, {required headers, http.Client? client}) async {
-          switch (uri.path) {
-            case '/repos/owner/current':
-              return GitHubAuthProbeResponse(
-                statusCode: 200,
-                body: jsonEncode({
-                  'full_name': 'owner/current',
-                  'permissions': <String, Object?>{
-                    'pull': true,
-                    'push': true,
-                    'admin': false,
-                  },
-                }),
-              );
-            case '/user':
-              return GitHubAuthProbeResponse(
-                statusCode: 200,
-                body: jsonEncode({
-                  'login': 'workspace-tester',
-                  'name': 'Workspace Tester',
-                }),
-              );
-            case '/repos/owner/current/branches/main':
-              return GitHubAuthProbeResponse(
-                statusCode: 401,
-                body: jsonEncode({'message': 'Bad credentials'}),
-                headers: const {'www-authenticate': 'Bearer realm="GitHub"'},
-              );
-          }
-          throw StateError('Unexpected request: $uri');
-        },
+        getResponseFetcher:
+            (uri, {required headers, http.Client? client}) async {
+              switch (uri.path) {
+                case '/repos/owner/current':
+                  return GitHubAuthProbeResponse(
+                    statusCode: 200,
+                    body: jsonEncode({
+                      'full_name': 'owner/current',
+                      'permissions': <String, Object?>{
+                        'pull': true,
+                        'push': true,
+                        'admin': false,
+                      },
+                    }),
+                  );
+                case '/user':
+                  return GitHubAuthProbeResponse(
+                    statusCode: 200,
+                    body: jsonEncode({
+                      'login': 'workspace-tester',
+                      'name': 'Workspace Tester',
+                    }),
+                  );
+                case '/repos/owner/current/branches/main':
+                  return GitHubAuthProbeResponse(
+                    statusCode: 401,
+                    body: jsonEncode({'message': 'Bad credentials'}),
+                    headers: const {
+                      'www-authenticate': 'Bearer realm="GitHub"',
+                    },
+                  );
+              }
+              throw StateError('Unexpected request: $uri');
+            },
       );
 
       await provider.authenticate(
@@ -357,6 +360,111 @@ void main() {
         result.hostedSnapshotReloadDirective,
         HostedSnapshotReloadDirective.disabled,
       );
+    },
+  );
+
+  test(
+    'GitHub provider validates file revisions from one tree snapshot during applyFileChanges',
+    () async {
+      var contentsRequestCount = 0;
+      var treeValidationRequestCount = 0;
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/ref/heads/main':
+              return http.Response(
+                jsonEncode({
+                  'object': <String, Object?>{'sha': 'head-commit'},
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/commits/head-commit':
+              return http.Response(
+                jsonEncode({
+                  'tree': <String, Object?>{'sha': 'base-tree'},
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/trees/base-tree':
+              treeValidationRequestCount += 1;
+              expect(request.url.queryParameters['recursive'], '1');
+              return http.Response(
+                jsonEncode({
+                  'tree': <Object?>[
+                    <String, Object?>{
+                      'path': 'DEMO/config/priorities.json',
+                      'type': 'blob',
+                      'sha': 'priority-sha',
+                    },
+                  ],
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/trees':
+              return http.Response(jsonEncode({'sha': 'updated-tree'}), 201);
+            case '/repos/owner/current/git/commits':
+              return http.Response(jsonEncode({'sha': 'new-commit'}), 201);
+            case '/repos/owner/current/git/refs/heads/main':
+              return http.Response(jsonEncode(<String, Object?>{}), 200);
+          }
+
+          if (request.url.path.startsWith('/repos/owner/current/contents/')) {
+            contentsRequestCount += 1;
+            return http.Response('', 500);
+          }
+
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final result = await provider.applyFileChanges(
+        const RepositoryFileChangeRequest(
+          branch: 'main',
+          message: 'Update priorities',
+          changes: <RepositoryFileChange>[
+            RepositoryTextFileChange(
+              path: 'DEMO/config/priorities.json',
+              content: '[{"id":"high","name":"High"}]\n',
+              expectedRevision: 'priority-sha',
+            ),
+          ],
+        ),
+      );
+
+      expect(result.revision, 'new-commit');
+      expect(treeValidationRequestCount, 1);
+      expect(contentsRequestCount, 0);
     },
   );
 }

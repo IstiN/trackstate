@@ -534,10 +534,13 @@ class ProviderBackedTrackStateRepository
     await _provider.ensureCleanWorktree();
 
     final writeBranch = await _provider.resolveWriteBranch();
-    final blobPaths = (await _provider.listTree(ref: writeBranch))
-        .where((entry) => entry.type == 'blob')
-        .map((entry) => entry.path)
-        .toSet();
+    final blobEntries = (await _provider.listTree(
+      ref: writeBranch,
+    )).where((entry) => entry.type == 'blob').toList(growable: false);
+    final blobPaths = blobEntries.map((entry) => entry.path).toSet();
+    final blobRevisions = {
+      for (final entry in blobEntries) entry.path: entry.revision,
+    };
     final projectPath = blobPaths.firstWhere(
       (path) => path.endsWith('/project.json') || path == 'project.json',
       orElse: () => throw const TrackStateRepositoryException(
@@ -581,6 +584,7 @@ class ProviderBackedTrackStateRepository
           path: projectPath,
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -591,6 +595,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'statuses.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -601,6 +606,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'issue-types.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -611,6 +617,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'fields.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -621,6 +628,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'workflows.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -631,6 +639,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'priorities.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -641,6 +650,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'versions.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -651,6 +661,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'components.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -661,6 +672,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'resolutions.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
     ];
@@ -675,6 +687,7 @@ class ProviderBackedTrackStateRepository
             path: path,
             ref: writeBranch,
             blobPaths: blobPaths,
+            blobRevisions: blobRevisions,
           ),
         ),
       );
@@ -694,6 +707,7 @@ class ProviderBackedTrackStateRepository
             path: path,
             ref: writeBranch,
             blobPaths: blobPaths,
+            blobRevisions: blobRevisions,
           ),
         ),
       );
@@ -3687,9 +3701,14 @@ class ProviderBackedTrackStateRepository
     required String path,
     required String ref,
     required Set<String> blobPaths,
+    Map<String, String?>? blobRevisions,
   }) async {
     if (!blobPaths.contains(path)) {
       return null;
+    }
+    final revision = blobRevisions?[path];
+    if (revision != null || blobRevisions?.containsKey(path) == true) {
+      return revision;
     }
     final file = await _provider.readTextFile(path, ref: ref);
     return file.revision;

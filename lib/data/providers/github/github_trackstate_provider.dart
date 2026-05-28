@@ -260,6 +260,7 @@ class GitHubTrackStateProvider
           (entry) => RepositoryTreeEntry(
             path: entry['path']?.toString() ?? '',
             type: entry['type']?.toString() ?? '',
+            revision: entry['sha']?.toString(),
           ),
         )
         .toList();
@@ -411,10 +412,13 @@ class GitHubTrackStateProvider
       repository: connection.repository,
       commitSha: headCommitSha,
     );
+    final currentPathRevisions = await _treePathRevisions(
+      repository: connection.repository,
+      treeSha: baseTreeSha,
+    );
     for (final change in request.changes) {
-      await _ensureExpectedRevisionMatches(
-        repository: connection.repository,
-        ref: headCommitSha,
+      _ensureExpectedRevisionMatches(
+        currentPathRevisions: currentPathRevisions,
         change: change,
       );
     }
@@ -1390,20 +1394,15 @@ class GitHubTrackStateProvider
     );
   }
 
-  Future<void> _ensureExpectedRevisionMatches({
-    required String repository,
-    required String ref,
+  void _ensureExpectedRevisionMatches({
+    required Map<String, String?> currentPathRevisions,
     required RepositoryFileChange change,
-  }) async {
+  }) {
     final expectedRevision = change.expectedRevision;
     if (change is RepositoryDeleteFileChange && expectedRevision == null) {
       return;
     }
-    final currentRevision = await _currentPathRevision(
-      repository: repository,
-      path: change.path,
-      ref: ref,
-    );
+    final currentRevision = currentPathRevisions[change.path];
     if (expectedRevision == currentRevision) {
       return;
     }
@@ -1419,26 +1418,32 @@ class GitHubTrackStateProvider
     );
   }
 
-  Future<String?> _currentPathRevision({
+  Future<Map<String, String?>> _treePathRevisions({
     required String repository,
-    required String path,
-    required String ref,
+    required String treeSha,
   }) async {
-    final response = await _http.get(
-      _githubUri('/repos/$repository/contents/$path', {'ref': ref}),
-      headers: _githubHeaders(_connection?.token),
-    );
-    if (response.statusCode == 404) {
-      return null;
-    }
-    if (response.statusCode != 200) {
-      throw TrackStateProviderException(
-        'GitHub API request failed for /repos/$repository/contents/$path '
-        '(${response.statusCode}): ${response.body}',
+    final json =
+        await _sendGitHubJson(
+              method: 'GET',
+              path: '/repos/$repository/git/trees/$treeSha',
+              queryParameters: const {'recursive': '1'},
+            )
+            as Map<String, Object?>;
+    final tree = json['tree'];
+    if (tree is! List<Object?>) {
+      throw const TrackStateProviderException(
+        'GitHub tree response did not contain a file list.',
       );
     }
-    final json = jsonDecode(response.body) as Map<String, Object?>;
-    return json['sha']?.toString();
+    final revisions = <String, String?>{};
+    for (final entry in tree.whereType<Map<String, Object?>>()) {
+      final path = entry['path']?.toString().trim() ?? '';
+      if (path.isEmpty || entry['type']?.toString() != 'blob') {
+        continue;
+      }
+      revisions[path] = entry['sha']?.toString();
+    }
+    return revisions;
   }
 
   Future<String> _gitRefSha({
@@ -1564,11 +1569,12 @@ class GitHubTrackStateProvider
   Future<Object?> _sendGitHubJson({
     required String method,
     required String path,
+    Map<String, String>? queryParameters,
     Object? body,
     Set<int> expectedStatusCodes = const {200},
   }) async {
     final response = await _http.send(
-      http.Request(method, _githubUri(path))
+      http.Request(method, _githubUri(path, queryParameters))
         ..headers.addAll({
           ..._githubHeaders(_connection?.token),
           if (body != null) 'content-type': 'application/json; charset=utf-8',
