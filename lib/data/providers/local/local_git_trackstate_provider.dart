@@ -3,21 +3,39 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../domain/models/trackstate_models.dart';
+import '../github/github_trackstate_provider.dart';
 import '../trackstate_provider.dart';
+
+typedef LocalGitHostedProviderFactory =
+    TrackStateProviderAdapter Function({
+      required String repository,
+      required String branch,
+      required String dataRef,
+    });
 
 class LocalGitTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryReleaseAttachmentStore,
         RepositoryFileMutator,
-        RepositoryHistoryReader {
+        RepositoryHistoryReader,
+        RepositoryGitHubIdentityResolver {
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
+    String? writeBranch,
     GitProcessRunner? processRunner,
-  }) : _processRunner = processRunner ?? const IoGitProcessRunner();
+    LocalGitHostedProviderFactory? hostedProviderFactory,
+  }) : _processRunner = processRunner ?? const IoGitProcessRunner(),
+       _writeBranch = writeBranch?.trim(),
+       _hostedProviderFactory =
+           hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
 
   final String repositoryPath;
   final GitProcessRunner _processRunner;
+  final LocalGitHostedProviderFactory _hostedProviderFactory;
+  final String? _writeBranch;
+  RepositoryConnection? _connection;
 
   @override
   final String dataRef;
@@ -30,12 +48,14 @@ class LocalGitTrackStateProvider
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
-    final branch = await getBranch(connection.branch);
+    final resolvedBranch = _writeBranch ?? connection.branch;
+    final branch = await getBranch(resolvedBranch);
     if (!branch.exists) {
       throw TrackStateProviderException(
-        'Local branch ${connection.branch} was not found in $repositoryPath.',
+        'Local branch $resolvedBranch was not found in $repositoryPath.',
       );
     }
+    _connection = connection;
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
     return RepositoryUser(
@@ -78,6 +98,10 @@ class LocalGitTrackStateProvider
 
   @override
   Future<String> resolveWriteBranch() async {
+    final configuredWriteBranch = _writeBranch;
+    if (configuredWriteBranch != null && configuredWriteBranch.isNotEmpty) {
+      return configuredWriteBranch;
+    }
     final result = await _runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.stdout.trim();
   }
@@ -102,6 +126,7 @@ class LocalGitTrackStateProvider
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    validateRepositoryTextWrite(request);
     await _ensureOnBranch(request.branch);
     await _ensurePathClean(request.path);
     _ensureExpectedRevisionMatches(
@@ -160,6 +185,7 @@ class LocalGitTrackStateProvider
       await _ensurePathClean(change.path);
       switch (change) {
         case RepositoryTextFileChange():
+          validateRepositoryTextChange(change);
           _ensureExpectedRevisionMatches(
             path: change.path,
             expectedRevision: change.expectedRevision,
@@ -200,6 +226,7 @@ class LocalGitTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: revision?.stdout.trim(),
+        createdCommit: false,
       );
     }
     await _runGit(['commit', '-m', request.message, '--', ...paths]);
@@ -227,11 +254,73 @@ class LocalGitTrackStateProvider
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
+    final releaseAttachmentCapability = await _releaseAttachmentCapability(
+      branch: branch,
+    );
     return RepositoryPermission(
       canRead: exists.exists,
       canWrite: exists.exists,
       isAdmin: false,
+      supportsReleaseAttachmentWrites:
+          releaseAttachmentCapability.supportsReleaseAttachmentWrites,
+      releaseAttachmentWriteFailureReason:
+          releaseAttachmentCapability.failureReason,
     );
+  }
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    final currentState = await _readSyncState();
+    if (previousState == null) {
+      return RepositorySyncCheck(state: currentState);
+    }
+    final signals = <WorkspaceSyncSignal>{};
+    final changedPaths = <String>{};
+    if (previousState.repositoryRevision != currentState.repositoryRevision) {
+      signals.add(WorkspaceSyncSignal.localHead);
+      changedPaths.addAll(
+        await _changedPathsBetween(
+          previousState.repositoryRevision,
+          currentState.repositoryRevision,
+        ),
+      );
+    }
+    if ((previousState.workingTreeRevision ?? '') !=
+        (currentState.workingTreeRevision ?? '')) {
+      signals.add(WorkspaceSyncSignal.localWorktree);
+      changedPaths.addAll(await _worktreeChangedPaths());
+    }
+    return RepositorySyncCheck(
+      state: currentState,
+      signals: signals,
+      changedPaths: changedPaths,
+    );
+  }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    return store.readReleaseAttachment(request);
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: request.branch);
+    return store.writeReleaseAttachment(request);
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    await store.deleteReleaseAttachment(request);
   }
 
   @override
@@ -346,6 +435,250 @@ class LocalGitTrackStateProvider
   Future<String> _gitConfigValue(String key) async =>
       (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
 
+  Future<RepositorySyncState> _readSyncState() async {
+    final permission = await getPermission();
+    final branch = await resolveWriteBranch();
+    final revision = await _runGit(['rev-parse', dataRef]);
+    final status = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    return RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: revision.stdout.trim(),
+      sessionRevision:
+          '$branch:${permission.canRead}:${permission.canWrite}:${permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      workingTreeRevision: status.stdout.trim(),
+      permission: permission,
+    );
+  }
+
+  Future<Set<String>> _changedPathsBetween(
+    String previous,
+    String current,
+  ) async {
+    if (previous.trim().isEmpty ||
+        current.trim().isEmpty ||
+        previous.trim() == current.trim()) {
+      return const <String>{};
+    }
+    final result = await _runGit([
+      'diff',
+      '--name-only',
+      '--find-renames',
+      previous,
+      current,
+    ]);
+    return LineSplitter.split(
+      result.stdout,
+    ).map((line) => line.trim()).where((line) => line.isNotEmpty).toSet();
+  }
+
+  Future<Set<String>> _worktreeChangedPaths() async {
+    final result = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    final paths = <String>{};
+    for (final line in LineSplitter.split(result.stdout)) {
+      final normalized = line.trimRight();
+      if (normalized.length < 4) {
+        continue;
+      }
+      final rawPath = normalized.substring(3).trim();
+      if (rawPath.contains(' -> ')) {
+        final parts = rawPath.split(' -> ');
+        for (final part in parts) {
+          final value = part.trim();
+          if (value.isNotEmpty) {
+            paths.add(value);
+          }
+        }
+        continue;
+      }
+      if (rawPath.isNotEmpty) {
+        paths.add(rawPath);
+      }
+    }
+    return paths;
+  }
+
+  Future<_LocalReleaseAttachmentCapability> _releaseAttachmentCapability({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      return _LocalReleaseAttachmentCapability.unsupported(
+        await _gitRemoteFailureReason(),
+      );
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      return const _LocalReleaseAttachmentCapability.unsupported(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    try {
+      final provider = await _createHostedReleaseProvider(
+        repository: remoteIdentity,
+        branch: branch,
+      );
+      final permission = await provider.getPermission();
+      if (permission.supportsReleaseAttachmentWrites) {
+        return const _LocalReleaseAttachmentCapability.supported();
+      }
+      return _LocalReleaseAttachmentCapability.unsupported(
+        permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
+                true
+            ? permission.releaseAttachmentWriteFailureReason!.trim()
+            : 'GitHub authentication for $remoteIdentity does not permit '
+                  'GitHub Release uploads.',
+      );
+    } on TrackStateProviderException catch (error) {
+      return _LocalReleaseAttachmentCapability.unsupported(error.message);
+    }
+  }
+
+  Future<RepositoryReleaseAttachmentStore> _resolveReleaseAttachmentStore({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      throw TrackStateProviderException(await _gitRemoteFailureReason());
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    final provider = await _createHostedReleaseProvider(
+      repository: remoteIdentity,
+      branch: branch,
+    );
+    if (provider case final RepositoryReleaseAttachmentStore store) {
+      return store;
+    }
+    throw TrackStateProviderException(
+      'GitHub release uploads are not supported for $remoteIdentity.',
+    );
+  }
+
+  Future<TrackStateProviderAdapter> _createHostedReleaseProvider({
+    required String repository,
+    required String branch,
+  }) async {
+    final connection = _connection;
+    if (connection == null) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires a connected repository session.',
+      );
+    }
+    final provider = _hostedProviderFactory(
+      repository: repository,
+      branch: branch,
+      dataRef: branch,
+    );
+    await provider.authenticate(
+      RepositoryConnection(
+        repository: repository,
+        branch: branch,
+        token: connection.token,
+      ),
+    );
+    return provider;
+  }
+
+  Future<String?> _resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
+          '';
+      final identity = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (identity != null) {
+        return identity;
+      }
+    }
+    return null;
+  }
+
+  Future<String> _gitRemoteFailureReason() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    if (remoteNames.isEmpty) {
+      return 'GitHub repository identity cannot be resolved from the local Git '
+          'configuration because no remote is configured.';
+    }
+    return 'GitHub repository identity cannot be resolved from the local Git '
+        'configuration because no GitHub remote is configured.';
+  }
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
+          '';
+      final repository = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (repository != null) {
+        return repository;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async =>
+      (await _releaseAttachmentCapability(
+        branch: await resolveWriteBranch(),
+      )).failureReason;
+
+  String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
+    final normalized = remoteUrl.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final match = RegExp(
+      r'^(?:https://|ssh://git@|git@)github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?/?$',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (match == null) {
+      return null;
+    }
+    final owner = match.namedGroup('owner')?.trim() ?? '';
+    final repo = match.namedGroup('repo')?.trim() ?? '';
+    if (owner.isEmpty || repo.isEmpty) {
+      return null;
+    }
+    return '$owner/$repo';
+  }
+
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);
     if (result.stdout.trim().isEmpty) {
@@ -374,6 +707,11 @@ class LocalGitTrackStateProvider
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 
@@ -381,13 +719,14 @@ class LocalGitTrackStateProvider
     required String path,
     required String content,
   }) async {
-    final file = File(_absolutePath(path));
     await _withFileSystemErrorMapping(
       path: path,
       operation: 'write text file',
       action: () async {
-        await file.parent.create(recursive: true);
-        await file.writeAsString(content);
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsString(content, flush: true),
+        );
       },
     );
   }
@@ -396,15 +735,68 @@ class LocalGitTrackStateProvider
     required String path,
     required List<int> bytes,
   }) async {
-    final file = File(_absolutePath(path));
     await _withFileSystemErrorMapping(
       path: path,
       operation: 'write binary file',
       action: () async {
-        await file.parent.create(recursive: true);
-        await file.writeAsBytes(bytes);
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsBytes(bytes, flush: true),
+        );
       },
     );
+  }
+
+  Future<void> _replaceWorktreeFileAtomically({
+    required String path,
+    required Future<void> Function(File file) writeTempFile,
+  }) async {
+    final file = File(_absolutePath(path));
+    await file.parent.create(recursive: true);
+    final tempFile = File(
+      '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    final backupFile = File(
+      '${file.path}.bak-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await writeTempFile(tempFile);
+    try {
+      await _replaceFile(
+        tempFile: tempFile,
+        targetFile: file,
+        backupFile: backupFile,
+      );
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+      if (await backupFile.exists()) {
+        await backupFile.delete();
+      }
+    }
+  }
+
+  Future<void> _replaceFile({
+    required File tempFile,
+    required File targetFile,
+    required File backupFile,
+  }) async {
+    try {
+      await tempFile.rename(targetFile.path);
+      return;
+    } on FileSystemException {
+      if (await targetFile.exists()) {
+        await targetFile.rename(backupFile.path);
+      }
+      try {
+        await tempFile.rename(targetFile.path);
+      } on Object {
+        if (await backupFile.exists()) {
+          await backupFile.rename(targetFile.path);
+        }
+        rethrow;
+      }
+    }
   }
 
   Future<void> _deleteWorktreeFileIfExists(String path) async {
@@ -527,6 +919,28 @@ class LocalGitTrackStateProvider
     }
     return commits;
   }
+}
+
+TrackStateProviderAdapter _defaultLocalGitHostedProviderFactory({
+  required String repository,
+  required String branch,
+  required String dataRef,
+}) => GitHubTrackStateProvider(
+  repositoryName: repository,
+  sourceRef: branch,
+  dataRef: dataRef,
+);
+
+class _LocalReleaseAttachmentCapability {
+  const _LocalReleaseAttachmentCapability.supported()
+    : supportsReleaseAttachmentWrites = true,
+      failureReason = null;
+
+  const _LocalReleaseAttachmentCapability.unsupported(this.failureReason)
+    : supportsReleaseAttachmentWrites = false;
+
+  final bool supportsReleaseAttachmentWrites;
+  final String? failureReason;
 }
 
 _LfsPointerInfo? _parseLfsPointer(String content) {

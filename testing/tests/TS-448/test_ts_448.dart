@@ -178,7 +178,6 @@ Future<void> _waitForShellRecoveryWindow(
     await tester.pump(step);
   }
 }
-
 bool _snapshotContains(List<String> values, String expected) {
   for (final value in values) {
     final trimmed = value.trim();

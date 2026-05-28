@@ -39,6 +39,19 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
             cwd=project_root,
         )
 
+    def test(
+        self,
+        project_root: Path,
+        target: Path | str,
+        *,
+        reporter: str | None = None,
+    ) -> CliCommandResult:
+        flutter_bin = self._resolve_flutter_bin()
+        command: list[str] = [str(flutter_bin), "test", self._target_text(target)]
+        if reporter:
+            command.extend(("-r", reporter))
+        return self._run(tuple(command), cwd=project_root)
+
     def theme_token_check(
         self,
         project_root: Path,

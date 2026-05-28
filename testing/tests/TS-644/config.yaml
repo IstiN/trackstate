@@ -1,0 +1,11 @@
+test_id: TS-644
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN, or bootstrapped by the shared Dart probe runtime
+notes:
+  - Programmatically invokes the production CLI link formatter helpers through a Dart probe.
+  - Passes a non-canonical `IssueLink(type: "blocks", direction: "inward")` object to the formatter path.
+  - Verifies the visible formatted payload still renders and that stderr emits a validation warning for the inconsistent relationship metadata.

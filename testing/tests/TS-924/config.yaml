@@ -1,0 +1,40 @@
+test_id: TS-924
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs and pull request metadata
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts924_probe_surface.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts924-accessibility-pass-gate
+  commit_message: "TS-924 probe: verify compliant accessibility gate pass"
+  pull_request_title: "TS-924 disposable probe: verify compliant accessibility gate pass"
+  pull_request_body: "Disposable PR created by TS-924 automation to verify that the live pull-request accessibility gate passes when the rendered probe keeps WCAG AA contrast and uses a descriptive semantics label."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - axe
+    - wcag
+  contrast_evidence_markers:
+    - contrast
+    - color contrast
+    - ratio
+    - wcag
+    - 4.5:1
+  semantic_evidence_markers:
+    - aria
+    - semantics
+    - semantic
+    - label
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request with a rendered Flutter probe surface that keeps accessible text contrast and uses a descriptive semantics label.
+  - Waits for the live PR workflow run and inspects the actual PR checks surface and workflow logs instead of inferring behavior from workflow source text.
