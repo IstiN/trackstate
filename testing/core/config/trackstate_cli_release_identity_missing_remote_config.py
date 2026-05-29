@@ -19,8 +19,11 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
     source_file_text: str
     attachment_tag_prefix: str
     expected_attachment_relative_path: str
+    origin_remote_name: str | None
+    origin_remote_url: str | None
     expected_identity_fragments: tuple[str, ...]
     generic_release_auth_fragments: tuple[str, ...]
+    provider_capability_fragments: tuple[str, ...]
 
     @property
     def source_file_bytes(self) -> bytes:
@@ -33,15 +36,32 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(payload, dict):
             raise ValueError(
-                "TS-523 config must deserialize to a mapping: "
+                "Release identity missing-remote config must deserialize to a mapping: "
                 f"{path}"
             )
 
         runtime_inputs = payload.get("runtime_inputs") or {}
         if not isinstance(runtime_inputs, dict):
             raise ValueError(
-                "TS-523 config runtime_inputs must deserialize to a mapping: "
-                f"{path}"
+                "Release identity missing-remote config runtime_inputs must deserialize "
+                f"to a mapping: {path}"
+            )
+
+        origin_remote_name = cls._optional_string(
+            runtime_inputs,
+            "origin_remote_name",
+            path,
+        )
+        origin_remote_url = cls._optional_string(
+            runtime_inputs,
+            "origin_remote_url",
+            path,
+        )
+        if (origin_remote_name is None) != (origin_remote_url is None):
+            raise ValueError(
+                "Release identity missing-remote config must define both "
+                "runtime_inputs.origin_remote_name and runtime_inputs.origin_remote_url "
+                f"together in {path}."
             )
 
         return cls(
@@ -75,6 +95,8 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
                 "expected_attachment_relative_path",
                 path,
             ),
+            origin_remote_name=origin_remote_name,
+            origin_remote_url=origin_remote_url,
             expected_identity_fragments=cls._require_lower_string_list(
                 runtime_inputs,
                 "expected_identity_fragments",
@@ -85,13 +107,33 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
                 "generic_release_auth_fragments",
                 path,
             ),
+            provider_capability_fragments=cls._optional_lower_string_list(
+                runtime_inputs,
+                "provider_capability_fragments",
+                path,
+            ),
         )
 
     @staticmethod
     def _require_string(payload: dict[str, Any], key: str, path: Path) -> str:
         value = payload.get(key)
         if not isinstance(value, str) or not value:
-            raise ValueError(f"TS-523 config runtime_inputs.{key} must be a string in {path}.")
+            raise ValueError(
+                "Release identity missing-remote config runtime_inputs."
+                f"{key} must be a string in {path}."
+            )
+        return value
+
+    @staticmethod
+    def _optional_string(payload: dict[str, Any], key: str, path: Path) -> str | None:
+        value = payload.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                "Release identity missing-remote config runtime_inputs."
+                f"{key} must be a non-empty string in {path}."
+            )
         return value
 
     @staticmethod
@@ -103,13 +145,14 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
         value = payload.get(key)
         if not isinstance(value, list) or not value:
             raise ValueError(
-                f"TS-523 config runtime_inputs.{key} must be a non-empty list in {path}."
+                "Release identity missing-remote config runtime_inputs."
+                f"{key} must be a non-empty list in {path}."
             )
         items = []
         for index, item in enumerate(value):
             if not isinstance(item, str) or not item:
                 raise ValueError(
-                    "TS-523 config runtime_inputs."
+                    "Release identity missing-remote config runtime_inputs."
                     f"{key}[{index}] must be a non-empty string in {path}."
                 )
             items.append(item)
@@ -140,13 +183,14 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
             return ()
         if not isinstance(value, list):
             raise ValueError(
-                f"TS-523 config runtime_inputs.{key} must be a list in {path}."
+                "Release identity missing-remote config runtime_inputs."
+                f"{key} must be a list in {path}."
             )
         items = []
         for index, item in enumerate(value):
             if not isinstance(item, str) or not item:
                 raise ValueError(
-                    "TS-523 config runtime_inputs."
+                    "Release identity missing-remote config runtime_inputs."
                     f"{key}[{index}] must be a non-empty string in {path}."
                 )
             items.append(item.lower())

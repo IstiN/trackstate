@@ -119,7 +119,7 @@ class LiveIssueDetailCollaborationPageRegressionTest(unittest.TestCase):
             session.click_calls,
             [
                 (
-                    'flt-semantics[aria-label="Replace attachment"] flt-semantics[flt-tappable]',
+                    'flt-semantics[role="button"][flt-tappable]:text-is("Replace attachment")',
                     None,
                 ),
             ],

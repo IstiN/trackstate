@@ -106,6 +106,15 @@ void main() {
                 'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
               );
             } else {
+              if (submitErrors.isNotEmpty) {
+                failures.add(
+                  'Step 4 failed: submitting a read-only PAT raised framework errors during the repository-access recovery flow, '
+                  'so the read-only transition did not complete cleanly. '
+                  'Observed framework errors: ${_formatErrors(submitErrors)}. '
+                  'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
+                  'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+                );
+              }
               readOnlyTransitionVerified = true;
               if (await app.isDialogTextVisible('Cancel')) {
                 await app.closeDialog('Cancel');
@@ -303,23 +312,6 @@ Future<List<String>> _pumpUntilReadOnlyTransition(
     }
   }
   return errors;
-}
-
-Future<void> _waitForCondition(
-  WidgetTester tester, {
-  required Future<bool> Function() condition,
-  required String failureMessage,
-  Duration timeout = const Duration(seconds: 5),
-  Duration step = const Duration(milliseconds: 100),
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    await tester.pump(step);
-    if (await condition()) {
-      return;
-    }
-  }
-  fail(failureMessage);
 }
 
 bool _snapshotContains(List<String> values, String expected) {

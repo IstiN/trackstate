@@ -37,10 +37,14 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
         *,
         config: TrackStateCliReleaseIdentityMissingRemoteConfig,
     ) -> TrackStateCliReleaseIdentityMissingRemoteValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-523-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-identity-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-523-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-identity-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -79,38 +83,51 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".ts523-home"
-        sandbox_home.mkdir(parents=True, exist_ok=True)
-        env["HOME"] = str(sandbox_home)
-        env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
-        env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        completed = subprocess.run(
-            executed_command,
-            cwd=repository_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
+        remote_names = tuple(
+            line.strip()
+            for line in self._git_output(repository_path, "remote").splitlines()
+            if line.strip()
         )
-        observation = TrackStateCliCommandObservation(
-            requested_command=requested_command,
-            executed_command=executed_command,
-            fallback_reason=(
-                "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped GitHub credentials from the environment so TS-523 runs "
-                "the exact local command from a repository with no Git remotes."
-            ),
-            repository_path=str(repository_path),
-            compiled_binary_path=str(executable_path),
-            result=CliCommandResult(
-                command=executed_command,
-                exit_code=completed.returncode,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                json_payload=self._parse_json(completed.stdout),
-            ),
+        remote_description = (
+            "a repository whose configured remotes do not point to GitHub"
+            if remote_names
+            else "a repository with no Git remotes"
         )
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-identity-home-"
+        ) as sandbox_home_dir:
+            sandbox_home = Path(sandbox_home_dir)
+            env["HOME"] = str(sandbox_home)
+            env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
+            env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            completed = subprocess.run(
+                executed_command,
+                cwd=repository_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            observation = TrackStateCliCommandObservation(
+                requested_command=requested_command,
+                executed_command=executed_command,
+                fallback_reason=(
+                    "Pinned execution to a temporary executable compiled from this checkout "
+                    "and stripped GitHub credentials from the environment so the missing-"
+                    "remote release-identity scenario runs the exact local command from "
+                    f"{remote_description}."
+                ),
+                repository_path=str(repository_path),
+                compiled_binary_path=str(executable_path),
+                result=CliCommandResult(
+                    command=executed_command,
+                    exit_code=completed.returncode,
+                    stdout=completed.stdout,
+                    stderr=completed.stderr,
+                    json_payload=self._parse_json(completed.stdout),
+                ),
+            )
         return observation, stripped
 
     def _seed_local_repository(
@@ -162,7 +179,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-TS-523 local github-releases missing-remote fixture.
+Release identity missing-remote fixture.
 """,
         )
         self._write_binary_file(
@@ -170,16 +187,30 @@ TS-523 local github-releases missing-remote fixture.
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-523 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "Release Identity Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts523@example.com",
+            "release-identity@example.com",
         )
+        if config.origin_remote_name and config.origin_remote_url:
+            self._git(
+                repository_path,
+                "remote",
+                "add",
+                config.origin_remote_name,
+                config.origin_remote_url,
+            )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-523 fixture")
+        self._git(repository_path, "commit", "-m", "Seed missing-remote fixture")
 
     def _capture_repository_state(
         self,

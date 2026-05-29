@@ -65,22 +65,12 @@ class Ts522ReleaseDownloadAuthFailureScenario:
         failures.extend(self._validate_filesystem_state(validation, result))
         return result, failures
 
-    def _build_result(
-        self,
-        validation: TrackStateCliReleaseDownloadAuthFailureValidationResult,
-    ) -> dict[str, object]:
-        payload = validation.observation.result.json_payload
-        payload_dict = payload if isinstance(payload, dict) else None
-        error = payload_dict.get("error") if isinstance(payload_dict, dict) else None
-        error_dict = error if isinstance(error, dict) else None
+    def _build_base_result(self) -> dict[str, object]:
         return {
             "ticket": TICKET_KEY,
             "ticket_summary": TICKET_SUMMARY,
             "ticket_command": self.config.ticket_command,
-            "requested_command": validation.observation.requested_command_text,
-            "executed_command": validation.observation.executed_command_text,
-            "compiled_binary_path": validation.observation.compiled_binary_path,
-            "repository_path": validation.observation.repository_path,
+            "requested_command": " ".join(self.config.requested_command),
             "config_path": str(self.config_path),
             "os": platform.system(),
             "project_key": self.config.project_key,
@@ -88,37 +78,56 @@ class Ts522ReleaseDownloadAuthFailureScenario:
             "attachment_relative_path": self.config.attachment_relative_path,
             "expected_output_relative_path": self.config.expected_output_relative_path,
             "remote_origin_url": self.config.remote_origin_url,
-            "stdout": validation.observation.result.stdout,
-            "stderr": validation.observation.result.stderr,
-            "exit_code": validation.observation.result.exit_code,
-            "payload": payload_dict,
-            "error": error_dict,
-            "observed_error_code": error_dict.get("code")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_error_category": error_dict.get("category")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_provider": payload_dict.get("provider")
-            if isinstance(payload_dict, dict)
-            else None,
-            "observed_output_format": payload_dict.get("output")
-            if isinstance(payload_dict, dict)
-            else None,
-            "observed_error_message": error_dict.get("message")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_error_details": error_dict.get("details")
-            if isinstance(error_dict, dict)
-            else None,
-            "initial_state": _state_to_dict(validation.initial_state),
-            "final_state": _state_to_dict(validation.final_state),
-            "stripped_environment_variables": list(
-                validation.stripped_environment_variables
-            ),
             "steps": [],
             "human_verification": [],
         }
+
+    def _build_result(
+        self,
+        validation: TrackStateCliReleaseDownloadAuthFailureValidationResult,
+    ) -> dict[str, object]:
+        result = self._build_base_result()
+        payload = validation.observation.result.json_payload
+        payload_dict = payload if isinstance(payload, dict) else None
+        error = payload_dict.get("error") if isinstance(payload_dict, dict) else None
+        error_dict = error if isinstance(error, dict) else None
+        result.update(
+            {
+                "requested_command": validation.observation.requested_command_text,
+                "executed_command": validation.observation.executed_command_text,
+                "compiled_binary_path": validation.observation.compiled_binary_path,
+                "repository_path": validation.observation.repository_path,
+                "stdout": validation.observation.result.stdout,
+                "stderr": validation.observation.result.stderr,
+                "exit_code": validation.observation.result.exit_code,
+                "payload": payload_dict,
+                "error": error_dict,
+                "observed_error_code": error_dict.get("code")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_error_category": error_dict.get("category")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_provider": payload_dict.get("provider")
+                if isinstance(payload_dict, dict)
+                else None,
+                "observed_output_format": payload_dict.get("output")
+                if isinstance(payload_dict, dict)
+                else None,
+                "observed_error_message": error_dict.get("message")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_error_details": error_dict.get("details")
+                if isinstance(error_dict, dict)
+                else None,
+                "initial_state": _state_to_dict(validation.initial_state),
+                "final_state": _state_to_dict(validation.final_state),
+                "stripped_environment_variables": list(
+                    validation.stripped_environment_variables
+                ),
+            }
+        )
+        return result
 
     def _assert_exact_command(
         self,
@@ -339,6 +348,7 @@ class Ts522ReleaseDownloadAuthFailureScenario:
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     scenario = Ts522ReleaseDownloadAuthFailureScenario()
+    base_result = scenario._build_base_result()
 
     try:
         result, failures = scenario.execute()
@@ -346,9 +356,15 @@ def main() -> None:
             raise AssertionError("\n".join(failures))
         _write_pass_outputs(result)
     except Exception as error:
-        failure_result = locals().get("result", {}) if "result" in locals() else {}
+        failure_result = locals().get("result", base_result)
         if not isinstance(failure_result, dict):
-            failure_result = {}
+            failure_result = dict(base_result)
+        if not failure_result.get("final_state"):
+            failure_result.setdefault("failure_mode", "runtime_setup_failure")
+            failure_result.setdefault("observed_error_code", "TEST_RUNTIME_FAILED")
+            failure_result.setdefault("observed_error_category", "runtime")
+            failure_result.setdefault("observed_provider", "test-runtime")
+            failure_result.setdefault("observed_output_format", "runtime")
         failure_result.update(
             {
                 "ticket": TICKET_KEY,
@@ -453,15 +469,51 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     stdout = _as_text(result.get("stdout"))
     stderr = _as_text(result.get("stderr"))
     visible_error = _visible_error_text(result.get("payload"), stdout=stdout, stderr=stderr)
+    if not visible_error:
+        visible_error = error_message
     observed_output = _observed_command_output(stdout=stdout, stderr=stderr)
+    if observed_output == "<empty>":
+        observed_output = error_message or _as_text(result.get("traceback"))
     final_state = result.get("final_state")
-    final_state_text = json.dumps(final_state, indent=2, sort_keys=True)
+    final_state_dict = final_state if isinstance(final_state, dict) else {}
+    final_state_text = json.dumps(final_state_dict, indent=2, sort_keys=True)
     expected_output_path = _as_text(result.get("expected_output_relative_path"))
     failure_mode = _as_text(result.get("failure_mode"))
     product_gap = _as_text(result.get("product_gap"))
-    observed_provider = _as_text(result.get("observed_provider")) or "local-git"
-    observed_reason = _error_reason(result) or visible_error
-    if failure_mode == "local_provider_capability_gate":
+    default_provider = "test-runtime" if failure_mode == "runtime_setup_failure" else "local-git"
+    observed_provider = _as_text(result.get("observed_provider")) or default_provider
+    observed_reason = _error_reason(result) or visible_error or error_message
+    what_was_tested_line = (
+        f"* Attempted to execute {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no GitHub token in CLI args or environment."
+        if failure_mode == "runtime_setup_failure"
+        else f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no GitHub token in CLI args or environment."
+    )
+    markdown_tested_line = (
+        f"- Attempted to execute `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no GitHub token in CLI args or environment."
+        if failure_mode == "runtime_setup_failure"
+        else f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no GitHub token in CLI args or environment."
+    )
+
+    if failure_mode == "runtime_setup_failure":
+        step_one_summary = (
+            "the test runtime failed before the attachment-download command could be "
+            "observed on the checked-out revision"
+        )
+        human_summary = (
+            "Human-style verification could not reach the TS-522 command boundary "
+            "because the test runtime failed before any caller-visible "
+            "attachment-download result was produced."
+        )
+        actual_result_line = (
+            "* The checked-out TrackState CLI could not be executed far enough to "
+            "validate the release-backed missing-auth boundary; the failure stayed "
+            f"at test/runtime level with {_jira_inline(observed_reason)}."
+        )
+        step_two_line = (
+            "* ⚪ Step 2 was not reached because the attachment download command "
+            "never completed."
+        )
+    elif failure_mode == "local_provider_capability_gate":
         step_one_summary = (
             "the local release-backed download path failed earlier at the provider "
             "capability gate, so the command never reached missing-auth handling"
@@ -478,6 +530,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             "That means the local runtime path never reached GitHub "
             "auth/configuration handling for the release-backed attachment."
         )
+        step_two_line = "* ✅ Step 2 passed: no local download file was created."
     else:
         step_one_summary = (
             "the command failed, but the visible output was generic and did not "
@@ -495,6 +548,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(observed_reason)} instead of explicit "
             "release-auth/configuration guidance."
         )
+        step_two_line = "* ✅ Step 2 passed: no local download file was created."
+
     jira_lines = [
         "h3. Test Automation Result",
         "",
@@ -502,7 +557,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "h4. What was tested",
-        f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no GitHub token in CLI args or environment.",
+        what_was_tested_line,
         "* Inspected the caller-visible CLI output and the local output path after the command.",
         "",
         "h4. Result",
@@ -510,7 +565,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"* Observed error code/category: {_jira_inline(_as_text(result.get('observed_error_code')))} / {_jira_inline(_as_text(result.get('observed_error_category')))}",
         f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
         f"* Observed visible output: {_jira_inline(visible_error)}",
-        "* ✅ Step 2 passed: no local download file was created.",
+        step_two_line,
         f"* {human_summary}",
         *([f"* Product gap: {product_gap}"] if product_gap else []),
         "* Observed repository state:",
@@ -540,7 +595,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "## What was automated",
-        f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no GitHub token in CLI args or environment.",
+        markdown_tested_line,
         "- Inspected the caller-visible CLI output and the local output path after the command.",
         "",
         "## Result",
@@ -548,7 +603,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"- Observed error code/category: `{_as_text(result.get('observed_error_code'))}` / `{_as_text(result.get('observed_error_category'))}`",
         f"- Observed provider/output: `{observed_provider}` / `{_as_text(result.get('observed_output_format'))}`",
         f"- Observed visible output: `{visible_error}`",
-        "- ✅ Step 2 passed: no local download file was created.",
+        (
+            "- ⚪ Step 2 was not reached because the attachment download command "
+            "never completed."
+            if failure_mode == "runtime_setup_failure"
+            else "- ✅ Step 2 passed: no local download file was created."
+        ),
         f"- {human_summary}",
         *([f"- Product gap: {product_gap}"] if product_gap else []),
         "- Observed repository state:",
@@ -566,14 +626,15 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         RUN_COMMAND,
         "```",
     ]
-    bug_lines = [
-        "h4. Environment",
-        f"* Repository path: {_jira_inline(_as_text(result.get('repository_path')))}",
-        f"* Command: {_jira_inline(_as_text(result.get('ticket_command')))}",
-        f"* OS: {platform.system()}",
-        f"* Remote origin: {_jira_inline(_as_text(result.get('remote_origin_url')))}",
-        "* Auth setup: GH_TOKEN, GITHUB_TOKEN, and TRACKSTATE_TOKEN were removed from the process environment before execution.",
-        "",
+    if failure_mode == "runtime_setup_failure":
+        if BUG_DESCRIPTION_PATH.exists():
+            BUG_DESCRIPTION_PATH.unlink()
+        JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+        PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+        RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+        return
+
+    bug_steps = [
         "h4. Steps to Reproduce",
         (
             f"# ✅ Create a local TrackState repository whose {_jira_inline('project.json')} sets "
@@ -592,6 +653,19 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(expected_output_path)}. Observed: the file was not created, "
             "stdout showed the repository error envelope below, and the repository stayed clean."
         ),
+    ]
+    actual_result_prefix = [
+        "* The file was not written locally, so no download artifact was created."
+    ]
+    bug_lines = [
+        "h4. Environment",
+        f"* Repository path: {_jira_inline(_as_text(result.get('repository_path')))}",
+        f"* Command: {_jira_inline(_as_text(result.get('ticket_command')))}",
+        f"* OS: {platform.system()}",
+        f"* Remote origin: {_jira_inline(_as_text(result.get('remote_origin_url')))}",
+        "* Auth setup: GH_TOKEN, GITHUB_TOKEN, and TRACKSTATE_TOKEN were removed from the process environment before execution.",
+        "",
+        *bug_steps,
         "",
         "h4. Expected Result",
         "* The command should fail with an explicit release-auth/configuration error that tells the user GitHub access is required for a release-backed attachment download.",
@@ -599,7 +673,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "* Silent fallback to local attachment storage must not occur.",
         "",
         "h4. Actual Result",
-        "* The file was not written locally, so no download artifact was created.",
+        *actual_result_prefix,
         actual_result_line,
         "",
         "h4. Logs / Error Output",

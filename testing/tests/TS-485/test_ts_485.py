@@ -87,7 +87,8 @@ class Ts485MixedAttachmentResolutionScenario:
             "new_attachment_name": self.config.new_attachment_name,
             "expected_legacy_backend": self.config.expected_legacy_backend,
             "expected_new_backend": self.config.expected_new_backend,
-            "expected_github_release_tag": self.config.expected_github_release_tag,
+            "expected_github_release_tag": validation.expected_github_release_tag,
+            "remote_origin_url": validation.remote_origin_url,
             "upload_exit_code": validation.upload_observation.result.exit_code,
             "upload_stdout": validation.upload_observation.result.stdout,
             "upload_stderr": validation.upload_observation.result.stderr,
@@ -214,17 +215,29 @@ class Ts485MixedAttachmentResolutionScenario:
                 f"Expected mode: {self.config.expected_new_backend}\n"
                 f"Observed project.json:\n{state.project_json_text}"
             )
-        else:
+        if not state.remote_origin_url:
+            failures.append(
+                "Precondition failed: the seeded repository did not configure a GitHub "
+                "origin for the local github-releases upload path.\n"
+                f"Observed repository state:\n{_describe_state(state)}"
+            )
+        if (
+            project_mode == self.config.expected_new_backend
+            and state.remote_origin_url
+            and not failures
+        ):
             _record_step(
                 result,
                 step=1,
                 status="passed",
                 action=(
                     f"Inspect `{self.config.manifest_relative_path}` and confirm the "
-                    "current project attachment storage mode is github-releases."
+                    "current project attachment storage mode is github-releases with a "
+                    "GitHub origin configured for release-backed uploads."
                 ),
                 observed=(
                     f"project_attachment_storage={project_mode}; "
+                    f"remote_origin_url={state.remote_origin_url}; "
                     f"manifest_entry={json.dumps(legacy_entry, sort_keys=True)}"
                 ),
             )
@@ -240,7 +253,8 @@ class Ts485MixedAttachmentResolutionScenario:
                 check=(
                     "Verified the observable manifest JSON showed `old.pdf` under the "
                     "issue attachment list with a `repository-path` backend marker while "
-                    "project settings were already switched to `github-releases`."
+                    "project settings were already switched to `github-releases` and the "
+                    "fixture repository pointed at a GitHub origin."
                 ),
                 observed=state.manifest_text,
             )
@@ -328,11 +342,14 @@ class Ts485MixedAttachmentResolutionScenario:
                 f"Observed entry: {json.dumps(new_entry, sort_keys=True)}"
             )
         else:
-            if new_entry.get("githubReleaseTag") != self.config.expected_github_release_tag:
+            if (
+                new_entry.get("githubReleaseTag")
+                != validation.expected_github_release_tag
+            ):
                 failures.append(
                     "Expected result failed: the new manifest entry did not preserve "
                     "the expected GitHub release tag.\n"
-                    f"Expected tag: {self.config.expected_github_release_tag}\n"
+                    f"Expected tag: {validation.expected_github_release_tag}\n"
                     f"Observed entry: {json.dumps(new_entry, sort_keys=True)}"
                 )
             _record_step(
@@ -482,17 +499,18 @@ class Ts485MixedAttachmentResolutionScenario:
                 "the command completed.\n"
                 f"Observed repository state:\n{_describe_state(post_upload_state)}"
             )
-        if post_upload_state.head_commit_count != initial_state.head_commit_count:
+        if post_upload_state.head_commit_count != initial_state.head_commit_count + 1:
             failures.append(
-                "Expected result failed: the repository created a new commit during the "
-                "TS-485 upload attempt.\n"
+                "Expected result failed: the successful local upload did not create the "
+                "single manifest update commit expected for TS-485.\n"
                 f"Initial commit count: {initial_state.head_commit_count}\n"
                 f"Final commit count: {post_upload_state.head_commit_count}\n"
                 f"Observed repository state:\n{_describe_state(post_upload_state)}"
             )
-        if post_upload_state.head_commit_subject != initial_state.head_commit_subject:
+        if post_upload_state.head_commit_subject == initial_state.head_commit_subject:
             failures.append(
-                "Expected result failed: HEAD changed during the TS-485 upload attempt.\n"
+                "Expected result failed: HEAD did not advance to a new metadata commit "
+                "during the TS-485 upload.\n"
                 f"Initial HEAD: {initial_state.head_commit_subject}\n"
                 f"Final HEAD: {post_upload_state.head_commit_subject}\n"
                 f"Observed repository state:\n{_describe_state(post_upload_state)}"
@@ -500,6 +518,24 @@ class Ts485MixedAttachmentResolutionScenario:
         result["attachment_file_paths_after_upload"] = list(
             post_upload_state.attachment_file_paths
         )
+        attachment_paths = tuple(post_upload_state.attachment_file_paths)
+        if self.config.legacy_attachment_relative_path not in attachment_paths:
+            failures.append(
+                "Expected result failed: the legacy repository-path attachment "
+                "disappeared from the local issue attachments directory.\n"
+                f"Observed attachment paths: {attachment_paths}"
+            )
+        if any(
+            path
+            == f"{self.config.project_key}/{self.config.issue_key}/attachments/{self.config.new_attachment_name}"
+            for path in attachment_paths
+        ):
+            failures.append(
+                "Expected result failed: the release-backed upload wrote `new.png` "
+                "into the local issue attachments directory instead of keeping it in "
+                "GitHub Releases.\n"
+                f"Observed attachment paths: {attachment_paths}"
+            )
         return failures
 
 
@@ -514,6 +550,7 @@ def _state_to_dict(
         "new_attachment_source_exists": state.new_attachment_source_exists,
         "project_json_text": state.project_json_text,
         "attachment_file_paths": list(state.attachment_file_paths),
+        "remote_origin_url": state.remote_origin_url,
         "git_status_lines": list(state.git_status_lines),
         "head_commit_subject": state.head_commit_subject,
         "head_commit_count": state.head_commit_count,
@@ -566,6 +603,7 @@ def _describe_state(state: TrackStateCliMixedAttachmentResolutionRepositoryState
             f"legacy_attachment_exists={state.legacy_attachment_exists}",
             f"new_attachment_source_exists={state.new_attachment_source_exists}",
             f"attachment_file_paths={state.attachment_file_paths}",
+            f"remote_origin_url={state.remote_origin_url}",
             f"head_commit_subject={state.head_commit_subject}",
             f"head_commit_count={state.head_commit_count}",
             f"git_status_lines={state.git_status_lines}",
@@ -656,7 +694,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"h2. {TICKET_KEY} {status}",
             "",
             "*Automation checks*",
-            f"* Seeded a disposable local repository with `TS-10`, a legacy `old.pdf` attachment, and `attachmentStorage.mode = github-releases` in `project.json`.",
+            f"* Seeded a disposable local repository with `TS-10`, a legacy `old.pdf` attachment, `attachmentStorage.mode = github-releases` in `project.json`, and Git origin `{result.get('remote_origin_url', '')}`.",
             f"* Ran upload command: {{code}}{result.get('ticket_command_upload', '')}{{code}}",
             f"* Ran download command: {{code}}{result.get('ticket_command_download', '')}{{code}}",
             f"* Inspected `{result.get('manifest_relative_path', '')}` before and after the upload attempt.",
@@ -719,7 +757,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             "",
             "### Automation",
             "- Seeded a disposable local TrackState repository with issue `TS-10`.",
-            "- Set `project.json` attachment storage mode to `github-releases` while preserving a legacy `old.pdf` manifest entry with `storageBackend = repository-path`.",
+            "- Set `project.json` attachment storage mode to `github-releases` while preserving a legacy `old.pdf` manifest entry with `storageBackend = repository-path` and configuring a GitHub origin for release-backed uploads.",
             f"- Ran the exact upload command: `{result.get('ticket_command_upload', '')}`.",
             f"- Ran the exact download command: `{result.get('ticket_command_download', '')}`.",
             "- Compared the observable `attachments.json` manifest before and after the upload attempt.",
@@ -834,6 +872,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Environment",
             f"- Repository path: `{result.get('repository_path', '<unknown>')}`",
+            f"- Git origin: `{result.get('remote_origin_url', '<unknown>')}`",
             f"- OS: `{result.get('os', platform.system())}`",
             f"- Upload command: `{result.get('ticket_command_upload', '')}`",
             f"- Download command: `{result.get('ticket_command_download', '')}`",

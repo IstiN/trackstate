@@ -1,10 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/repositories/trackstate_repository_factory.dart';
-import 'package:trackstate/data/repositories/trackstate_runtime.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+
+import '../../core/utils/local_git_test_repository.dart';
 
 Future<TrackStateRepository> createLocalGitTestRepository({
   required WidgetTester tester,
@@ -41,9 +42,9 @@ Future<ProviderBackedTrackStateRepository> createLocalGitMutationRepository({
   required WidgetTester tester,
   required String repositoryPath,
 }) async {
-  final repository = createTrackStateRepository(
-    runtime: TrackStateRuntime.localGit,
-    localRepositoryPath: repositoryPath,
+  final repository = LocalTrackStateRepository(
+    repositoryPath: repositoryPath,
+    processRunner: const SyncGitProcessRunner(),
   );
   if (repository case final ProviderBackedTrackStateRepository providerBacked) {
     await preloadProviderBackedLocalGitRepository(
@@ -198,6 +199,11 @@ class _PreloadedLocalGitRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) =>
-      repository.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+    String? sourceName,
+  }) => repository.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 }

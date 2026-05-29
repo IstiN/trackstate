@@ -8,6 +8,7 @@ import traceback
 import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -35,7 +36,7 @@ PROJECT_JSON_PATH = "DEMO/project.json"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 ATTACHMENT_NAME = "manual.pdf"
 ATTACHMENT_PATH = f"{ISSUE_PATH}/attachments/{ATTACHMENT_NAME}"
-RELEASE_TAG_PREFIX = "ts510-attachments-"
+RELEASE_TAG_PREFIX = f"ts510-attachments-{uuid4().hex[:8]}-"
 EXPECTED_RELEASE_TAG = f"{RELEASE_TAG_PREFIX}{ISSUE_KEY}"
 LEGACY_ATTACHMENT_TEXT = (
     "%PDF-1.4\n"
@@ -78,7 +79,12 @@ def main() -> None:
 
     user = service.fetch_authenticated_user()
     project_json_text = service.fetch_repo_text(PROJECT_JSON_PATH)
-    original_release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    original_release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
+    if original_release is not None:
+        raise RuntimeError(
+            f"TS-510 requires a unique hosted release tag `{EXPECTED_RELEASE_TAG}`, but "
+            "that tag already exists. Refusing to overwrite shared live release state.",
+        )
     mutations = _collect_original_files(
         service,
         (PROJECT_JSON_PATH, ATTACHMENT_PATH, MANIFEST_PATH),
@@ -100,7 +106,7 @@ def main() -> None:
         "steps": [],
         "human_verification": [],
         "precondition_project_json_before": project_json_text,
-        "original_release_present": original_release is not None,
+        "original_release_present": False,
     }
 
     scenario_error: Exception | None = None
@@ -268,38 +274,70 @@ def main() -> None:
                     result["manifest_after_replacement"] = manifest_entry["manifest_text"]
                     result["matching_manifest_entries"] = manifest_entry["matching_entries"]
                     result["release_asset_names_after_upload"] = manifest_entry["release_asset_names"]
+                    refresh_error: str | None = None
+                    refreshed_body = ""
+                    refreshed_download_count = 0
+                    try:
+                        refresh_runtime = tracker_page.open()
+                        result["runtime_after_refresh"] = refresh_runtime.kind
+                        result["runtime_after_refresh_body_text"] = refresh_runtime.body_text
+                        if refresh_runtime.kind != "ready":
+                            raise AssertionError(
+                                "The deployed app did not return to the ready tracker shell "
+                                "after confirming the replacement.\n"
+                                f"Observed body text:\n{refresh_runtime.body_text}",
+                            )
+                        page.search_and_select_issue(
+                            issue_key=ISSUE_KEY,
+                            issue_summary=ISSUE_SUMMARY,
+                            query=ISSUE_KEY,
+                        )
+                        page.open_collaboration_tab("Attachments")
+                        refreshed_body = page.wait_for_text(
+                            ATTACHMENT_NAME,
+                            timeout_ms=60_000,
+                        )
+                        refreshed_download_count = page.attachment_download_button_count(
+                            ATTACHMENT_NAME,
+                        )
+                    except Exception as error:
+                        refresh_error = f"{type(error).__name__}: {error}"
+                        result["refresh_error"] = refresh_error
+                        refreshed_body = page.current_body_text()
+                    result["attachments_body_text_after_refresh"] = refreshed_body
+                    result["download_count_after_refresh"] = refreshed_download_count
                     if not matched_manifest:
                         raise AssertionError(
                             "Step 4 failed: the live replacement did not update "
                             "`attachments.json` so that `manual.pdf` had exactly one "
                             "`github-releases` entry within the timeout.\n"
                             f"Observed manifest text:\n{manifest_entry['manifest_text']}\n"
-                            f"Observed matching entries: {manifest_entry['matching_entries']}",
+                            f"Observed matching entries: {manifest_entry['matching_entries']}\n"
+                            f"Observed release assets: {manifest_entry['release_asset_names']}\n"
+                            f"Observed refreshed download control count: {refreshed_download_count}\n"
+                            + (
+                                f"Observed refresh error: {refresh_error}\n"
+                                if refresh_error
+                                else ""
+                            )
+                            + f"Observed refreshed body text:\n{refreshed_body}",
+                        )
+                    if refresh_error is not None:
+                        raise AssertionError(
+                            "Step 4 failed: the live replacement updated the manifest, but "
+                            "the hosted Attachments tab could not be re-opened to verify the "
+                            "user-visible result.\n"
+                            f"Observed refresh error: {refresh_error}\n"
+                            f"Observed manifest text:\n{manifest_entry['manifest_text']}",
                         )
 
-                    refresh_runtime = tracker_page.open()
-                    result["runtime_after_refresh"] = refresh_runtime.kind
-                    page.search_and_select_issue(
-                        issue_key=ISSUE_KEY,
-                        issue_summary=ISSUE_SUMMARY,
-                        query=ISSUE_KEY,
-                    )
-                    page.open_collaboration_tab("Attachments")
-                    refreshed_body = page.wait_for_text(
-                        ATTACHMENT_NAME,
-                        timeout_ms=60_000,
-                    )
-                    refreshed_download_count = page.attachment_download_button_count(
-                        ATTACHMENT_NAME,
-                    )
-                    result["attachments_body_text_after_refresh"] = refreshed_body
-                    result["download_count_after_refresh"] = refreshed_download_count
                     if refreshed_download_count != 1:
                         raise AssertionError(
                             "Step 4 failed: refreshing the Attachments tab showed duplicate "
                             "or missing `manual.pdf` rows instead of exactly one active "
                             "entry.\n"
                             f"Observed download control count: {refreshed_download_count}\n"
+                            f"Observed release assets: {manifest_entry['release_asset_names']}\n"
                             f"Observed body text:\n{refreshed_body}",
                         )
                     _record_step(
@@ -346,7 +384,6 @@ def main() -> None:
             cleanup = _restore_fixture(
                 service=service,
                 mutations=mutations,
-                original_release=original_release,
             )
             result["cleanup"] = cleanup
         except Exception as error:
@@ -402,7 +439,6 @@ def _fetch_repo_file_if_exists(
 
 
 def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
-    _delete_release_if_present(service, service.fetch_release_by_tag(EXPECTED_RELEASE_TAG))
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
@@ -503,7 +539,7 @@ def _observe_manifest_state(service: LiveSetupRepositoryService) -> dict[str, ob
         for entry in entries
         if isinstance(entry, dict) and str(entry.get("name", "")) == ATTACHMENT_NAME
     ]
-    release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     release_asset_names = [
         asset.name
         for asset in (release.assets if release is not None else [])
@@ -531,7 +567,6 @@ def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
     mutations: list[RepoMutation],
-    original_release: LiveHostedRelease | None,
 ) -> dict[str, object]:
     restored_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -554,16 +589,13 @@ def _restore_fixture(
             )
         restored_paths.append(mutation.path)
 
-    release_after_test = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
-    if original_release is None:
-        _delete_release_if_present(service, release_after_test)
-        release_cleanup = "deleted-seeded-release"
-    else:
-        release_cleanup = (
-            "kept-original-release"
-            if release_after_test is not None
-            else "original-release-missing"
-        )
+    release_after_test = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
+    _delete_release_if_present(service, release_after_test)
+    release_cleanup = (
+        "deleted-seeded-release"
+        if release_after_test is not None
+        else "no-seeded-release"
+    )
 
     return {
         "status": "restored",
@@ -579,19 +611,30 @@ def _delete_release_if_present(
 ) -> None:
     if release is None:
         return
-    for asset in release.assets:
-        service.delete_release_asset(asset.id)
-    service.delete_release(release.id)
-    matched, _ = poll_until(
-        probe=lambda: service.fetch_release_by_tag(release.tag_name),
-        is_satisfied=lambda value: value is None,
-        timeout_seconds=60,
-        interval_seconds=3,
+    matched, remaining = poll_until(
+        probe=lambda: _delete_release_pass(service, release.tag_name),
+        is_satisfied=lambda value: not value,
+        timeout_seconds=120,
+        interval_seconds=5,
     )
     if not matched:
         raise AssertionError(
-            f"Cleanup failed: release tag {release.tag_name} still exists after delete.",
+            "Cleanup failed: release tag "
+            f"{release.tag_name} still exists after delete.\nRemaining releases: {remaining}",
         )
+
+
+def _delete_release_pass(
+    service: LiveSetupRepositoryService,
+    tag_name: str,
+) -> list[int]:
+    matches = service.fetch_releases_by_tag_any_state(tag_name)
+    for release in matches:
+        for asset in release.assets:
+            service.delete_release_asset(asset.id)
+        service.delete_release(release.id)
+    remaining = service.fetch_releases_by_tag_any_state(tag_name)
+    return [release.id for release in remaining]
 
 
 def _record_step(
@@ -806,7 +849,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-510 - Legacy attachment replacement still surfaces duplicate or stale active entries",
+            f"# {_bug_title(result)}",
             "",
             "## Steps to reproduce",
             "1. Open 'TS-477' in the Issue Detail Attachments tab.",
@@ -826,10 +869,7 @@ def _bug_description(result: dict[str, object]) -> str:
             ),
             (
                 "- Actual: "
-                + str(
-                    result.get("error")
-                    or "the hosted replacement flow did not converge to one active github-releases attachment entry."
-                )
+                + _actual_failure_summary(result)
             ),
             "",
             "## Exact error message or assertion failure",
@@ -854,6 +894,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "### Matching manifest entries",
             "```json",
             json.dumps(result.get("matching_manifest_entries", []), indent=2, sort_keys=True),
+            "```",
+            "### Release assets after replacement attempt",
+            "```json",
+            json.dumps(result.get("release_asset_names_after_upload", []), indent=2, sort_keys=True),
             "```",
             "### Replace dialog text",
             "```text",
@@ -948,6 +992,32 @@ def _ticket_step_action(step_number: int) -> str:
         3: "Confirm the replacement in the dialog.",
         4: "Refresh or observe the attachment list in the tab.",
     }.get(step_number, "Ticket step")
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    failed_step = _extract_failed_step_number(str(result.get("error", "")))
+    if failed_step == 2:
+        return "TS-510 - Hosted legacy attachment replacement cannot be started from the Attachments tab"
+    if failed_step == 4:
+        return "TS-510 - Hosted legacy attachment replacement leaves the repository-path entry active"
+    return "TS-510 - Hosted legacy attachment replacement does not match the expected result"
+
+
+def _actual_failure_summary(result: dict[str, object]) -> str:
+    error = str(result.get("error", "")).strip()
+    refreshed_body = str(result.get("attachments_body_text_after_refresh", "")).strip()
+    release_assets = result.get("release_asset_names_after_upload", [])
+    if error and refreshed_body:
+        return (
+            f"{error}\nObserved Attachments tab after refresh:\n{refreshed_body}\n"
+            f"Observed release assets: {release_assets}"
+        )
+    if error:
+        return f"{error}\nObserved release assets: {release_assets}"
+    return (
+        "the hosted replacement flow did not converge to one active github-releases "
+        f"attachment entry. Observed release assets: {release_assets}"
+    )
 
 
 if __name__ == "__main__":

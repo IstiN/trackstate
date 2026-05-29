@@ -6,9 +6,9 @@ import sys
 import traceback
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
 
 from testing.components.services.trackstate_cli_release_identity_missing_remote_validator import (  # noqa: E402
     TrackStateCliReleaseIdentityMissingRemoteValidator,
@@ -33,26 +33,28 @@ TICKET_SUMMARY = (
     "Local runtime upload without remote repository — explicit identity error "
     "for release-backed storage"
 )
-OUTPUTS_DIR = REPO_ROOT / "outputs"
+OUTPUTS_DIR = WORKSPACE_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 TEST_FILE_PATH = "testing/tests/TS-523/test_ts_523.py"
 RUN_COMMAND = "python testing/tests/TS-523/test_ts_523.py"
 
 
 class Ts523ReleaseIdentityMissingRemoteScenario:
     def __init__(self) -> None:
-        self.repository_root = REPO_ROOT
-        self.config_path = self.repository_root / "testing/tests/TS-523/config.yaml"
+        self.workspace_root = WORKSPACE_ROOT
+        self.source_root = WORKSPACE_ROOT
+        self.config_path = self.workspace_root / "testing/tests/TS-523/config.yaml"
         self.config = TrackStateCliReleaseIdentityMissingRemoteConfig.from_file(
             self.config_path
         )
         self.validator = TrackStateCliReleaseIdentityMissingRemoteValidator(
             probe=create_trackstate_cli_release_identity_missing_remote_probe(
-                self.repository_root
+                self.source_root
             )
         )
 
@@ -94,6 +96,7 @@ class Ts523ReleaseIdentityMissingRemoteScenario:
             "requested_command": validation.observation.requested_command_text,
             "executed_command": validation.observation.executed_command_text,
             "compiled_binary_path": validation.observation.compiled_binary_path,
+            "source_root": str(self.source_root),
             "repository_path": validation.observation.repository_path,
             "config_path": str(self.config_path),
             "os": platform.system(),
@@ -344,11 +347,28 @@ def main() -> None:
         failure_result = locals().get("result", {}) if "result" in locals() else {}
         if not isinstance(failure_result, dict):
             failure_result = {}
+        failure_result.setdefault("ticket_command", scenario.config.ticket_command)
+        failure_result.setdefault(
+            "expected_attachment_relative_path",
+            scenario.config.expected_attachment_relative_path,
+        )
+        failure_result.setdefault("config_path", str(scenario.config_path))
+        failure_result.setdefault("source_root", str(scenario.source_root))
+        if _is_compile_failure_message(str(error)):
+            failure_result["product_gap"] = (
+                "The repository-local TrackState CLI cannot be compiled for the local "
+                "runtime because the CLI dependency graph pulls in Flutter `dart:ui` "
+                "APIs through the GitHub provider path."
+            )
+            failure_result["error"] = (
+                "AssertionError: Failed to compile a temporary TrackState CLI executable."
+            )
+        else:
+            failure_result["error"] = f"{type(error).__name__}: {error}"
         failure_result.update(
             {
                 "ticket": TICKET_KEY,
                 "ticket_summary": TICKET_SUMMARY,
-                "error": f"{type(error).__name__}: {error}",
                 "traceback": traceback.format_exc(),
             }
         )
@@ -374,6 +394,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     )
 
     visible_error = _as_text(result.get("visible_error_text"))
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
     jira_lines = [
         "h3. Test Automation Result",
         "",
@@ -384,6 +406,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
         "* Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"* Inspected the repository path {_jira_inline(_as_text(result.get('expected_attachment_relative_path')))} and the local attachments directory after the command.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
         "",
         "h4. Result",
         "* Step 1 passed: the CLI failed immediately with explicit repository-identity guidance tied to the missing local Git remote configuration.",
@@ -398,7 +421,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "",
         "h4. Run command",
         "{code:bash}",
-        RUN_COMMAND,
+        run_command,
         "{code}",
     ]
     markdown_lines = [
@@ -411,6 +434,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
         "- Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"- Inspected `{_as_text(result.get('expected_attachment_relative_path'))}` and the local attachments directory after the command.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
         "",
         "## Result",
         "- Step 1 passed: the CLI failed immediately with explicit repository-identity guidance tied to the missing local Git remote configuration.",
@@ -420,16 +444,23 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "",
         "## How to run",
         "```bash",
-        RUN_COMMAND,
+        run_command,
         "```",
     ]
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    _write_review_replies()
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error_message = _as_text(result.get("error"))
+    if _is_compile_failure_message(_as_text(result.get("traceback"))) or _is_compile_failure_message(
+        error_message
+    ):
+        _write_compile_failure_outputs(result, error_message=error_message)
+        return
+
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -454,6 +485,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     failure_mode = _as_text(result.get("failure_mode"))
     product_gap = _as_text(result.get("product_gap"))
     observed_provider = _as_text(result.get("observed_provider")) or "local-git"
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
     if failure_mode == "generic_release_auth_guidance":
         step_one_summary = (
             "the command failed, but it only returned generic release-upload "
@@ -496,6 +529,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "h4. What was tested",
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
         "* Inspected the caller-visible CLI output and the repository attachment path after the command.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
         "",
         "h4. Result",
         f"* ❌ Step 1 failed: {step_one_summary}.",
@@ -522,7 +556,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. Run command",
         "{code:bash}",
-        RUN_COMMAND,
+        run_command,
         "{code}",
     ]
     markdown_lines = [
@@ -534,6 +568,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "## What was automated",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
         "- Inspected the caller-visible CLI output and the repository attachment path after the command.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
         "",
         "## Result",
         f"- ❌ Step 1 failed: {step_one_summary}.",
@@ -555,13 +590,14 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## How to run",
         "```bash",
-        RUN_COMMAND,
+        run_command,
         "```",
     ]
     bug_lines = [
         "# TS-523 bug reproduction",
         "",
         "## Environment",
+        *([f"- Source checkout: `{source_checkout}`"] if source_checkout else []),
         f"- Repository path: `{_as_text(result.get('repository_path'))}`",
         f"- Command: `{_as_text(result.get('ticket_command'))}`",
         f"- OS: `{platform.system()}`",
@@ -605,6 +641,205 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
+    _write_review_replies()
+
+
+def _write_compile_failure_outputs(
+    result: dict[str, object],
+    *,
+    error_message: str,
+) -> None:
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error_message,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    product_gap = _as_text(result.get("product_gap"))
+    compile_command = _extract_between(
+        _as_text(result.get("traceback")),
+        "Command: ",
+        "\nExit code:",
+    )
+    compile_stderr = _extract_between(
+        _as_text(result.get("traceback")),
+        "stderr:\n",
+        "\n\nTraceback",
+    ) or _extract_after(_as_text(result.get("traceback")), "stderr:\n")
+    visible_error = _first_non_empty_line(compile_stderr) or error_message
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
+
+    jira_lines = [
+        "h3. Test Automation Result",
+        "",
+        "*Status:* ❌ FAILED",
+        f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "h4. What was tested",
+        f"* Attempted to execute {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
+        "* The test first compiled the repository-local TrackState CLI so the exact public local command could be exercised against the disposable repository.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
+        "",
+        "h4. Result",
+        "* ❌ The ticket scenario could not start because the repository-local CLI failed to compile for the local runtime.",
+        f"* Observed compile command: {_jira_inline(compile_command)}",
+        f"* Observed compiler failure: {_jira_inline(visible_error)}",
+        "* Because the public local CLI path is currently broken, the missing-remote repository-identity contract could not be re-verified.",
+        *([f"* Product gap: {product_gap}"] if product_gap else []),
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        run_command,
+        "{code}",
+    ]
+    markdown_lines = [
+        "## Test Automation Result",
+        "",
+        "**Status:** ❌ FAILED",
+        f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## What was automated",
+        f"- Attempted to execute `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
+        "- The test first compiled the repository-local TrackState CLI so the exact public local command could run against the disposable repository.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
+        "",
+        "## Result",
+        "- ❌ The ticket scenario could not start because the repository-local CLI failed to compile for the local runtime.",
+        f"- Observed compile command: `{compile_command}`",
+        f"- Observed compiler failure: `{visible_error}`",
+        "- Because the public local CLI path is currently broken, the missing-remote repository-identity contract could not be re-verified.",
+        *([f"- Product gap: {product_gap}"] if product_gap else []),
+        "",
+        "## Observed output",
+        "```text",
+        (compile_stderr or error_message).rstrip(),
+        "```",
+        "",
+        "## How to run",
+        "```bash",
+        run_command,
+        "```",
+    ]
+    bug_lines = [
+        "# TS-523 bug reproduction",
+        "",
+        "## Environment",
+        *([f"- Source checkout: `{source_checkout}`"] if source_checkout else []),
+        f"- Command: `{_as_text(result.get('ticket_command'))}`",
+        f"- OS: `{platform.system()}`",
+        "",
+        "## Steps to reproduce",
+        "1. Create a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes.",
+        "2. From this checkout, run the TS-523 automation or compile the CLI directly:",
+        f"   - `{run_command}`",
+        f"   - `{compile_command}`",
+        "3. Observe the CLI build failure before the ticket command can execute.",
+        "",
+        "## Expected result",
+        "- The repository-local TrackState CLI should compile successfully in the local runtime so TS-523 can execute the public `trackstate attachment upload ... --target local` path.",
+        "- After the CLI starts, the command should fail with explicit repository-identity guidance when no Git remote is configured.",
+        "",
+        "## Actual result",
+        "- The repository-local CLI cannot be built in this checkout for the local runtime.",
+        f"- The compiler fails with `{visible_error}` before the ticket command can run.",
+        *([f"- Missing/broken production capability: {product_gap}"] if product_gap else []),
+        "",
+        "## Failing command/output",
+        "```text",
+        compile_command,
+        "```",
+        "",
+        "```text",
+        (compile_stderr or _as_text(result.get("traceback"))).rstrip(),
+        "```",
+    ]
+    JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+    PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
+    _write_review_replies()
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3234648281,
+                        "threadId": "PRRT_kwDOSU6Gf86BxMzA",
+                        "reply": (
+                            "Fixed: removed the `TRACKSTATE_TS523_SOURCE_ROOT` "
+                            "override so TS-523 now always compiles and validates "
+                            "the workspace checkout under review. The reported "
+                            "result stays pinned to this branch, and any branch-"
+                            "local product gap remains a real failed outcome."
+                        ),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _is_compile_failure_message(message: str) -> bool:
+    return (
+        "Failed to compile a temporary TrackState CLI executable." in message
+        or ("dart:ui" in message and "bin/trackstate.dart" in message)
+    )
+
+
+def _extract_between(text: str, start: str, end: str) -> str:
+    if start not in text:
+        return ""
+    _, _, remainder = text.partition(start)
+    if end and end in remainder:
+        return remainder.partition(end)[0].strip()
+    return remainder.strip()
+
+
+def _extract_after(text: str, start: str) -> str:
+    if start not in text:
+        return ""
+    return text.partition(start)[2].strip()
+
+
+def _first_non_empty_line(text: str) -> str:
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _source_checkout_display(result: dict[str, object]) -> str:
+    source_root = _as_text(result.get("source_root")).strip()
+    if not source_root:
+        return ""
+    try:
+        if Path(source_root).resolve() == WORKSPACE_ROOT.resolve():
+            return ""
+    except OSError:
+        pass
+    return source_root
+
+
+def _display_run_command(result: dict[str, object]) -> str:
+    return RUN_COMMAND
 
 
 def _record_step(

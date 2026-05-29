@@ -16,6 +16,7 @@ class TrackStateCliMixedAttachmentResolutionRepositoryState:
     new_attachment_source_exists: bool
     project_json_text: str | None
     attachment_file_paths: tuple[str, ...]
+    remote_origin_url: str | None
     git_status_lines: tuple[str, ...]
     head_commit_subject: str | None
     head_commit_count: int
@@ -35,3 +36,5 @@ class TrackStateCliMixedAttachmentResolutionValidationResult:
     post_upload_state: TrackStateCliMixedAttachmentResolutionRepositoryState
     upload_observation: TrackStateCliCommandObservation
     download_observation: TrackStateCliMixedAttachmentResolutionDownloadObservation
+    expected_github_release_tag: str
+    remote_origin_url: str

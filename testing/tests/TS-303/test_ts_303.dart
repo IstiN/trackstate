@@ -145,13 +145,13 @@ void main() {
               '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
-
         await screen.enterLabeledTextField(
           'Summary',
           text: 'TS-303 hierarchy validation draft',
         );
         await screen.submitCreateIssue(createIssueSection: 'Dashboard');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+
         final parentValidationVisible = await screen.isTextVisible(
           'Sub-tasks require a parent issue.',
         );
@@ -171,6 +171,35 @@ void main() {
               'Create form still visible: $createFormStillVisible. Repository '
               'issues: ${repositoryIssues.join(' | ')}.',
         );
+        expect(
+          createFormStillVisible,
+          isTrue,
+          reason:
+              'Step 5 failed: after showing the parent-required validation '
+              'message, the Create issue form should remain open so the user can '
+              'select Parent and continue. Visible texts: '
+              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          await screen.countDropdownFields('Parent'),
+          1,
+          reason:
+              'Step 5 failed: after the parent-required validation appears, the '
+              'visible Parent dropdown should remain available for correction. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          repositoryIssues.where(
+            (issue) => issue.contains('TS-303 hierarchy validation draft'),
+          ),
+          isEmpty,
+          reason:
+              'Step 5 failed: submitting a Sub-task without Parent must not '
+              'create a new issue in the repository. Repository issues: '
+              '${repositoryIssues.join(' | ')}.',
+        );
 
         await screen.selectDropdownOption(
           'Parent',
@@ -178,6 +207,15 @@ void main() {
         );
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
+        expect(
+          await screen.readDropdownFieldValue('Parent'),
+          Ts303IssueHierarchyFixture.parentOptionLabel,
+          reason:
+              'Step 6 failed: selecting Parent should update the visible Parent '
+              'field to the chosen issue. Visible texts: '
+              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
         expect(
           await screen.readReadOnlyFieldValue('Epic'),
           Ts303IssueHierarchyFixture.derivedEpicLabel,
