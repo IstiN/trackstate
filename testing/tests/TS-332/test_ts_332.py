@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 import traceback
 from pathlib import Path
 
@@ -27,8 +26,6 @@ OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts332_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts332_success.png"
 MAX_TAB_STEPS = 8
-FOCUS_SETTLE_TIMEOUT_SECONDS = 2.0
-FOCUS_POLL_INTERVAL_SECONDS = 0.05
 
 
 def main() -> None:
@@ -152,15 +149,14 @@ def main() -> None:
                 )
 
                 live_issue_page.focus_collaboration_tab("Attachments")
-                traversal = [_focused_element_dict(live_issue_page.active_element())]
+                initial_obs = live_issue_page.active_element()
+                traversal = [_focused_element_dict(initial_obs)]
+                prev_obs = initial_obs
                 for _ in range(MAX_TAB_STEPS):
                     live_issue_page.press_key("Tab")
-                    traversal.append(
-                        _wait_for_focus_update(
-                            live_issue_page,
-                            previous=traversal[-1],
-                        ),
-                    )
+                    obs = live_issue_page.wait_for_active_element_change(prev_obs)
+                    traversal.append(_focused_element_dict(obs))
+                    prev_obs = obs
                 result["tab_traversal"] = traversal
 
                 focused_download = _find_download_focus(traversal, expected_download_label)
@@ -260,23 +256,9 @@ def _find_download_focus(
         if observation.get("role") != "button":
             continue
         accessible_name = (observation.get("accessible_name") or "").strip()
-        text = (observation.get("text") or "").strip()
-        if accessible_name == expected_download_label or text == expected_download_label:
+        if accessible_name == expected_download_label:
             return observation
     return None
-
-
-def _wait_for_focus_update(
-    live_issue_page: LiveIssueDetailCollaborationPage,
-    *,
-    previous: dict[str, str | None],
-) -> dict[str, str | None]:
-    deadline = time.monotonic() + FOCUS_SETTLE_TIMEOUT_SECONDS
-    latest = _focused_element_dict(live_issue_page.active_element())
-    while latest == previous and time.monotonic() < deadline:
-        time.sleep(FOCUS_POLL_INTERVAL_SECONDS)
-        latest = _focused_element_dict(live_issue_page.active_element())
-    return latest
 
 
 def _format_focus_traversal(traversal: list[dict[str, str | None]]) -> str:

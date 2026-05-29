@@ -1,0 +1,1716 @@
+from __future__ import annotations
+
+import json
+import platform
+import re
+import sys
+import tempfile
+import traceback
+import urllib.error
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from testing.components.pages.live_issue_detail_collaboration_page import (  # noqa: E402
+    AttachmentSelectionSummaryObservation,
+    AttachmentUploadControlsObservation,
+    LiveIssueDetailCollaborationPage,
+)
+from testing.components.pages.live_project_settings_page import (  # noqa: E402
+    LiveProjectSettingsPage,
+)
+from testing.components.services.live_setup_repository_service import (  # noqa: E402
+    LiveHostedRelease,
+    LiveHostedRepositoryFile,
+    LiveSetupRepositoryService,
+)
+from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
+from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
+    create_live_tracker_app_with_stored_token,
+)
+
+TICKET_KEY = "TS-509"
+ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
+ISSUE_KEY = "DEMO-2"
+ISSUE_SUMMARY = "Explore the issue board"
+PROJECT_JSON_PATH = "DEMO/project.json"
+MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
+RELEASE_TAG_PREFIX_BASE = "ts509-release-bypass-"
+UPLOAD_SIZE_BYTES = 2_500_000
+ATTACHMENTS_PANEL_TIMEOUT_SECONDS = 180
+ATTACHMENTS_PANEL_POLL_INTERVAL_SECONDS = 4
+UPLOAD_PERSIST_TIMEOUT_SECONDS = 180
+UPLOAD_PERSIST_POLL_INTERVAL_SECONDS = 4
+
+HOSTED_LIMITED_UPLOAD_TITLE = "Some attachment uploads still require local Git"
+HOSTED_LIMITED_UPLOAD_FRAGMENTS = (
+    "Attachment upload is available for browser-supported files.",
+    "Files that follow the Git LFS attachment path",
+    "local Git runtime.",
+)
+GENERIC_LFS_ERROR_FRAGMENT = "download-only for Git LFS attachments"
+GENERIC_ATTACHMENT_LIMITED_LABEL = "Attachments limited"
+GENERIC_SETTINGS_RECOVERY_LABEL = "Open settings"
+REPOSITORY_ACCESS_PRIMARY_TITLE = "Connected"
+REPOSITORY_ACCESS_SECONDARY_TITLE = "GitHub Releases attachment storage"
+REPOSITORY_ACCESS_SETTINGS_HINT = (
+    "Settings is the canonical place to review repository access and reconnect safely."
+)
+
+OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts509_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts509_failure.png"
+
+
+@dataclass(frozen=True)
+class RepoMutation:
+    path: str
+    original_file: LiveHostedRepositoryFile | None
+
+
+@dataclass(frozen=True)
+class AttachmentPanelObservation:
+    body_text: str
+    choose_button_count: int
+    choose_button_enabled: bool
+    upload_button_count: int
+    upload_button_enabled: bool
+    loading_visible: bool
+    open_settings_count: int
+
+
+@dataclass(frozen=True)
+class ReleaseWritePreconditionObservation:
+    body_text: str
+
+
+def main() -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    config = load_live_setup_test_config()
+    service = LiveSetupRepositoryService(config=config)
+    token = service.token
+    if not token:
+        raise RuntimeError(
+            "TS-509 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
+        )
+
+    user = service.fetch_authenticated_user()
+    issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
+    _assert_preconditions(issue_fixture)
+
+    gitattributes_text = service.fetch_repo_text(".gitattributes")
+    lfs_extension = _pick_lfs_extension(gitattributes_text)
+    upload_name = f"ts509-release-upload.{lfs_extension}"
+    upload_path_in_repo = f"{ISSUE_PATH}/attachments/{upload_name}"
+    release_tag_prefix = _build_release_tag_prefix()
+    expected_release_tag = _expected_release_tag(release_tag_prefix)
+    mutations = _collect_original_files(
+        service,
+        (PROJECT_JSON_PATH, MANIFEST_PATH, upload_path_in_repo),
+    )
+
+    result: dict[str, object] = {
+        "ticket": TICKET_KEY,
+        "app_url": config.app_url,
+        "repository": service.repository,
+        "repository_ref": service.ref,
+        "issue_key": issue_fixture.key,
+        "issue_summary": issue_fixture.summary,
+        "issue_path": issue_fixture.path,
+        "project_json_path": PROJECT_JSON_PATH,
+        "manifest_path": MANIFEST_PATH,
+        "release_tag_prefix": release_tag_prefix,
+        "release_tag": expected_release_tag,
+        "upload_name": upload_name,
+        "upload_path": upload_path_in_repo,
+        "lfs_extension": lfs_extension,
+        "upload_size_bytes": UPLOAD_SIZE_BYTES,
+        "steps": [],
+        "human_verification": [],
+        "lfs_gitattributes": gitattributes_text,
+    }
+
+    scenario_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    try:
+        fixture_setup = _seed_fixture(
+            service,
+            release_tag_prefix=release_tag_prefix,
+            expected_release_tag=expected_release_tag,
+        )
+        result["fixture_setup"] = fixture_setup
+
+        with tempfile.TemporaryDirectory(prefix="ts509-", dir=OUTPUTS_DIR) as temp_dir:
+            upload_file_path = Path(temp_dir) / upload_name
+            upload_file_path.write_bytes(b"z" * UPLOAD_SIZE_BYTES)
+            result["selected_file_path"] = str(upload_file_path)
+
+            with create_live_tracker_app_with_stored_token(
+                config,
+                token=token,
+            ) as tracker_page:
+                page = LiveIssueDetailCollaborationPage(tracker_page)
+                settings_page = LiveProjectSettingsPage(tracker_page)
+                try:
+                    runtime = tracker_page.open()
+                    result["runtime_state"] = runtime.kind
+                    result["runtime_body_text"] = runtime.body_text
+                    if runtime.kind != "ready":
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="failed",
+                            action="Open the hosted app and reach the ready tracker shell.",
+                            observed=(
+                                f"runtime_state={runtime.kind}\n"
+                                f"Observed body text:\n{runtime.body_text}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check="Observed the hosted app body before any GitHub connection flow began.",
+                            observed=runtime.body_text,
+                        )
+                        raise AssertionError(
+                            "Precondition failed: the deployed app did not reach the hosted "
+                            "tracker shell before the TS-509 scenario began.\n"
+                            f"Observed body text:\n{runtime.body_text}",
+                        )
+
+                    try:
+                        page.ensure_connected(
+                            token=token,
+                            repository=service.repository,
+                            user_login=user.login,
+                        )
+                        page.dismiss_connection_banner()
+                        connected_body = page.current_body_text()
+                        result["connected_body_text"] = connected_body
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="passed",
+                            action=(
+                                "Connect the hosted session to GitHub and wait for the "
+                                "ready tracker shell."
+                            ),
+                            observed=(
+                                f"connected_repository={service.repository}; "
+                                f"user_login={user.login}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the hosted app reached the connected tracker shell "
+                                "before checking Repository access."
+                            ),
+                            observed=connected_body,
+                        )
+                    except Exception as error:
+                        connected_body = page.current_body_text()
+                        result["connected_body_text"] = connected_body
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="failed",
+                            action=(
+                                "Connect the hosted session to GitHub and wait for the "
+                                "ready tracker shell."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed body text:\n{connected_body}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the hosted app after the GitHub connection wait "
+                                "timed out, before Repository access or Attachments were reached."
+                            ),
+                            observed=connected_body,
+                        )
+                        raise
+                    try:
+                        repository_access = _observe_release_write_precondition(
+                            settings_page,
+                        )
+                        result["repository_access_observation"] = (
+                            _release_write_precondition_payload(repository_access)
+                        )
+                        observed_release_tag_prefix = (
+                            _assert_release_write_precondition(
+                                repository_access,
+                                expected_release_tag_prefix=release_tag_prefix,
+                            )
+                        )
+                        result["repository_access_release_tag_prefix"] = (
+                            observed_release_tag_prefix
+                        )
+                        _record_step(
+                            result,
+                            step=0,
+                            status="passed",
+                            action=(
+                                "Verify the hosted Repository access surface exposes "
+                                "release-backed browser uploads before using the "
+                                "Attachments tab as product evidence."
+                            ),
+                            observed=(
+                                "browser_supported_release_copy_visible=true; "
+                                f"release_tag_prefix={observed_release_tag_prefix}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Repository access section showed "
+                                "the browser-supported GitHub Releases upload copy "
+                                "required by the TS-509 precondition."
+                            ),
+                            observed=_repository_access_precondition_summary(
+                                repository_access,
+                            ),
+                        )
+                    except Exception as error:
+                        repository_access_body = settings_page.body_text()
+                        result["repository_access_body_text"] = repository_access_body
+                        _record_step(
+                            result,
+                            step=0,
+                            status="failed",
+                            action=(
+                                "Verify the hosted Repository access surface exposes "
+                                "release-backed browser uploads before using the "
+                                "Attachments tab as product evidence."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed body text:\n{repository_access_body}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the visible Repository access section before "
+                                "using the Attachments tab as TS-509 product evidence."
+                            ),
+                            observed=repository_access_body,
+                        )
+                        raise
+                    page.open_issue(
+                        issue_key=ISSUE_KEY,
+                        issue_summary=ISSUE_SUMMARY,
+                    )
+                    if page.issue_detail_count(ISSUE_KEY) == 0:
+                        raise AssertionError(
+                            "Step 1 failed: selecting the seeded issue did not open the "
+                            "hosted issue detail view.\n"
+                            f"Observed body text:\n{page.current_body_text()}",
+                        )
+
+                    try:
+                        page.open_collaboration_tab("Attachments")
+                        attachment_panel = _wait_for_attachment_panel(page)
+                        _store_attachment_panel_observation(
+                            result,
+                            attachment_panel,
+                            result_key="attachments_text_before_upload",
+                        )
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=attachment_panel.body_text,
+                            step_number=1,
+                        )
+                        _assert_attachment_upload_controls(
+                            attachment_panel,
+                        )
+                        _record_step(
+                            result,
+                            step=1,
+                            status="passed",
+                            action="Open the Issue Detail Attachments tab for the hosted issue.",
+                            observed=(
+                                "attachments_loaded=true; "
+                                f"{_attachment_panel_summary(attachment_panel)}; "
+                                "no_local_git_warning=true"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Attachments panel finished loading and "
+                                "did not show the amber local-Git or Git-LFS restriction copy "
+                                "before file selection."
+                            ),
+                            observed=attachment_panel.body_text,
+                        )
+                    except Exception as error:
+                        attachment_panel = _observe_attachment_panel(page)
+                        _store_attachment_panel_observation(
+                            result,
+                            attachment_panel,
+                            result_key="attachments_text_before_upload",
+                        )
+                        _record_step(
+                            result,
+                            step=1,
+                            status="failed",
+                            action="Open the Issue Detail Attachments tab for the hosted issue.",
+                            observed=(
+                                f"{error}\n"
+                                f"{_attachment_panel_summary(attachment_panel)}\n"
+                                f"Observed body text:\n{attachment_panel.body_text}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the Attachments panel state exactly as a hosted user "
+                                "would see it before any file selection."
+                            ),
+                            observed=attachment_panel.body_text,
+                        )
+                        raise
+
+                    try:
+                        page.choose_attachment(
+                            str(upload_file_path),
+                            timeout_ms=30_000,
+                        )
+                        selection_summary = page.wait_for_attachment_selection_summary(
+                            file_name=upload_name,
+                            timeout_ms=60_000,
+                        )
+                        result["selection_summary"] = _selection_summary_payload(
+                            selection_summary,
+                        )
+                        _assert_selection_summary(selection_summary, upload_name)
+                        selected_text = page.current_body_text()
+                        result["attachments_text_after_selection"] = selected_text
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=selected_text,
+                            step_number=2,
+                        )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="passed",
+                            action=(
+                                "Select a file that matches a Git LFS-tracked extension and "
+                                "review the pending upload state."
+                            ),
+                            observed=_selection_summary_text(selection_summary),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the selected-file summary showed the exact file "
+                                "name, a visible size label, and an enabled Upload "
+                                "attachment action."
+                            ),
+                            observed=_selection_summary_text(selection_summary),
+                        )
+                    except Exception as error:
+                        selected_text = page.current_body_text()
+                        result["attachments_text_after_selection"] = selected_text
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=(
+                                "Select a file that matches a Git LFS-tracked extension and "
+                                "review the pending upload state."
+                            ),
+                            observed=(
+                                f"{error}\nObserved body text:\n{selected_text}"
+                            ),
+                        )
+                        raise
+
+                    try:
+                        page.upload_attachment()
+                        matched_manifest, manifest_observation = poll_until(
+                            probe=lambda: _observe_manifest_state(
+                                service,
+                                attachment_name=upload_name,
+                                expected_release_tag=expected_release_tag,
+                            ),
+                            is_satisfied=lambda state: state["single_entry_is_release"] is True,
+                            timeout_seconds=UPLOAD_PERSIST_TIMEOUT_SECONDS,
+                            interval_seconds=UPLOAD_PERSIST_POLL_INTERVAL_SECONDS,
+                        )
+                        result["manifest_after_upload"] = manifest_observation["manifest_text"]
+                        result["matching_manifest_entries"] = manifest_observation[
+                            "matching_entries"
+                        ]
+                        result["release_asset_names_after_upload"] = manifest_observation[
+                            "release_asset_names"
+                        ]
+                        if not matched_manifest:
+                            raise AssertionError(
+                                "Step 3 failed: the hosted upload did not create a single "
+                                "github-releases manifest entry for the selected LFS-tracked "
+                                "file within the timeout.\n"
+                                f"Observed manifest text:\n{manifest_observation['manifest_text']}\n"
+                                f"Observed release assets: {manifest_observation['release_asset_names']}",
+                            )
+
+                        upload_visible_text = page.wait_for_text(upload_name, timeout_ms=60_000)
+                        result["attachments_text_after_upload"] = upload_visible_text
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=upload_visible_text,
+                            step_number=3,
+                        )
+                        visible_download_count = page.attachment_download_button_count(upload_name)
+                        result["visible_download_count_after_upload"] = visible_download_count
+                        if visible_download_count != 1:
+                            raise AssertionError(
+                                "Step 3 failed: the hosted Attachments tab did not show "
+                                "exactly one visible download row for the newly uploaded "
+                                "release-backed attachment.\n"
+                                f"Observed download control count: {visible_download_count}\n"
+                                f"Observed body text:\n{upload_visible_text}",
+                            )
+                        _record_step(
+                            result,
+                            step=3,
+                            status="passed",
+                            action=(
+                                "Upload the selected file and verify the browser routes it "
+                                "to the GitHub Release-backed attachment flow."
+                            ),
+                            observed=(
+                                f"release_tag={expected_release_tag}; "
+                                f"manifest_entry={json.dumps(manifest_observation['matching_entries'][0], sort_keys=True)}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the uploaded file appeared as a visible attachment "
+                                "row in the hosted UI after submission, without any local-"
+                                "Git/LFS warning replacing the success state."
+                            ),
+                            observed=upload_visible_text,
+                        )
+                    except Exception as error:
+                        manifest_observation = _observe_manifest_state(
+                            service,
+                            attachment_name=upload_name,
+                            expected_release_tag=expected_release_tag,
+                        )
+                        result["manifest_after_upload"] = manifest_observation["manifest_text"]
+                        result["matching_manifest_entries"] = manifest_observation[
+                            "matching_entries"
+                        ]
+                        result["release_asset_names_after_upload"] = manifest_observation[
+                            "release_asset_names"
+                        ]
+                        upload_visible_text = page.current_body_text()
+                        result["attachments_text_after_upload"] = upload_visible_text
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=(
+                                "Upload the selected file and verify the browser routes it "
+                                "to the GitHub Release-backed attachment flow."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed manifest text:\n{manifest_observation['manifest_text']}\n"
+                                f"Observed release assets: {manifest_observation['release_asset_names']}\n"
+                                f"Observed body text:\n{upload_visible_text}"
+                            ),
+                        )
+                        raise
+
+                    page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                    result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+                except Exception:
+                    page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                    result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                    raise
+    except Exception as error:
+        scenario_error = error
+        result["error"] = f"{type(error).__name__}: {error}"
+        result["traceback"] = traceback.format_exc()
+    finally:
+        try:
+            cleanup_result = _restore_fixture(
+                service=service,
+                mutations=mutations,
+                expected_release_tag=expected_release_tag,
+            )
+            result["cleanup"] = cleanup_result
+        except Exception:
+            cleanup_error = traceback.format_exc()
+            result["cleanup_error"] = cleanup_error
+
+    if scenario_error is not None:
+        if cleanup_error is not None:
+            result["error"] = (
+                f"{result['error']}\n\nCleanup also failed:\n{cleanup_error}"
+            )
+        _write_failure_outputs(result)
+        raise scenario_error
+
+    if cleanup_error is not None:
+        result["error"] = f"AssertionError: cleanup failed\n\n{cleanup_error}"
+        _write_failure_outputs(result)
+        raise AssertionError(result["error"])
+
+    _write_pass_outputs(result)
+
+
+def _assert_preconditions(issue_fixture) -> None:
+    if issue_fixture.key != ISSUE_KEY:
+        raise AssertionError(
+            "Precondition failed: TS-509 expected the seeded DEMO-2 issue fixture.\n"
+            f"Observed issue key: {issue_fixture.key}",
+        )
+
+
+def _pick_lfs_extension(gitattributes_text: str) -> str:
+    tracked_extensions = [
+        match.group("extension").lower()
+        for match in re.finditer(
+            r"^\*\.(?P<extension>[A-Za-z0-9]+)\s+filter=lfs\b",
+            gitattributes_text,
+            flags=re.MULTILINE,
+        )
+    ]
+    for preferred in ("zip", "pdf", "png", "jpg", "jpeg", "gif", "webp"):
+        if preferred in tracked_extensions:
+            return preferred
+    if tracked_extensions:
+        return tracked_extensions[0]
+    raise AssertionError(
+        "Precondition failed: the hosted repository `.gitattributes` did not expose a "
+        "Git LFS-tracked file extension for the browser-upload routing test.",
+    )
+
+
+def _collect_original_files(
+    service: LiveSetupRepositoryService,
+    paths: tuple[str, ...],
+) -> list[RepoMutation]:
+    return [
+        RepoMutation(path=path, original_file=_fetch_repo_file_if_exists(service, path))
+        for path in paths
+    ]
+
+
+def _fetch_repo_file_if_exists(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> LiveHostedRepositoryFile | None:
+    try:
+        return service.fetch_repo_file(path)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+
+
+def _build_release_tag_prefix() -> str:
+    return f"{RELEASE_TAG_PREFIX_BASE}{uuid.uuid4().hex[:8]}-"
+
+
+def _expected_release_tag(release_tag_prefix: str) -> str:
+    return f"{release_tag_prefix}{ISSUE_KEY}"
+
+
+def _observe_release_write_precondition(
+    settings_page: LiveProjectSettingsPage,
+) -> ReleaseWritePreconditionObservation:
+    settings_body = settings_page.open_settings()
+    if "Project Settings" not in settings_body:
+        raise AssertionError(
+            "Precondition failed: the hosted session did not reach the Project Settings "
+            "surface needed to verify `supportsReleaseAttachmentWrites` through the "
+            "visible Repository access section.\n"
+            f"Observed body text:\n{settings_body}",
+        )
+    return ReleaseWritePreconditionObservation(
+        body_text=settings_body,
+    )
+
+
+def _assert_release_write_precondition(
+    observation: ReleaseWritePreconditionObservation,
+    expected_release_tag_prefix: str,
+) -> str:
+    expected_supported_copy = (
+        "New attachments resolve to release tag "
+        f"{expected_release_tag_prefix}<ISSUE_KEY>, and this hosted session can "
+        "complete release-backed uploads in the browser."
+    )
+    if expected_supported_copy not in observation.body_text:
+        raise AssertionError(
+            "Precondition failed: the hosted Repository access section did not expose "
+            "browser-supported GitHub Releases upload capability before the "
+            "Attachments flow began.\n"
+            f"Expected visible text fragment:\n{expected_supported_copy}\n\n"
+            f"Observed body text:\n{observation.body_text}",
+        )
+    return expected_release_tag_prefix
+
+
+def _release_write_precondition_payload(
+    observation: ReleaseWritePreconditionObservation,
+) -> dict[str, object]:
+    return {
+        "body_text": observation.body_text,
+    }
+
+
+def _repository_access_precondition_summary(
+    observation: ReleaseWritePreconditionObservation,
+) -> str:
+    return observation.body_text
+
+
+def _observe_attachment_panel(
+    page: LiveIssueDetailCollaborationPage,
+) -> AttachmentPanelObservation:
+    controls = page.observe_attachment_upload_controls()
+    body_text = page.current_body_text()
+    return AttachmentPanelObservation(
+        body_text=body_text,
+        choose_button_count=controls.choose_button_count,
+        choose_button_enabled=controls.choose_button_enabled,
+        upload_button_count=controls.upload_button_count,
+        upload_button_enabled=controls.upload_button_enabled,
+        loading_visible="Attachments loading" in body_text
+        or "Attachments Loading..." in body_text,
+        open_settings_count=page.button_label_fragment_count("Open settings"),
+    )
+
+
+def _wait_for_attachment_panel(
+    page: LiveIssueDetailCollaborationPage,
+) -> AttachmentPanelObservation:
+    matched, observation = poll_until(
+        probe=lambda: _observe_attachment_panel(page),
+        is_satisfied=lambda current: not current.loading_visible,
+        timeout_seconds=ATTACHMENTS_PANEL_TIMEOUT_SECONDS,
+        interval_seconds=ATTACHMENTS_PANEL_POLL_INTERVAL_SECONDS,
+    )
+    if not matched:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab never finished loading after "
+            "switching the live project to github-releases within the timeout.\n"
+            f"{_attachment_panel_summary(observation)}\n"
+            f"Observed body text:\n{observation.body_text}"
+        )
+    return observation
+
+
+def _store_attachment_panel_observation(
+    result: dict[str, object],
+    observation: AttachmentPanelObservation,
+    *,
+    result_key: str,
+) -> None:
+    result[result_key] = observation.body_text
+    result["choose_button_count"] = observation.choose_button_count
+    result["choose_button_enabled"] = observation.choose_button_enabled
+    result["upload_button_count"] = observation.upload_button_count
+    result["upload_button_enabled"] = observation.upload_button_enabled
+    result["open_settings_count"] = observation.open_settings_count
+    result["attachments_loading_visible"] = observation.loading_visible
+
+
+def _attachment_panel_summary(observation: AttachmentPanelObservation) -> str:
+    return (
+        f"choose_button_count={observation.choose_button_count}; "
+        f"choose_button_enabled={observation.choose_button_enabled}; "
+        f"upload_button_count={observation.upload_button_count}; "
+        f"upload_button_enabled={observation.upload_button_enabled}; "
+        f"open_settings_count={observation.open_settings_count}; "
+        f"attachments_loading_visible={observation.loading_visible}"
+    )
+
+
+def _seed_fixture(
+    service: LiveSetupRepositoryService,
+    *,
+    release_tag_prefix: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    _delete_release_if_present(service, service.fetch_release_by_tag(expected_release_tag))
+    project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
+    if not isinstance(project_payload, dict):
+        raise AssertionError(
+            f"Precondition failed: {PROJECT_JSON_PATH} did not deserialize to a JSON object.",
+        )
+    project_payload["attachmentStorage"] = {
+        "mode": "github-releases",
+        "githubReleases": {"tagPrefix": release_tag_prefix},
+    }
+    service.write_repo_text(
+        PROJECT_JSON_PATH,
+        content=json.dumps(project_payload, indent=2) + "\n",
+        message=f"{TICKET_KEY}: enable github-releases attachment storage",
+    )
+
+    matched, observed_project_json = poll_until(
+        probe=lambda: service.fetch_repo_text(PROJECT_JSON_PATH),
+        is_satisfied=lambda text: _project_attachment_mode(text) == "github-releases"
+        and _project_release_tag_prefix(text) == release_tag_prefix,
+        timeout_seconds=120,
+        interval_seconds=4,
+    )
+    if not matched:
+        raise AssertionError(
+            "Precondition failed: the hosted repository did not expose the expected "
+            "github-releases project configuration within the timeout.\n"
+            f"Observed project.json:\n{observed_project_json}",
+        )
+    return {
+        "project_json": observed_project_json,
+        "attachment_storage_mode": _project_attachment_mode(observed_project_json),
+        "release_tag_prefix": _project_release_tag_prefix(observed_project_json),
+        "expected_release_tag": expected_release_tag,
+    }
+
+
+def _project_attachment_mode(project_json_text: str) -> str:
+    payload = json.loads(project_json_text)
+    if not isinstance(payload, dict):
+        return ""
+    attachment_storage = payload.get("attachmentStorage")
+    if not isinstance(attachment_storage, dict):
+        return ""
+    return str(attachment_storage.get("mode", "")).strip()
+
+
+def _project_release_tag_prefix(project_json_text: str) -> str:
+    payload = json.loads(project_json_text)
+    if not isinstance(payload, dict):
+        return ""
+    attachment_storage = payload.get("attachmentStorage")
+    if not isinstance(attachment_storage, dict):
+        return ""
+    release_config = attachment_storage.get("githubReleases")
+    if not isinstance(release_config, dict):
+        return ""
+    return str(release_config.get("tagPrefix", "")).strip()
+
+
+def _observe_manifest_state(
+    service: LiveSetupRepositoryService,
+    *,
+    attachment_name: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    manifest_file = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
+    manifest_text = manifest_file.content if manifest_file is not None else "[]\n"
+    entries = json.loads(manifest_text)
+    if not isinstance(entries, list):
+        raise AssertionError(
+            f"{MANIFEST_PATH} was not a JSON array.\nObserved text:\n{manifest_text}",
+        )
+    matching_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict) and str(entry.get("name", "")) == attachment_name
+    ]
+    release = service.fetch_release_by_tag(expected_release_tag)
+    release_asset_names = [
+        asset.name
+        for asset in (release.assets if release is not None else [])
+        if asset.name
+    ]
+    return {
+        "manifest_text": manifest_text,
+        "matching_entries": matching_entries,
+        "release_asset_names": release_asset_names,
+        "single_entry_is_release": len(matching_entries) == 1
+        and str(matching_entries[0].get("storageBackend", "")) == "github-releases"
+        and str(matching_entries[0].get("githubReleaseTag", "")) == expected_release_tag
+        and str(matching_entries[0].get("githubReleaseAssetName", "")) == attachment_name
+        and attachment_name in release_asset_names,
+    }
+
+
+def _delete_release_if_present(
+    service: LiveSetupRepositoryService,
+    release: LiveHostedRelease | None,
+) -> None:
+    if release is None:
+        return
+    for asset in release.assets:
+        service.delete_release_asset(asset.id)
+    service.delete_release(release.id)
+    matched, _ = poll_until(
+        probe=lambda: service.fetch_release_by_tag(release.tag_name),
+        is_satisfied=lambda value: value is None,
+        timeout_seconds=60,
+        interval_seconds=3,
+    )
+    if not matched:
+        raise AssertionError(
+            f"Cleanup failed: release tag {release.tag_name} still exists after delete.",
+        )
+
+
+def _restore_fixture(
+    *,
+    service: LiveSetupRepositoryService,
+    mutations: list[RepoMutation],
+    expected_release_tag: str,
+) -> dict[str, object]:
+    restored_paths: list[str] = []
+    deleted_paths: list[str] = []
+    for mutation in reversed(mutations):
+        if mutation.original_file is None:
+            current = _fetch_repo_file_if_exists(service, mutation.path)
+            if current is not None:
+                service.delete_repo_file(
+                    mutation.path,
+                    message=f"{TICKET_KEY}: cleanup seeded fixture",
+                )
+                deleted_paths.append(mutation.path)
+            continue
+        current = service.fetch_repo_text(mutation.path)
+        if current != mutation.original_file.content:
+            service.write_repo_text(
+                mutation.path,
+                content=mutation.original_file.content,
+                message=f"{TICKET_KEY}: restore original fixture",
+            )
+        restored_paths.append(mutation.path)
+
+    release_after_test = service.fetch_release_by_tag(expected_release_tag)
+    _delete_release_if_present(service, release_after_test)
+    release_cleanup = (
+        "deleted-seeded-release"
+        if release_after_test is not None
+        else "no-seeded-release"
+    )
+
+    return {
+        "status": "restored",
+        "restored_paths": restored_paths,
+        "deleted_paths": deleted_paths,
+        "release_cleanup": release_cleanup,
+    }
+
+
+def _assert_no_lfs_restriction(
+    *,
+    page: LiveIssueDetailCollaborationPage,
+    body_text: str,
+    step_number: int,
+) -> None:
+    if GENERIC_ATTACHMENT_LIMITED_LABEL in body_text:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still exposed the "
+            "generic limited-upload hosted state instead of a ready browser-upload "
+            "flow for the github-releases project.\n"
+            f"Observed body text:\n{body_text}",
+        )
+    if page.button_label_fragment_count(GENERIC_SETTINGS_RECOVERY_LABEL) > 0:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still exposed the "
+            f'visible "{GENERIC_SETTINGS_RECOVERY_LABEL}" recovery action instead of '
+            "the direct upload flow required by TS-509.\n"
+            f"Observed body text:\n{body_text}",
+        )
+    if HOSTED_LIMITED_UPLOAD_TITLE in body_text:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still displayed the "
+            "amber local-Git warning even though the project was configured for "
+            "release-backed browser uploads.\n"
+            f"Observed body text:\n{body_text}",
+        )
+    for fragment in (*HOSTED_LIMITED_UPLOAD_FRAGMENTS, GENERIC_LFS_ERROR_FRAGMENT):
+        if fragment in body_text:
+            raise AssertionError(
+                f"Step {step_number} failed: the hosted Attachments tab still displayed "
+                "Git LFS restriction guidance instead of allowing the release-backed "
+                "browser upload flow.\n"
+                f"Unexpected fragment: {fragment}\n"
+                f"Observed body text:\n{body_text}",
+            )
+    if page.text_fragment_count(HOSTED_LIMITED_UPLOAD_TITLE) > 0:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still exposed the "
+            "local-Git restriction title through the rendered semantics tree.\n"
+            f"Observed body text:\n{body_text}",
+        )
+
+
+def _assert_selection_summary(
+    summary: AttachmentSelectionSummaryObservation,
+    file_name: str,
+) -> None:
+    if not summary.file_name_visible:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not show the chosen file name "
+            "before upload submission.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if not summary.size_label:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not show a visible file size "
+            "before upload submission.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if file_name not in summary.summary_text:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not preserve the exact chosen "
+            "file name.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if not summary.upload_enabled:
+        raise AssertionError(
+            "Step 2 failed: the Upload attachment action stayed disabled after choosing "
+            "the LFS-tracked file.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+
+
+def _assert_attachment_upload_controls(
+    panel: AttachmentPanelObservation,
+) -> None:
+    if panel.choose_button_count != 1 or panel.upload_button_count != 1:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab did not expose exactly one visible "
+            "`Choose attachment` control and one visible `Upload attachment` control "
+            "before file selection.\n"
+            f"{_attachment_panel_summary(panel)}\n"
+            f"Observed body text:\n{panel.body_text}",
+        )
+    if not panel.choose_button_enabled:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab did not keep the visible "
+            "`Choose attachment` browser-upload affordance enabled before file selection.\n"
+            f"{_attachment_panel_summary(panel)}\n"
+            f"Observed body text:\n{panel.body_text}",
+        )
+
+
+def _selection_summary_payload(
+    summary: AttachmentSelectionSummaryObservation,
+) -> dict[str, object]:
+    return {
+        "summary_text": summary.summary_text,
+        "file_name_visible": summary.file_name_visible,
+        "size_label": summary.size_label,
+        "upload_enabled": summary.upload_enabled,
+        "summary_top": summary.summary_top,
+        "first_attachment_top": summary.first_attachment_top,
+    }
+
+
+def _selection_summary_text(summary: AttachmentSelectionSummaryObservation) -> str:
+    return (
+        f"summary_text={summary.summary_text!r}; size_label={summary.size_label!r}; "
+        f"upload_enabled={summary.upload_enabled}"
+    )
+
+
+def _record_step(
+    result: dict[str, object],
+    *,
+    step: int,
+    status: str,
+    action: str,
+    observed: str,
+) -> None:
+    steps = result.setdefault("steps", [])
+    assert isinstance(steps, list)
+    steps.append(
+        {
+            "step": step,
+            "status": status,
+            "action": action,
+            "observed": observed,
+        },
+    )
+
+
+def _record_human_verification(
+    result: dict[str, object],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    checks = result.setdefault("human_verification", [])
+    assert isinstance(checks, list)
+    checks.append({"check": check, "observed": observed})
+
+
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+
+
+def _write_failure_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: unknown failure"))
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error,
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+
+
+def _expected_repository_access_copy(result: dict[str, object]) -> str:
+    release_tag_prefix = str(result.get("release_tag_prefix", ""))
+    return (
+        "New attachments resolve to release tag "
+        f"{release_tag_prefix}<ISSUE_KEY>, and this hosted session can complete "
+        "release-backed uploads in the browser."
+    )
+
+
+def _observed_repository_access_copy(result: dict[str, object]) -> str:
+    observation = result.get("repository_access_observation")
+    if isinstance(observation, dict):
+        body_text = observation.get("body_text")
+        if body_text:
+            return str(body_text)
+    body_text = result.get("repository_access_body_text")
+    if body_text:
+        return str(body_text)
+    return "No Repository access body text was recorded."
+
+
+def _observed_setup_body_text(result: dict[str, object]) -> str:
+    for key in ("connected_body_text", "runtime_body_text"):
+        body_text = result.get(key)
+        if body_text:
+            return str(body_text)
+    return "No hosted app body text was recorded."
+
+
+def _stopped_before_repository_access(result: dict[str, object]) -> bool:
+    return _step_status(result, -1) == "failed"
+
+
+def _stopped_at_repository_access_precondition(result: dict[str, object]) -> bool:
+    return _step_status(result, 0) == "failed"
+
+
+def _failure_result_summary(result: dict[str, object], *, jira: bool) -> str:
+    bullet = "*" if jira else "-"
+    if _stopped_before_repository_access(result):
+        return (
+            f"{bullet} Did not reach the TS-509 precondition: the hosted app never converged "
+            "to the connected tracker shell, so Repository access and Attachments were not reached."
+        )
+    if _stopped_at_repository_access_precondition(result):
+        return (
+            f"{bullet} Did not match the TS-509 precondition: the visible Repository "
+            "access section never exposed browser-supported GitHub Releases upload "
+            "capability, so the Attachments file-selection/upload steps were not reached."
+        )
+    return f"{bullet} Did not match the expected result."
+
+
+def _repository_access_failure_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    if not _stopped_at_repository_access_precondition(result):
+        return []
+    bullet = "*" if jira else "-"
+    opening = "*Repository access precondition*" if jira else "### Repository access precondition"
+    return [
+        "",
+        opening,
+        (
+            f"{bullet} Missing capability boundary: the hosted session did not expose "
+            "`supportsReleaseAttachmentWrites` through the visible Repository access copy."
+        ),
+        f"{bullet} Expected visible copy:",
+        "{code}" if jira else "```text",
+        _expected_repository_access_copy(result),
+        "{code}" if jira else "```",
+        f"{bullet} Actual visible copy:",
+        "{code}" if jira else "```text",
+        _observed_repository_access_copy(result),
+        "{code}" if jira else "```",
+        (
+            f"{bullet} Resulting boundary: the scenario stopped in Project Settings before "
+            "opening the Attachments tab file-selection/upload flow."
+        ),
+    ]
+
+
+def _setup_failure_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    if not _stopped_before_repository_access(result):
+        return []
+    bullet = "*" if jira else "-"
+    opening = "*Hosted app setup*" if jira else "### Hosted app setup"
+    return [
+        "",
+        opening,
+        (
+            f"{bullet} Missing boundary: the hosted app never reached the connected shell "
+            "needed before Repository access or Attachments could be validated."
+        ),
+        f"{bullet} Actual visible copy/state:",
+        "{code}" if jira else "```text",
+        _observed_setup_body_text(result),
+        "{code}" if jira else "```",
+    ]
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    lines = [
+        f"h3. {TICKET_KEY} {status}",
+        "",
+        "*Automation coverage*",
+        *_automation_coverage_lines(result, jira=True),
+        "",
+        "*Observed result*",
+        (
+            "* Matched the expected result: no amber local-Git/LFS warning appeared, the "
+            "upload controls stayed enabled, and the uploaded file was persisted as a "
+            "github-releases attachment."
+            if passed
+            else _failure_result_summary(result, jira=True)
+        ),
+        (
+            f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
+            f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
+            f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
+        ),
+        f"* Screenshot: {{{{{screenshot_path}}}}}",
+        "",
+        "*Step results*",
+        *_step_lines(result, jira=True),
+        "",
+        "*Human-style verification*",
+        *_human_lines(result, jira=True),
+        *([] if passed else _setup_failure_lines(result, jira=True)),
+        *([] if passed else _repository_access_failure_lines(result, jira=True)),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "*Exact error*",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _pr_body(result: dict[str, object], *, passed: bool) -> str:
+    status = "Passed" if passed else "Failed"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    lines = [
+        f"## {TICKET_KEY} {status}",
+        "",
+        "### Automation",
+        *_automation_coverage_lines(result, jira=False),
+        "",
+        "### Observed result",
+        (
+            "- Matched the expected result: no amber local-Git/LFS warning appeared, the "
+            "upload controls stayed enabled, and the uploaded file was persisted as a "
+            "`github-releases` attachment."
+            if passed
+            else _failure_result_summary(result, jira=False)
+        ),
+        (
+            f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
+            f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
+        ),
+        f"- Screenshot: `{screenshot_path}`",
+        "",
+        "### Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "### Human-style verification",
+        *_human_lines(result, jira=False),
+        *([] if passed else _setup_failure_lines(result, jira=False)),
+        *([] if passed else _repository_access_failure_lines(result, jira=False)),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "### Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "passed" if passed else "failed"
+    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    lines = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        (
+            "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then captured the visible Attachments state and any "
+            "manifest / GitHub Release evidence reached by the flow."
+            if passed
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then stopped before Repository access because the hosted "
+            "app never reached the connected tracker shell."
+            if _stopped_before_repository_access(result)
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then stopped at the visible Project Settings / Repository "
+            "access precondition when the hosted session never exposed browser-supported "
+            "GitHub Releases upload capability."
+            if _stopped_at_repository_access_precondition(result)
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then captured the visible Attachments state and any "
+            "manifest / GitHub Release evidence reached by the flow."
+        ),
+        "",
+        "## Observed",
+        f"- Screenshot: `{screenshot_path}`",
+        f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
+        f"- Cleanup: `{result.get('cleanup')}`",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Failure mode",
+                (
+                    "- Hosted app setup failure: the GitHub-connected tracker shell never "
+                    "became ready, so Repository access and the Attachments flow were not reached."
+                    if _stopped_before_repository_access(result)
+                    else
+                    "- Repository access precondition failure: the hosted session did not "
+                    "expose `supportsReleaseAttachmentWrites`, so the Attachments "
+                    "file-selection/upload steps were never reached."
+                    if _stopped_at_repository_access_precondition(result)
+                    else "- Attachments upload flow failure after the precondition passed."
+                ),
+                "",
+                *(
+                    [
+                        "## Hosted app setup evidence",
+                        "```text",
+                        _observed_setup_body_text(result),
+                        "```",
+                        "",
+                    ]
+                    if _stopped_before_repository_access(result)
+                    else [
+                        "## Repository access evidence",
+                        "### Expected visible copy",
+                        "```text",
+                        _expected_repository_access_copy(result),
+                        "```",
+                        "### Actual visible copy",
+                        "```text",
+                        _observed_repository_access_copy(result),
+                        "```",
+                        "",
+                    ]
+                ),
+                "## Error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _bug_description(result: dict[str, object]) -> str:
+    if _stopped_before_repository_access(result):
+        return _setup_failure_bug_description(result)
+    if _stopped_at_repository_access_precondition(result):
+        return _precondition_bug_description(result)
+    release_tag = str(result.get("release_tag", ""))
+    return "\n".join(
+        [
+            "# TS-509 - Release-backed hosted upload still shows local Git / Git LFS restriction or fails to route to GitHub Releases",
+            "",
+            "## Steps to reproduce",
+            "1. Open the Issue Detail screen for any issue.",
+            f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
+            "2. Navigate to the 'Attachments' tab.",
+            f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
+            (
+                "3. Select a file to upload (for this run: "
+                f"`{result.get('upload_name', '<unknown>')}` with a Git LFS-tracked "
+                f"`.{str(result.get('lfs_extension', '')).lstrip('.')}` extension) and upload it."
+            ),
+            f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
+            f"   - {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- **Expected:** the hosted Attachments tab should not show the amber "
+                "local-Git or Git-LFS restriction warning, the Choose attachment / Upload "
+                "attachment actions should stay enabled, and submitting the file should "
+                "persist one release-backed manifest entry plus a GitHub Release asset."
+            ),
+            (
+                "- **Actual:** "
+                + str(
+                    result.get("error")
+                    or "the hosted browser upload did not bypass the restriction state or "
+                    "did not converge to a release-backed attachment entry."
+                )
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.platform()}`",
+            f"- Selected file: `{result.get('selected_file_path')}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Manifest path: `{MANIFEST_PATH}`",
+            f"- Release tag: `{release_tag}`",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+            "### Attachments tab before upload",
+            "```text",
+            str(result.get("attachments_text_before_upload", "")),
+            "```",
+            "### Attachments tab after selection",
+            "```text",
+            str(result.get("attachments_text_after_selection", "")),
+            "```",
+            "### Attachments tab after upload",
+            "```text",
+            str(result.get("attachments_text_after_upload", "")),
+            "```",
+            "### Manifest after upload attempt",
+            "```json",
+            str(result.get("manifest_after_upload", "")),
+            "```",
+            "### Matching manifest entries",
+            "```json",
+            json.dumps(result.get("matching_manifest_entries", []), indent=2, sort_keys=True),
+            "```",
+            "### Release asset names after upload",
+            "```json",
+            json.dumps(result.get("release_asset_names_after_upload", []), indent=2),
+            "```",
+            f"- Cleanup: `{result.get('cleanup')}`",
+            f"- Cleanup error: `{result.get('cleanup_error', '')}`",
+        ],
+    ) + "\n"
+
+
+def _setup_failure_bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            "# TS-509 - Hosted app never reached the connected tracker shell",
+            "",
+            "## Steps to reproduce",
+            "1. Configure the project with `attachmentStorage.mode = github-releases` and a release tag prefix.",
+            (
+                "2. Open the hosted app and wait for the GitHub-connected tracker shell "
+                "that should appear before Repository access and Attachments can be exercised."
+            ),
+            f"   - ❌ {_step_observation(result, -1)}",
+            "3. Continue to Project Settings / Repository access only after the connected shell is visible.",
+            "   - ❌ Not reached because the hosted shell never became ready.",
+            "4. Continue to the Attachments tab only after Repository access is available.",
+            "   - ❌ Not reached because the hosted shell never became ready.",
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- **Expected:** the hosted app should reach the connected tracker shell so "
+                "Repository access can be checked and the TS-509 Attachments flow can begin."
+            ),
+            (
+                "- **Actual:** the hosted app timed out before showing any of the expected "
+                "connected or recoverable GitHub access states, so the test never reached "
+                "Repository access or Attachments."
+            ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "The public hosted app did not expose a ready connected shell or a visible "
+                "recoverable connection state within the timeout window. This blocks TS-509 "
+                "before any Repository access or Attachments behavior can be evaluated."
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.platform()}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Release tag prefix: `{result.get('release_tag_prefix')}`",
+            "",
+            "## Failing command/output",
+            "```text",
+            str(result.get("error", "")),
+            "```",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+            "### Hosted app body text",
+            "```text",
+            _observed_setup_body_text(result),
+            "```",
+            f"- Cleanup: `{result.get('cleanup')}`",
+            f"- Cleanup error: `{result.get('cleanup_error', '')}`",
+        ],
+    ) + "\n"
+
+
+def _precondition_bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            "# TS-509 - Hosted Repository access does not expose browser-supported release uploads",
+            "",
+            "## Steps to reproduce",
+            "1. Configure the project with `attachmentStorage.mode = github-releases` and a release tag prefix.",
+            (
+                "2. Open the hosted app and navigate to **Project Settings** so the visible "
+                "**Repository access** section can be inspected before opening the "
+                "**Attachments** tab."
+            ),
+            f"   - {'✅' if _step_status(result, 0) == 'passed' else '❌'} {_step_observation(result, 0)}",
+            (
+                "3. Check whether the Repository access section shows the browser-supported "
+                "GitHub Releases upload copy required for `supportsReleaseAttachmentWrites`."
+            ),
+            f"   - Expected visible copy:\n```text\n{_expected_repository_access_copy(result)}\n```",
+            f"   - Actual visible copy:\n```text\n{_observed_repository_access_copy(result)}\n```",
+            (
+                "4. Continue to the **Attachments** tab only if that precondition is visible."
+            ),
+            "   - ❌ Not reached because the Repository access precondition failed.",
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- **Expected:** before using the Attachments tab as TS-509 product evidence, "
+                "the visible Repository access section should confirm that new attachments "
+                "resolve to the seeded GitHub Release tag and that the hosted session can "
+                "complete release-backed uploads in the browser."
+            ),
+            (
+                "- **Actual:** the hosted Project Settings / Repository access section never "
+                "showed that browser-supported GitHub Releases capability, so the Attachments "
+                "file-selection/upload steps could not be exercised."
+            ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "The public hosted Repository access surface does not expose the "
+                "`supportsReleaseAttachmentWrites` capability needed by TS-509. This is a "
+                "product-visible capability gap, not an automation-only issue, because the "
+                "test must stop before the Attachments flow when that visible precondition is absent."
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.platform()}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Release tag prefix: `{result.get('release_tag_prefix')}`",
+            "",
+            "## Failing command/output",
+            "```text",
+            str(result.get("error", "")),
+            "```",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+            "### Repository access body text",
+            "```text",
+            _observed_repository_access_copy(result),
+            "```",
+            f"- Cleanup: `{result.get('cleanup')}`",
+            f"- Cleanup error: `{result.get('cleanup_error', '')}`",
+        ],
+    ) + "\n"
+
+
+def _automation_coverage_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    bullet = "*" if jira else "-"
+    release_tag = str(result.get("release_tag", ""))
+    lines = [
+        (
+            f"{bullet} Switched `{PROJECT_JSON_PATH}` to `attachmentStorage.mode = "
+            "github-releases` with a ticket-specific release tag prefix."
+        )
+    ]
+    if _step_status(result, -1) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Opened the hosted app and waited for the GitHub-connected tracker shell."
+        )
+    if _step_status(result, 0) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Verified the visible Project Settings / Repository access copy "
+            "for browser-supported GitHub Releases uploads before using the Attachments tab."
+        )
+    if _step_status(result, 1) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Opened the deployed hosted TrackState app, connected GitHub, "
+            "and navigated to the seeded issue's Attachments tab."
+        )
+    if _step_status(result, 2) == "passed":
+        lines.append(
+            f"{bullet} Selected the Git LFS-tracked `{result.get('upload_name', '')}` "
+            "fixture through the real browser file picker and observed the pending "
+            "upload state."
+        )
+    elif _step_status(result, 2) == "failed":
+        lines.append(
+            f"{bullet} Attempted to select the Git LFS-tracked "
+            f"`{result.get('upload_name', '')}` fixture through the real browser file picker."
+        )
+    if _step_status(result, 3) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Polled `{MANIFEST_PATH}` plus the GitHub Release `{release_tag}` "
+            "to verify whether the upload was routed to release-backed storage."
+        )
+    return lines
+
+
+def _find_step(result: dict[str, object], step_number: int) -> dict[str, object] | None:
+    for step in result.get("steps", []):
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
+            return step
+    return None
+
+
+def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    lines: list[str] = []
+    for step in result.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        prefix = "#" if jira else "1."
+        status = str(step.get("status", "failed"))
+        lines.append(
+            f"{prefix} Step {step['step']} — {step['action']} — "
+            f"{status.upper() if jira else status}: {step['observed']}"
+        )
+    if not lines:
+        lines.append("# No step details were recorded." if jira else "1. No step details were recorded.")
+    return lines
+
+
+def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    lines: list[str] = []
+    for check in result.get("human_verification", []):
+        if not isinstance(check, dict):
+            continue
+        prefix = "#" if jira else "1."
+        lines.append(f"{prefix} {check.get('check')}: {check.get('observed')}")
+    if not lines:
+        lines.append(
+            "# No human-style verification data was recorded."
+            if jira
+            else "1. No human-style verification data was recorded."
+        )
+    return lines
+
+
+def _step_status(result: dict[str, object], step_number: int) -> str:
+    step = _find_step(result, step_number)
+    if step is None:
+        return "not_run"
+    return str(step.get("status", "failed"))
+
+
+def _step_observation(result: dict[str, object], step_number: int) -> str:
+    step = _find_step(result, step_number)
+    if step is not None:
+        return str(step.get("observed", "No observation recorded."))
+    previous_step = step_number - 1
+    if previous_step >= 0 and _find_step(result, previous_step) is not None and _step_status(
+        result,
+        previous_step,
+    ) != "passed":
+        return (
+            f"Not reached because Step {previous_step} failed: "
+            f"{_step_observation(result, previous_step)}"
+        )
+    return str(result.get("error", "No observation recorded."))
+
+
+if __name__ == "__main__":
+    main()

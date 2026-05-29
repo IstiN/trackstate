@@ -6,5 +6,5 @@ dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
   - git CLI available on PATH for seeding a disposable Local Git repository
 notes:
-  - Executes `trackstate --target local` from inside a disposable Local Git repository without `--path`.
+  - Compiles a temporary CLI executable from this checkout, then executes `trackstate --target local` from inside a disposable Local Git repository without `--path`.
   - Verifies the CLI resolves the local target to the current working directory.
