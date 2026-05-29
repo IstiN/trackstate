@@ -21,13 +21,13 @@ flutter test testing/tests/TS-42/test_ts_42.dart
 ## Environment requirements
 
 - No additional environment variables are required.
-- The test uses the built-in demo issue snapshot and a read-only repository fake.
+- The test uses an in-memory repository snapshot with `TRACK-1`, `TRACK-2`,
+  and `TRACK-3`, then starts the real app against that data.
 
 ## Expected passing output
 
-The test passes when the issue detail screen disables or hides write actions for
-the read-only session and shows a visible read-only explanation, such as text or
-tooltip that mentions permission, read-only mode, or write access. The harness
-also compares that behavior with a writable baseline so the test only treats an
-action as capability-guarded if the same control is actually exposed when
-`canWrite=true`.
+The test passes when booting the app with the initial route
+`/issues/TRACK-3` renders the primary issue detail surface for `TRACK-3`
+after loading completes. It should fail if startup falls back to another issue
+or to the default dashboard/search experience instead of honoring the route
+issue key.

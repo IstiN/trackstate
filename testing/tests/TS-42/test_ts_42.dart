@@ -1,230 +1,344 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import '../../core/interfaces/read_only_issue_detail_screen.dart';
-import '../../core/models/action_availability.dart';
-import '../../fixtures/read_only_issue_detail_screen_fixture.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
+import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
   testWidgets(
-    'TS-42 shows read-only issue detail actions as unavailable before save',
+    'TS-42: direct nested issue route shows TRACK-3 as the primary issue identity',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      ReadOnlyIssueDetailScreenHandle? writableScreen;
-      ReadOnlyIssueDetailScreenHandle? readOnlyScreen;
+      addTearDown(semantics.dispose);
 
-      try {
-        const targetIssueKey = 'TRACK-12';
-        const targetSummary = 'Implement Git sync service';
-        const previousIssueKey = 'TRACK-11';
-        const previousSummary = 'Stabilize dashboard polling';
-        writableScreen = await launchWritableIssueDetailFixture(tester);
-        final writableState = await _openTargetIssue(
-          screen: writableScreen,
-          previousIssueKey: previousIssueKey,
-          previousSummary: previousSummary,
-          targetIssueKey: targetIssueKey,
-          targetSummary: targetSummary,
-          requireNavigationProof: false,
-        );
-        writableScreen.dispose();
-        writableScreen = null;
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
 
-        readOnlyScreen = await launchReadOnlyIssueDetailFixture(tester);
-        final readOnlyState = await _openTargetIssue(
-          screen: readOnlyScreen,
-          previousIssueKey: previousIssueKey,
-          previousSummary: previousSummary,
-          targetIssueKey: targetIssueKey,
-          targetSummary: targetSummary,
-          requireNavigationProof: true,
-        );
+      tester.binding.platformDispatcher.defaultRouteNameTestValue =
+          '/issues/TRACK-3';
+      addTearDown(
+        tester.binding.platformDispatcher.clearDefaultRouteNameTestValue,
+      );
 
-        final failures = <String>[];
+      await tester.pumpWidget(
+        const TrackStateApp(repository: _Ts42NestedIssueRepository()),
+      );
+      await _pumpUntilLoaded(tester);
 
-        if (!writableState.transition.enabled) {
-          failures.add(
-            'TS-42 requires Transition to be a real write action before the '
-            'read-only check, but the writable baseline did not expose it as '
-            'enabled. Observed ${writableState.transition.describe()}.',
-          );
-        }
-        if (!readOnlyState.transition.isUnavailable) {
-          failures.add(
-            'Transition should be disabled or hidden when canWrite=false. '
-            'Observed ${readOnlyState.transition.describe()}.',
-          );
-        }
-        if (!writableState.edit.visible) {
-          failures.add(
-            'Edit is not exposed on the issue-detail surface even when '
-            'canWrite=true, so the product does not provide the ticketed '
-            'Edit action to capability-guard. Observed '
-            '${writableState.edit.describe()}.',
-          );
-        } else if (!writableState.edit.enabled) {
-          failures.add(
-            'Edit is rendered but not enabled even when canWrite=true, so '
-            'TS-42 cannot verify a writable baseline. Observed '
-            '${writableState.edit.describe()}.',
-          );
-        } else if (!readOnlyState.edit.isUnavailable) {
-          failures.add(
-            'Edit should be disabled or hidden when canWrite=false. '
-            'Observed ${readOnlyState.edit.describe()}.',
-          );
-        }
-        if (!writableState.comment.visible) {
-          failures.add(
-            'Comments is not exposed as an actionable control on the issue-'
-            'detail surface even when canWrite=true, so the product does not '
-            'provide the ticketed Comment action to capability-guard. '
-            'Observed ${writableState.comment.describe()}.',
-          );
-        } else if (!writableState.comment.enabled) {
-          failures.add(
-            'Comments is rendered but not enabled even when canWrite=true, '
-            'so TS-42 cannot verify a writable baseline. Observed '
-            '${writableState.comment.describe()}.',
-          );
-        } else if (!readOnlyState.comment.isUnavailable) {
-          failures.add(
-            'Comments should be disabled or hidden when canWrite=false. '
-            'Observed ${readOnlyState.comment.describe()}.',
-          );
-        }
-        if (readOnlyState.hasReadOnlyExplanation) {
-          // no-op
-        } else {
-          failures.add(
-            'A visible read-only explanation should be rendered as text or '
-            'tooltip, for example messaging that mentions permission, '
-            'read-only mode, or write access.',
-          );
-        }
+      final expectedIssueDetail = find.bySemanticsLabel('Issue detail TRACK-3');
+      final observedIssueDetails = _matchingSemanticsLabels(
+        tester,
+        RegExp(r'^Issue detail '),
+      );
+      final visibleTexts = _visibleTextSnippets(tester);
 
-        if (failures.isNotEmpty) {
-          fail(
-            'Expected read-only issue detail UI to guard all write actions '
-            'up front for canWrite=false. ${failures.join(' ')} Observed '
-            'writable baseline: ${writableState.describe()}. Observed '
-            'read-only state: ${readOnlyState.describe()}.',
-          );
-        }
-      } finally {
-        writableScreen?.dispose();
-        readOnlyScreen?.dispose();
-        semantics.dispose();
-      }
+      expect(
+        expectedIssueDetail,
+        findsOneWidget,
+        reason:
+            'Opening /issues/TRACK-3 should render the TRACK-3 issue detail '
+            'surface after loading completes. Instead the app showed issue '
+            'detail labels $observedIssueDetails with visible text snippets '
+            '$visibleTexts.',
+      );
+
+      expect(
+        find.text('TRACK-3'),
+        findsWidgets,
+        reason:
+            'The requested nested issue key should be visible on the loaded '
+            'detail surface for /issues/TRACK-3.',
+      );
     },
   );
 }
 
-Future<_IssueDetailState> _openTargetIssue({
-  required ReadOnlyIssueDetailScreenHandle screen,
-  required String previousIssueKey,
-  required String previousSummary,
-  required String targetIssueKey,
-  required String targetSummary,
-  required bool requireNavigationProof,
-}) async {
-  await screen.openSearch();
-  if (requireNavigationProof) {
-    await screen.selectIssue(previousIssueKey, previousSummary);
-    expect(
-      screen.showsIssueDetail(previousIssueKey),
-      isTrue,
-      reason:
-          'Expected the search result for TRACK-11 to open its issue-detail '
-          'surface before navigating to TRACK-12.',
-    );
-    expect(
-      screen.showsAcceptanceCriterion(
-        previousIssueKey,
-        'Dashboard cards stay interactive during refresh.',
-      ),
-      isTrue,
-      reason:
-          'Expected TRACK-11 to render its own issue detail after selecting '
-          'it from the search results.',
-    );
-    expect(
-      screen.showsAcceptanceCriterion(
-        targetIssueKey,
-        'Push issue updates as commits.',
-      ),
-      isFalse,
-      reason:
-          'Expected TRACK-12-specific detail content to stay absent until '
-          'the test opens TRACK-12 from the search results.',
-    );
-  }
-  await screen.selectIssue(targetIssueKey, targetSummary);
+class _Ts42NestedIssueRepository implements TrackStateRepository {
+  const _Ts42NestedIssueRepository();
 
-  expect(
-    screen.showsIssueDetail(targetIssueKey),
-    isTrue,
-    reason:
-        'Expected opening the TRACK-12 search result to render the '
-        'TRACK-12 issue-detail surface.',
+  static const _project = ProjectConfig(
+    key: 'TRACK',
+    name: 'TrackState Demo',
+    repository: 'trackstate/trackstate',
+    branch: 'main',
+    defaultLocale: 'en',
+    issueTypeDefinitions: [
+      TrackStateConfigEntry(id: 'epic', name: 'Epic'),
+      TrackStateConfigEntry(id: 'story', name: 'Story'),
+      TrackStateConfigEntry(id: 'subtask', name: 'Sub-task'),
+    ],
+    statusDefinitions: [
+      TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+      TrackStateConfigEntry(id: 'inProgress', name: 'In Progress'),
+      TrackStateConfigEntry(id: 'done', name: 'Done'),
+    ],
+    fieldDefinitions: [
+      TrackStateFieldDefinition(
+        id: 'summary',
+        name: 'Summary',
+        type: 'string',
+        required: true,
+      ),
+      TrackStateFieldDefinition(
+        id: 'description',
+        name: 'Description',
+        type: 'markdown',
+        required: false,
+      ),
+      TrackStateFieldDefinition(
+        id: 'acceptanceCriteria',
+        name: 'Acceptance Criteria',
+        type: 'markdown-list',
+        required: false,
+      ),
+    ],
   );
-  expect(
-    screen.showsAcceptanceCriterion(
-      targetIssueKey,
-      'Push issue updates as commits.',
+
+  static const _issues = [
+    TrackStateIssue(
+      key: 'TRACK-1',
+      project: 'TRACK',
+      issueType: IssueType.epic,
+      issueTypeId: 'epic',
+      status: IssueStatus.inProgress,
+      statusId: 'inProgress',
+      priority: IssuePriority.medium,
+      priorityId: 'medium',
+      summary: 'Build TrackState.AI MVP',
+      description: 'Create the first usable TrackState.AI experience.',
+      assignee: 'route-tester',
+      reporter: 'route-tester',
+      labels: [],
+      components: [],
+      fixVersionIds: [],
+      watchers: [],
+      customFields: {},
+      parentKey: null,
+      epicKey: null,
+      parentPath: null,
+      epicPath: null,
+      progress: 0.5,
+      updatedLabel: '1 hour ago',
+      acceptanceCriteria: [],
+      comments: [],
+      links: [],
+      attachments: [],
+      isArchived: false,
+      storagePath: 'TRACK/TRACK-1/main.md',
     ),
-    isTrue,
-    reason:
-        'Expected tapping the TRACK-12 search result to replace the '
-        'detail panel with TRACK-12-specific content.',
-  );
-  if (requireNavigationProof) {
-    expect(
-      screen.showsAcceptanceCriterion(
-        targetIssueKey,
-        'Dashboard cards stay interactive during refresh.',
+    TrackStateIssue(
+      key: 'TRACK-2',
+      project: 'TRACK',
+      issueType: IssueType.story,
+      issueTypeId: 'story',
+      status: IssueStatus.todo,
+      statusId: 'todo',
+      priority: IssuePriority.medium,
+      priorityId: 'medium',
+      summary: 'Implement JQL parser',
+      description: 'Make search work with Jira-compatible filters.',
+      assignee: 'route-tester',
+      reporter: 'route-tester',
+      labels: [],
+      components: [],
+      fixVersionIds: [],
+      watchers: [],
+      customFields: {},
+      updatedLabel: '30 minutes ago',
+      storagePath: 'TRACK/TRACK-1/TRACK-2/main.md',
+      parentKey: 'TRACK-1',
+      parentPath: 'TRACK/TRACK-1/main.md',
+      epicKey: 'TRACK-1',
+      epicPath: 'TRACK/TRACK-1/main.md',
+      progress: 0.25,
+      acceptanceCriteria: [],
+      comments: [],
+      links: [],
+      attachments: [],
+      isArchived: false,
+    ),
+    TrackStateIssue(
+      key: 'TRACK-3',
+      project: 'TRACK',
+      issueType: IssueType.subtask,
+      issueTypeId: 'subtask',
+      status: IssueStatus.todo,
+      statusId: 'todo',
+      priority: IssuePriority.medium,
+      priorityId: 'medium',
+      summary: 'Parse ORDER BY clause',
+      description: 'Support ORDER BY fields in nested issue queries.',
+      assignee: 'route-tester',
+      reporter: 'route-tester',
+      labels: [],
+      components: [],
+      fixVersionIds: [],
+      watchers: [],
+      customFields: {},
+      updatedLabel: 'just now',
+      storagePath: 'TRACK/TRACK-1/TRACK-2/TRACK-3/main.md',
+      parentKey: 'TRACK-2',
+      parentPath: 'TRACK/TRACK-1/TRACK-2/main.md',
+      epicKey: 'TRACK-1',
+      epicPath: 'TRACK/TRACK-1/main.md',
+      progress: 0,
+      acceptanceCriteria: ['Render pagination controls with stable ordering.'],
+      comments: [],
+      links: [],
+      attachments: [],
+      isArchived: false,
+    ),
+  ];
+
+  static const _index = RepositoryIndex(
+    entries: [
+      RepositoryIssueIndexEntry(
+        key: 'TRACK-1',
+        path: 'TRACK/TRACK-1/main.md',
+        childKeys: ['TRACK-2'],
       ),
-      isFalse,
-      reason:
-          'Expected TRACK-11-specific detail content to disappear after '
-          'opening TRACK-12 from the search results.',
-    );
-  }
-  expect(
-    screen.showsIssueKey(targetIssueKey),
-    isTrue,
-    reason: 'Expected the TRACK-12 issue key to be visible in issue detail.',
-  );
-  expect(
-    screen.showsSummary(targetIssueKey, targetSummary),
-    isTrue,
-    reason: 'Expected the TRACK-12 summary to be visible in issue detail.',
+      RepositoryIssueIndexEntry(
+        key: 'TRACK-2',
+        path: 'TRACK/TRACK-1/TRACK-2/main.md',
+        childKeys: ['TRACK-3'],
+        parentKey: 'TRACK-1',
+        parentPath: 'TRACK/TRACK-1/main.md',
+        epicKey: 'TRACK-1',
+        epicPath: 'TRACK/TRACK-1/main.md',
+      ),
+      RepositoryIssueIndexEntry(
+        key: 'TRACK-3',
+        path: 'TRACK/TRACK-1/TRACK-2/TRACK-3/main.md',
+        childKeys: [],
+        parentKey: 'TRACK-2',
+        parentPath: 'TRACK/TRACK-1/TRACK-2/main.md',
+        epicKey: 'TRACK-1',
+        epicPath: 'TRACK/TRACK-1/main.md',
+      ),
+    ],
   );
 
-  return _IssueDetailState(
-    transition: screen.transitionAction(targetIssueKey),
-    edit: screen.editAction(targetIssueKey),
-    comment: screen.commentAction(targetIssueKey),
-    hasReadOnlyExplanation: screen.hasReadOnlyExplanation(targetIssueKey),
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'route-tester', displayName: 'Route Tester');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => const TrackerSnapshot(
+    project: _project,
+    issues: _issues,
+    repositoryIndex: _index,
+  );
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async {
+    final query = jql.trim().toLowerCase();
+    if (query.isEmpty) {
+      return _issues;
+    }
+    return _issues.where((issue) {
+      final haystack = '${issue.key} ${issue.summary}'.toLowerCase();
+      return haystack.contains(query);
+    }).toList();
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue.copyWith(description: description.trim());
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue.copyWith(status: status, statusId: status.id);
+}
+
+Future<void> _pumpUntilLoaded(
+  WidgetTester tester, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final end = DateTime.now().add(timeout);
+
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final loadingVisible = find
+        .byType(CircularProgressIndicator)
+        .evaluate()
+        .isNotEmpty;
+    final routeResolved =
+        find
+            .bySemanticsLabel(RegExp(r'^Issue detail '))
+            .evaluate()
+            .isNotEmpty ||
+        find.text('Dashboard').evaluate().isNotEmpty ||
+        find.text('JQL Search').evaluate().isNotEmpty ||
+        find.text('Hierarchy').evaluate().isNotEmpty;
+
+    if (!loadingVisible && routeResolved) {
+      await tester.pump(const Duration(milliseconds: 300));
+      return;
+    }
+  }
+
+  fail(
+    'Timed out waiting for the app to finish loading /issues/TRACK-3. '
+    'Observed text snippets: ${_visibleTextSnippets(tester)}',
   );
 }
 
-class _IssueDetailState {
-  const _IssueDetailState({
-    required this.transition,
-    required this.edit,
-    required this.comment,
-    required this.hasReadOnlyExplanation,
-  });
+List<String> _matchingSemanticsLabels(WidgetTester tester, Pattern pattern) {
+  return find
+      .byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label;
+        if (label == null) {
+          return false;
+        }
+        if (pattern is RegExp) {
+          return pattern.hasMatch(label);
+        }
+        return label.contains(pattern.toString());
+      })
+      .evaluate()
+      .map((element) => (element.widget as Semantics).properties.label)
+      .whereType<String>()
+      .toSet()
+      .toList()
+    ..sort();
+}
 
-  final ActionAvailability transition;
-  final ActionAvailability edit;
-  final ActionAvailability comment;
-  final bool hasReadOnlyExplanation;
-
-  String describe() => [
-    transition.describe(),
-    edit.describe(),
-    comment.describe(),
-    'readOnlyExplanationVisible=$hasReadOnlyExplanation',
-  ].join(', ');
+List<String> _visibleTextSnippets(WidgetTester tester) {
+  return find
+      .byWidgetPredicate((widget) => widget is Text || widget is SelectableText)
+      .evaluate()
+      .map((element) {
+        final widget = element.widget;
+        if (widget is Text) {
+          return widget.data ?? widget.textSpan?.toPlainText() ?? '';
+        }
+        if (widget is SelectableText) {
+          return widget.data ?? widget.textSpan?.toPlainText() ?? '';
+        }
+        return '';
+      })
+      .map((text) => text.replaceAll(RegExp(r'\s+'), ' ').trim())
+      .where((text) => text.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort()
+    ..retainWhere((text) => text.length <= 120);
 }
