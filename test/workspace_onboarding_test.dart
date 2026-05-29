@@ -107,7 +107,7 @@ void main() {
     expect(find.text('Add workspace'), findsOneWidget);
     expect(
       find.text(
-        'Choose a local folder to open an existing workspace or initialize TrackState in a new one.',
+        'Choose a local folder or hosted repository to get started.',
       ),
       findsOneWidget,
     );
@@ -120,6 +120,41 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'first launch shows the ticket-required onboarding copy and local setup field hints',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(const TrackStateApp());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Choose a local folder or hosted repository to get started.'),
+        findsOneWidget,
+      );
+      expect(find.text('Local folder'), findsOneWidget);
+      expect(find.text('Hosted repository'), findsOneWidget);
+      expect(find.text('Repository Path'), findsOneWidget);
+      expect(find.text('Branch'), findsOneWidget);
+      expect(find.text('Enter the local Git folder path.'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('local-workspace-onboarding-initialize-folder'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'first launch local onboarding saves a custom workspace name and opens the workspace',

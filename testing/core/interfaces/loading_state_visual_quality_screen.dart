@@ -20,11 +20,21 @@ abstract interface class LoadingStateVisualQualityScreenHandle {
 
   Color? navigationBackgroundColor(String label);
 
+  Color resolveNavigationBackground(String label, Set<WidgetState> states);
+
   Color navigationTextColor(String label);
 
   Color loadingBannerTextColor();
 
+  Color loadingBannerBackgroundColor();
+
   Color firstLoadingPillTextColor();
+
+  Color firstLoadingPillBackgroundColor();
+
+  Color loadingIndicatorForegroundColor();
+
+  Color loadingIndicatorBackgroundColor();
 
   Color topBarPlaceholderTextColor();
 

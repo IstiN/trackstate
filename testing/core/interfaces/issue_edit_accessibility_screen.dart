@@ -12,6 +12,8 @@ abstract interface class IssueEditAccessibilityScreenHandle {
 
   List<String> visibleSemanticsLabels();
 
+  List<String> accessibilityFeedbackTexts();
+
   List<String> semanticsTraversal();
 
   Future<List<String>> collectForwardFocusOrder();

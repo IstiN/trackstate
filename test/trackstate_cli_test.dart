@@ -1978,6 +1978,108 @@ void main() {
     );
 
     test(
+      'hosted release-backed attachment upload bypasses LFS preflight for LFS-patterned filenames',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-hosted-release-upload.png',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsBytes(const <int>[137, 80, 78, 71, 13, 10]);
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          requiredUploadToken: 'env-token',
+        );
+        final hostedProvider = _FakeHostedTrackStateProvider(
+          user: const RepositoryUser(login: 'octocat', displayName: 'Octo Cat'),
+          permission: const RepositoryPermission(
+            canRead: true,
+            canWrite: true,
+            isAdmin: false,
+            canManageAttachments: true,
+            attachmentUploadMode: AttachmentUploadMode.noLfs,
+            supportsReleaseAttachmentWrites: true,
+          ),
+          lfsTrackedPaths: const <String>{
+            'TRACK/TRACK-1/attachments/design_v1.png',
+          },
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+            environment: const <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: hostedProvider,
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+          '--name',
+          'design_v1.png',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final attachment = data['attachment']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0, reason: result.stdout);
+        expect(json['ok'], isTrue);
+        expect(data['authSource'], 'env');
+        expect(repository.lastUploadIssue?.key, 'TRACK-1');
+        expect(repository.lastUploadName, 'design_v1.png');
+        expect(attachment['id'], 'TRACK/TRACK-1/attachments/design_v1.png');
+      },
+    );
+
+    test(
       'local release-backed upload surfaces explicit GitHub release validation failures',
       () async {
         final uploadFile = File(
