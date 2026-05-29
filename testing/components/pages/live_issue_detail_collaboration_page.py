@@ -121,7 +121,7 @@ class LiveIssueDetailCollaborationPage:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-389.\n"
+                "precondition for the live collaboration-tab scenario.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
 

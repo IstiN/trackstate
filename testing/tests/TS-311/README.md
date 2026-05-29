@@ -18,6 +18,11 @@ python -m playwright install chromium
 python testing/tests/TS-311/test_ts_311.py
 ```
 
+The run writes the required pipeline artifacts to `outputs/`, including
+`test_automation_result.json`, `jira_comment.md`, `pr_body.md`, and
+`response.md`, plus `bug_description.md` when the live product behavior fails
+the ticket.
+
 ## Required environment
 
 - Python 3.12+
