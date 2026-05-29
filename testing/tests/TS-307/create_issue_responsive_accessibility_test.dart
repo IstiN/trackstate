@@ -5,6 +5,8 @@ import '../../core/interfaces/create_issue_accessibility_screen.dart';
 import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
+  const compactViewport = Size(390, 844);
+
   testWidgets(
     'TS-307 adapts the Create issue surface responsively and keeps it accessible',
     (tester) async {
@@ -89,7 +91,10 @@ void main() {
           }
         }
 
-        await screen.resizeToViewport(width: 390, height: 844);
+        await screen.resizeToViewport(
+          width: compactViewport.width,
+          height: compactViewport.height,
+        );
 
         final compactLayout = screen.observeLayout();
         final compactLooksFullScreen =

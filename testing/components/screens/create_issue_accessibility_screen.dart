@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/create_issue_accessibility_screen.dart';
@@ -20,6 +21,8 @@ class CreateIssueAccessibilityScreen
   final TrackStateAppComponent _app;
   final CreateIssueAccessibilityRobot _robot;
 
+  static const Size _desktopViewport = Size(1440, 900);
+
   LocalTrackStateFixture? _fixture;
   String? _createIssueSection;
 
@@ -30,6 +33,10 @@ class CreateIssueAccessibilityScreen
     }
 
     await _app.pumpLocalGitApp(repositoryPath: _fixture!.repositoryPath);
+    await _robot.resizeToViewport(
+      width: _desktopViewport.width,
+      height: _desktopViewport.height,
+    );
     _app.expectLocalRuntimeChrome();
     _createIssueSection = await _app.openCreateIssueFlow();
     await _expectCreateIssueFormVisible();
