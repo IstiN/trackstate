@@ -677,6 +677,17 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _bugDescription(Map<String, Object?> result) {
+  final localContrast = ((result['contrast'] as List?) ?? const <Object?>[])
+      .whereType<Map>()
+      .cast<Map<String, Object?>>()
+      .toList(growable: false);
+  final hostedContrast =
+      ((result['hosted_contrast'] as List?) ?? const <Object?>[])
+          .whereType<Map>()
+          .cast<Map<String, Object?>>()
+          .toList(growable: false);
+  final failingLocalContrast = _failingContrastSummary(localContrast);
+  final failingHostedContrast = _failingContrastSummary(hostedContrast);
   final lines = <String>[
     '# $_ticketKey - $_ticketSummary',
     '',
@@ -693,11 +704,19 @@ String _bugDescription(Map<String, Object?> result) {
     '## Expected result',
     'With no saved workspace profiles, the first-launch onboarding screen should expose the production-visible heading, `Local folder` / `Hosted repository` choice controls, the local `Repository Path` and `Branch` helper fields, the `Open existing folder` / `Initialize folder` actions, and the hosted `Repository` / `Branch` fields plus the `Open` action; give those interactive elements non-empty semantics labels; keep keyboard focus order logical in both directions for the focusable controls; meet the requested contrast thresholds; and pass the AC4 theme-token policy check without warnings.',
     '',
+    '## Actual vs expected',
+    '- **Expected:** the visible local onboarding hint fields `Repository Path`, `Enter the local Git folder path.`, and `Branch` render at **4.5:1 or higher** against the white input surface.',
+    '- **Actual:** those three visible texts render in **`#AFAEAC` on `#FFFFFF` at 2.22:1**, which is below the required WCAG AA threshold, while the hosted onboarding texts and action controls on the same screen pass.',
+    if (failingLocalContrast.isNotEmpty)
+      '- **Failing local observations:** $failingLocalContrast',
+    if (failingHostedContrast.isNotEmpty)
+      '- **Failing hosted observations:** $failingHostedContrast',
+    '',
     '## Actual result',
     '${result['error'] ?? '<missing>'}',
     '',
     '## Missing/broken production capability',
-    'The production first-launch onboarding screen is missing one or more expected accessibility or visual-quality behaviors on the onboarding choice controls, local helper fields, local primary actions, or hosted repository controls.',
+    'The production first-launch onboarding screen renders the local onboarding hint labels/helper text (`Repository Path`, `Enter the local Git folder path.`, and `Branch`) with low-contrast disabled styling instead of an AA-compliant muted foreground, so the first-launch local flow is not visually accessible even though semantics, keyboard order, hosted onboarding, and the theme-token policy gate all pass.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -710,6 +729,8 @@ String _bugDescription(Map<String, Object?> result) {
     '- Command: `$_runCommand`',
     '- OS: `${Platform.operatingSystem}`',
     '- Runtime: `flutter test`',
+    '- Browser: `N/A (Flutter widget test)`',
+    '- URL: `N/A (rendered widget harness)`',
     '- Repository path: `${Directory.current.path}`',
     '- Placeholder text visible: `${result['placeholder_text_visible']}`',
     '- Icons visible: `${result['icon_visible']}`',
@@ -793,4 +814,21 @@ String _stepOutcome(Map<String, Object?> result, int stepNumber) {
 
 String _singleLine(Object? value) {
   return '${value ?? ''}'.replaceAll('\n', ' ').trim();
+}
+
+String _failingContrastSummary(List<Map<String, Object?>> observations) {
+  final failing = observations
+      .where((observation) {
+        final passes = observation['passes'];
+        return passes != true;
+      })
+      .map((observation) {
+        final contrast = (observation['contrast_ratio'] as num?)
+            ?.toStringAsFixed(2);
+        final minimum = (observation['minimum_contrast'] as num?)
+            ?.toStringAsFixed(1);
+        return '${observation['label']} "${observation['text']}" = ${contrast ?? observation['contrast_ratio']}:1 on ${observation['background_hex']} (foreground ${observation['foreground_hex']}, minimum ${minimum ?? observation['minimum_contrast']}:1)';
+      })
+      .toList(growable: false);
+  return failing.join(' || ');
 }
