@@ -21,6 +21,12 @@ void main() {
     expect(() => parseTrackStateRuntime('svn'), throwsArgumentError);
   });
 
+  test('hosted runtime defaults to the setup repository', () {
+    expect(SetupTrackStateRepository.repositoryName, 'IstiN/trackstate-setup');
+    expect(SetupTrackStateRepository.sourceRef, 'main');
+    expect(SetupTrackStateRepository.dataRef, 'main');
+  });
+
   test('repository factory builds the requested adapter-backed repository', () {
     final hosted = createTrackStateRepository(
       runtime: TrackStateRuntime.github,

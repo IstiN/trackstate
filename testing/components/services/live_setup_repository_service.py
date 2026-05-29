@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import urllib.error
 from urllib.parse import quote
 import urllib.request
@@ -39,6 +40,9 @@ class GitHubAuthenticatedUser:
 class LiveHostedIssueFixture:
     key: str
     path: str
+    issue_type: str
+    status: str
+    priority: str
     summary: str
     description: str
     priority_id: str
@@ -95,6 +99,9 @@ class LiveHostedRelease:
     target_commitish: str = ""
 
 
+_GITHUB_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -136,6 +143,9 @@ class LiveSetupRepositoryService:
         entries = self._read_repo_directory(issue_path)
         issue_key = issue_path.rstrip("/").split("/")[-1]
         main_markdown = self._read_repo_text(f"{issue_path}/main.md")
+        issue_type = self._front_matter_value(main_markdown, key="issueType")
+        status = self._front_matter_value(main_markdown, key="status")
+        priority = self._front_matter_value(main_markdown, key="priority")
         summary = self._front_matter_value(main_markdown, key="summary")
         entry_names = {
             str(entry.get("name", ""))
@@ -168,6 +178,9 @@ class LiveSetupRepositoryService:
         return LiveHostedIssueFixture(
             key=issue_key,
             path=issue_path,
+            issue_type=issue_type or "",
+            status=status or "",
+            priority=priority or "",
             summary=summary or issue_key,
             description=self._markdown_section(main_markdown, heading="Description"),
             priority_id=self._front_matter_value(main_markdown, key="priority") or "",
@@ -263,6 +276,27 @@ class LiveSetupRepositoryService:
     def fetch_repo_text(self, path: str) -> str:
         return self.fetch_repo_file(path).content
 
+    def fetch_branch_head_sha(self, branch: str | None = None) -> str:
+        branch_name = (branch or self.ref).strip()
+        if not branch_name:
+            raise RuntimeError("GitHub branch head lookup requires a branch name.")
+
+        response = self._read_json(
+            f"/repos/{self.repository}/git/ref/heads/{quote(branch_name, safe='')}",
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not return an object: {response!r}",
+            )
+        obj = response.get("object")
+        sha = obj.get("sha") if isinstance(obj, dict) else None
+        if not isinstance(sha, str) or not _GITHUB_SHA_PATTERN.match(sha):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not expose a full commit SHA: "
+                f"{response!r}",
+            )
+        return sha
+
     def write_repo_text(self, path: str, *, content: str, message: str) -> None:
         sha: str | None = None
         try:
@@ -327,7 +361,6 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
-
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
@@ -352,7 +385,6 @@ class LiveSetupRepositoryService:
             locale_present=locale_present,
             payload=payload,
         )
-
     def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
         issue_paths: list[str] = []
         pending_paths = [root_path]

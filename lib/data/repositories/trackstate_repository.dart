@@ -534,10 +534,13 @@ class ProviderBackedTrackStateRepository
     await _provider.ensureCleanWorktree();
 
     final writeBranch = await _provider.resolveWriteBranch();
-    final blobPaths = (await _provider.listTree(ref: writeBranch))
-        .where((entry) => entry.type == 'blob')
-        .map((entry) => entry.path)
-        .toSet();
+    final blobEntries = (await _provider.listTree(
+      ref: writeBranch,
+    )).where((entry) => entry.type == 'blob').toList(growable: false);
+    final blobPaths = blobEntries.map((entry) => entry.path).toSet();
+    final blobRevisions = {
+      for (final entry in blobEntries) entry.path: entry.revision,
+    };
     final projectPath = blobPaths.firstWhere(
       (path) => path.endsWith('/project.json') || path == 'project.json',
       orElse: () => throw const TrackStateRepositoryException(
@@ -581,6 +584,7 @@ class ProviderBackedTrackStateRepository
           path: projectPath,
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -591,6 +595,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'statuses.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -601,6 +606,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'issue-types.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -611,6 +617,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'fields.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -621,6 +628,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'workflows.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -631,6 +639,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'priorities.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -641,6 +650,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'versions.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -651,6 +661,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'components.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
       RepositoryTextFileChange(
@@ -661,6 +672,7 @@ class ProviderBackedTrackStateRepository
           path: _joinPath(configRoot, 'resolutions.json'),
           ref: writeBranch,
           blobPaths: blobPaths,
+          blobRevisions: blobRevisions,
         ),
       ),
     ];
@@ -675,6 +687,7 @@ class ProviderBackedTrackStateRepository
             path: path,
             ref: writeBranch,
             blobPaths: blobPaths,
+            blobRevisions: blobRevisions,
           ),
         ),
       );
@@ -694,6 +707,7 @@ class ProviderBackedTrackStateRepository
             path: path,
             ref: writeBranch,
             blobPaths: blobPaths,
+            blobRevisions: blobRevisions,
           ),
         ),
       );
@@ -1115,10 +1129,23 @@ class ProviderBackedTrackStateRepository
         scopes: const {IssueHydrationScope.attachments},
       );
     }
+    final attachmentPath = resolveIssueAttachmentPath(
+      currentIssue,
+      normalizedName,
+      sourceName: sourceName,
+    );
+    final existingAttachment = currentIssue.attachments
+        .where((candidate) => candidate.storagePath == attachmentPath)
+        .firstOrNull;
+    final preserveRepositoryPathReplacement =
+        attachmentStorage.mode == AttachmentStorageMode.githubReleases &&
+        !permission.supportsReleaseAttachmentWrites &&
+        existingAttachment?.storageBackend == AttachmentStorageMode.repositoryPath;
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
       final githubReleases = attachmentStorage.githubReleases!;
       final writeBranch = await _provider.resolveWriteBranch();
-      if (!permission.supportsReleaseAttachmentWrites) {
+      if (!permission.supportsReleaseAttachmentWrites &&
+          !preserveRepositoryPathReplacement) {
         final inboxPath = _releaseAttachmentInboxPath(
           issue: currentIssue,
           fileName: resolveAttachmentStorageName(
@@ -1146,159 +1173,151 @@ class ProviderBackedTrackStateRepository
         _replaceCachedIssue(updatedIssue);
         return updatedIssue;
       }
-      final releaseStore = switch (_provider) {
-        final RepositoryReleaseAttachmentStore supported => supported,
-        _ => throw const TrackStateRepositoryException(
-          'This repository provider does not support GitHub Releases '
-          'attachment uploads.',
-        ),
-      };
-      final attachmentPath = resolveIssueAttachmentPath(
-        currentIssue,
-        normalizedName,
-        sourceName: sourceName,
-      );
-      final attachmentMetadataPath = _attachmentMetadataPath(
-        _issueRoot(currentIssue.storagePath),
-      );
-      final metadataRevision = await _existingRevision(
-        path: attachmentMetadataPath,
-        ref: writeBranch,
-        blobPaths: _snapshotBlobPaths,
-      );
-      final timestamp = DateTime.now().toUtc().toIso8601String();
-      final author = _defaultAuthor(_session.resolvedUserIdentity);
-      final releaseTag = githubReleases.releaseTagForIssue(currentIssue.key);
-      final assetName = attachmentPath.split('/').last;
-      final releaseAssetNames = {
-        for (final attachment in currentIssue.attachments)
-          if (attachment.storageBackend ==
-                  AttachmentStorageMode.githubReleases &&
-              attachment.githubReleaseTag == releaseTag)
-            attachment.githubReleaseAssetName ?? attachment.name,
-      };
-      final previousReleaseAttachment = currentIssue.attachments
-          .where(
-            (attachment) =>
-                attachment.storagePath == attachmentPath &&
-                attachment.storageBackend ==
+      if (!preserveRepositoryPathReplacement) {
+        final releaseStore = switch (_provider) {
+          final RepositoryReleaseAttachmentStore supported => supported,
+          _ => throw const TrackStateRepositoryException(
+            'This repository provider does not support GitHub Releases '
+            'attachment uploads.',
+          ),
+        };
+        final attachmentMetadataPath = _attachmentMetadataPath(
+          _issueRoot(currentIssue.storagePath),
+        );
+        final metadataRevision = await _existingRevision(
+          path: attachmentMetadataPath,
+          ref: writeBranch,
+          blobPaths: _snapshotBlobPaths,
+        );
+        final timestamp = DateTime.now().toUtc().toIso8601String();
+        final author = _defaultAuthor(_session.resolvedUserIdentity);
+        final releaseTag = githubReleases.releaseTagForIssue(currentIssue.key);
+        final assetName = attachmentPath.split('/').last;
+        final releaseAssetNames = {
+          for (final attachment in currentIssue.attachments)
+            if (attachment.storageBackend ==
                     AttachmentStorageMode.githubReleases &&
-                attachment.githubReleaseTag == releaseTag,
-          )
-          .firstOrNull;
-      final rollbackAttachment = previousReleaseAttachment == null
-          ? null
-          : await releaseStore.readReleaseAttachment(
-              RepositoryReleaseAttachmentReadRequest(
-                releaseTag: previousReleaseAttachment.githubReleaseTag!,
-                assetName:
-                    previousReleaseAttachment.githubReleaseAssetName ??
-                    previousReleaseAttachment.name,
-                assetId: previousReleaseAttachment.revisionOrOid,
-              ),
-            );
-      final releaseWriteResult = await releaseStore.writeReleaseAttachment(
-        RepositoryReleaseAttachmentWriteRequest(
-          issueKey: currentIssue.key,
-          releaseTag: releaseTag,
-          releaseTitle: githubReleases.releaseTitleForIssue(currentIssue.key),
-          assetName: assetName,
-          bytes: bytes,
-          mediaType: _mediaTypeForPath(assetName),
-          branch: writeBranch,
-          allowedAssetNames: releaseAssetNames,
-        ),
-      );
-      final updatedAttachment = IssueAttachment(
-        id: attachmentPath,
-        name: normalizedName,
-        mediaType: _mediaTypeForPath(attachmentPath),
-        sizeBytes: bytes.length,
-        author: author,
-        createdAt: timestamp,
-        storagePath: attachmentPath,
-        revisionOrOid: releaseWriteResult.assetId,
-        storageBackend: AttachmentStorageMode.githubReleases,
-        githubReleaseTag: releaseWriteResult.releaseTag,
-        githubReleaseAssetName: releaseWriteResult.assetName,
-      );
-      final updatedAttachments = [
-        for (final candidate in currentIssue.attachments)
-          if (candidate.storagePath == attachmentPath)
-            updatedAttachment
-          else
-            candidate,
-        if (!currentIssue.attachments.any(
-          (candidate) => candidate.storagePath == attachmentPath,
-        ))
-          updatedAttachment,
-      ]..sort(_sortAttachmentsNewestFirst);
-      final metadataWriteResult = await () async {
-        try {
-          return await _provider.writeTextFile(
-            RepositoryWriteRequest(
-              path: attachmentMetadataPath,
-              content:
-                  '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
-              message: 'Update attachment metadata for ${currentIssue.key}',
-              branch: writeBranch,
-              expectedRevision: metadataRevision,
-            ),
-          );
-        } catch (error, stackTrace) {
-          try {
-            await releaseStore.deleteReleaseAttachment(
-              RepositoryReleaseAttachmentDeleteRequest(
-                releaseTag: releaseWriteResult.releaseTag,
-                assetId: releaseWriteResult.assetId,
-                assetName: releaseWriteResult.assetName,
-              ),
-            );
-            if (previousReleaseAttachment != null &&
-                rollbackAttachment != null) {
-              await releaseStore.writeReleaseAttachment(
-                RepositoryReleaseAttachmentWriteRequest(
-                  issueKey: currentIssue.key,
+                attachment.githubReleaseTag == releaseTag)
+              attachment.githubReleaseAssetName ?? attachment.name,
+        };
+        final previousReleaseAttachment = currentIssue.attachments
+            .where(
+              (attachment) =>
+                  attachment.storagePath == attachmentPath &&
+                  attachment.storageBackend ==
+                      AttachmentStorageMode.githubReleases &&
+                  attachment.githubReleaseTag == releaseTag,
+            )
+            .firstOrNull;
+        final rollbackAttachment = previousReleaseAttachment == null
+            ? null
+            : await releaseStore.readReleaseAttachment(
+                RepositoryReleaseAttachmentReadRequest(
                   releaseTag: previousReleaseAttachment.githubReleaseTag!,
-                  releaseTitle: githubReleases.releaseTitleForIssue(
-                    currentIssue.key,
-                  ),
                   assetName:
                       previousReleaseAttachment.githubReleaseAssetName ??
                       previousReleaseAttachment.name,
-                  bytes: rollbackAttachment.bytes,
-                  mediaType: previousReleaseAttachment.mediaType,
-                  branch: writeBranch,
-                  allowedAssetNames: releaseAssetNames,
+                  assetId: previousReleaseAttachment.revisionOrOid,
                 ),
               );
-            }
-          } catch (rollbackError) {
-            throw TrackStateRepositoryException(
-              'Could not update attachment metadata for ${currentIssue.key} '
-              'after uploading GitHub release asset $assetName. '
-              'Rollback also failed: $rollbackError',
+        final releaseWriteResult = await releaseStore.writeReleaseAttachment(
+          RepositoryReleaseAttachmentWriteRequest(
+            issueKey: currentIssue.key,
+            releaseTag: releaseTag,
+            releaseTitle: githubReleases.releaseTitleForIssue(currentIssue.key),
+            assetName: assetName,
+            bytes: bytes,
+            mediaType: _mediaTypeForPath(assetName),
+            branch: writeBranch,
+            allowedAssetNames: releaseAssetNames,
+          ),
+        );
+        final updatedAttachment = IssueAttachment(
+          id: attachmentPath,
+          name: normalizedName,
+          mediaType: _mediaTypeForPath(attachmentPath),
+          sizeBytes: bytes.length,
+          author: author,
+          createdAt: timestamp,
+          storagePath: attachmentPath,
+          revisionOrOid: releaseWriteResult.assetId,
+          storageBackend: AttachmentStorageMode.githubReleases,
+          githubReleaseTag: releaseWriteResult.releaseTag,
+          githubReleaseAssetName: releaseWriteResult.assetName,
+        );
+        final updatedAttachments = [
+          for (final candidate in currentIssue.attachments)
+            if (candidate.storagePath == attachmentPath)
+              updatedAttachment
+            else
+              candidate,
+          if (!currentIssue.attachments.any(
+            (candidate) => candidate.storagePath == attachmentPath,
+          ))
+            updatedAttachment,
+        ]..sort(_sortAttachmentsNewestFirst);
+        final metadataWriteResult = await () async {
+          try {
+            return await _provider.writeTextFile(
+              RepositoryWriteRequest(
+                path: attachmentMetadataPath,
+                content:
+                    '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
+                message: 'Update attachment metadata for ${currentIssue.key}',
+                branch: writeBranch,
+                expectedRevision: metadataRevision,
+              ),
             );
+          } catch (error, stackTrace) {
+            try {
+              await releaseStore.deleteReleaseAttachment(
+                RepositoryReleaseAttachmentDeleteRequest(
+                  releaseTag: releaseWriteResult.releaseTag,
+                  assetId: releaseWriteResult.assetId,
+                  assetName: releaseWriteResult.assetName,
+                ),
+              );
+              if (previousReleaseAttachment != null &&
+                  rollbackAttachment != null) {
+                await releaseStore.writeReleaseAttachment(
+                  RepositoryReleaseAttachmentWriteRequest(
+                    issueKey: currentIssue.key,
+                    releaseTag: previousReleaseAttachment.githubReleaseTag!,
+                    releaseTitle: githubReleases.releaseTitleForIssue(
+                      currentIssue.key,
+                    ),
+                    assetName:
+                        previousReleaseAttachment.githubReleaseAssetName ??
+                        previousReleaseAttachment.name,
+                    bytes: rollbackAttachment.bytes,
+                    mediaType: previousReleaseAttachment.mediaType,
+                    branch: writeBranch,
+                    allowedAssetNames: releaseAssetNames,
+                  ),
+                );
+              }
+            } catch (rollbackError) {
+              throw TrackStateRepositoryException(
+                'Could not update attachment metadata for ${currentIssue.key} '
+                'after uploading GitHub release asset $assetName. '
+                'Rollback also failed: $rollbackError',
+              );
+            }
+            Error.throwWithStackTrace(error, stackTrace);
           }
-          Error.throwWithStackTrace(error, stackTrace);
-        }
-      }();
-      _snapshotArtifactRevisions[attachmentMetadataPath] =
-          metadataWriteResult.revision;
-      _snapshotBlobPaths = {..._snapshotBlobPaths, attachmentMetadataPath};
-      final updatedIssue = currentIssue.copyWith(
-        hasAttachmentsLoaded: true,
-        attachments: updatedAttachments,
-      );
-      _replaceCachedIssue(updatedIssue);
-      return updatedIssue;
+        }();
+        _snapshotArtifactRevisions[attachmentMetadataPath] =
+            metadataWriteResult.revision;
+        _snapshotBlobPaths = {..._snapshotBlobPaths, attachmentMetadataPath};
+        final updatedIssue = currentIssue.copyWith(
+          hasAttachmentsLoaded: true,
+          attachments: updatedAttachments,
+        );
+        _replaceCachedIssue(updatedIssue);
+        return updatedIssue;
+      }
     }
     final writeBranch = await _provider.resolveWriteBranch();
-    final attachmentPath = resolveIssueAttachmentPath(
-      currentIssue,
-      normalizedName,
-      sourceName: sourceName,
-    );
     final attachmentMetadataPath = _attachmentMetadataPath(
       _issueRoot(currentIssue.storagePath),
     );
@@ -1811,21 +1830,7 @@ class ProviderBackedTrackStateRepository
           summaryIssues,
         ),
         loadWarnings: loadWarnings,
-        readiness: const TrackerBootstrapReadiness(
-          domainStates: {
-            TrackerDataDomain.projectMeta: TrackerLoadState.ready,
-            TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
-            TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
-            TrackerDataDomain.issueDetails: TrackerLoadState.partial,
-          },
-          sectionStates: {
-            TrackerSectionKey.dashboard: TrackerLoadState.ready,
-            TrackerSectionKey.board: TrackerLoadState.ready,
-            TrackerSectionKey.search: TrackerLoadState.partial,
-            TrackerSectionKey.hierarchy: TrackerLoadState.ready,
-            TrackerSectionKey.settings: TrackerLoadState.ready,
-          },
-        ),
+        readiness: _hostedBootstrapReadiness(),
         startupRecovery: _startupRecovery,
       );
     }
@@ -2032,6 +2037,8 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'project metadata',
         ),
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
     }
     final configRoot = projectJson == null
         ? _defaultConfigRoot(dataRoot)
@@ -2207,12 +2214,47 @@ class ProviderBackedTrackStateRepository
     ];
   }
 
+  TrackerBootstrapReadiness _hostedBootstrapReadiness() {
+    if (_startupRecovery == null) {
+      return const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+          TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.ready,
+          TrackerSectionKey.board: TrackerLoadState.ready,
+          TrackerSectionKey.search: TrackerLoadState.partial,
+          TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      );
+    }
+    return const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.partial,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.loading,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.partial,
+        TrackerSectionKey.board: TrackerLoadState.partial,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.partial,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    );
+  }
+
   void _validateHostedBootstrapIndex({
     required RepositoryIndex repositoryIndex,
     required List<String> issuePathsInTree,
   }) {
     if (repositoryIndex.entries.isEmpty) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
       );
     }
@@ -2221,7 +2263,7 @@ class ProviderBackedTrackStateRepository
           (entry.issueTypeId ?? '').trim().isEmpty ||
           (entry.statusId ?? '').trim().isEmpty ||
           (entry.updatedLabel ?? '').trim().isEmpty) {
-        throw TrackStateRepositoryException(
+        throw HostedBootstrapIndexValidationException(
           'Hosted bootstrap requires summary metadata for ${entry.key} in .trackstate/index/issues.json. Regenerate the tracker indexes and retry.',
         );
       }
@@ -2229,13 +2271,13 @@ class ProviderBackedTrackStateRepository
     final indexedPaths =
         repositoryIndex.entries.map((entry) => entry.path).toList()..sort();
     if (indexedPaths.length != issuePathsInTree.length) {
-      throw const TrackStateRepositoryException(
+      throw const HostedBootstrapIndexValidationException(
         'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
       );
     }
     for (var index = 0; index < indexedPaths.length; index += 1) {
       if (indexedPaths[index] != issuePathsInTree[index]) {
-        throw const TrackStateRepositoryException(
+        throw const HostedBootstrapIndexValidationException(
           'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
         );
       }
@@ -2529,6 +2571,9 @@ class ProviderBackedTrackStateRepository
           ),
         );
         continue;
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        continue;
       }
       if (json is! Map) {
         continue;
@@ -2596,6 +2641,9 @@ class ProviderBackedTrackStateRepository
         ),
       );
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
   }
 
@@ -2619,6 +2667,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: warningSubject,
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
   }
@@ -2709,6 +2760,12 @@ class ProviderBackedTrackStateRepository
         _fieldDefinitions,
         growable: false,
       );
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
     }
   }
 
@@ -2734,6 +2791,9 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'workflows',
         ),
       );
+      return const [];
+    } on GitHubRateLimitException catch (error) {
+      _captureHostedStartupRecovery(error);
       return const [];
     }
     if (json is! Map) {
@@ -2834,6 +2894,14 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'summary issue index',
           ),
         );
+        entries.addAll(
+          _fallbackHostedRepositoryIndexEntries(
+            blobPaths: blobPaths,
+            dataRoot: dataRoot,
+          ),
+        );
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
         entries.addAll(
           _fallbackHostedRepositoryIndexEntries(
             blobPaths: blobPaths,
@@ -3638,9 +3706,14 @@ class ProviderBackedTrackStateRepository
     required String path,
     required String ref,
     required Set<String> blobPaths,
+    Map<String, String?>? blobRevisions,
   }) async {
     if (!blobPaths.contains(path)) {
       return null;
+    }
+    final revision = blobRevisions?[path];
+    if (revision != null || blobRevisions?.containsKey(path) == true) {
+      return revision;
     }
     final file = await _provider.readTextFile(path, ref: ref);
     return file.revision;
@@ -3965,6 +4038,11 @@ class DemoTrackStateRepository implements TrackStateRepository {
 
 class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
+}
+
+class HostedBootstrapIndexValidationException
+    extends TrackStateRepositoryException {
+  const HostedBootstrapIndexValidationException(super.message);
 }
 
 class TrackStatePartialHydrationException

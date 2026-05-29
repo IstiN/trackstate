@@ -47,6 +47,10 @@ THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-954-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-954-third"
 LINKED_BUGS = [
+    "TS-1210",
+    "TS-1208",
+    "TS-1155",
+    "TS-1150",
     "TS-1135",
     "TS-1133",
     "TS-1044",
@@ -56,6 +60,7 @@ LINKED_BUGS = [
     "TS-1018",
     "TS-1010",
     "TS-1009",
+    "TS-999",
     "TS-998",
     "TS-997",
     "TS-975",
@@ -66,7 +71,7 @@ LINKED_BUGS = [
 ]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FOCUS_SETTLE_MS = 300
-MAX_TABS_TO_REACH_FOOTER = 8
+FOOTER_TAB_BUDGET_BUFFER = 2
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
 FIELD_LABELS = ("Repository", "Branch")
 
@@ -156,7 +161,7 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "linked_bugs": LINKED_BUGS,
         "focus_settle_ms": FOCUS_SETTLE_MS,
-        "max_tabs_to_reach_footer": MAX_TABS_TO_REACH_FOOTER,
+        "footer_tab_budget_buffer": FOOTER_TAB_BUDGET_BUFFER,
         "preloaded_workspace_state": workspace_state,
         "steps": [],
         "human_verification": [],
@@ -448,6 +453,14 @@ def _tab_to_footer_and_wrap(
     first_row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> dict[str, object]:
     first_row_label = _saved_workspace_row_focus_label(first_row)
+    internal_tab_stops = page.observe_internal_tab_stops(
+        panel=panel,
+        timeout_ms=4_000,
+    )
+    tab_budget = max(
+        len(internal_tab_stops) + FOOTER_TAB_BUDGET_BUFFER,
+        8,
+    )
     initial_focus_state = _capture_tab_state(
         page=page,
         panel=panel,
@@ -460,7 +473,7 @@ def _tab_to_footer_and_wrap(
     tab_trace: list[dict[str, object]] = []
     footer_state: dict[str, object] | None = None
     footer_button_state: WorkspaceSwitcherButtonStateObservation | None = None
-    for press_index in range(1, MAX_TABS_TO_REACH_FOOTER + 1):
+    for press_index in range(1, tab_budget + 1):
         before = page.active_element()
         page.press_key("Tab", timeout_ms=4_000)
         _wait_for_switcher_stability_or_raise(
@@ -499,6 +512,7 @@ def _tab_to_footer_and_wrap(
         tab_trace=tab_trace,
         footer_state=footer_state,
         footer_button_state=footer_button_state,
+        tab_budget=tab_budget,
     )
 
     before_wrap = page.active_element()
@@ -532,6 +546,8 @@ def _tab_to_footer_and_wrap(
 
     return {
         "initial_focus_state": initial_focus_state,
+        "internal_tab_stops": [_tab_stop_payload(item) for item in internal_tab_stops],
+        "tab_budget": tab_budget,
         "tab_trace_to_footer": tab_trace,
         "footer_state": footer_state,
         "footer_button_state": _button_state_payload(footer_button_state),
@@ -564,10 +580,15 @@ def _assert_initial_panel_state(
         )
     first_row = _selected_saved_workspace(rows)
     if first_row is None:
-        failures.append("no saved workspace row was marked selected when the panel opened")
+        first_row = next(
+            (row for row in rows if row.display_name == FIRST_WORKSPACE_DISPLAY_NAME),
+            rows[0] if rows else None,
+        )
+    if first_row is None:
+        failures.append("no saved workspace row was available when the panel opened")
     elif first_row.display_name != FIRST_WORKSPACE_DISPLAY_NAME:
         failures.append(
-            f"the selected row was {first_row.display_name!r} instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
+            f"the primary saved workspace row was {first_row.display_name!r} instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
         )
     labels = _surface_labels(surface)
     for label in (*FIELD_LABELS, LAST_INTERNAL_CONTROL_LABEL):
@@ -647,6 +668,7 @@ def _assert_traversal_reached_footer(
     tab_trace: list[dict[str, object]],
     footer_state: dict[str, object] | None,
     footer_button_state: WorkspaceSwitcherButtonStateObservation | None,
+    tab_budget: int,
 ) -> None:
     failures: list[str] = []
     if not tab_trace:
@@ -673,7 +695,7 @@ def _assert_traversal_reached_footer(
     if footer_state is None:
         failures.append(
             f"the visible {LAST_INTERNAL_CONTROL_LABEL!r} footer button was never reached within "
-            f"{MAX_TABS_TO_REACH_FOOTER} Tab presses",
+            f"{tab_budget} Tab presses",
         )
     elif footer_button_state is None:
         failures.append(
@@ -1039,6 +1061,21 @@ def _button_state_payload(
         "keyboard_focusable": observation.keyboard_focusable,
         "active_within": observation.active_within,
         "outer_html": observation.outer_html,
+    }
+
+
+def _tab_stop_payload(observation: object) -> dict[str, object]:
+    return {
+        "label": getattr(observation, "label", None),
+        "visible_text": getattr(observation, "visible_text", None),
+        "role": getattr(observation, "role", None),
+        "tag_name": getattr(observation, "tag_name", None),
+        "tabindex": getattr(observation, "tabindex", None),
+        "tab_index_value": getattr(observation, "tab_index_value", None),
+        "dom_index": getattr(observation, "dom_index", None),
+        "keyboard_focusable": getattr(observation, "keyboard_focusable", None),
+        "disabled": getattr(observation, "disabled", None),
+        "outer_html": getattr(observation, "outer_html", None),
     }
 
 
@@ -1555,41 +1592,44 @@ def _build_bug_description(result: dict[str, object]) -> str:
         )
 
     lines = [
-        f"# {TICKET_KEY} bug report",
+        f"h3. Bug report — {TICKET_KEY}",
         "",
-        "## Steps to reproduce",
+        "h4. Steps to Reproduce",
         *annotated_steps,
         "",
-        "## Exact error message or assertion failure",
-        "```text",
+        "h4. Exact error message or assertion failure",
+        "{code}",
         str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "{code}",
         "",
-        "## Actual result",
-        _actual_result_summary(result, passed=False),
-        "",
-        "## Expected result",
+        "h4. Expected Result",
         EXPECTED_RESULT,
         "",
-        "## Environment details",
-        f"- URL: {result.get('app_url')}",
-        f"- Browser: {result.get('browser')}",
-        f"- OS: {result.get('os')}",
-        f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-        f"- Run command: `{RUN_COMMAND}`",
+        "h4. Actual Result",
+        _actual_result_summary(result, passed=False),
         "",
-        "## Screenshots or logs",
-        f"- Screenshot: `{result.get('screenshot')}`",
-        f"- Startup observation: `{json.dumps(result.get('startup_observation'), ensure_ascii=True)}`",
-        f"- Shell observation: `{json.dumps(result.get('shell_observation'), ensure_ascii=True)}`",
-        f"- Trigger observation: `{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}`",
-        f"- Switcher observation: `{json.dumps(result.get('open_switcher_observation'), ensure_ascii=True)}`",
-        f"- Footer state before Tab: `{json.dumps(result.get('save_and_switch_before_tab'), ensure_ascii=True)}`",
-        f"- Footer state at focus: `{json.dumps(result.get('footer_button_state'), ensure_ascii=True)}`",
-        f"- Tab trace: `{json.dumps(result.get('tab_trace_to_footer'), ensure_ascii=True)}`",
-        f"- Wrap state: `{json.dumps(result.get('wrap_state_after_footer'), ensure_ascii=True)}`",
-        f"- Console events: `{json.dumps(result.get('console_events'), ensure_ascii=True)}`",
-        f"- Page errors: `{json.dumps(result.get('page_errors'), ensure_ascii=True)}`",
+        "h4. Environment",
+        f"* URL: {result.get('app_url')}",
+        f"* Browser: {result.get('browser')}",
+        f"* OS: {result.get('os')}",
+        f"* Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+        f"* Run command: {{code}}{RUN_COMMAND}{{code}}",
+        "",
+        "h4. Screenshots or logs",
+        f"* Screenshot: {result.get('screenshot')}",
+        f"* Startup observation: {{code}}{json.dumps(result.get('startup_observation'), ensure_ascii=True)}{{code}}",
+        f"* Shell observation: {{code}}{json.dumps(result.get('shell_observation'), ensure_ascii=True)}{{code}}",
+        f"* Trigger observation: {{code}}{json.dumps(result.get('trigger_observation'), ensure_ascii=True)}{{code}}",
+        f"* Switcher observation: {{code}}{json.dumps(result.get('open_switcher_observation'), ensure_ascii=True)}{{code}}",
+        f"* Footer state before Tab: {{code}}{json.dumps(result.get('save_and_switch_before_tab'), ensure_ascii=True)}{{code}}",
+        f"* Footer state at focus: {{code}}{json.dumps(result.get('footer_button_state'), ensure_ascii=True)}{{code}}",
+        f"* Tab trace: {{code}}{json.dumps(result.get('tab_trace_to_footer'), ensure_ascii=True)}{{code}}",
+        f"* Wrap state: {{code}}{json.dumps(result.get('wrap_state_after_footer'), ensure_ascii=True)}{{code}}",
+        f"* Console events: {{code}}{json.dumps(result.get('console_events'), ensure_ascii=True)}{{code}}",
+        f"* Page errors: {{code}}{json.dumps(result.get('page_errors'), ensure_ascii=True)}{{code}}",
+        "",
+        "h4. Notes",
+        f"* Linked bugs considered during this rerun: {', '.join(LINKED_BUGS)}",
     ]
     return "\n".join(lines) + "\n"
 

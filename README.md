@@ -46,7 +46,7 @@ dart run trackstate jira_execute_request --target local --method GET --request-p
 
 `.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
 
-`.github/workflows/build-native.yml` is the dedicated Apple release workflow. It runs only for semantic version tags (`v*`) or manual recovery dispatches, verifies the TrackState macOS runner contract before scheduling release work, and publishes the zipped macOS app bundle, CLI archive, and SHA256 manifest to the source repository release. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
+`.github/workflows/build-native.yml` is the dedicated Apple release workflow. It runs only for semantic version tags (`v*`) or manual recovery dispatches, verifies the TrackState macOS runner contract before scheduling release work, and publishes the zipped macOS app bundle, CLI archive, and SHA256 manifest to the source repository release. `.github/workflows/repair-historical-apple-releases.yml` now watches successful `main` validation runs and re-dispatches `build-native.yml` for `v0.0.98` when the published Apple Silicon archive still contains a universal binary. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
 
 ## Fork-and-run setup repository
 
