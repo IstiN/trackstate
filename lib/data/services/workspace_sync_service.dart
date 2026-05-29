@@ -61,6 +61,7 @@ class WorkspaceSyncService {
   WorkspaceSyncTrigger? _queuedFollowUpTrigger;
   int _hostedBackoffIndex = 0;
   DateTime? _lastCompletedAt;
+  DateTime? _scheduledHostedRetryAt;
   TrackerSnapshot? _baselineSnapshot;
   RepositorySyncState? _previousSyncState;
 
@@ -130,6 +131,7 @@ class WorkspaceSyncService {
       );
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
+      _scheduledHostedRetryAt = null;
       _publishStatus(
         _status.copyWith(
           health: WorkspaceSyncHealth.synced,
@@ -284,10 +286,15 @@ class WorkspaceSyncService {
     if (_repository.usesLocalPersistence || _hostedBackoffSteps.isEmpty) {
       return now.add(_cadence);
     }
+    final scheduledHostedRetryAt = _scheduledHostedRetryAt;
+    if (scheduledHostedRetryAt != null && scheduledHostedRetryAt.isAfter(now)) {
+      return scheduledHostedRetryAt;
+    }
     final index = _hostedBackoffIndex < _hostedBackoffSteps.length
         ? _hostedBackoffIndex
         : _hostedBackoffSteps.length - 1;
     final nextRetryAt = now.add(_hostedBackoffSteps[index]);
+    _scheduledHostedRetryAt = nextRetryAt;
     if (_hostedBackoffIndex < _hostedBackoffSteps.length - 1) {
       _hostedBackoffIndex += 1;
     }
