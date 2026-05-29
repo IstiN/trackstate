@@ -80,6 +80,7 @@ class TrackStateTrackerPage:
     CONNECTED_BANNER_TEMPLATE = CONNECTED_BANNER_TEMPLATES[0]
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
+    CONNECT_BUTTON_TEXT = "Connect GitHub"
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     DISCONNECTED_MARKERS = (
         "Needs sign-in",
@@ -92,9 +93,9 @@ class TrackStateTrackerPage:
 
     @classmethod
     def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
-        return tuple(
-            template.format(user_login=user_login, repository=repository)
-            for template in cls.CONNECTED_BANNER_TEMPLATES
+        return cls.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
         )
 
     @classmethod
@@ -108,7 +109,7 @@ class TrackStateTrackerPage:
         normalized_body = " ".join(body_text.split()).casefold()
         if any(
             " ".join(banner.split()).casefold() in normalized_body
-            for banner in cls.connected_banners(
+            for banner in cls.connected_banner_variants(
                 user_login=user_login,
                 repository=repository,
             )
@@ -320,6 +321,13 @@ class TrackStateTrackerPage:
         )
 
     @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return cls.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+
+    @classmethod
     def connected_banner_variants(
         cls,
         *,
@@ -329,19 +337,17 @@ class TrackStateTrackerPage:
         repository_variants = {repository, repository.lower()}
         banners: list[str] = []
         for repository_variant in repository_variants:
-            banners.append(
-                cls.CONNECTED_BANNER_TEMPLATE.format(
-                    user_login=user_login,
-                    repository=repository_variant,
-                ),
-            )
-            banners.append(
-                cls.CONNECTED_BANNER_COMPACT_TEMPLATE.format(
-                    user_login=user_login,
-                    repository=repository_variant,
-                ),
-            )
-        return tuple(banners)
+            for template in (
+                *cls.CONNECTED_BANNER_TEMPLATES,
+                cls.CONNECTED_BANNER_COMPACT_TEMPLATE,
+            ):
+                banners.append(
+                    template.format(
+                        user_login=user_login,
+                        repository=repository_variant,
+                    ),
+                )
+        return tuple(dict.fromkeys(banners))
 
     def create_issue_from_board(
         self,

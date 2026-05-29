@@ -821,11 +821,13 @@ class PlaywrightStoredTokenWebAppRuntime(
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_keys = sorted(
-            {
-                self._repository.replace("/", "."),
-                self._repository.lower().replace("/", "."),
-            },
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
         )
         self._context.add_init_script(
             script=(

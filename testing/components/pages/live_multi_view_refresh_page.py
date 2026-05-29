@@ -159,40 +159,16 @@ class LiveMultiViewRefreshPage:
             ) from error
 
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
-        open_errors: list[str] = []
-        self.navigate_to_section("Board")
-        try:
-            self.open_issue_from_current_section(
-                issue_key=issue_key,
-                issue_summary=issue_summary,
-            )
-        except (AssertionError, WebAppTimeoutError) as error:
-            open_errors.append(f"Board path: {error}")
-            self._issue_page.search_and_select_issue(
-                issue_key=issue_key,
-                issue_summary=issue_summary,
-                query=issue_key,
-            )
-        self._session.wait_for_selector(
-            self._edit_button_selector,
-            has_text="Edit",
-            timeout_ms=30_000,
-        )
-        self._session.click(
-            self._edit_button_selector,
-            has_text="Edit",
-            timeout_ms=30_000,
-        )
-        dialog_text = self._wait_for_edit_dialog(issue_key=issue_key, origin_label="Board")
-        if issue_key not in dialog_text:
-            raise AssertionError(
-                "Step 3 failed: opening the requested issue from Board did not "
-                f"lead to the edit surface for {issue_key}.\n"
-                f"Expected issue key in edit dialog: {issue_key}\n"
-                f"Open-path fallbacks: {open_errors}\n"
-                f"Observed dialog text:\n{dialog_text}",
-            )
-        return dialog_text
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            if self._button_bounds_for_sidebar_label("JQL Search") is not None:
+                self.navigate_to_section("JQL Search")
+            if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+                self._session.wait_for_text(issue_key, timeout_ms=60_000)
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
     def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
         self.navigate_to_section("JQL Search")
