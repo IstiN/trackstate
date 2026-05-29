@@ -222,6 +222,13 @@ class WebAppSession(Protocol):
     ) -> object: ...
     def active_element(self) -> FocusedElementObservation: ...
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation: ...
+
     def wait_for_download_after_keypress(
         self,
         key: str,
