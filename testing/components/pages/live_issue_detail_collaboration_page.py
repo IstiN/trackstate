@@ -73,6 +73,7 @@ class LiveIssueDetailCollaborationPage:
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
+    _connect_button_label = "Connect GitHub"
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
         'flt-semantics[aria-label*="Choose attachment"] flt-semantics[flt-tappable], '

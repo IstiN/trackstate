@@ -809,12 +809,7 @@ def _discussion_threads() -> list[dict[str, object]]:
         return []
     normalized_threads: list[dict[str, object]] = []
     for thread in threads:
-        if (
-            isinstance(thread, dict)
-            and thread.get("resolved") is False
-            and thread.get("rootCommentId") is not None
-            and thread.get("threadId") is not None
-        ):
+        if isinstance(thread, dict) and thread.get("resolved") is not True:
             normalized_threads.append(thread)
     return normalized_threads
 

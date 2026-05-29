@@ -26,17 +26,24 @@ from testing.core.config.live_setup_test_config import load_live_setup_test_conf
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-614"
+TEST_CASE_SUMMARY = (
+    "Desktop header interactive elements — consistent 32px height and vertical alignment"
+)
+TEST_FILE = "testing/tests/TS-614/test_ts_614.py"
 RUN_COMMAND = "python testing/tests/TS-614/test_ts_614.py"
 EXPECTED_CONTROL_HEIGHT = 32.0
 HEIGHT_TOLERANCE = 1.0
 VERTICAL_CENTER_TOLERANCE = 1.0
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUTS_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts614_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts614_failure.png"
 
@@ -310,14 +317,33 @@ def _container_assertion_message(
 ) -> str | None:
     if observation is None:
         return (
-            "the live DOM did not expose a reliable shared parent header container for the "
-            "audited controls, so the required flex / align-items: center assertion could "
-            "not be verified."
+            "the public DOM did not expose a shared CSS-backed parent header container for "
+            "the audited desktop controls, so the required display:flex / align-items:center "
+            "assertion could not be verified."
+        )
+    if observation.tag_name == "flt-semantics":
+        identifier = (
+            f' "{observation.semantics_identifier}"'
+            if observation.semantics_identifier
+            else ""
+        )
+        return (
+            "the public DOM only exposed the shared parent header container"
+            f"{identifier} as a Flutter semantics wrapper "
+            f'(tag="{observation.tag_name}", display="{observation.display}") rather than a '
+            "CSS-backed layout container, so the required display:flex / "
+            "align-items:center styling remains unverifiable."
         )
     if observation.display not in {"flex", "inline-flex"}:
+        identifier = (
+            f' "{observation.semantics_identifier}"'
+            if observation.semantics_identifier
+            else ""
+        )
         return (
-            "expected the exposed header container to use a flex layout, "
-            f'but observed display="{observation.display}".'
+            "expected the parent desktop header container to expose a flex layout with "
+            f'align-items: center, but the shared public container{identifier} rendered '
+            f'as tag="{observation.tag_name}" with display="{observation.display}".'
         )
     if observation.align_items != "center":
         return (
@@ -325,6 +351,12 @@ def _container_assertion_message(
             f'but observed align-items="{observation.align_items}".'
         )
     return None
+
+
+def _container_css_assertion_is_verifiable(
+    observation: HeaderContainerObservation | None,
+) -> bool:
+    return observation is not None and observation.tag_name != "flt-semantics"
 
 
 def _vertical_alignment_message(center_spread: float) -> str | None:
@@ -362,9 +394,20 @@ def _height_summary(header: HeaderObservation) -> dict[str, float]:
 
 def _container_summary(observation: HeaderContainerObservation | None) -> str:
     if observation is None:
-        return "header_container=not_exposed; css_assertion=required_parent_not_found"
+        return "header_container=not_exposed; css_assertion=unverifiable"
+    identifier_summary = (
+        f"identifier={observation.semantics_identifier}; "
+        if observation.semantics_identifier
+        else ""
+    )
+    css_assertion_summary = (
+        ""
+        if _container_css_assertion_is_verifiable(observation)
+        else "css_assertion=unverifiable_semantics_wrapper; "
+    )
     return (
-        f"tag={observation.tag_name}; display={observation.display}; "
+        f"{css_assertion_summary}{identifier_summary}tag={observation.tag_name}; "
+        f"display={observation.display}; "
         f"align_items={observation.align_items}; "
         f"justify_content={observation.justify_content}; "
         f"bounds=({observation.x:.2f}, {observation.y:.2f}, "
@@ -430,6 +473,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, status="PASSED"), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, status="PASSED"), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_markdown(result, status="PASSED"), encoding="utf-8")
+    _write_review_replies(result, passed=True)
     if BUG_DESCRIPTION_PATH.exists():
         BUG_DESCRIPTION_PATH.unlink()
 
@@ -453,48 +497,54 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, status="FAILED"), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, status="FAILED"), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_markdown(result, status="FAILED"), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
 def _jira_comment(result: dict[str, object], *, status: str) -> str:
     steps = _steps(result)
     human_checks = _human_checks(result)
+    status_line = "✅ PASSED" if status == "PASSED" else "❌ FAILED"
+    automated_summary = _jira_step_result_bullets(steps)
+    human_summary = _jira_human_result_bullets(human_checks)
+    failure_detail = str(result.get("error", "Automation passed.")).replace(chr(10), " ")
     return "\n".join(
         [
-            f"h1. {TICKET_KEY} — {status}",
+            "h3. Test Automation Result",
             "",
-            f"*Automation result:* {status}",
-            f"*Environment:* {result['app_url']} | Chromium via Playwright | {result['os']}",
-            f"*Repository:* {result['repository']}@{result['repository_ref']}",
-            f"*Run command:* {{{{ {RUN_COMMAND} }}}}",
+            f"*Status:* {status_line}",
+            f"*Test Case:* {TICKET_KEY} — {TEST_CASE_SUMMARY}",
             "",
-            "h2. Automated checks",
-            *[
-                f"# Step {step['step']} — {step['status'].upper()}: {step['action']} "
-                f"{{{{{step['observed']}}}}}"
-                for step in steps
-            ],
+            "h4. What was tested",
+            *automated_summary,
+            *human_summary,
             "",
-            "h2. Real user verification",
-            *[
-                f"* {entry['check']} Observed: {{{{{entry['observed']}}}}}"
-                for entry in human_checks
-            ],
-            "",
-            "h2. Observed result",
-            f"* Visible header control heights: {{{{{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}}}}}",
-            f"* Vertical center spread: {{{{{result.get('vertical_center_spread_px', '')}}}}}",
-            f"* Header container: {{{{{result.get('header_container_summary', '')}}}}}",
+            "h4. Result",
+            (
+                "* Automated result: "
+                f"{_status_summary(steps)}. Visible control heights: "
+                f"{{{{{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}}}}}. "
+                f"Vertical center spread: {{{{{result.get('vertical_center_spread_px', '')}}}}}."
+            ),
+            (
+                "* Human-style verification: "
+                f"{_human_summary_sentence(human_checks)}"
+            ),
+            f"* Observed: {failure_detail}",
+            f"* Environment: {result['app_url']} | Chromium via Playwright | {result['os']}",
+            f"* Repository: {result['repository']}@{result['repository_ref']}",
             f"* Screenshot: {{{{{result.get('screenshot', '')}}}}}",
             "",
-            "h2. Expected result",
-            (
-                "* Every desktop header control is rendered at 32px height and the parent "
-                "header container uses a flex layout with {{align-items: center}}."
-            ),
+            "h4. Test file",
+            "{code}",
+            TEST_FILE,
+            "{code}",
             "",
-            "h2. Actual result",
-            f"* {str(result.get('error', 'Automation passed.')).replace(chr(10), ' ')}",
+            "h4. Run command",
+            "{code:bash}",
+            RUN_COMMAND,
+            "{code}",
+            "",
         ],
     ).rstrip() + "\n"
 
@@ -502,42 +552,38 @@ def _jira_comment(result: dict[str, object], *, status: str) -> str:
 def _pr_body(result: dict[str, object], *, status: str) -> str:
     steps = _steps(result)
     human_checks = _human_checks(result)
+    status_line = "✅ PASSED" if status == "PASSED" else "❌ FAILED"
     lines = [
-        f"# {TICKET_KEY} — {status}",
+        "## Test Automation Result",
         "",
-        f"**Environment:** `{result['app_url']}` · Chromium via Playwright · `{result['os']}`",
-        f"**Repository:** `{result['repository']}@{result['repository_ref']}`",
-        f"**Run command:** `{RUN_COMMAND}`",
+        f"**Status:** {status_line}",
+        f"**Test Case:** {TICKET_KEY} — {TEST_CASE_SUMMARY}",
         "",
-        "## Automated checks",
+        "## What was automated",
     ]
-    for step in steps:
-        lines.append(
-            f"- Step {step['step']} — **{step['status'].upper()}**: {step['action']} "
-            f"`{step['observed']}`"
-        )
+    lines.extend(_markdown_step_result_bullets(steps))
+    lines.extend(_markdown_human_result_bullets(human_checks))
     lines.extend(
         [
             "",
-            "## Real user verification",
-        ],
-    )
-    for entry in human_checks:
-        lines.append(f"- {entry['check']} Observed: `{entry['observed']}`")
-    lines.extend(
-        [
-            "",
-            "## Observed result",
-            f"- Visible header control heights: `{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}`",
-            f"- Vertical center spread: `{result.get('vertical_center_spread_px', '')}`",
+            "## Result",
+            (
+                "- Automated result: "
+                f"{_status_summary(steps)}. Visible control heights: "
+                f"`{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}`. "
+                f"Vertical center spread: `{result.get('vertical_center_spread_px', '')}`."
+            ),
             f"- Header container: `{result.get('header_container_summary', '')}`",
+            f"- Human-style verification: {_human_summary_sentence(human_checks)}",
+            f"- Observed: {str(result.get('error', 'Automation passed.')).replace(chr(10), ' ')}",
+            f"- Environment: `{result['app_url']}` · Chromium via Playwright · `{result['os']}`",
+            f"- Repository: `{result['repository']}@{result['repository_ref']}`",
             f"- Screenshot: `{result.get('screenshot', '')}`",
             "",
-            "## Expected result",
-            "- Every desktop header control renders at 32px height and the parent header container uses a flex layout with `align-items: center`.",
-            "",
-            "## Actual result",
-            f"- {str(result.get('error', 'Automation passed.')).replace(chr(10), ' ')}",
+            "## How to run",
+            "```bash",
+            RUN_COMMAND,
+            "```",
         ],
     )
     return "\n".join(lines).rstrip() + "\n"
@@ -548,11 +594,12 @@ def _response_markdown(result: dict[str, object], *, status: str) -> str:
         [
             f"# {TICKET_KEY} — {status}",
             "",
-            f"- Environment: `{result['app_url']}` · Chromium via Playwright · `{result['os']}`",
+            f"- Test case: `{TICKET_KEY}` — {TEST_CASE_SUMMARY}",
             f"- Visible header control heights: `{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}`",
             f"- Vertical center spread: `{result.get('vertical_center_spread_px', '')}`",
             f"- Header container: `{result.get('header_container_summary', '')}`",
             f"- Screenshot: `{result.get('screenshot', '')}`",
+            f"- Environment: `{result['app_url']}` · Chromium via Playwright · `{result['os']}`",
             f"- Result: {str(result.get('error', 'Automation passed.')).replace(chr(10), ' ')}",
         ],
     ).rstrip() + "\n"
@@ -562,7 +609,7 @@ def _bug_description(result: dict[str, object]) -> str:
     steps = _steps(result)
     return "\n".join(
         [
-            f"# {TICKET_KEY} — Desktop header interactive elements height regression",
+            f"# {TICKET_KEY} — {TEST_CASE_SUMMARY}",
             "",
             "## Exact steps to reproduce",
             "1. Open the application to any tracking section (for this run: Dashboard). "
@@ -579,6 +626,7 @@ def _bug_description(result: dict[str, object]) -> str:
             + _step_outcome(steps, 6),
             "",
             "## Exact error message or assertion failure",
+            f"- Command: `{RUN_COMMAND}`",
             "```text",
             str(result.get("traceback", "")).rstrip(),
             "```",
@@ -590,6 +638,13 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"`{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}` "
                 f"with vertical center spread `{result.get('vertical_center_spread_px', '')}`; "
                 f"the exposed header container summary was `{result.get('header_container_summary', '')}`."
+            ),
+            (
+                "- **Missing production capability:** the hosted public DOM does not expose a "
+                "CSS-backed parent container for the desktop header controls. The only shared "
+                "surface exposed to automation is the Flutter semantics wrapper, so the ticket's "
+                "required `display:flex` / `align-items: center` assertion cannot be proven on a "
+                "public DOM node."
             ),
             "",
             "## Environment details",
@@ -637,6 +692,105 @@ def _combined_step_outcome(steps: list[dict[str, object]], step_number: int) -> 
     marker = "✅" if status == "passed" else "❌"
     observed = " | ".join(str(step.get("observed", "")) for step in matches)
     return f"{marker} {observed}"
+
+
+def _status_summary(steps: list[dict[str, object]]) -> str:
+    passed_steps = [step for step in steps if step.get("status") == "passed"]
+    failed_steps = [step for step in steps if step.get("status") == "failed"]
+    if not failed_steps:
+        return f"all {len(passed_steps)} ticket steps passed"
+    failed_labels = ", ".join(f"Step {step['step']}" for step in failed_steps)
+    return f"{len(passed_steps)} step(s) passed and {len(failed_steps)} failed ({failed_labels})"
+
+
+def _jira_step_result_bullets(steps: list[dict[str, object]]) -> list[str]:
+    return [
+        (
+            f"* Step {step['step']} — {step['status'].upper()}: {step['action']} "
+            f"Observed: {{{{{step['observed']}}}}}"
+        )
+        for step in steps
+    ]
+
+
+def _jira_human_result_bullets(human_checks: list[dict[str, object]]) -> list[str]:
+    return [
+        f"* Human check: {entry['check']} Observed: {{{{{entry['observed']}}}}}"
+        for entry in human_checks
+    ]
+
+
+def _markdown_step_result_bullets(steps: list[dict[str, object]]) -> list[str]:
+    return [
+        (
+            f"- Step {step['step']} — **{step['status'].upper()}**: {step['action']} "
+            f"Observed: `{step['observed']}`"
+        )
+        for step in steps
+    ]
+
+
+def _markdown_human_result_bullets(human_checks: list[dict[str, object]]) -> list[str]:
+    return [
+        f"- Human check: {entry['check']} Observed: `{entry['observed']}`"
+        for entry in human_checks
+    ]
+
+
+def _human_summary_sentence(human_checks: list[dict[str, object]]) -> str:
+    if not human_checks:
+        return "no additional human-style observations were recorded."
+    return " / ".join(
+        f"{entry['check']} Observed: {entry['observed']}" for entry in human_checks
+    )
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{str(result.get('error', ''))}`."
+    )
+    return (
+        "Fixed: Step 6 no longer treats `css_assertion=unverifiable_semantics_wrapper` as a "
+        "synthetic pass. When the public DOM only exposes "
+        "`trackstate-desktop-header-controls` as a `flt-semantics` wrapper, the test now "
+        "fails as a clear product-gap/unverifiable-container result and still writes the "
+        "required review replies artifact. "
+        + rerun_summary
+    )
 
 
 if __name__ == "__main__":

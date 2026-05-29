@@ -86,6 +86,7 @@ class LiveStartupRecoveryPage:
         *,
         timeout_ms: int = 120_000,
         require_retry_action: bool = True,
+        require_settings_heading: bool = True,
         required_body_fragments: tuple[str, ...] = (),
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
@@ -95,6 +96,7 @@ class LiveStartupRecoveryPage:
               settingsHeading,
               topbarTitle,
               requireRetryAction,
+              requireSettingsHeading,
               requiredBodyFragments,
             }) => {
               const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
@@ -122,7 +124,7 @@ class LiveStartupRecoveryPage:
                 .map((candidate) => normalize(candidate.innerText))
                 .filter((label) => label.length > 0);
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
-                && bodyText.includes(settingsHeading)
+                && (!requireSettingsHeading || bodyText.includes(settingsHeading))
                 && bodyText.includes(topbarTitle)
                 && (!requireRetryAction || visibleButtonLabels.includes('Retry'))
                 && requiredBodyFragments.every((fragment) => bodyText.includes(fragment))
@@ -134,6 +136,7 @@ class LiveStartupRecoveryPage:
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
                 "requireRetryAction": require_retry_action,
+                "requireSettingsHeading": require_settings_heading,
                 "requiredBodyFragments": list(required_body_fragments),
             },
             timeout_ms=timeout_ms,
