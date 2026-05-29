@@ -187,9 +187,13 @@ def main() -> None:
                     ),
                 )
 
-                dialog_text = app_page.open_edit_dialog_for_issue(
+                app_page.navigate_to_section("Board")
+                app_page.open_issue_from_current_section(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
+                )
+                dialog_text = app_page.open_edit_dialog_from_current_issue_detail(
+                    issue_key=issue_fixture.key,
                 )
                 result["edit_dialog_text"] = dialog_text
                 initial_priority = app_page.priority_control()

@@ -283,6 +283,10 @@ class WebAppSession(Protocol):
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
 
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None: ...
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]: ...
+
     def wait_for_text_absent(
         self,
         text: str,
