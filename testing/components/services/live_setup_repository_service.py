@@ -385,7 +385,6 @@ class LiveSetupRepositoryService:
             locale_present=locale_present,
             payload=payload,
         )
-
     def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
         issue_paths: list[str] = []
         pending_paths = [root_path]
