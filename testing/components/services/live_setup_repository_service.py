@@ -195,7 +195,16 @@ class LiveSetupRepositoryService:
                 continue
             prefix = f"{key}:"
             if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
+                raw_value = line.removeprefix(prefix).strip()
+                if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] == '"':
+                    try:
+                        parsed_value = json.loads(raw_value)
+                    except json.JSONDecodeError:
+                        return raw_value.strip('"')
+                    return str(parsed_value)
+                if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] == "'":
+                    return raw_value[1:-1]
+                return raw_value
         return None
 
     @staticmethod

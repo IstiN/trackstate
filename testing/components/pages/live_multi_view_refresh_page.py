@@ -66,7 +66,7 @@ class EditSurfaceObservation:
 
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
+    _edit_button_label = "Edit"
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
     _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
@@ -107,18 +107,16 @@ class LiveMultiViewRefreshPage:
             ) from error
 
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
-        self.navigate_to_section("JQL Search")
-        self._session.wait_for_selector(
-            self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=60_000,
-        )
-        self.open_issue_from_current_section(
-            issue_key=issue_key,
-            issue_summary=issue_summary,
-        )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            if self._button_bounds_for_sidebar_label("JQL Search") is not None:
+                self.navigate_to_section("JQL Search")
+            if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+                self._session.wait_for_text(issue_key, timeout_ms=60_000)
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
     def open_edit_dialog_from_board_card(
         self,
@@ -166,8 +164,16 @@ class LiveMultiViewRefreshPage:
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text=self._edit_button_label,
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._button_selector,
+            has_text=self._edit_button_label,
+            timeout_ms=30_000,
+        )
         return self._wait_for_edit_dialog(
             issue_key=issue_key,
             origin_label="current issue detail",

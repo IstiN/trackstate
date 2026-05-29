@@ -43,7 +43,7 @@ class TrackStateTrackerPage:
     )
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_TEXT = "Connect GitHub"
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -76,7 +76,7 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        if self.session.count(self.BUTTON_SELECTOR, has_text=self.CONNECT_BUTTON_TEXT) == 0:
             return ConnectionObservation(
                 dialog_text="",
                 body_text=self.body_text(),
@@ -109,15 +109,15 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
+        connected_banners = self.connected_banners(
             user_login=user_login,
             repository=repository,
         )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_banners, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
@@ -126,6 +126,24 @@ class TrackStateTrackerPage:
             dialog_text=dialog_text,
             body_text=wait_match.body_text,
         )
+
+    @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        candidates = [
+            cls.CONNECTED_BANNER_TEMPLATE.format(
+                user_login=user_login,
+                repository=repository,
+            ),
+        ]
+        normalized_repository = repository.lower()
+        if normalized_repository != repository:
+            candidates.append(
+                cls.CONNECTED_BANNER_TEMPLATE.format(
+                    user_login=user_login,
+                    repository=normalized_repository,
+                ),
+            )
+        return tuple(dict.fromkeys(candidates))
 
     def create_issue_from_board(
         self,
