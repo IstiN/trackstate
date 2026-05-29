@@ -1,6 +1,6 @@
 import 'dart:ui' show Size;
 
-import 'package:flutter/material.dart' show Semantics, ValueKey;
+import 'package:flutter/material.dart' show Semantics;
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,7 +33,7 @@ void main() {
       final failures = <String>[];
 
       try {
-        await app.pump(fixture.createReadOnlyRepository());
+        await app.pump(fixture.createRepository());
         _expectViewport(tester, failures: failures, stepLabel: 'Step 1');
 
         await _waitForCondition(
@@ -75,10 +75,16 @@ void main() {
           failures: failures,
         );
 
-        await _openConnectDialog(
+        await _openRepositoryAccessDialog(
           app: app,
           failures: failures,
           stepLabel: 'Step 2',
+          bannerTitle: Ts1239RepositoryAccessGoldenFixture.disconnectedTitle,
+          bannerMessage:
+              Ts1239RepositoryAccessGoldenFixture.disconnectedMessage,
+          actionLabel: Ts1239RepositoryAccessGoldenFixture.disconnectedAction,
+          expectedDialogTitle:
+              Ts1239RepositoryAccessGoldenFixture.disconnectedAction,
         );
         await _submitHostedAccessToken(
           tester,
@@ -138,30 +144,16 @@ void main() {
           failures: failures,
         );
 
-        await app.pump(fixture.createWritableRepository());
         _expectViewport(tester, failures: failures, stepLabel: 'Step 5');
-        await _waitForCondition(
-          tester,
-          condition: () async =>
-              await app.isTopBarTextVisible(
-                Ts1239RepositoryAccessGoldenFixture.disconnectedLabel,
-              ) &&
-              await app.isRepositoryAccessBannerVisible(
-                title: Ts1239RepositoryAccessGoldenFixture.disconnectedTitle,
-                message:
-                    Ts1239RepositoryAccessGoldenFixture.disconnectedMessage,
-              ),
-          failureMessage:
-              'Step 5 failed: the writable-hosted fixture did not start in the expected unauthenticated state before reconnecting for full access. '
-              'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
-              'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
-          failures: failures,
-        );
-
-        await _openConnectDialog(
+        await _openRepositoryAccessDialog(
           app: app,
           failures: failures,
           stepLabel: 'Step 5',
+          bannerTitle: Ts1239RepositoryAccessGoldenFixture.readOnlyTitle,
+          bannerMessage: Ts1239RepositoryAccessGoldenFixture.readOnlyMessage,
+          actionLabel: Ts1239RepositoryAccessGoldenFixture.readOnlyAction,
+          expectedDialogTitle:
+              Ts1239RepositoryAccessGoldenFixture.manageAccessDialogTitle,
         );
         await _submitHostedAccessToken(
           tester,
@@ -220,11 +212,25 @@ void main() {
           );
         }
 
+        await app.openSection('Settings');
+        await _waitForCondition(
+          tester,
+          condition: () async =>
+              await app.isTextVisible('Project Settings') &&
+              await app.isTextVisible('Repository access'),
+          failureMessage:
+              'Step 5 failed: the connected flow did not reach the Settings repository-access surface needed for the scoped full-access golden. '
+              'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
+          failures: failures,
+        );
         await _compareApprovedGolden(
-          target: _workspaceSwitcherTrigger,
+          target: _settingsRepositoryAccessLabel(
+            Ts1239RepositoryAccessGoldenFixture.writableLabel,
+          ),
           approvedGoldenPath: _fullAccessGoldenPath,
           failureLabel:
-              'Step 5 failed: the full-access repository access badge no longer matches the approved golden baseline.',
+              'Step 5 failed: the Settings repository-access state label no longer matches the approved golden baseline.',
           failures: failures,
         );
 
@@ -291,29 +297,33 @@ Finder _repositoryAccessBanner(String title, {required String message}) =>
       description: 'repository-access banner "$title"',
     );
 
-Finder get _workspaceSwitcherTrigger =>
-    find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+Finder _settingsRepositoryAccessLabel(String label) =>
+    find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
 
-Future<void> _openConnectDialog({
+Future<void> _openRepositoryAccessDialog({
   required TrackStateAppComponent app,
   required List<String> failures,
   required String stepLabel,
+  required String bannerTitle,
+  required String bannerMessage,
+  required String actionLabel,
+  required String expectedDialogTitle,
 }) async {
   final opened = await app.tapRepositoryAccessBannerAction(
-    title: Ts1239RepositoryAccessGoldenFixture.disconnectedTitle,
-    message: Ts1239RepositoryAccessGoldenFixture.disconnectedMessage,
-    actionLabel: Ts1239RepositoryAccessGoldenFixture.disconnectedAction,
+    title: bannerTitle,
+    message: bannerMessage,
+    actionLabel: actionLabel,
   );
   if (!opened) {
     failures.add(
-      '$stepLabel failed: tapping the visible "${Ts1239RepositoryAccessGoldenFixture.disconnectedAction}" CTA did not open the repository-access dialog. '
+      '$stepLabel failed: tapping the visible "$actionLabel" CTA did not open the repository-access dialog. '
       'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
     );
     return;
   }
 
   final dialogVisible =
-      await app.isDialogTextVisible('Connect GitHub') &&
+      await app.isDialogTextVisible(expectedDialogTitle) &&
       await app.isTextFieldVisible('Fine-grained token') &&
       await app.isDialogTextVisible('Connect token');
   if (!dialogVisible) {

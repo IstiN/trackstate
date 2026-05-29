@@ -37,10 +37,14 @@ class Ts1239RepositoryAccessGoldenFixture {
 
   static const String writableToken = 'ghp_ts1239_full_access';
   static const String writableLabel = 'Connected';
+  static const String manageAccessDialogTitle = 'Manage GitHub access';
 
-  ReactiveIssueDetailTrackStateRepository createReadOnlyRepository() =>
-      ReactiveIssueDetailTrackStateRepository(permission: readOnlyPermission);
-
-  ReactiveIssueDetailTrackStateRepository createWritableRepository() =>
-      ReactiveIssueDetailTrackStateRepository(permission: writablePermission);
+  ReactiveIssueDetailTrackStateRepository createRepository() =>
+      ReactiveIssueDetailTrackStateRepository(
+        permission: readOnlyPermission,
+        tokenPermissions: const <String, RepositoryPermission>{
+          readOnlyToken: readOnlyPermission,
+          writableToken: writablePermission,
+        },
+      );
 }

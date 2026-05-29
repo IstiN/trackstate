@@ -5,5 +5,6 @@ platform: widget
 dependencies: []
 notes:
   - Reuses the shared TrackState app component and the hosted reactive repository fixture instead of mocking the repository-access UI.
-  - Verifies the unauthenticated, read-only, and full-access 1440x960 surfaces with approved goldens.
+  - Verifies the unauthenticated and read-only banners plus the connected Settings repository-access state label at 1440x960 with approved goldens.
+  - Reconnects from the validated read-only session instead of restarting the app before the full-access assertion.
   - Confirms the read-only banner wraps its long message without RenderFlex overflow errors before asserting the golden baseline.
