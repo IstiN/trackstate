@@ -445,8 +445,7 @@ class PlaywrightWebAppSession(WebAppSession):
                             return value;
                         }
                     }
-                    const text = normalize(element.textContent);
-                    return text || null;
+                    return null;
                 };
                 const derivedOwnedLabelFor = (element) => {
                     if (!(element instanceof Element)) {
@@ -521,6 +520,23 @@ class PlaywrightWebAppSession(WebAppSession):
             tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
             outer_html=str(payload["outerHtml"]),
         )
+
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
 
     def wait_for_download_after_keypress(
         self,
