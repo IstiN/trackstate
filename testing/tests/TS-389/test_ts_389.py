@@ -189,13 +189,8 @@ def main() -> None:
                                 "Verified the visible Attachments tab state from a user "
                                 "perspective before attempting the duplicate upload."
                             ),
-                            observed=(
-                                "The page showed browser-upload limitations instead of an "
-                                "actionable duplicate upload flow. Visible copy included "
-                                "`GitHub Releases uploads are unavailable in the browser`, "
-                                "`This repository session is download-only for Git LFS "
-                                "attachments`, and `Choose a file to review its size before "
-                                "upload.`"
+                            observed=_attachment_upload_controls_human_observation(
+                                attachments_body_text,
                             ),
                         )
                         raise AssertionError(f"Step 2 failed: {failure_observation}")
@@ -517,6 +512,35 @@ def _attachment_upload_controls_failure_observation(
         f"Observed upload button count: {upload_button_count}\n"
         f"Observed upload button enabled: {upload_button_enabled}\n"
         f"Observed body text:\n{attachments_body_text}"
+    )
+
+
+def _attachment_upload_controls_human_observation(attachments_body_text: str) -> str:
+    visible_copy = []
+    for fragment in (
+        "Attachments limited",
+        "GitHub Releases uploads are unavailable in the browser",
+        "This repository session is download-only for Git LFS attachments",
+        "Choose a file to review its size before upload.",
+    ):
+        if fragment in attachments_body_text:
+            visible_copy.append(f"`{fragment}`")
+
+    if visible_copy:
+        joined_copy = ", ".join(visible_copy[:-1])
+        if joined_copy:
+            joined_copy = f"{joined_copy}, and {visible_copy[-1]}"
+        else:
+            joined_copy = visible_copy[-1]
+        return (
+            "The page showed browser-upload limitations instead of an actionable "
+            f"duplicate upload flow. Verified visible copy: {joined_copy}."
+        )
+
+    return (
+        "The page showed browser-upload limitations instead of an actionable "
+        "duplicate upload flow. Observed body text:\n"
+        f"{attachments_body_text}"
     )
 
 
