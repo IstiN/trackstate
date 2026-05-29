@@ -96,7 +96,9 @@ def main() -> None:
 
                 observation = search_page.search_with_expected_counts(
                     query="",
-                    expected_count_summaries=(expected_count_summary,),
+                    expected_count_summaries=_observable_count_summaries(
+                        expected_issue_count,
+                    ),
                 )
                 search_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["observation"] = _observation_to_dict(observation)
@@ -221,6 +223,15 @@ def _assert_empty_query_results(
                 f"Issue key: {fixture.key}\n"
                 f"Observed body text:\n{observation.body_text}",
             )
+
+
+def _observable_count_summaries(expected_issue_count: int) -> tuple[str, ...]:
+    upper_bound = max(expected_issue_count, 1) + 5
+    summaries = ["No issues"]
+    for count in range(1, upper_bound + 1):
+        label = "issue" if count == 1 else "issues"
+        summaries.append(f"{count} {label}")
+    return tuple(summaries)
 
 
 def _observation_to_dict(observation) -> dict[str, object]:
