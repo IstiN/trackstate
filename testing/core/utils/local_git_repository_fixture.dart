@@ -44,7 +44,17 @@ class LocalGitRepositoryFixture {
 
   Future<void> stageAll() => _git(['add', '.']);
 
-  Future<void> commit(String message) => _git(['commit', '-m', message]);
+  Future<void> commit(
+    String message, {
+    String? authorDate,
+    String? committerDate,
+  }) => _git(
+    ['commit', '-m', message],
+    environment: {
+      if (authorDate != null) 'GIT_AUTHOR_DATE': authorDate,
+      if (committerDate != null) 'GIT_COMMITTER_DATE': committerDate,
+    },
+  );
 
   static Future<LocalGitRepositoryFixture> create({
     String userName = 'Local Tester',
@@ -111,8 +121,15 @@ Loaded from local Git.
     await commit('Initial local runtime fixture');
   }
 
-  Future<void> _git(List<String> args) async {
-    final result = await Process.run('git', ['-C', directory.path, ...args]);
+  Future<void> _git(
+    List<String> args, {
+    Map<String, String>? environment,
+  }) async {
+    final result = await Process.run('git', [
+      '-C',
+      directory.path,
+      ...args,
+    ], environment: environment);
     if (result.exitCode != 0) {
       throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }

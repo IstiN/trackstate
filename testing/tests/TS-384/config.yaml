@@ -1,0 +1,9 @@
+test_id: TS-384
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Preserves the ticket's legacy `--path` command text and executes the current `--request-path` equivalent from a seeded Local Git repository.
+  - Verifies successful allowlisted Jira comment reads return raw Jira-compatible JSON without the TrackState success-envelope wrapper.

@@ -17,8 +17,46 @@
   "edit": "Edit",
   "save": "Save",
   "transition": "Transition",
+  "transitionIssue": "Transition issue",
   "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
+  "workspaceSyncSettings": "Workspace sync",
+  "workspaceSyncChecking": "Syncing",
+  "workspaceSyncAttentionNeededVisibleLabel": "Attention needed",
+  "workspaceSyncAttentionNeededSemanticLabel": "Sync error, attention needed",
+  "workspaceSyncUnavailable": "Sync unavailable",
+  "workspaceSyncPending": "Updates pending",
+  "workspaceSyncPendingTitle": "Updates pending",
+  "workspaceSyncPendingMessage": "Background updates were detected while edits were open. TrackState will apply the latest refresh after you finish the current draft or save.",
+  "workspaceSyncCheckingMessage": "TrackState is checking the active workspace for Git and repository changes.",
+  "workspaceSyncIdleMessage": "Workspace sync is running in the background for the active workspace.",
+  "workspaceSyncLastSuccessful": "Last successful sync check: {timestamp}",
+  "@workspaceSyncLastSuccessful": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncRetryAt": "Next retry at {timestamp}.",
+  "@workspaceSyncRetryAt": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncErrorMessage": "The latest sync check failed: {error}",
+  "@workspaceSyncErrorMessage": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncLastCheckedLabel": "Last checked",
+  "workspaceSyncLastSuccessfulLabel": "Last successful",
+  "workspaceSyncLatestError": "Latest error",
   "searchIssues": "Search issues",
   "loadMore": "Load more",
   "loadMoreIssues": "Load more issues",
@@ -45,10 +83,68 @@
   "inProgress": "In Progress",
   "inReview": "In Review",
   "done": "Done",
+  "detail": "Detail",
+  "comment": "Comment",
   "comments": "Comments",
   "attachments": "Attachments",
+  "attachmentsDownloadOnlyMessage": "This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.",
+  "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
+  "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.",
+  "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
+  "attachmentsAccessMessageReadOnly": "This repository connection cannot push attachment changes. Existing attachments remain available for download.",
+  "chooseAttachment": "Choose attachment",
+  "uploadAttachment": "Upload attachment",
+  "clearSelectedAttachment": "Clear selected attachment",
+  "noAttachmentSelected": "Choose a file to review its size before upload.",
+  "selectedAttachmentSummary": "Selected attachment: {fileName} ({fileSize})",
+  "@selectedAttachmentSummary": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      },
+      "fileSize": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentRequiresLocalGitUpload": "{fileName} follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.",
+  "@attachmentRequiresLocalGitUpload": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
   "history": "History",
+  "downloadAttachment": "Download {fileName}",
+  "@downloadAttachment": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "commentPlaceholder": "Add a comment...",
   "postComment": "Post comment",
+  "editedAt": "Edited {timestamp}",
+  "@editedAt": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentTitle": "Replace attachment?",
+  "replaceAttachmentMessage": "Uploading this file will replace the existing attachment stored as {fileName}. Rename the new file first if you need to keep both versions.",
+  "@replaceAttachmentMessage": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentAction": "Replace attachment",
+  "keepCurrentAttachment": "Keep current attachment",
   "linkedIssues": "Linked issues",
   "description": "Description",
   "acceptanceCriteria": "Acceptance Criteria",
@@ -57,22 +153,158 @@
   "status": "Status",
   "initialStatus": "Initial status",
   "priority": "Priority",
+  "resolution": "Resolution",
+  "components": "Components",
+  "fixVersions": "Fix versions",
   "assignee": "Assignee",
   "labels": "Labels",
+  "name": "Name",
+  "delete": "Delete",
   "parent": "Parent",
   "epic": "Epic",
   "reporter": "Reporter",
   "repository": "Repository",
   "branch": "Branch",
   "projectSettings": "Project Settings",
+  "projectSettingsAdmin": "Project settings administration",
+  "projectSettingsDescription": "Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.",
   "issueTypes": "Issue Types",
+  "statuses": "Statuses",
+  "workflows": "Workflows",
   "workflow": "Workflow",
   "fields": "Fields",
+  "priorities": "Priorities",
+  "versions": "Versions",
+  "resolutions": "Resolutions",
+  "locales": "Locales",
+  "githubReleases": "GitHub Releases",
+  "attachmentStorageDescription": "Choose where new attachments are stored. Existing attachments keep the backend recorded when they were created.",
+  "attachmentStorageMode": "Attachment storage mode",
+  "attachmentRepositoryPathSummary": "Repository-path mode keeps attachments in <issue-root>/attachments/<file> inside the project repository.",
+  "attachmentReleaseTagPrefix": "Release tag prefix",
+  "attachmentReleaseTagPrefixHelper": "TrackState derives the issue release tag as <tagPrefix><ISSUE_KEY>.",
+  "attachmentReleaseMappingSummary": "Each issue resolves to the release tag {tagPrefix}<ISSUE_KEY>. Release title stays \"Attachments for <ISSUE_KEY>\", and the asset name is the sanitized file name.",
+  "@attachmentReleaseMappingSummary": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentStorageImmutableNote": "Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.",
+  "attachmentStorageRepositoryPathCalloutTitle": "Repository-path attachment storage",
+  "attachmentStorageRepositoryPathSupportedMessage": "New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.",
+  "attachmentStorageRepositoryPathLimitedMessage": "New attachments are stored in <issue-root>/attachments/<file>. Browser uploads work for repository files, but Git LFS attachments still need a local Git runtime.",
+  "attachmentStorageRepositoryPathRestrictedMessage": "New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.",
+  "attachmentStorageGitHubReleasesCalloutTitle": "GitHub Releases attachment storage",
+  "attachmentStorageGitHubReleasesSupportedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.",
+  "@attachmentStorageGitHubReleasesSupportedMessage": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentStorageGitHubReleasesRestrictedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.",
+  "@attachmentStorageGitHubReleasesRestrictedMessage": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
   "language": "Language",
+  "defaultLocale": "Default locale",
+  "defaultLocaleChip": "{locale} (default)",
+  "@defaultLocaleChip": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "resetSettings": "Reset",
+  "saveSettings": "Save settings",
+  "addStatus": "Add status",
+  "editStatus": "Edit status",
+  "deleteStatus": "Delete status",
+  "addWorkflow": "Add workflow",
+  "editWorkflow": "Edit workflow",
+  "deleteWorkflow": "Delete workflow",
+  "addIssueType": "Add issue type",
+  "editIssueType": "Edit issue type",
+  "deleteIssueType": "Delete issue type",
+  "addField": "Add field",
+  "editField": "Edit field",
+  "deleteField": "Delete field",
+  "addPriority": "Add priority",
+  "editPriority": "Edit priority",
+  "deletePriority": "Delete priority",
+  "addComponent": "Add component",
+  "editComponent": "Edit component",
+  "deleteComponent": "Delete component",
+  "addVersion": "Add version",
+  "editVersion": "Edit version",
+  "deleteVersion": "Delete version",
+  "addLocale": "Add locale",
+  "localeCode": "Locale code",
+  "localeCodeHelper": "Use stable locale identifiers such as en, fr, or pt-BR.",
+  "removeLocaleAction": "Remove locale",
+  "removeLocale": "Remove locale {locale}",
+  "@removeLocale": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationField": "Translation ({locale})",
+  "@translationField": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationFallbackWarning": "Missing translation. Using fallback \"{value}\" from {source}.",
+  "@translationFallbackWarning": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "canonicalNameFallback": "canonical name",
+  "catalogId": "ID",
+  "catalogCategory": "Category",
+  "catalogWorkflow": "Workflow",
+  "catalogTransitions": "Transitions",
+  "catalogStatuses": "Statuses",
+  "catalogType": "Type",
+  "catalogRequired": "Required",
+  "catalogReserved": "Reserved",
+  "catalogHierarchyLevel": "Hierarchy level",
+  "catalogIcon": "Icon",
+  "catalogDefaultValue": "Default value",
+  "catalogOptions": "Options",
+  "applicableIssueTypes": "Applicable issue types",
+  "allowedStatuses": "Allowed statuses",
+  "transitionName": "Transition name",
+  "transitionFrom": "From status",
+  "transitionTo": "To status",
+  "addTransition": "Add transition",
+  "removeTransition": "Remove transition",
+  "statusCategoryNew": "New",
+  "statusCategoryIndeterminate": "In progress",
+  "statusCategoryDone": "Done",
   "theme": "Theme",
   "lightTheme": "Light theme",
   "darkTheme": "Dark theme",
   "mobilePreview": "Mobile issue preview",
+  "loading": "Loading...",
   "noResults": "No issues match this query",
   "queryUpdated": "Query updated",
   "kanbanHint": "Drag-ready workflow columns backed by Git files",
@@ -80,7 +312,109 @@
   "repositoryAccessLocalGit": "Local Git",
   "repositoryAccessConnected": "Connected",
   "repositoryAccessConnectGitHub": "Connect GitHub",
+  "repositoryAccessReadOnly": "Read-only",
+  "repositoryAccessAttachmentsRestricted": "Attachments limited",
   "repositoryAccessSettings": "Repository access",
+  "repositoryAccessDisconnectedTitle": "GitHub write access is not connected",
+  "repositoryAccessDisconnectedMessage": "Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.",
+  "repositoryAccessReadOnlyTitle": "This repository session is read-only",
+  "repositoryAccessReadOnlyMessage": "This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.",
+  "repositoryAccessCapabilitySummary": "Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.",
+  "@repositoryAccessCapabilitySummary": {
+    "placeholders": {
+      "canWrite": {
+        "type": "String"
+      },
+      "canCreateBranch": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryAccessAttachmentRestrictedTitle": "Attachments stay download-only in the browser",
+  "repositoryAccessAttachmentRestrictedMessage": "Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.",
+  "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
+  "repositoryAccessAttachmentLimitedMessage": "Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
+  "repositoryAccessReleaseRestrictedTitle": "GitHub Releases uploads are unavailable in the browser",
+  "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.",
+  "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
+  "savedWorkspaces": "Saved workspaces",
+  "workspaceSwitcher": "Workspace switcher",
+  "workspaceSwitcherEmptyState": "No saved workspaces yet. Add one to switch between repositories faster.",
+  "addWorkspace": "Add workspace",
+  "localFolder": "Local folder",
+  "hostedRepository": "Hosted repository",
+  "workspaceOnboardingDescription": "Choose how TrackState should open the next workspace.",
+  "workspaceOnboardingFirstRunDescription": "Choose a local folder to open an existing workspace or initialize TrackState in a new one.",
+  "workspaceOnboardingFirstLaunchDescription": "Choose a local folder or hosted repository to get started.",
+  "localWorkspaceOnboardingOpenExisting": "Open existing folder",
+  "localWorkspaceOnboardingInitializeFolder": "Initialize folder",
+  "localWorkspaceOnboardingFolderLabel": "Selected folder",
+  "localWorkspaceOnboardingFolderRequired": "Choose a folder to continue.",
+  "localWorkspaceOnboardingFolderBrowseOpen": "Choose existing folder",
+  "localWorkspaceOnboardingFolderBrowseInitialize": "Choose folder to initialize",
+  "localWorkspaceOnboardingChangeFolder": "Change folder",
+  "localWorkspaceOnboardingDetailsTitle": "Workspace details",
+  "localWorkspaceOnboardingWorkspaceName": "Workspace name",
+  "localWorkspaceOnboardingWorkspaceNameRequired": "Workspace name is required.",
+  "localWorkspaceOnboardingWorkspaceNameHelper": "Defaults to the selected folder name. You can rename it before saving the workspace profile.",
+  "localWorkspaceOnboardingWriteBranchHelper": "TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.",
+  "localWorkspaceOnboardingWriteBranchRequired": "Write Branch is required.",
+  "localWorkspaceOnboardingReadyStatus": "Ready to open",
+  "localWorkspaceOnboardingInitializeStatus": "Initialization required",
+  "localWorkspaceOnboardingBlockedStatus": "Folder not supported",
+  "localWorkspaceOnboardingOpenAction": "Open workspace",
+  "localWorkspaceOnboardingInitializeAction": "Initialize TrackState here",
+  "localWorkspaceOnboardingCurrentBranchMismatch": "This repository is currently on {branch}. Switch the branch yourself before onboarding, or keep the detected write branch.",
+  "@localWorkspaceOnboardingCurrentBranchMismatch": {
+    "placeholders": {
+      "branch": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceOnboardingRepositoryHelper": "Enter the repository as owner/repo.",
+  "workspaceOnboardingLocalFolderHelper": "Enter the local Git folder path.",
+  "workspaceOnboardingBrowseRepositories": "Accessible repositories",
+  "workspaceOnboardingLoadingRepositories": "Loading accessible repositories...",
+  "workspaceOnboardingBrowseUnavailableHint": "Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.",
+  "workspaceOnboardingRepositoryManualFallbackHint": "Select a repository from the current GitHub session or enter owner/repo manually.",
+  "workspaceOnboardingRepositoryLoadFailed": "Accessible repositories could not be loaded. Enter owner/repo manually instead. {error}",
+  "@workspaceOnboardingRepositoryLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceTargetTypeHosted": "Hosted",
+  "workspaceTargetTypeLocal": "Local",
+  "activeWorkspace": "Active",
+  "openWorkspace": "Open",
+  "addWorkspace": "Add workspace",
+  "workspaceSaveAndSwitch": "Save and switch",
+  "workspaceStateLocalGit": "Local Git",
+  "workspaceStateLocal": "Local",
+  "workspaceStateConnected": "Connected",
+  "workspaceStateReadOnly": "Read-only",
+  "workspaceStateSyncIssue": "Sync issue",
+  "workspaceStateNeedsSignIn": "Needs sign-in",
+  "workspaceStateSavedHostedWorkspace": "Saved hosted workspace",
+  "workspaceStateUnavailable": "Unavailable",
+  "workspaceDeleteConfirmationTitle": "Delete saved workspace",
+  "workspaceDeleteConfirmationMessage": "Delete {workspaceName} and remove its stored credentials? This action cannot be undone.",
+  "@workspaceDeleteConfirmationMessage": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      }
+    }
+  },
+  "startupRecovery": "Startup recovery",
+  "startupRateLimitRecoveryTitle": "GitHub startup limit reached",
+  "startupRateLimitRecoveryBlockingMessage": "Hosted startup hit GitHub''s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.",
+  "startupRateLimitRecoveryShellMessage": "Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.",
+  "startupHostedBootstrapIndexRecoveryTitle": "Hosted issue index needs regeneration",
+  "startupHostedBootstrapIndexRecoveryMessage": "Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.",
   "repositoryPath": "Repository Path",
   "writeBranch": "Write Branch",
   "trackerDataNotFound": "TrackState data was not found.",
@@ -100,10 +434,51 @@
       }
     }
   },
-  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "repositoryConfigFallback": "TrackState.AI fell back to startup-safe repository defaults so the shell could open. {error}",
   "@repositoryConfigFallback": {
     "placeholders": {
       "error": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSwitchFailed": "Could not open {workspaceName}. {reason}",
+  "@workspaceSwitchFailed": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceRestoreSkipped": "Skipped {workspaceName} during restore. {reason}",
+  "@workspaceRestoreSkipped": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceRestoreFailed": "No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}",
+  "@workspaceRestoreFailed": {
+    "placeholders": {
+      "workspaceName": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "selectedIssueUnavailable": "{issueKey} is no longer available in this workspace.",
+  "@selectedIssueUnavailable": {
+    "placeholders": {
+      "issueKey": {
         "type": "String"
       }
     }
@@ -130,6 +505,14 @@
     }
   },
   "saveFailed": "Save failed: {error}",
+  "attachmentDownloadFailed": "Attachment download failed: {error}",
+  "@attachmentDownloadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "@saveFailed": {
     "placeholders": {
       "error": {
@@ -192,6 +575,31 @@
       }
     }
   },
+  "repositoryAccessConnectedRepositoryPathMessage": "Connected as {login} to {repository}. New attachments use repository-path storage in this repository.",
+  "@repositoryAccessConnectedRepositoryPathMessage": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryAccessConnectedGitHubReleasesMessage": "Connected as {login} to {repository}. New attachments use GitHub Releases tags derived as {tagPrefix}<ISSUE_KEY>.",
+  "@repositoryAccessConnectedGitHubReleasesMessage": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      },
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
   "storedGitHubTokenInvalid": "Stored GitHub token is no longer valid: {error}",
   "@storedGitHubTokenInvalid": {
     "placeholders": {
@@ -204,9 +612,47 @@
   "configuredRepositoryFallback": "configured repository",
   "currentBranchFallback": "current branch",
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
+  "localGitHostedAccessDescription": "Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
+  "retry": "Retry",
+  "retryStartup": "Retry startup",
+  "editIssue": "Edit issue",
   "optional": "Optional",
+  "unassigned": "Unassigned",
+  "noEpic": "No epic",
+  "summaryRequired": "Summary is required before saving.",
+  "statusTransitionHelper": "Only valid workflow transitions are available.",
+  "currentStatus": "Current status",
+  "noTransitionsAvailable": "No workflow transitions available.",
+  "resolutionRequired": "Resolution is required for this transition.",
+  "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "@hierarchyChangeConfirmationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      }
+    }
+  },
+  "hierarchyChangeConfirmationDestinationMessage": "Saving this hierarchy change will move {issueLabel} together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to {destinationLabel}.",
+  "@hierarchyChangeConfirmationDestinationMessage": {
+    "placeholders": {
+      "issueLabel": {
+        "type": "String"
+      },
+      "descendantCount": {
+        "type": "int"
+      },
+      "destinationLabel": {
+        "type": "String"
+      }
+    }
+  },
+  "confirmMove": "Confirm move",
   "derivedFromParent": "Derived from parent",
   "epicDerivedFromParent": "Epic is derived from the selected parent issue.",
   "subTaskParentRequired": "Sub-tasks require a parent issue.",
@@ -219,6 +665,9 @@
   "continueWithGitHubApp": "Continue with GitHub App",
   "cancel": "Cancel",
   "connectToken": "Connect token",
+  "manageGitHubAccess": "Manage GitHub access",
+  "openSettings": "Open settings",
+  "reconnectWriteAccess": "Reconnect for write access",
   "issueCount": "{count, plural, =0{No issues} =1{1 issue} other{{count} issues}}",
   "@issueCount": {
     "placeholders": {

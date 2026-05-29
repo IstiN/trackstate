@@ -5,8 +5,8 @@ import '../../core/interfaces/create_issue_accessibility_screen.dart';
 import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
+  const desktopViewport = Size(1440, 900);
   const compactViewport = Size(390, 844);
-
   testWidgets(
     'TS-307 adapts the Create issue surface responsively and keeps it accessible',
     (tester) async {
@@ -14,7 +14,11 @@ void main() {
       CreateIssueAccessibilityScreenHandle? screen;
 
       try {
-        screen = await launchCreateIssueAccessibilityFixture(tester);
+        screen = await launchCreateIssueAccessibilityFixture(
+          tester,
+          initialViewportWidth: desktopViewport.width,
+          initialViewportHeight: desktopViewport.height,
+        );
 
         final failures = <String>[];
 
@@ -41,6 +45,13 @@ void main() {
         }
 
         final desktopLayout = screen.observeLayout();
+        if (desktopLayout.viewportWidth != desktopViewport.width ||
+            desktopLayout.viewportHeight != desktopViewport.height) {
+          failures.add(
+            'TS-307 must start from a ${desktopViewport.width.toInt()}x${desktopViewport.height.toInt()} desktop viewport, '
+            'but ${desktopLayout.viewportWidth.toInt()}x${desktopLayout.viewportHeight.toInt()} was observed.',
+          );
+        }
         final wideLooksLikeSideSheet =
             desktopLayout.widthFraction <= 0.5 &&
             desktopLayout.rightInset <= 48 &&
@@ -97,6 +108,13 @@ void main() {
         );
 
         final compactLayout = screen.observeLayout();
+        if (compactLayout.viewportWidth != compactViewport.width ||
+            compactLayout.viewportHeight != compactViewport.height) {
+          failures.add(
+            'TS-307 must resize to a ${compactViewport.width.toInt()}x${compactViewport.height.toInt()} compact viewport, '
+            'but ${compactLayout.viewportWidth.toInt()}x${compactLayout.viewportHeight.toInt()} was observed.',
+          );
+        }
         final compactLooksFullScreen =
             compactLayout.widthFraction >= 0.9 &&
             compactLayout.heightFraction >= 0.9 &&
