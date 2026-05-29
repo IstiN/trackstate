@@ -17364,9 +17364,7 @@ class _HistoryRow extends StatelessWidget {
                   ),
                   Text(
                     '${entry.author} · ${entry.timestamp}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    style: _collaborationMetadataTextStyle(context),
                   ),
                   if ((entry.before ?? '').isNotEmpty ||
                       (entry.after ?? '').isNotEmpty)
@@ -17424,9 +17422,7 @@ class _CommentBubble extends StatelessWidget {
                     ),
                     Text(
                       metadata,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                      style: _collaborationMetadataTextStyle(context),
                     ),
                     const SizedBox(height: 6),
                     Text(comment.body),
@@ -17448,6 +17444,17 @@ String _commentMetadata(IssueComment comment, AppLocalizations l10n) {
     return '$createdAt · ${l10n.editedAt(updatedAt)}';
   }
   return createdAt;
+}
+
+TextStyle? _collaborationMetadataTextStyle(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.textTheme.labelSmall?.copyWith(
+    color: context.ts.text,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    height: 1.2,
+    letterSpacing: .24,
+  );
 }
 
 String _formatAttachmentFileSize(int sizeBytes) {
