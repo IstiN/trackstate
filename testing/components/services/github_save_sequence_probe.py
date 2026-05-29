@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from typing import Any
 
 from testing.core.interfaces.web_app_session import WebAppSession, WebAppTimeoutError
+from testing.core.utils.polling import poll_until
 
 
 @dataclass(frozen=True)
@@ -89,8 +91,15 @@ class GitHubSaveSequenceProbe:
     def __init__(self, *, session: WebAppSession, repository: str) -> None:
         self._session = session
         self._repository = repository
+        self._log_name = "github-save-sequence-probe"
 
     def install(self) -> None:
+        if self._supports_playwright_network_recording():
+            self._session.start_network_recording(  # type: ignore[attr-defined]
+                name=self._log_name,
+                url_fragment=f"/repos/{self._repository.lower()}/git/",
+            )
+            return
         self._session.evaluate(
             """
             ({ repository }) => {
@@ -252,6 +261,36 @@ class GitHubSaveSequenceProbe:
         stale_write_sha: str,
         timeout_ms: int = 60_000,
     ) -> GitHubFetchBeforeWriteObservation:
+        if self._supports_playwright_network_recording():
+            matched, payload = poll_until(
+                probe=lambda: self._payload_from_entries(
+                    self.read_log(),
+                    stale_write_sha=stale_write_sha,
+                ),
+                is_satisfied=lambda value: (
+                    isinstance(value, dict) and value.get("kind") == "observed"
+                ),
+                timeout_seconds=max(timeout_ms / 1000, 1),
+                interval_seconds=0.25,
+            )
+            if not matched:
+                self._raise_payload_error(payload, stale_write_sha=stale_write_sha)
+            assert isinstance(payload, dict)
+            observation = self._build_observation(payload)
+            if not observation.ref_was_stale:
+                raise AssertionError(
+                    "Step 6 failed: the save flow did not prove that the branch ref lookup moved "
+                    "past the stale stored SHA before the tree update.\n"
+                    f"Stale write SHA: {stale_write_sha}\n"
+                    f"Observed payload: {payload}",
+                )
+            if any(status == 422 for status in observation.response_statuses):
+                raise AssertionError(
+                    "Step 6 failed: the save network sequence still hit GitHub HTTP 422 during "
+                    "the stale-base-SHA scenario.\n"
+                    f"Observed payload: {payload}",
+                )
+            return observation
         try:
             payload = self._session.wait_for_function(
                 """
@@ -274,7 +313,7 @@ class GitHubSaveSequenceProbe:
                     ) || null;
                   const refRequest = [...entries]
                     .reverse()
-                    .find((entry) => requestMatches(entry, 'GET', '/git/refs/heads/'));
+                    .find((entry) => requestMatches(entry, 'GET', '/git/ref/heads/'));
                   if (!refRequest) {
                     return null;
                   }
@@ -355,6 +394,166 @@ class GitHubSaveSequenceProbe:
                 f"Observed network log: {self.read_log()}",
             ) from error
 
+        if not isinstance(payload, dict) or str(payload.get("kind")) != "observed":
+            self._raise_payload_error(
+                payload if isinstance(payload, dict) else None,
+                stale_write_sha=stale_write_sha,
+            )
+        assert isinstance(payload, dict)
+
+        observation = self._build_observation(payload)
+        if not observation.ref_was_stale:
+            raise AssertionError(
+                "Step 6 failed: the save flow did not prove that the branch ref lookup moved "
+                "past the stale stored SHA before the tree update.\n"
+                f"Stale write SHA: {stale_write_sha}\n"
+                f"Observed payload: {payload}",
+            )
+        if any(status == 422 for status in observation.response_statuses):
+            raise AssertionError(
+                "Step 6 failed: the save network sequence still hit GitHub HTTP 422 during "
+                "the stale-base-SHA scenario.\n"
+                f"Observed payload: {payload}",
+            )
+        return observation
+
+    def read_log(self) -> list[dict[str, object]]:
+        if self._supports_playwright_network_recording():
+            payload = self._session.read_network_log(name=self._log_name)  # type: ignore[attr-defined]
+            return [
+                dict(entry)
+                for entry in payload
+                if isinstance(entry, dict)
+            ]
+        payload = self._session.evaluate(
+            "() => window.__githubSaveSequenceProbe?.entries ?? []",
+        )
+        if not isinstance(payload, list):
+            return []
+        entries: list[dict[str, object]] = []
+        for entry in payload:
+            if isinstance(entry, dict):
+                entries.append(dict(entry))
+        return entries
+
+    def _supports_playwright_network_recording(self) -> bool:
+        return hasattr(self._session, "start_network_recording") and hasattr(
+            self._session,
+            "read_network_log",
+        )
+
+    def _payload_from_entries(
+        self,
+        raw_entries: list[dict[str, object]],
+        *,
+        stale_write_sha: str,
+    ) -> dict[str, object] | None:
+        entries = [
+            GitHubNetworkEntry.from_payload(entry)
+            for entry in raw_entries
+            if isinstance(entry, dict)
+        ]
+        ref_request = next(
+            (
+                entry
+                for entry in reversed(entries)
+                if entry.phase == "request"
+                and entry.method == "GET"
+                and "/git/ref/heads/" in entry.url
+            ),
+            None,
+        )
+        if ref_request is None:
+            return None
+        ref_response = self._response_for(entries, ref_request)
+        if ref_response is None or ref_response.status != 200:
+            return None
+        try:
+            ref_json = json.loads(ref_response.response_text or "{}")
+        except json.JSONDecodeError as error:
+            return {
+                "kind": "invalid-ref-response",
+                "entries": raw_entries,
+                "refRequest": ref_request.as_dict(),
+                "refResponse": ref_response.as_dict(),
+                "parseError": str(error),
+            }
+        ref_object = ref_json.get("object") if isinstance(ref_json, dict) else None
+        ref_sha = ref_object.get("sha") if isinstance(ref_object, dict) else None
+        if not isinstance(ref_sha, str) or not ref_sha:
+            return {
+                "kind": "missing-ref-sha",
+                "entries": raw_entries,
+                "refRequest": ref_request.as_dict(),
+                "refResponse": ref_response.as_dict(),
+            }
+        commit_request = next(
+            (
+                entry
+                for entry in entries
+                if entry.phase == "request"
+                and entry.method == "GET"
+                and f"/git/commits/{ref_sha}" in entry.url
+                and entry.order > ref_request.order
+            ),
+            None,
+        )
+        if commit_request is None:
+            return None
+        commit_response = self._response_for(entries, commit_request)
+        if commit_response is None or commit_response.status != 200:
+            return None
+        tree_request = next(
+            (
+                entry
+                for entry in entries
+                if entry.phase == "request"
+                and entry.method == "POST"
+                and "/git/trees" in entry.url
+                and entry.order > commit_request.order
+            ),
+            None,
+        )
+        if tree_request is None:
+            return None
+        statuses = [
+            entry.status
+            for entry in entries
+            if entry.phase == "response" and entry.status is not None
+        ]
+        return {
+            "kind": "observed",
+            "entries": raw_entries,
+            "refRequest": ref_request.as_dict(),
+            "refResponse": ref_response.as_dict(),
+            "refSha": ref_sha,
+            "commitRequest": commit_request.as_dict(),
+            "commitResponse": commit_response.as_dict(),
+            "treeRequest": tree_request.as_dict(),
+            "refWasStale": ref_sha != stale_write_sha,
+            "statuses": statuses,
+        }
+
+    def _response_for(
+        self,
+        entries: list[GitHubNetworkEntry],
+        request: GitHubNetworkEntry,
+    ) -> GitHubNetworkEntry | None:
+        return next(
+            (
+                entry
+                for entry in entries
+                if entry.phase == "response" and entry.request_id == request.request_id
+            ),
+            None,
+        )
+
+    def _raise_payload_error(
+        self,
+        payload: dict[str, object] | None,
+        *,
+        stale_write_sha: str,
+    ) -> None:
         if not isinstance(payload, dict):
             raise AssertionError(
                 "Step 6 failed: the hosted save flow never exposed the expected GitHub ref, "
@@ -374,40 +573,18 @@ class GitHubSaveSequenceProbe:
                 "SHA before the tree update.\n"
                 f"Observed payload: {payload}",
             )
-        if kind != "observed":
-            raise AssertionError(
-                "Step 6 failed: the hosted save flow did not expose an observable "
-                "fetch-before-write sequence.\n"
-                f"Observed payload: {payload}",
-            )
-
-        observation = self._build_observation(payload)
-        if not observation.ref_was_stale:
+        if kind == "observed" and not bool(payload.get("refWasStale")):
             raise AssertionError(
                 "Step 6 failed: the save flow did not prove that the branch ref lookup moved "
                 "past the stale stored SHA before the tree update.\n"
                 f"Stale write SHA: {stale_write_sha}\n"
                 f"Observed payload: {payload}",
             )
-        if any(status == 422 for status in observation.response_statuses):
-            raise AssertionError(
-                "Step 6 failed: the save network sequence still hit GitHub HTTP 422 during "
-                "the stale-base-SHA scenario.\n"
-                f"Observed payload: {payload}",
-            )
-        return observation
-
-    def read_log(self) -> list[dict[str, object]]:
-        payload = self._session.evaluate(
-            "() => window.__githubSaveSequenceProbe?.entries ?? []",
+        raise AssertionError(
+            "Step 6 failed: the hosted save flow did not expose an observable "
+            "fetch-before-write sequence.\n"
+            f"Observed payload: {payload}",
         )
-        if not isinstance(payload, list):
-            return []
-        entries: list[dict[str, object]] = []
-        for entry in payload:
-            if isinstance(entry, dict):
-                entries.append(dict(entry))
-        return entries
 
     def _build_observation(
         self,
