@@ -21,7 +21,7 @@ class JqlSearchAccessibilityWidgetFramework {
 
   Future<JqlSearchAccessibilityScreenHandle> launch() async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
-    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
 
     await tester.pumpWidget(
