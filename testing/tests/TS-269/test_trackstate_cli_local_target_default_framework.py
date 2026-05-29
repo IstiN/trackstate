@@ -26,6 +26,7 @@ class TrackStateCliLocalTargetDefaultFrameworkRegressionTest(unittest.TestCase):
         with (
             patch.dict(os.environ, {"TRACKSTATE_DART_BIN": "/custom/dart"}, clear=False),
             patch.object(framework, "_seed_local_repository") as seed_mock,
+            patch.object(framework, "_compile_executable") as compile_mock,
             patch.object(framework, "_run", return_value=expected_result) as run_mock,
         ):
             observation = framework.observe_default_json_session(
@@ -33,15 +34,18 @@ class TrackStateCliLocalTargetDefaultFrameworkRegressionTest(unittest.TestCase):
             )
 
         seed_mock.assert_called_once()
+        compile_mock.assert_called_once()
+        compiled_binary_path = compile_mock.call_args.args[0]
+        self.assertEqual(compiled_binary_path.name, "trackstate")
         self.assertEqual(
             observation.executed_command,
             (
-                "/custom/dart",
-                str(Path.cwd() / "bin" / "trackstate.dart"),
+                str(compiled_binary_path),
                 "--target",
                 "local",
             ),
         )
+        self.assertIn("temporary executable compiled from this checkout", observation.fallback_reason or "")
         self.assertEqual(observation.repository_path, str(run_mock.call_args.kwargs["cwd"]))
         self.assertNotIn("--path", observation.executed_command_text)
         run_mock.assert_called_once_with(
@@ -61,7 +65,7 @@ class TrackStateCliLocalTargetDefaultFrameworkRegressionTest(unittest.TestCase):
         return replace(
             base_config,
             requested_command_prefix=("trackstate", "--target", "local"),
-            fallback_command_prefix=("dart", "run", "trackstate", "--target", "local"),
+            fallback_command_prefix=("trackstate", "--target", "local"),
         )
 
 

@@ -128,9 +128,10 @@ class SettingsScreenRobot {
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
     Widget Function(Widget child)? appWrapper,
+    Size viewportSize = const Size(1440, 960),
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
-    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.physicalSize = viewportSize;
     tester.view.devicePixelRatio = 1;
     final app = TrackStateApp(key: UniqueKey(), repository: repository);
     await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
@@ -969,14 +970,6 @@ class SettingsScreenRobot {
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
 
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
-  }
-
   Finder _filledSettingsProviderButton(String label) {
     return _lowestButton(find.widgetWithText(FilledButton, label));
   }
@@ -1003,7 +996,7 @@ class SettingsScreenRobot {
   Finder _labeledDropdownField(String label) =>
       find.byWidgetPredicate((widget) {
         if (widget is DropdownButtonFormField) {
-          return widget.decoration?.labelText == label;
+          return widget.decoration.labelText == label;
         }
         return false;
       }, description: 'dropdown field labeled $label');
@@ -1125,6 +1118,7 @@ class SettingsScreenRobot {
   }
 
   List<String> visibleSemanticsLabelsSnapshot() {
+    // ignore: deprecated_member_use
     final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
     if (root == null) {
       return <String>[];

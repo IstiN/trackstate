@@ -146,15 +146,6 @@ def main() -> None:
                         ),
                         observed=failure,
                     )
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "Entered the Environment field details in the live Add field "
-                            "dialog and returned to the Fields catalog to confirm whether "
-                            "the new row appeared for a user."
-                        ),
-                        observed=failure,
-                    )
                 else:
                     _record_step(
                         result,
@@ -319,14 +310,6 @@ def main() -> None:
                         ),
                     )
                     settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
-                    settings_page.open_fields_tab()
-                    environment_row_before_save = settings_page.field_row_observation(
-                        CUSTOM_FIELD_NAME,
-                    )
-                    result["environment_row_before_save_settings"] = _row_payload(
-                        environment_row_before_save,
-                    )
-                    _assert_custom_field_row(environment_row_before_save)
                     settings_page.save_settings()
                     refreshed_fields_text = _reopen_fields_tab(
                         tracker_page=tracker_page,

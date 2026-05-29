@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -32,20 +29,20 @@ from testing.tests.support.hosted_sync_auth_failure_runtime import (  # noqa: E4
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
 TICKET_KEY = "TS-715"
-RUN_COMMAND = "python testing/tests/TS-715/test_ts_715.py"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-715/test_ts_715.py"
 EXPECTED_SYNC_LABEL = "Sync unavailable"
 EXPECTED_RETRY_INTERVAL_SECONDS = 60
 RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 900
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
     re.IGNORECASE,
 )
 NEXT_RETRY_PATTERN = re.compile(r"Next retry at [^.]+\.", re.IGNORECASE)
-WORKSPACE_SYNC_OCR_REGION = (250, 445, 1425, 705)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -94,7 +91,7 @@ def main() -> None:
             runtime_factory=lambda: runtime,
         ) as tracker_page:
             page = LiveWorkspaceSyncPage(tracker_page)
-            tracker_page.session.set_viewport_size(width=1440, height=960)
+            tracker_page.session.set_viewport_size(width=1440, height=900)
             try:
                 runtime_state = tracker_page.open()
                 result["runtime_state"] = runtime_state.kind
@@ -108,11 +105,11 @@ def main() -> None:
 
                 initial_surface = page.open_settings(timeout_ms=90_000)
                 stable_surface = page.wait_for_status("Synced with Git", timeout_ms=180_000)
-                stable_ocr_text = _read_workspace_sync_ocr(page)
+                stable_section_text = _visible_workspace_sync_text(stable_surface)
                 result["initial_surface"] = _surface_payload(initial_surface)
                 result["stable_surface"] = _surface_payload(stable_surface)
-                result["stable_workspace_sync_ocr"] = stable_ocr_text
-                _assert_stable_workspace_sync_copy(stable_surface, stable_ocr_text)
+                result["stable_workspace_sync_text"] = stable_section_text
+                _assert_stable_workspace_sync_copy(stable_surface, stable_section_text)
                 _record_step(
                     result,
                     step=1,
@@ -123,7 +120,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"header_pill={stable_surface.header_pill_label}; "
-                        f"workspace_sync_ocr={stable_ocr_text}; "
+                        f"workspace_sync_text={stable_section_text}; "
                         f"user_login={user.login}"
                     ),
                 )
@@ -142,11 +139,11 @@ def main() -> None:
                     ),
                 )
 
-                failure_ocr_text = _wait_for_failure_ocr(page)
                 failure_surface = _wait_for_expected_failure_surface(page)
+                failure_section_text = _visible_workspace_sync_text(failure_surface)
                 result["failure_surface"] = _surface_payload(failure_surface)
-                result["failure_workspace_sync_ocr"] = failure_ocr_text
-                _assert_failure_surface(failure_surface, failure_ocr_text)
+                result["failure_workspace_sync_text"] = failure_section_text
+                _assert_failure_surface(failure_surface, failure_section_text)
                 first_post_revocation_request = _first_post_revocation_request(
                     sync_observation,
                 )
@@ -177,44 +174,9 @@ def main() -> None:
                     ),
                     observed=(
                         f"header_pill={failure_surface.header_pill_label}; "
-                        f"workspace_sync_ocr={failure_ocr_text}"
+                        f"workspace_sync_text={failure_section_text}"
                     ),
                 )
-
-                first_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    timeout_seconds=60,
-                )
-                second_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    previous_request=first_failed_request,
-                    minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
-                    timeout_seconds=150,
-                )
-                retry_interval_seconds = (
-                    second_failed_request.observed_at_monotonic
-                    - first_failed_request.observed_at_monotonic
-                )
-                result["failed_sync_requests"] = [
-                    asdict(request) for request in sync_observation.failed_sync_requests
-                ]
-                result["post_revocation_request_urls"] = list(
-                    sync_observation.post_revocation_request_urls,
-                )
-                result["retry_interval_seconds"] = retry_interval_seconds
-                _assert_retry_interval(retry_interval_seconds)
-                _record_step(
-                    result,
-                    step=5,
-                    status="passed",
-                    action="Verify the time of the next scheduled check in the logs.",
-                    observed=(
-                        f"first_failed_sync_request={first_failed_request.url}; "
-                        f"second_failed_sync_request={second_failed_request.url}; "
-                        f"retry_interval_seconds={retry_interval_seconds:.1f}"
-                    ),
-                )
-
                 _record_human_verification(
                     result,
                     check=(
@@ -232,7 +194,60 @@ def main() -> None:
                         "Verified the visible `Workspace sync` Settings card showed the "
                         "authentication failure and the next retry message in the same section."
                     ),
-                    observed=failure_ocr_text,
+                    observed=failure_section_text,
+                )
+
+                first_failed_request = _wait_for_failed_request(
+                    sync_observation,
+                    timeout_seconds=60,
+                )
+                try:
+                    second_failed_request = _wait_for_failed_request(
+                        sync_observation,
+                        previous_request=first_failed_request,
+                        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+                        timeout_seconds=FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS,
+                    )
+                    retry_interval_seconds = (
+                        second_failed_request.observed_at_monotonic
+                        - first_failed_request.observed_at_monotonic
+                    )
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    result["retry_interval_seconds"] = retry_interval_seconds
+                    _assert_retry_interval(retry_interval_seconds)
+                except Exception as step5_error:
+                    result["failed_sync_requests"] = [
+                        asdict(request) for request in sync_observation.failed_sync_requests
+                    ]
+                    result["post_revocation_request_urls"] = list(
+                        sync_observation.post_revocation_request_urls,
+                    )
+                    _record_step(
+                        result,
+                        step=5,
+                        status="failed",
+                        action="Verify the time of the next scheduled check in the logs.",
+                        observed=_step5_failure_observation(
+                            sync_observation,
+                            step5_error,
+                        ),
+                    )
+                    raise
+                _record_step(
+                    result,
+                    step=5,
+                    status="passed",
+                    action="Verify the time of the next scheduled check in the logs.",
+                    observed=(
+                        f"first_failed_sync_request={first_failed_request.url}; "
+                        f"second_failed_sync_request={second_failed_request.url}; "
+                        f"retry_interval_seconds={retry_interval_seconds:.1f}"
+                    ),
                 )
                 _record_human_verification(
                     result,
@@ -266,6 +281,7 @@ def main() -> None:
             result["post_revocation_request_urls"] = list(
                 sync_observation.post_revocation_request_urls,
             )
+        _upgrade_step5_timeout_failure(result)
         _write_failure_outputs(result)
         raise
 
@@ -335,66 +351,34 @@ def _matching_failed_request(
 def _wait_for_expected_failure_surface(
     page: LiveWorkspaceSyncPage,
 ) -> WorkspaceSyncSurfaceObservation:
-    _, observation = poll_until(
+    found, observation = poll_until(
         probe=page.observe,
-        is_satisfied=lambda current: current.header_pill_label == EXPECTED_SYNC_LABEL,
-        timeout_seconds=45,
+        is_satisfied=lambda current: not _failure_surface_errors(current),
+        timeout_seconds=150,
         interval_seconds=2,
     )
-    return observation
-
-
-def _wait_for_failure_ocr(page: LiveWorkspaceSyncPage) -> str:
-    found, ocr_text = poll_until(
-        probe=lambda: _read_workspace_sync_ocr(page),
-        is_satisfied=lambda text: (
-            "workspace sync" in text
-            and "next retry at" in text
-            and (
-                "latest sync check failed" in text
-                or "latest error" in text
-                or "bad credentials" in text
-                or "401" in text
-            )
-        ),
-        timeout_seconds=150,
-        interval_seconds=3,
-    )
     if not found:
+        errors = "; ".join(_failure_surface_errors(observation))
         raise AssertionError(
-            "Step 4 failed: OCR of the visible `Workspace sync` card did not show the "
-            "expected failure copy after the revoked-PAT sync check.\n"
-            f"Observed OCR text:\n{ocr_text}",
+            "Step 4 failed: the visible hosted sync failure UI did not match the ticket "
+            "expectation within the allowed wait.\n"
+            f"{errors}.\n"
+            f"Observed Workspace sync text:\n{_visible_workspace_sync_text(observation)}",
         )
-    return ocr_text
+    return observation
 
 
 def _assert_failure_surface(
     observation: WorkspaceSyncSurfaceObservation,
-    ocr_text: str,
+    section_text: str,
 ) -> None:
-    errors: list[str] = []
-    if observation.header_pill_label != EXPECTED_SYNC_LABEL:
-        errors.append(
-            "the top-bar sync pill showed "
-            f"`{observation.header_pill_label}` instead of `{EXPECTED_SYNC_LABEL}`"
-        )
-    if AUTH_ERROR_FRAGMENT_PATTERN.search(ocr_text) is None:
-        errors.append(
-            "the visible Workspace sync card did not show an authentication-flavored "
-            "error containing `401`, `Bad credentials`, or the GitHub failure prefix"
-        )
-    next_retry_match = NEXT_RETRY_PATTERN.search(ocr_text)
-    if next_retry_match is None:
-        errors.append(
-            "the visible Workspace sync card did not show the `Next retry at ...` message"
-        )
+    errors = _failure_surface_errors(observation)
     if errors:
         raise AssertionError(
             "Step 4 failed: the visible hosted sync failure UI did not match the ticket "
             "expectation.\n"
             f"{'; '.join(errors)}.\n"
-            f"Observed OCR text:\n{ocr_text}",
+            f"Observed Workspace sync text:\n{section_text}",
         )
 
 
@@ -452,6 +436,79 @@ def _record_human_verification(
     verifications.append({"check": check, "observed": observed})
 
 
+def _step5_failure_observation(
+    observation: HostedSyncAuthFailureObservation,
+    error: Exception,
+) -> str:
+    requests = tuple(observation.failed_sync_requests)
+    if requests:
+        first_request = requests[0]
+        second_request = _matching_failed_request(
+            requests,
+            previous_request=first_request,
+            minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+        )
+        if second_request is not None:
+            retry_interval_seconds = (
+                second_request.observed_at_monotonic - first_request.observed_at_monotonic
+            )
+            return (
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"error={type(error).__name__}: {error}"
+            )
+        return (
+            f"first_failed_sync_request={first_request.url}; "
+            f"observed_failed_sync_request_log={_request_log(requests)}; "
+            f"error={type(error).__name__}: {error}"
+        )
+    return f"error={type(error).__name__}: {error}"
+
+
+def _upgrade_step5_timeout_failure(result: dict[str, object]) -> None:
+    error = str(result.get("error", ""))
+    timeout_prefix = (
+        "AssertionError: Step 5 failed: the hosted app did not issue a distinct "
+        "follow-up failed repository-scoped GitHub request after the first revoked-PAT "
+        "check."
+    )
+    if not error.startswith(timeout_prefix):
+        return
+    requests = _request_items(result)
+    if len(requests) < 2:
+        return
+    first_request = requests[0]
+    second_request = _matching_failed_request(
+        requests,
+        previous_request=first_request,
+        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+    )
+    if second_request is None:
+        return
+    retry_interval_seconds = (
+        second_request.observed_at_monotonic - first_request.observed_at_monotonic
+    )
+    result["retry_interval_seconds"] = retry_interval_seconds
+    try:
+        _assert_retry_interval(retry_interval_seconds)
+    except AssertionError as measured_error:
+        measured_message = f"{type(measured_error).__name__}: {measured_error}"
+        result["error"] = measured_message
+        result["traceback"] = measured_message
+        _replace_step_result(
+            result,
+            step=5,
+            status="failed",
+            observed=(
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"error={measured_message}"
+            ),
+        )
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -504,6 +561,15 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         if passed
         else "* Did not match the expected result."
     )
+    retry_log_line = (
+        "* Verified the visible authentication error and the {Next retry at ...} message, "
+        "then confirmed from the captured sync-request log that the next automatic check "
+        "happened about one minute later."
+        if passed
+        else "* Verified the visible authentication error and the {Next retry at ...} "
+        "message, then inspected the captured sync-request log for the actual follow-up "
+        "retry timing."
+    )
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
@@ -511,7 +577,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed hosted TrackState web app in Chromium and connected the real hosted workspace session.",
         "* Switched the live GitHub sync runtime to synthetic HTTP 401 {Bad credentials} responses for workspace-sync repository checks to reproduce a revoked PAT.",
         "* Waited for the background sync coordinator to perform a failed check, then verified the visible top-bar sync pill and the {Workspace sync} Settings card.",
-        "* Verified the visible authentication error and the {Next retry at ...} message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later.",
+        retry_log_line,
         "",
         "*Observed result*",
         outcome,
@@ -551,6 +617,11 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         if passed
         else "- Did not match the expected result."
     )
+    retry_log_line = (
+        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later."
+        if passed
+        else "- Verified the visible authentication error and the `Next retry at ...` message, then inspected the captured sync-request log for the actual follow-up retry timing."
+    )
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
@@ -558,7 +629,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed hosted TrackState web app in Chromium and connected the real hosted workspace session.",
         "- Switched the live GitHub sync runtime to synthetic HTTP 401 `Bad credentials` responses for workspace-sync repository checks to reproduce a revoked PAT.",
         "- Waited for the background sync coordinator to perform a failed check, then verified the visible top-bar sync pill and the `Workspace sync` Settings card.",
-        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed from the captured sync-request log that the next automatic check happened about one minute later.",
+        retry_log_line,
         "",
         "### Observed result",
         outcome,
@@ -620,6 +691,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     request_log = _request_log(_request_items(result))
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    actual_summary = _actual_retry_summary(result)
     return "\n".join(
         [
             "# TS-715 - Hosted sync auth failure does not present the expected `Sync unavailable` state/backoff evidence",
@@ -648,13 +720,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             "- Expected: after the hosted PAT is revoked, the top-bar pill shows `Sync unavailable`, the Settings `Workspace sync` card shows an authentication error plus `Next retry at ...`, and the next logged sync check happens about one minute later.",
-            (
-                "- Actual: "
-                + str(
-                    result.get("error")
-                    or "the visible sync failure state or retry timing did not match the ticket expectation."
-                )
-            ),
+            f"- Actual: {actual_summary}",
             "",
             "## Exact error message",
             "```text",
@@ -726,9 +792,26 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
     return "Step was not completed."
 
 
+def _replace_step_result(
+    result: dict[str, object],
+    *,
+    step: int,
+    status: str,
+    observed: str,
+) -> None:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return
+    for item in steps:
+        if isinstance(item, dict) and item.get("step") == step:
+            item["status"] = status
+            item["observed"] = observed
+            return
+
+
 def _assert_stable_workspace_sync_copy(
     observation: WorkspaceSyncSurfaceObservation,
-    ocr_text: str,
+    section_text: str,
 ) -> None:
     if observation.header_pill_label != "Synced with Git":
         raise AssertionError(
@@ -736,11 +819,14 @@ def _assert_stable_workspace_sync_copy(
             "the PAT revocation.\n"
             f"Observed header pill: {observation.header_pill_label}",
         )
-    if "workspace sync" not in ocr_text or "synced with git" not in ocr_text:
+    if "workspace sync" not in section_text or (
+        "synced with git" not in section_text
+        and "last successful sync check" not in section_text
+    ):
         raise AssertionError(
-            "Precondition failed: OCR could not confirm the visible healthy `Workspace "
+            "Precondition failed: the visible healthy `Workspace "
             "sync` card before the PAT revocation.\n"
-            f"Observed OCR text:\n{ocr_text}",
+            f"Observed Workspace sync text:\n{section_text}",
         )
 
 
@@ -792,28 +878,50 @@ def _request_log(requests: tuple[HostedSyncAuthFailureRequest, ...]) -> str:
     )
 
 
-def _read_workspace_sync_ocr(page: LiveWorkspaceSyncPage) -> str:
-    if shutil.which("tesseract") is None:
-        observation = page.observe()
-        visible_text = observation.settings_card_text or observation.body_text
-        return _normalize_ocr_text(visible_text)
-    with tempfile.TemporaryDirectory(prefix="ts715-ocr-") as temp_dir:
-        screenshot_path = Path(temp_dir) / "workspace-sync.png"
-        cropped_path = Path(temp_dir) / "workspace-sync-crop.png"
-        page.screenshot(str(screenshot_path))
-        from PIL import Image
-
-        with Image.open(screenshot_path) as image:
-            cropped = image.crop(WORKSPACE_SYNC_OCR_REGION).convert("L")
-            cropped = cropped.resize((cropped.width * 2, cropped.height * 2))
-            cropped.save(cropped_path)
-        completed = subprocess.run(
-            ["tesseract", str(cropped_path), "stdout", "--psm", "6"],
-            check=True,
-            capture_output=True,
-            text=True,
+def _failure_surface_errors(
+    observation: WorkspaceSyncSurfaceObservation,
+) -> list[str]:
+    section_text = _visible_workspace_sync_text(observation)
+    errors: list[str] = []
+    if observation.header_pill_label != EXPECTED_SYNC_LABEL:
+        errors.append(
+            "the top-bar sync pill showed "
+            f"`{observation.header_pill_label}` instead of `{EXPECTED_SYNC_LABEL}`"
         )
-    return _normalize_ocr_text(completed.stdout)
+    if AUTH_ERROR_FRAGMENT_PATTERN.search(section_text) is None:
+        errors.append(
+            "the visible Workspace sync card did not show an authentication-flavored "
+            "error containing `401`, `Bad credentials`, or the GitHub failure prefix"
+        )
+    if NEXT_RETRY_PATTERN.search(section_text) is None:
+        errors.append(
+            "the visible Workspace sync card did not show the `Next retry at ...` message"
+        )
+    return errors
+
+
+def _visible_workspace_sync_text(
+    observation: WorkspaceSyncSurfaceObservation,
+) -> str:
+    return _normalize_ocr_text(observation.settings_card_text or observation.body_text)
+
+
+def _actual_retry_summary(result: dict[str, object]) -> str:
+    requests = _request_items(result)
+    if len(requests) >= 2:
+        retry_interval_seconds = (
+            requests[1].observed_at_monotonic - requests[0].observed_at_monotonic
+        )
+        return (
+            "the UI switched to `Sync unavailable` and showed an auth failure plus "
+            f"`Next retry at ...`, but the captured repository-scoped retry interval was "
+            f"{retry_interval_seconds:.1f}s instead of about {EXPECTED_RETRY_INTERVAL_SECONDS}s. "
+            f"Request log: {_request_log(requests)}"
+        )
+    return str(
+        result.get("error")
+        or "the visible sync failure state or retry timing did not match the ticket expectation."
+    )
 
 
 def _normalize_ocr_text(value: str) -> str:

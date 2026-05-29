@@ -415,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
+  /// **'This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
@@ -1264,6 +1264,15 @@ abstract class AppLocalizations {
   /// **'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.'**
   String get repositoryAccessReadOnlyMessage;
 
+  /// No description provided for @repositoryAccessCapabilitySummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Current session flags: canWrite={canWrite}, canCreateBranch={canCreateBranch}.'**
+  String repositoryAccessCapabilitySummary(
+    String canWrite,
+    String canCreateBranch,
+  );
+
   /// No description provided for @repositoryAccessAttachmentRestrictedTitle.
   ///
   /// In en, this message translates to:
@@ -1353,6 +1362,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Choose a local folder to open an existing workspace or initialize TrackState in a new one.'**
   String get workspaceOnboardingFirstRunDescription;
+
+  /// No description provided for @workspaceOnboardingFirstLaunchDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a local folder or hosted repository to get started.'**
+  String get workspaceOnboardingFirstLaunchDescription;
 
   /// No description provided for @localWorkspaceOnboardingOpenExisting.
   ///
@@ -1564,6 +1579,12 @@ abstract class AppLocalizations {
   /// **'Read-only'**
   String get workspaceStateReadOnly;
 
+  /// No description provided for @workspaceStateSyncIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync issue'**
+  String get workspaceStateSyncIssue;
+
   /// No description provided for @workspaceStateNeedsSignIn.
   ///
   /// In en, this message translates to:
@@ -1617,6 +1638,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.'**
   String get startupRateLimitRecoveryShellMessage;
+
+  /// No description provided for @startupHostedBootstrapIndexRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted issue index needs regeneration'**
+  String get startupHostedBootstrapIndexRecoveryTitle;
+
+  /// No description provided for @startupHostedBootstrapIndexRecoveryMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.'**
+  String get startupHostedBootstrapIndexRecoveryMessage;
 
   /// No description provided for @repositoryPath.
   ///

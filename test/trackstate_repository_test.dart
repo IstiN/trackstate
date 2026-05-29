@@ -119,6 +119,119 @@ Hosted projects without explicit attachmentStorage should keep repository-path a
   );
 
   test(
+    'provider-backed project settings save reuses tree revisions for existing config files',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do', 'category': 'new'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/config/workflows.json': jsonEncode([
+            {
+              'id': 'story-flow',
+              'name': 'Story Flow',
+              'issueTypeIds': ['story'],
+              'statuses': ['todo'],
+              'transitions': [],
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'medium', 'name': 'Medium'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([
+            {'id': 'v1', 'name': 'v1'},
+          ]),
+          'DEMO/config/components.json': jsonEncode([
+            {'id': 'core', 'name': 'Core'},
+          ]),
+          'DEMO/config/resolutions.json': jsonEncode([
+            {'id': 'done', 'name': 'Done'},
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Settings fixture issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-13T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Settings fixture issue
+updated: 2026-05-13T00:00:00Z
+---
+
+# Description
+
+Minimal issue fixture for project settings tests.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+      final snapshot = await repository.loadSnapshot();
+      provider.readTextFilePaths.clear();
+
+      await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          priorityDefinitions: [
+            ...snapshot.project.priorityDefinitions,
+            const TrackStateConfigEntry(id: 'high', name: 'High'),
+          ],
+        ),
+      );
+
+      expect(
+        provider.readTextFilePaths,
+        equals(const ['DEMO/project.json', 'DEMO/config/fields.json']),
+      );
+      expect(provider.lastFileChangeRequest, isNotNull);
+      expect(
+        provider.lastFileChangeRequest!.changes
+            .whereType<RepositoryTextFileChange>()
+            .map((change) => change.expectedRevision)
+            .whereType<String>()
+            .every((revision) => revision.startsWith('tree:')),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'setup repository resolves github releases attachment storage and metadata',
     () async {
       final repository = _mockSetupRepository(
@@ -794,6 +907,59 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'provider-backed repository detail hydration keeps index-backed links when no issue-local links.json exists',
+    () async {
+      final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
+      files.remove('DEMO/DEMO-1/DEMO-2/links.json');
+      final issuesIndex =
+          jsonDecode(files['DEMO/.trackstate/index/issues.json']!)
+              as List<dynamic>;
+      final sourceEntry = issuesIndex
+          .whereType<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['key'] == 'DEMO-2');
+      sourceEntry['links'] = [
+        {'type': 'blocks', 'target': 'DEMO-4', 'direction': 'outward'},
+      ];
+      files['DEMO/.trackstate/index/issues.json'] = jsonEncode(issuesIndex);
+
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: files,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      final indexEntry = snapshot.repositoryIndex.entryForKey('DEMO-2');
+      final summaryIssue = snapshot.issues.firstWhere(
+        (issue) => issue.key == 'DEMO-2',
+      );
+
+      expect(indexEntry, isNotNull);
+      expect(indexEntry!.links, hasLength(1));
+      expect(indexEntry.links.single.targetKey, 'DEMO-4');
+      expect(summaryIssue.links, isEmpty);
+
+      final hydrated = await repository.hydrateIssue(
+        summaryIssue,
+        scopes: const {IssueHydrationScope.detail},
+      );
+
+      expect(hydrated.hasDetailLoaded, isTrue);
+      expect(hydrated.links, hasLength(1));
+      expect(hydrated.links.single.type, 'blocks');
+      expect(hydrated.links.single.direction, 'outward');
+      expect(hydrated.links.single.targetKey, 'DEMO-4');
+    },
+  );
+
+  test(
     'provider-backed repository force refresh reloads updated comment content',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
@@ -1263,7 +1429,7 @@ Summary data stays available.
   );
 
   test(
-    'setup repository keeps startup blocked when issue summary index is rate limited',
+    'setup repository publishes startup recovery when issue summary index is rate limited',
     () async {
       final repository = _mockSetupRepository(
         files: {
@@ -1311,9 +1477,22 @@ updated: 2026-05-05T00:00:00Z
         },
       );
 
-      await expectLater(
-        repository.loadSnapshot,
-        throwsA(isA<GitHubRateLimitException>()),
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.startupRecovery, isNotNull);
+      expect(
+        snapshot.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(snapshot.issues, hasLength(1));
+      expect(snapshot.repositoryIndex.entries, hasLength(1));
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.settings),
+        TrackerLoadState.ready,
+      );
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.board),
+        isNot(TrackerLoadState.ready),
       );
     },
   );
@@ -1391,6 +1570,225 @@ updated: 2026-05-05T00:05:00Z
 
       expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
       expect(snapshot.project.key, 'DEMO');
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed summary issue index completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'epic', 'name': 'Epic'},
+            {'id': 'story', 'name': 'Story'},
+            {'id': 'subtask', 'name': 'Sub-task'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: epic
+status: todo
+priority: medium
+summary: Bootstrap summary fallback
+updated: 2026-05-05T00:05:00Z
+---
+''',
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Child issue
+updated: 2026-05-05T00:06:00Z
+epic: DEMO-1
+---
+''',
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Bootstrap summary fallback',
+              'issueType': 'epic',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': ['DEMO-2'],
+              'archived': false,
+            },
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'summary': 'Child issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:06:00Z',
+              'epic': 'DEMO-1',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/index/issues.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode([
+              {
+                'key': 'DEMO-1',
+                'path': 'DEMO/DEMO-1/main.md',
+                'summary': 'Bootstrap summary fallback',
+                'issueType': 'epic',
+                'status': 'todo',
+                'updated': '2026-05-05T00:05:00Z',
+                'children': ['DEMO-2'],
+                'archived': false,
+              },
+              {
+                'key': 'DEMO-2',
+                'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+                'summary': 'Child issue',
+                'issueType': 'story',
+                'status': 'todo',
+                'updated': '2026-05-05T00:06:00Z',
+                'epic': 'DEMO-1',
+                'children': [],
+                'archived': false,
+              },
+            ]),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1', 'DEMO-2']);
+      expect(snapshot.issues.first.summary, 'DEMO-1');
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/index/issues.json',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed tombstone metadata completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Live issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
+            },
+          ]),
+          'DEMO/.trackstate/tombstones/DEMO-99.json': jsonEncode({
+            'key': 'DEMO-99',
+            'project': 'DEMO',
+            'formerPath': 'DEMO/DEMO-99/main.md',
+            'deletedAt': '2026-05-05T00:07:00Z',
+            'summary': 'Deleted issue',
+          }),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Live issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/tombstones/DEMO-99.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode({
+              'key': 'DEMO-99',
+              'project': 'DEMO',
+              'formerPath': 'DEMO/DEMO-99/main.md',
+              'deletedAt': '2026-05-05T00:07:00Z',
+              'summary': 'Deleted issue',
+            }),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(snapshot.repositoryIndex.deleted, isEmpty);
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/tombstones/DEMO-99.json',
+          ),
+        ),
+      );
     },
   );
 
@@ -2461,6 +2859,138 @@ size 6
         Uint8List.fromList(utf8.encode('roadmap')),
       );
       expect(provider.files['DEMO/DEMO-1/attachments.json'], '[]\n');
+    },
+  );
+
+  test(
+    'provider-backed repository overwrites legacy repository-path attachments directly when hosted release writes are unavailable',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.full,
+          supportsReleaseAttachmentWrites: false,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Nested release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Nested release-backed attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Nested release-backed attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
+              '%PDF-1.4\nlegacy repository attachment\n',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+      expect(
+        provider.binaryFiles.containsKey(
+          'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
+        ),
+        isFalse,
+      );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(
+        updated.attachments.single.repositoryPath,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
     },
   );
 
@@ -3912,6 +4442,7 @@ class _FakeReleaseAttachmentProvider
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final List<String> readTextFilePaths = <String>[];
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryFileChangeRequest? lastFileChangeRequest;
   RepositoryConnection? _connection;
@@ -3935,9 +4466,9 @@ class _FakeReleaseAttachmentProvider
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     return [
       for (final path in files.keys)
-        RepositoryTreeEntry(path: path, type: 'blob'),
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
       for (final path in binaryFiles.keys)
-        RepositoryTreeEntry(path: path, type: 'blob'),
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
     ];
   }
 
@@ -3946,6 +4477,7 @@ class _FakeReleaseAttachmentProvider
     String path, {
     required String ref,
   }) async {
+    readTextFilePaths.add(path);
     final content = files[path];
     if (content == null) {
       throw TrackStateProviderException('File not found: $path');

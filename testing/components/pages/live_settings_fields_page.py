@@ -163,13 +163,7 @@ class LiveSettingsFieldsPage:
     def fill_editor_input(self, label: str, value: str) -> None:
         selector = self._editor_input_selector(label)
         self._session.focus(selector, timeout_ms=30_000)
-        if value:
-            self._session.type_text(
-                selector,
-                value,
-                timeout_ms=30_000,
-                delay_ms=20,
-            )
+        self._session.fill(selector, value, timeout_ms=30_000)
         if label == "Options":
             self._session.wait_for_function(
                 """
@@ -189,7 +183,6 @@ class LiveSettingsFieldsPage:
             )
         else:
             self._session.wait_for_input_value(selector, value, timeout_ms=30_000)
-        self._session.press(selector, "Tab", timeout_ms=30_000)
 
     def select_field_type(self, type_name: str) -> None:
         self._session.click(self._button_selector, has_text="Type ", timeout_ms=30_000)
