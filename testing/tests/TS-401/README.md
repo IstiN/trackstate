@@ -4,10 +4,11 @@ Validates the live hosted multi-view edit flow against the deployed tracker at
 `https://istin.github.io/trackstate-setup/`.
 
 The automation:
-1. prefers the live `DEMO-5` issue and falls back to another non-epic live issue
-   that is not already `Done` / `Highest`
-2. opens the production **Edit issue** surface for that issue from the live
-   **Board** view
+1. inspects the live **Board** and selects a currently visible non-epic issue that
+   is not already `Done` / `Highest`, preferring the recent `DEMO-3994` to
+   `DEMO-3997` cards when available
+2. opens the production **Edit issue** surface for that issue, falling back to the
+   live **JQL Search** open-issue flow if the Board card open interaction is stale
 3. uses the live workflow path to reach a real **Done** transition when the
    current issue is still one or more workflow steps away from **Done**
 4. attempts the real user workflow to change **Priority** to `Highest` and

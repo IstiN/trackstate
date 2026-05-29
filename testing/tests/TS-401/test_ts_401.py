@@ -45,7 +45,7 @@ KNOWN_PRIORITY_LABELS = (
     "High",
     "Low",
 )
-PREFERRED_ISSUE_KEYS = ("DEMO-5",)
+PREFERRED_ISSUE_KEYS = ("DEMO-3994", "DEMO-3995", "DEMO-3996", "DEMO-3997", "DEMO-5")
 NON_EPIC_ISSUE_TYPES = {"story", "task", "bug", "sub-task", "subtask"}
 MAX_SETUP_TRANSITIONS = 3
 
@@ -62,7 +62,6 @@ def main() -> None:
         )
 
     user = service.fetch_authenticated_user()
-    issue_fixture = _select_issue_fixture(service=service)
 
     result: dict[str, object] = {
         "status": "failed",
@@ -70,8 +69,6 @@ def main() -> None:
         "app_url": config.app_url,
         "repository": service.repository,
         "repository_ref": service.ref,
-        "issue_key": issue_fixture.key,
-        "issue_summary": issue_fixture.summary,
         "expected_status": TARGET_STATUS_LABEL,
         "expected_priority": TARGET_PRIORITY_LABEL,
         "steps": [],
@@ -115,6 +112,22 @@ def main() -> None:
                     observed=page.current_body_text(),
                 )
 
+                visible_board_issues = page.visible_board_issues()
+                result["visible_board_issues"] = [
+                    {
+                        "key": issue.key,
+                        "summary": issue.summary,
+                        "label": issue.label,
+                    }
+                    for issue in visible_board_issues
+                ]
+                issue_fixture = _select_issue_fixture(
+                    service=service,
+                    visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                )
+                result["issue_key"] = issue_fixture.key
+                result["issue_summary"] = issue_fixture.summary
+
                 dialog_text = page.open_edit_dialog_for_issue(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
@@ -137,7 +150,10 @@ def main() -> None:
                     result,
                     step=3,
                     status="passed",
-                    action=f"Open the Edit issue surface for {issue_fixture.key} from Board.",
+                    action=(
+                        f"Open the Edit issue surface for the selected Board-visible issue "
+                        f"{issue_fixture.key}."
+                    ),
                     observed=dialog_text,
                 )
 
@@ -221,94 +237,150 @@ def main() -> None:
                     observed=post_save_detail_text,
                 )
 
-                detail_projection_text = page.wait_for_issue_detail_state(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                    expected_status=TARGET_STATUS_LABEL,
-                    expected_priority=TARGET_PRIORITY_LABEL,
-                    step_number=7,
-                )
-                result["detail_projection_text"] = detail_projection_text
-                _record_step(
-                    result,
-                    step=7,
-                    status="passed",
-                    action="Verify the issue detail refreshes to Done and Highest after save.",
-                    observed=detail_projection_text,
-                )
+                post_save_failures: list[str] = []
 
-                board_projection_text = page.wait_for_board_projection(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                    expected_column=EXPECTED_BOARD_COLUMN,
-                    expected_priority=TARGET_PRIORITY_LABEL,
-                )
-                result["board_projection_text"] = board_projection_text
-                _record_step(
-                    result,
-                    step=8,
-                    status="passed",
-                    action=(
-                        f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
-                        "priority."
-                    ),
-                    observed=board_projection_text,
-                )
-
-                hierarchy_projection_text = page.wait_for_hierarchy_projection(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                    expected_status=TARGET_STATUS_LABEL,
-                    expected_priority=TARGET_PRIORITY_LABEL,
-                )
-                result["hierarchy_projection_text"] = hierarchy_projection_text
-                _record_step(
-                    result,
-                    step=9,
-                    status="passed",
-                    action="Verify the visible Hierarchy row refreshes to Done and Highest.",
-                    observed=hierarchy_projection_text,
-                )
-
-                search_page = LiveJqlSearchPage(tracker_page)
-                search_observation = search_page.search(query=issue_fixture.key)
-                result["jql_search_observation"] = {
-                    "query": search_observation.query,
-                    "visible_query": search_observation.visible_query,
-                    "count_summary": search_observation.count_summary,
-                    "issue_result_labels": list(search_observation.issue_labels),
-                    "body_text": search_observation.body_text,
-                }
-                if (
-                    search_observation.count_summary != "1 issue"
-                    or (
-                        f"Open {issue_fixture.key} "
-                        f"{_normalized_issue_summary(issue_fixture.summary)}"
+                try:
+                    detail_projection_text = page.wait_for_issue_detail_state(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                        step_number=7,
                     )
-                    not in search_observation.issue_labels
-                ):
-                    raise AssertionError(
-                        "Step 10 failed: JQL Search did not visibly refresh down to the "
-                        f"edited {issue_fixture.key} issue after saving.\n"
-                        f"Observed count summary: {search_observation.count_summary}\n"
-                        f"Observed result labels: {list(search_observation.issue_labels)}\n"
-                        f"Observed JQL Search text:\n{search_observation.body_text}",
+                except AssertionError as error:
+                    result["detail_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=7,
+                        status="failed",
+                        action="Verify the issue detail refreshes to Done and Highest after save.",
+                        observed=str(error),
                     )
-                jql_projection_text = page.wait_for_jql_search_projection(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                    expected_status=TARGET_STATUS_LABEL,
-                    expected_priority=TARGET_PRIORITY_LABEL,
-                    expected_count_summary="1 issue",
-                )
-                result["jql_projection_text"] = jql_projection_text
-                _record_step(
-                    result,
-                    step=10,
-                    status="passed",
-                    action="Verify the visible JQL Search result row refreshes to Done and Highest.",
-                    observed=jql_projection_text,
-                )
+                    post_save_failures.append(str(error))
+                else:
+                    result["detail_projection_text"] = detail_projection_text
+                    _record_step(
+                        result,
+                        step=7,
+                        status="passed",
+                        action="Verify the issue detail refreshes to Done and Highest after save.",
+                        observed=detail_projection_text,
+                    )
+
+                try:
+                    board_projection_text = page.wait_for_board_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_column=EXPECTED_BOARD_COLUMN,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                    )
+                except AssertionError as error:
+                    result["board_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=8,
+                        status="failed",
+                        action=(
+                            f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
+                            "priority."
+                        ),
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["board_projection_text"] = board_projection_text
+                    _record_step(
+                        result,
+                        step=8,
+                        status="passed",
+                        action=(
+                            f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
+                            "priority."
+                        ),
+                        observed=board_projection_text,
+                    )
+
+                try:
+                    hierarchy_projection_text = page.wait_for_hierarchy_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                    )
+                except AssertionError as error:
+                    result["hierarchy_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=9,
+                        status="failed",
+                        action="Verify the visible Hierarchy row refreshes to Done and Highest.",
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["hierarchy_projection_text"] = hierarchy_projection_text
+                    _record_step(
+                        result,
+                        step=9,
+                        status="passed",
+                        action="Verify the visible Hierarchy row refreshes to Done and Highest.",
+                        observed=hierarchy_projection_text,
+                    )
+
+                try:
+                    search_page = LiveJqlSearchPage(tracker_page)
+                    search_observation = search_page.search(query=issue_fixture.key)
+                    result["jql_search_observation"] = {
+                        "query": search_observation.query,
+                        "visible_query": search_observation.visible_query,
+                        "count_summary": search_observation.count_summary,
+                        "issue_result_labels": list(search_observation.issue_labels),
+                        "body_text": search_observation.body_text,
+                    }
+                    if (
+                        search_observation.count_summary != "1 issue"
+                        or (
+                            f"Open {issue_fixture.key} "
+                            f"{_normalized_issue_summary(issue_fixture.summary)}"
+                        )
+                        not in search_observation.issue_labels
+                    ):
+                        raise AssertionError(
+                            "Step 10 failed: JQL Search did not visibly refresh down to the "
+                            f"edited {issue_fixture.key} issue after saving.\n"
+                            f"Observed count summary: {search_observation.count_summary}\n"
+                            f"Observed result labels: {list(search_observation.issue_labels)}\n"
+                            f"Observed JQL Search text:\n{search_observation.body_text}",
+                        )
+                    jql_projection_text = page.wait_for_jql_search_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                        expected_count_summary="1 issue",
+                    )
+                except AssertionError as error:
+                    result["jql_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=10,
+                        status="failed",
+                        action="Verify the visible JQL Search result row refreshes to Done and Highest.",
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["jql_projection_text"] = jql_projection_text
+                    _record_step(
+                        result,
+                        step=10,
+                        status="passed",
+                        action="Verify the visible JQL Search result row refreshes to Done and Highest.",
+                        observed=jql_projection_text,
+                    )
+
+                if post_save_failures:
+                    raise AssertionError("\n\n".join(post_save_failures))
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -339,17 +411,28 @@ def main() -> None:
         print(json.dumps(result, indent=2))
 
 
-def _select_issue_fixture(*, service: LiveSetupRepositoryService) -> LiveHostedIssueFixture:
+def _select_issue_fixture(
+    *,
+    service: LiveSetupRepositoryService,
+    visible_issue_keys: tuple[str, ...],
+) -> LiveHostedIssueFixture:
+    if not visible_issue_keys:
+        raise AssertionError(
+            "Precondition failed: the live Board view did not expose any visible issue cards "
+            "that TS-401 could edit and re-check across Board, Hierarchy, and JQL Search.",
+        )
     fixtures = [
         service.fetch_issue_fixture(path)
         for path in service.list_issue_paths("DEMO")
     ]
+    visible_issue_key_set = set(visible_issue_keys)
     candidates = [
         fixture
         for fixture in fixtures
         if fixture.issue_type.lower() in NON_EPIC_ISSUE_TYPES
         and fixture.status.lower() != "done"
         and fixture.priority.lower() != "highest"
+        and fixture.key in visible_issue_key_set
     ]
     for issue_key in PREFERRED_ISSUE_KEYS:
         preferred = next((fixture for fixture in candidates if fixture.key == issue_key), None)
@@ -358,8 +441,9 @@ def _select_issue_fixture(*, service: LiveSetupRepositoryService) -> LiveHostedI
     if candidates:
         return candidates[0]
     raise AssertionError(
-        "Precondition failed: the live hosted repository did not expose any non-epic issue "
-        "that still requires a fresh Highest/Done edit for TS-401.",
+        "Precondition failed: none of the currently visible Board issues exposed a non-epic "
+        "issue that still requires a fresh Highest/Done edit for TS-401.\n"
+        f"Visible Board issue keys: {sorted(visible_issue_key_set)}",
     )
 
 
@@ -406,20 +490,12 @@ def _stage_issue_until_done_is_available(
             issue_key=issue_fixture.key,
             expected_status=setup_target,
         )
-        setup_projection_text = page.wait_for_issue_detail_state(
-            issue_key=issue_fixture.key,
-            issue_summary=issue_fixture.summary,
-            expected_status=setup_target,
-            expected_priority=current_priority,
-            step_number=3,
-        )
         setup_transitions.append(
             {
                 "from_status": current_status,
                 "to_status": setup_target,
                 "status_control_text": setup_status_control.text,
                 "detail_text": setup_detail_text,
-                "projection_text": setup_projection_text,
             },
         )
         current_status = setup_target
@@ -432,7 +508,7 @@ def _stage_issue_until_done_is_available(
                 f"Use the live workflow to move {issue_fixture.key} from {setup_transitions[-1]['from_status']} "
                 f"to {setup_target} so the final Done transition becomes available."
             ),
-            observed=setup_projection_text,
+            observed=setup_detail_text,
         )
 
         dialog_text = page.open_edit_dialog_for_issue(

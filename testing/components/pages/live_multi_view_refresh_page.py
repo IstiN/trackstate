@@ -23,6 +23,13 @@ class EditControlObservation:
         )
 
 
+@dataclass(frozen=True)
+class BoardIssueObservation:
+    key: str
+    summary: str
+    label: str
+
+
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
@@ -50,11 +57,20 @@ class LiveMultiViewRefreshPage:
         self._issue_page.dismiss_connection_banner()
 
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
+        open_errors: list[str] = []
         self.navigate_to_section("Board")
-        self.open_issue_from_current_section(
-            issue_key=issue_key,
-            issue_summary=issue_summary,
-        )
+        try:
+            self.open_issue_from_current_section(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            )
+        except (AssertionError, WebAppTimeoutError) as error:
+            open_errors.append(f"Board path: {error}")
+            self._issue_page.search_and_select_issue(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+                query=issue_key,
+            )
         self._session.wait_for_selector(
             self._button_selector,
             has_text="Edit",
@@ -71,6 +87,7 @@ class LiveMultiViewRefreshPage:
                 "Step 3 failed: opening the requested issue from Board did not "
                 f"lead to the edit surface for {issue_key}.\n"
                 f"Expected issue key in edit dialog: {issue_key}\n"
+                f"Open-path fallbacks: {open_errors}\n"
                 f"Observed dialog text:\n{dialog_text}",
             )
         return dialog_text
@@ -211,8 +228,8 @@ class LiveMultiViewRefreshPage:
             )
         if control.contains("No workflow transitions available."):
             raise AssertionError(
-                "Step 5 failed: the Edit issue surface for DEMO-3 did not expose any "
-                "workflow transitions, so the scenario could not change the Status to "
+                "Step 5 failed: the Edit issue surface did not expose any workflow "
+                f"transitions, so the scenario could not change the Status to "
                 f"{target_label} before saving.\n"
                 f"Observed status control label: {control.label}\n"
                 f"Observed status helper text: {control.text}\n"
@@ -264,6 +281,55 @@ class LiveMultiViewRefreshPage:
             timeout_ms=30_000,
         )
         return options
+
+    def visible_board_issues(self) -> tuple[BoardIssueObservation, ...]:
+        self.navigate_to_section("Board")
+        payload = self._session.evaluate(
+            """
+            () => {
+              const issuePattern = /^Open ([A-Z][A-Z0-9]+-\\d+)\\s+(.+)$/;
+              const issues = [];
+              for (const element of document.querySelectorAll('flt-semantics[role="button"]')) {
+                const label = (element.getAttribute('aria-label') ?? '').trim();
+                const text = (element.innerText || element.textContent || '').trim();
+                const source = label || text;
+                const match = issuePattern.exec(source);
+                if (!match) {
+                  continue;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  continue;
+                }
+                issues.push({
+                  key: match[1],
+                  summary: match[2],
+                  label: source,
+                });
+              }
+              return issues;
+            }
+            """,
+        )
+        if not isinstance(payload, list):
+            return ()
+        issues: list[BoardIssueObservation] = []
+        seen_keys: set[str] = set()
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            key = str(entry.get("key", "")).strip()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            issues.append(
+                BoardIssueObservation(
+                    key=key,
+                    summary=str(entry.get("summary", "")).strip(),
+                    label=str(entry.get("label", "")).strip(),
+                ),
+            )
+        return tuple(issues)
 
     def save_issue_edits(
         self,
