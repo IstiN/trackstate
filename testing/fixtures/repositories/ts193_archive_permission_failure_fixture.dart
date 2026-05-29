@@ -59,6 +59,17 @@ class Ts193ArchivePermissionFailureFixture {
           await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
+      stagedIndexStatusLines: await _gitOutputLines([
+        'diff',
+        '--cached',
+        '--name-status',
+      ]),
+      unstagedDiffStatusLines: await _gitOutputLines(['diff', '--name-status']),
+      untrackedFiles: await _gitOutputLines([
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+      ]),
     );
   }
 

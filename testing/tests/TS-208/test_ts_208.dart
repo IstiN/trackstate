@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository_factory.dart';
-import 'package:trackstate/data/repositories/trackstate_runtime.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
@@ -48,7 +46,9 @@ void main() {
             '';
         expect(
           malformedFieldsContents,
-          contains('{"name":"Summary"}'),
+          contains(
+            '{"id":"summary","name":"Summary","type":"string","required":true}',
+          ),
           reason:
               'TS-208 must exercise a malformed DEMO/config/fields.json fixture.',
         );
@@ -61,12 +61,7 @@ void main() {
               'entries.',
         );
 
-        await screen.pump(
-          createTrackStateRepository(
-            runtime: TrackStateRuntime.localGit,
-            localRepositoryPath: fixture.repositoryPath,
-          ),
-        );
+        await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
         await screen.waitWithoutInteraction(const Duration(seconds: 2));
 
         final parseErrorLogged = await _waitForLoggedParseError(screen, tester);

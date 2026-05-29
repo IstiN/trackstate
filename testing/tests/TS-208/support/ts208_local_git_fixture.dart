@@ -7,8 +7,8 @@ class Ts208LocalGitFixture {
 
   static const malformedFieldsJson = '''
 [
-  {"name":"Summary"}
-  {"name":"Description"}
+  {"id":"summary","name":"Summary","type":"string","required":true}
+  {"id":"description","name":"Description","type":"markdown","required":false}
 ]
 ''';
 
@@ -43,20 +43,14 @@ class Ts208LocalGitFixture {
   Future<void> _seedMalformedFieldsConfiguration() async {
     await _repositoryFixture.writeFile('DEMO/config/statuses.json', '''
 [
-  {"name":"To Do"},
-  {"name":"In Progress"},
-  {"name":"Done"}
+  {"id":"todo","name":"To Do"},
+  {"id":"in-progress","name":"In Progress"},
+  {"id":"done","name":"Done"}
 ]
 ''');
     await _repositoryFixture.writeFile('DEMO/config/issue-types.json', '''
 [
-  {"name":"Story"}
-]
-''');
-    await _repositoryFixture.writeFile('DEMO/config/priorities.json', '''
-[
-  {"name":"Medium"},
-  {"name":"High"}
+  {"id":"story","name":"Story"}
 ]
 ''');
     await _repositoryFixture.writeFile(
@@ -67,12 +61,11 @@ class Ts208LocalGitFixture {
 ---
 key: DEMO-1
 project: DEMO
-issueType: Story
-status: In Progress
-priority: High
+issueType: story
+status: todo
 summary: "Malformed fields fallback coverage"
-assignee: local-user
-reporter: local-admin
+assignee: ts208-user
+reporter: ts208-user
 updated: 2026-05-09T00:00:00Z
 ---
 
