@@ -200,128 +200,135 @@ class TrackStateCliLinksJsonHierarchyExclusionTest(unittest.TestCase):
             f"Observed payload: {link_payload}",
         )
 
-        links_payload = observation.links_json_payload
-        self.assertIsInstance(
-            links_payload,
-            list,
-            "Step 5 failed: the repository-root `links.json` file was not a JSON "
-            "array.\n"
-            f"Path: {observation.links_json_relative_path}\n"
-            f"Discovered links.json files: {observation.links_json_files}\n"
-            f"Observed content:\n{observation.links_json_content}",
-        )
-        assert isinstance(links_payload, list)
-        self.assertEqual(
-            links_payload,
-            [self.config.expected_link_payload],
-            "Step 5 failed: the repository-root `links.json` file did not contain "
-            "exactly the expected non-hierarchical link record.\n"
-            f"Path: {observation.links_json_relative_path}\n"
-            f"Discovered links.json files: {observation.links_json_files}\n"
-            f"Observed payload: {links_payload}",
-        )
-        self.assertNotIn(
-            self.config.parent_issue_key,
-            observation.links_json_content or "",
-            "Expected result failed: the persisted non-hierarchical link file leaked "
-            "the parent issue key from the hierarchy relationship.\n"
-            f"Discovered links.json files: {observation.links_json_files}\n"
-            f"Observed content:\n{observation.links_json_content}",
-        )
-        self.assertNotIn(
-            self.config.child_issue_key,
-            observation.links_json_content or "",
-            "Expected result failed: the persisted non-hierarchical link file leaked "
-            "the child issue key from the hierarchy relationship.\n"
-            f"Discovered links.json files: {observation.links_json_files}\n"
-            f"Observed content:\n{observation.links_json_content}",
-        )
-
-        self.assertIsNotNone(
-            observation.child_main_content,
-            "Step 5 failed: the created child issue markdown was not readable.\n"
-            f"Expected path: {observation.child_main_relative_path}",
-        )
-        assert observation.child_main_content is not None
-        self.assertIn(
-            f"parent: {self.config.parent_issue_key}",
-            observation.child_main_content,
-            "Expected result failed: the child issue markdown did not visibly store "
-            "the hierarchy relationship through the canonical parent field.\n"
-            f"Observed main.md:\n{observation.child_main_content}",
-        )
-        self.assertIn(
-            "# Summary",
-            observation.child_main_content,
-            "Human-style verification failed: the child issue markdown did not render "
-            "the visible summary heading a user would read.\n"
-            f"Observed main.md:\n{observation.child_main_content}",
-        )
-        self.assertIn(
-            self.config.child_summary,
-            observation.child_main_content,
-            "Human-style verification failed: the child issue markdown did not render "
-            "the requested summary text.\n"
-            f"Observed main.md:\n{observation.child_main_content}",
-        )
-
-        issue_index_payload = observation.issue_index_payload
-        self.assertIsInstance(
-            issue_index_payload,
-            list,
-            "Expected result failed: the local issue index was not updated as a JSON "
-            "array after the hierarchy and link mutations.\n"
-            f"Path: {observation.issue_index_relative_path}\n"
-            f"Observed content:\n{observation.issue_index_content}",
-        )
-        assert isinstance(issue_index_payload, list)
-        index_by_key = {
-            entry["key"]: entry
-            for entry in issue_index_payload
-            if isinstance(entry, dict) and "key" in entry
-        }
-        self.assertIn(
-            self.config.parent_issue_key,
-            index_by_key,
-            "Expected result failed: the parent story was missing from the local issue "
-            "index after creation.\n"
-            f"Observed index payload: {issue_index_payload}",
-        )
-        self.assertIn(
-            self.config.child_issue_key,
-            index_by_key,
-            "Expected result failed: the sub-task was missing from the local issue "
-            "index after creation.\n"
-            f"Observed index payload: {issue_index_payload}",
-        )
-        self.assertEqual(
-            index_by_key[self.config.child_issue_key].get("parent"),
-            self.config.parent_issue_key,
-            "Expected result failed: the local issue index did not preserve the "
-            "parent-child relationship.\n"
-            f"Observed child index entry: {index_by_key[self.config.child_issue_key]}",
-        )
-        self.assertIn(
-            self.config.child_issue_key,
-            index_by_key[self.config.parent_issue_key].get("children", []),
-            "Expected result failed: the local issue index did not list the sub-task "
-            "under the parent story's children.\n"
-            f"Observed parent index entry: {index_by_key[self.config.parent_issue_key]}",
-        )
-
-        for fragment in (
-            '"command": "ticket-link"',
-            f'"target": "{self.config.unrelated_target_issue_key}"',
-            '"type": "blocks"',
-        ):
-            self.assertIn(
-                fragment,
-                observation.link_observation.result.stdout,
-                "Human-style verification failed: the visible CLI response for the "
-                "link command did not show the expected non-hierarchical link details.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Observed stdout:\n{observation.link_observation.result.stdout}",
+        with self.subTest(step="repository-root links.json"):
+            links_payload = observation.links_json_payload
+            self.assertIsInstance(
+                links_payload,
+                list,
+                "Step 5 failed: the repository-root `links.json` file was not a JSON "
+                "array.\n"
+                f"Path: {observation.links_json_relative_path}\n"
+                f"Discovered links.json files: {observation.links_json_files}\n"
+                f"Observed content:\n{observation.links_json_content}",
             )
+            if isinstance(links_payload, list):
+                self.assertEqual(
+                    links_payload,
+                    [self.config.expected_link_payload],
+                    "Step 5 failed: the repository-root `links.json` file did not "
+                    "contain exactly the expected non-hierarchical link record.\n"
+                    f"Path: {observation.links_json_relative_path}\n"
+                    f"Discovered links.json files: {observation.links_json_files}\n"
+                    f"Observed payload: {links_payload}",
+                )
+            self.assertNotIn(
+                self.config.parent_issue_key,
+                observation.links_json_content or "",
+                "Expected result failed: the persisted non-hierarchical link file "
+                "leaked the parent issue key from the hierarchy relationship.\n"
+                f"Discovered links.json files: {observation.links_json_files}\n"
+                f"Observed content:\n{observation.links_json_content}",
+            )
+            self.assertNotIn(
+                self.config.child_issue_key,
+                observation.links_json_content or "",
+                "Expected result failed: the persisted non-hierarchical link file "
+                "leaked the child issue key from the hierarchy relationship.\n"
+                f"Discovered links.json files: {observation.links_json_files}\n"
+                f"Observed content:\n{observation.links_json_content}",
+            )
+
+        with self.subTest(step="child issue markdown"):
+            self.assertIsNotNone(
+                observation.child_main_content,
+                "Step 5 failed: the created child issue markdown was not readable.\n"
+                f"Expected path: {observation.child_main_relative_path}",
+            )
+            assert observation.child_main_content is not None
+            self.assertIn(
+                f"parent: {self.config.parent_issue_key}",
+                observation.child_main_content,
+                "Expected result failed: the child issue markdown did not visibly "
+                "store the hierarchy relationship through the canonical parent field.\n"
+                f"Observed main.md:\n{observation.child_main_content}",
+            )
+            self.assertIn(
+                "# Summary",
+                observation.child_main_content,
+                "Human-style verification failed: the child issue markdown did not "
+                "render the visible summary heading a user would read.\n"
+                f"Observed main.md:\n{observation.child_main_content}",
+            )
+            self.assertIn(
+                self.config.child_summary,
+                observation.child_main_content,
+                "Human-style verification failed: the child issue markdown did not "
+                "render the requested summary text.\n"
+                f"Observed main.md:\n{observation.child_main_content}",
+            )
+
+        with self.subTest(step="issue index hierarchy"):
+            issue_index_payload = observation.issue_index_payload
+            self.assertIsInstance(
+                issue_index_payload,
+                list,
+                "Expected result failed: the local issue index was not updated as a "
+                "JSON array after the hierarchy and link mutations.\n"
+                f"Path: {observation.issue_index_relative_path}\n"
+                f"Observed content:\n{observation.issue_index_content}",
+            )
+            if isinstance(issue_index_payload, list):
+                index_by_key = {
+                    entry["key"]: entry
+                    for entry in issue_index_payload
+                    if isinstance(entry, dict) and "key" in entry
+                }
+                self.assertIn(
+                    self.config.parent_issue_key,
+                    index_by_key,
+                    "Expected result failed: the parent story was missing from the "
+                    "local issue index after creation.\n"
+                    f"Observed index payload: {issue_index_payload}",
+                )
+                self.assertIn(
+                    self.config.child_issue_key,
+                    index_by_key,
+                    "Expected result failed: the sub-task was missing from the local "
+                    "issue index after creation.\n"
+                    f"Observed index payload: {issue_index_payload}",
+                )
+                self.assertEqual(
+                    index_by_key[self.config.child_issue_key].get("parent"),
+                    self.config.parent_issue_key,
+                    "Expected result failed: the local issue index did not preserve "
+                    "the parent-child relationship.\n"
+                    f"Observed child index entry: "
+                    f"{index_by_key[self.config.child_issue_key]}",
+                )
+                self.assertIn(
+                    self.config.child_issue_key,
+                    index_by_key[self.config.parent_issue_key].get("children", []),
+                    "Expected result failed: the local issue index did not list the "
+                    "sub-task under the parent story's children.\n"
+                    f"Observed parent index entry: "
+                    f"{index_by_key[self.config.parent_issue_key]}",
+                )
+
+        with self.subTest(step="visible CLI link response"):
+            for fragment in (
+                '"command": "ticket-link"',
+                f'"target": "{self.config.unrelated_target_issue_key}"',
+                '"type": "blocks"',
+            ):
+                self.assertIn(
+                    fragment,
+                    observation.link_observation.result.stdout,
+                    "Human-style verification failed: the visible CLI response for "
+                    "the link command did not show the expected non-hierarchical link "
+                    "details.\n"
+                    f"Missing fragment: {fragment}\n"
+                    f"Observed stdout:\n{observation.link_observation.result.stdout}",
+                )
 
     def _assert_command_was_executed_exactly(
         self,
