@@ -175,7 +175,6 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isNavigationControlVisible(String label);
 
   Future<void> expectNavigationControlEnabled(String label);
-
   Future<bool> isNavigationChromeVisible();
 
   Future<List<String>> collectDisabledNavigationViolations({

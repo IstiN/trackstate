@@ -1,0 +1,10 @@
+test_id: TS-1235
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the live public `trackstate ticket update --target local` flow with `--field labels=["bug","ai"]`.
+  - Verifies the CLI returns a success envelope, does not emit comma-fragmentation parsing errors, persists the labels array in `TS/TS-1/main.md`, and creates one commit.

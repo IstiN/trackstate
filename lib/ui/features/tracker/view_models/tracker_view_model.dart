@@ -488,7 +488,12 @@ class TrackerViewModel extends ChangeNotifier {
         !session.canWrite) {
       return false;
     }
-    return session.canManageAttachments;
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.canManageAttachments &&
+          session.supportsReleaseAttachmentWrites;
+    }
+    return session.canManageAttachments &&
+        session.attachmentUploadMode != AttachmentUploadMode.none;
   }
 
   bool get hasBlockedWriteAccess =>
@@ -734,6 +739,9 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   void selectSection(TrackerSection section) {
+    if (!isSectionSelectable(section)) {
+      return;
+    }
     _section = section;
     if (section != TrackerSection.search) {
       _issueDetailReturnSection = null;
@@ -743,6 +751,13 @@ class TrackerViewModel extends ChangeNotifier {
       unawaited(ensureIssueDetailLoaded(issue));
     }
     notifyListeners();
+  }
+
+  bool isSectionSelectable(TrackerSection section) {
+    if (!hasStartupRecovery || _snapshot == null) {
+      return true;
+    }
+    return section == TrackerSection.settings;
   }
 
   void openProjectSettings({ProjectSettingsTab? tab}) {
@@ -1308,6 +1323,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _selectIssueFromSnapshot(saved);
       await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
+      if (transitionChanged) {
+        final project = _snapshot!.project;
+        final statusLabel = project.statusLabel(saved.statusId);
+        _message = usesLocalPersistence
+            ? TrackerMessage.localGitMoveCommitted(
+                issueKey: saved.key,
+                statusLabel: statusLabel,
+                branch: project.branch,
+              )
+            : _isConnected
+            ? TrackerMessage.githubMoveCommitted(
+                issueKey: saved.key,
+                statusLabel: statusLabel,
+              )
+            : TrackerMessage.movePendingGitHubPersistence(issueKey: saved.key);
+      }
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
@@ -1907,50 +1938,51 @@ class TrackerViewModel extends ChangeNotifier {
       }
       final completedWithinTimeout =
           await _runAutomaticRepositoryConnectionRestore(
-        connect: () => _repository.connect(
-          GitHubConnection(
-            repository: target.repository,
-            branch: target.branch,
-            token: storedToken,
-          ),
-        ),
-        onSuccess: (user) async {
-          _connectedUser = user;
-          _isConnected = true;
-          if (callbackToken != null) {
-            _startupHostedAccessModeOverride = null;
-          }
-          if (callbackToken != null) {
-            await _authStore.saveToken(
-              callbackToken,
-              repository: _workspaceId == null ? target.repository : null,
-              workspaceId: _workspaceId,
-            );
-          }
-          await _resumeStartupRecoveryAfterAuthentication();
-          await _reloadHostedStartupShellFallbackIfNeeded();
-          if (callbackToken != null) {
-            _message = TrackerMessage.githubConnected(
-              login: user.login,
-              repository: target.repository,
-            );
-          }
-        },
-        onError: (error) async {
-          _message = TrackerMessage.storedGitHubTokenInvalid(error);
-          await _authStore.clearToken(
-            repository: _workspaceId == null ? target.repository : null,
-            workspaceId: _workspaceId,
+            connect: () => _repository.connect(
+              GitHubConnection(
+                repository: target.repository,
+                branch: target.branch,
+                token: storedToken,
+              ),
+            ),
+            onSuccess: (user) async {
+              _connectedUser = user;
+              _isConnected = true;
+              if (callbackToken != null) {
+                _startupHostedAccessModeOverride = null;
+              }
+              if (callbackToken != null) {
+                await _authStore.saveToken(
+                  callbackToken,
+                  repository: _workspaceId == null ? target.repository : null,
+                  workspaceId: _workspaceId,
+                );
+              }
+              await _resumeStartupRecoveryAfterAuthentication();
+              await _reloadHostedStartupShellFallbackIfNeeded();
+              if (callbackToken != null) {
+                _message = TrackerMessage.githubConnected(
+                  login: user.login,
+                  repository: target.repository,
+                );
+              }
+            },
+            onError: (error) async {
+              _message = TrackerMessage.storedGitHubTokenInvalid(error);
+              await _authStore.clearToken(
+                repository: _workspaceId == null ? target.repository : null,
+                workspaceId: _workspaceId,
+              );
+            },
+            onFinally: () async {
+              _bindProviderSession();
+            },
           );
-        },
-        onFinally: () async {
-          _bindProviderSession();
-        },
-      );
       if (!completedWithinTimeout &&
           _startupHostedAccessModeOverride == null &&
           _snapshot != null) {
-        _startupHostedAccessModeOverride = HostedRepositoryAccessMode.disconnected;
+        _startupHostedAccessModeOverride =
+            HostedRepositoryAccessMode.disconnected;
         if (!_disposed) {
           notifyListeners();
         }
@@ -2326,14 +2358,20 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   TrackerStartupRecovery? _startupRecoveryFrom(Object error) {
-    if (error is! GitHubRateLimitException) {
-      return null;
+    if (error is GitHubRateLimitException) {
+      return TrackerStartupRecovery(
+        kind: TrackerStartupRecoveryKind.githubRateLimit,
+        failedPath: error.requestPath,
+        retryAfter: error.retryAfter,
+      );
     }
-    return TrackerStartupRecovery(
-      kind: TrackerStartupRecoveryKind.githubRateLimit,
-      failedPath: error.requestPath,
-      retryAfter: error.retryAfter,
-    );
+    if (error is HostedBootstrapIndexValidationException) {
+      return TrackerStartupRecovery(
+        kind: TrackerStartupRecoveryKind.hostedBootstrapIndex,
+        detail: error.message,
+      );
+    }
+    return null;
   }
 
   Future<({String repository, String branch})?> _connectionTarget() async {

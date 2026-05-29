@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from testing.components.pages.live_project_settings_page import (
+    LiveProjectSettingsPage,
+    RepositoryAccessControlsObservation,
+)
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
 
@@ -265,7 +269,7 @@ class LiveCreateIssueGatePage:
         gate: CreateIssueGateObservation,
         *,
         timeout_ms: int = 60_000,
-    ) -> str:
+    ) -> RepositoryAccessControlsObservation:
         if gate.gate_cta_center_x is None or gate.gate_cta_center_y is None:
             raise AssertionError(
                 "Step 5 failed: the create issue gate did not expose a clickable "
@@ -274,26 +278,15 @@ class LiveCreateIssueGatePage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         self._session.mouse_click(gate.gate_cta_center_x, gate.gate_cta_center_y)
-        settings_snapshot = self._session.wait_for_function(
-            """
-            (requiredFragments) => {
-              const snapshot = Array.from(document.querySelectorAll('flt-semantics'))
-                .flatMap((element) => [
-                  element.getAttribute('aria-label') ?? '',
-                  element.innerText ?? '',
-                ])
-                .map((value) => value.trim())
-                .filter((value) => value.length > 0)
-                .join('\\n');
-              return requiredFragments.every((fragment) => snapshot.includes(fragment))
-                ? snapshot
-                : null;
-            }
-            """,
-            arg=["Project Settings", "Repository access"],
-            timeout_ms=timeout_ms,
-        )
-        return str(settings_snapshot)
+        settings_page = LiveProjectSettingsPage(self._tracker_page)
+        try:
+            return settings_page.observe_repository_access_controls(timeout_ms=timeout_ms)
+        except AssertionError as error:
+            raise AssertionError(
+                "Step 5 failed: clicking the Create issue gate CTA did not route the user "
+                "to a visible Project Settings / Repository access surface.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
