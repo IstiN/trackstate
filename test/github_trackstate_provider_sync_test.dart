@@ -57,6 +57,57 @@ void main() {
   );
 
   test(
+    'GitHub provider falls back to dataRef when both sourceRef and session branch are commit SHAs (stale write ref)',
+    () async {
+      const staleSha = '59c6bb158aadd5b519207735181ee530eba4fc80';
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: staleSha,
+      );
+
+      // Unauthenticated: configuredBranch is empty, sourceRef is a SHA → dataRef
+      expect(await provider.resolveWriteBranch(), 'main');
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: staleSha,
+          token: 'token',
+        ),
+      );
+
+      // Authenticated with SHA branch: sourceRef is also a SHA → dataRef
+      expect(await provider.resolveWriteBranch(), 'main');
+    },
+  );
+
+  test(
     'GitHub provider emits hosted snapshot reload for compare commits with load_snapshot_delta=1',
     () async {
       final provider = await _createAuthenticatedProvider(

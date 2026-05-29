@@ -295,6 +295,12 @@ class GitHubTrackStateProvider
     final configuredBranch = _connection?.branch.trim() ?? '';
     if (configuredBranch.isEmpty ||
         _fullGitShaPattern.hasMatch(configuredBranch)) {
+      // When sourceRef is itself a full commit SHA (stale write ref stored in
+      // the workspace profile), fall back to dataRef (the actual branch name)
+      // so that applyFileChanges fetches the current branch head before writing.
+      if (_fullGitShaPattern.hasMatch(sourceRef)) {
+        return dataRef;
+      }
       return sourceRef;
     }
     if (configuredBranch.startsWith('refs/heads/')) {
