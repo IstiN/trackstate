@@ -1,0 +1,8 @@
+test_id: TS-443
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the hosted mandatory-bootstrap rate-limit fixture from TS-448 to trigger a GitHub 403 with x-ratelimit-remaining: 0 during TrackerViewModel.load().
+  - Verifies TrackerViewModel classifies the failure as startup recovery instead of a generic load error and that the user sees Retry and Connect GitHub on the blocking recovery surface.

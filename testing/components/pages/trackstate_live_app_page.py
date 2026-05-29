@@ -22,9 +22,14 @@ class TrackStateLiveAppPage:
     LOAD_ERROR_TEXT = (
         "TrackState data was not found in the configured repository runtime."
     )
+    LOAD_ERROR_TEXT_VARIANTS = (
+        LOAD_ERROR_TEXT,
+        "TrackState data was not found",
+    )
     CONNECT_READY_TEXT = "Connect GitHub"
     TOKEN_INPUT_SELECTOR = 'input[aria-label="Fine-grained token"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]'
+    VISIBLE_CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]:visible'
     REMEMBER_BROWSER_SELECTOR = (
         'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
     )
@@ -44,7 +49,7 @@ class TrackStateLiveAppPage:
     def wait_for_runtime_state(self, timeout_seconds: int = 90) -> RuntimeState:
         try:
             wait_match = self.session.wait_for_any_text(
-                [self.LOAD_ERROR_TEXT, self.CONNECT_READY_TEXT],
+                [*self.LOAD_ERROR_TEXT_VARIANTS, self.CONNECT_READY_TEXT],
                 timeout_ms=timeout_seconds * 1_000,
             )
         except WebAppTimeoutError:
@@ -53,7 +58,7 @@ class TrackStateLiveAppPage:
                 body_text=self.session.body_text(),
             )
 
-        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+        if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeState(kind="data-load-failed", body_text=wait_match.body_text)
         return RuntimeState(kind="connect-ready", body_text=wait_match.body_text)
 
@@ -64,8 +69,69 @@ class TrackStateLiveAppPage:
         return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        if self.session.count(self.TOKEN_INPUT_SELECTOR) == 0:
-            self.session.click(self.CONNECT_BUTTON_SELECTOR, has_text="Connect GitHub")
+        connect_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
+        try:
+            if self.session.count(connect_selector) > 0:
+                self.session.click(connect_selector, timeout_ms=30_000)
+            elif (
+                self.session.count(
+                    self.VISIBLE_CONNECT_BUTTON_SELECTOR,
+                    has_text=self.CONNECT_READY_TEXT,
+                )
+                > 0
+            ):
+                self.session.click(
+                    self.VISIBLE_CONNECT_BUTTON_SELECTOR,
+                    has_text=self.CONNECT_READY_TEXT,
+                    timeout_ms=30_000,
+                )
+            else:
+                raise WebAppTimeoutError("Connect GitHub button requires fallback click.")
+        except WebAppTimeoutError:
+            payload = self.session.evaluate(
+                """
+                (expectedText) => {
+                  const isVisible = (candidate) => {
+                    const rect = candidate.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                  };
+                  const match = Array.from(document.querySelectorAll('flt-semantics'))
+                    .filter((candidate) => {
+                      const text = (candidate.innerText ?? '').trim();
+                      const ariaLabel = (candidate.getAttribute('aria-label') ?? '').trim();
+                      const role = (candidate.getAttribute('role') ?? '').trim();
+                      return role === 'button'
+                        && isVisible(candidate)
+                        && (text === expectedText || ariaLabel === expectedText);
+                    })
+                    .sort((left, right) => {
+                      const leftRect = left.getBoundingClientRect();
+                      const rightRect = right.getBoundingClientRect();
+                      return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+                    })[0];
+                  if (!match) {
+                    return null;
+                  }
+                  const rect = match.getBoundingClientRect();
+                  return {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                }
+                """,
+                arg=self.CONNECT_READY_TEXT,
+            )
+            if not isinstance(payload, dict):
+                raise AssertionError(
+                    'The live app did not expose a visible "Connect GitHub" control.\n'
+                    f"Observed body text:\n{self.body_text()}",
+                )
+            self.session.mouse_click(
+                float(payload["x"]) + (float(payload["width"]) / 2),
+                float(payload["y"]) + (float(payload["height"]) / 2),
+            )
         self.session.wait_for_selector(self.TOKEN_INPUT_SELECTOR, timeout_ms=30_000)
 
     def read_connect_dialog_state(self) -> ConnectDialogState:
@@ -82,14 +148,14 @@ class TrackStateLiveAppPage:
 
     def submit_connect_token(self) -> None:
         self.session.click(
-            self.CONNECT_BUTTON_SELECTOR,
+            self.VISIBLE_CONNECT_BUTTON_SELECTOR,
             has_text="Connect token",
             timeout_ms=30_000,
         )
 
     def open_settings(self) -> None:
         self.session.click(
-            self.CONNECT_BUTTON_SELECTOR,
+            self.VISIBLE_CONNECT_BUTTON_SELECTOR,
             has_text="Settings",
             timeout_ms=30_000,
         )

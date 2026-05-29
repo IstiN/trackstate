@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
-import subprocess
 import tempfile
 
 from testing.core.config.trackstate_cli_jira_search_config import (
@@ -13,32 +10,41 @@ from testing.core.config.trackstate_cli_jira_search_config import (
 from testing.core.interfaces.trackstate_cli_jira_search_probe import (
     TrackStateCliJiraSearchProbe,
 )
-from testing.core.models.cli_command_result import CliCommandResult
 from testing.core.models.trackstate_cli_jira_search_result import (
     TrackStateCliJiraSearchObservation,
     TrackStateCliJiraSearchValidationResult,
 )
+from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
+    PythonTrackStateCliCompiledLocalFramework,
+)
 
 
-class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
+class PythonTrackStateCliJiraSearchFramework(
+    PythonTrackStateCliCompiledLocalFramework,
+    TrackStateCliJiraSearchProbe,
+):
     def __init__(self, repository_root: Path) -> None:
-        self._repository_root = Path(repository_root)
+        super().__init__(repository_root)
 
     def observe_search_response_shape(
         self,
         *,
         config: TrackStateCliJiraSearchConfig,
     ) -> TrackStateCliJiraSearchValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-cli-jira-search-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-cli-jira-search-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-319 can run the exact ticket command from the "
-                    "seeded repository as the current working directory."
+                    "checkout so the ticket scenario can run the exact command from "
+                    "the seeded repository as the current working directory."
                 )
                 return TrackStateCliJiraSearchValidationResult(
                     ticket_command=self._observe_command(
@@ -73,65 +79,6 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
             result=self._run(executed_command, cwd=repository_path),
         )
 
-    def _compile_executable(self, destination: Path) -> None:
-        dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        completed = subprocess.run(
-            (
-                dart_bin,
-                "compile",
-                "exe",
-                "bin/trackstate.dart",
-                "-o",
-                str(destination),
-            ),
-            cwd=self._repository_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                "Failed to compile a temporary TrackState CLI executable for TS-319.\n"
-                f"Command: {dart_bin} compile exe bin/trackstate.dart -o {destination}\n"
-                f"Exit code: {completed.returncode}\n"
-                f"stdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
-            )
-
-    def _run(self, command: tuple[str, ...], *, cwd: Path) -> CliCommandResult:
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        completed = subprocess.run(
-            command,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return CliCommandResult(
-            command=command,
-            exit_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            json_payload=self._parse_json(completed.stdout),
-        )
-
-    @staticmethod
-    def _parse_json(stdout: str) -> object | None:
-        payload = stdout.strip()
-        if not payload:
-            return None
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError:
-            return None
-
     def _seed_local_repository(
         self,
         repository_path: Path,
@@ -158,16 +105,22 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
         for issue in config.fixture_issues:
             self._seed_issue(repository_path, issue)
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-319 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState Search Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts319@example.com",
+            "search-tester@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-319 fixture")
+        self._git(repository_path, "commit", "-m", "Seed CLI search fixture")
 
     def _seed_issue(
         self,
@@ -192,23 +145,3 @@ updated: {issue.updated}
 {issue.issue_description}
 """,
         )
-
-    @staticmethod
-    def _write_file(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-    @staticmethod
-    def _git(repository_path: Path, *args: str) -> None:
-        completed = subprocess.run(
-            ("git", "-C", str(repository_path), *args),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"git {' '.join(args)} failed for {repository_path}.\n"
-                f"stdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
-            )
