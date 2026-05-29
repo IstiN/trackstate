@@ -342,6 +342,17 @@ class UrllibWebAppSession(WebAppSession):
             "Active-element inspection is not supported by the urllib web session fallback."
         )
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        del previous_outer_html, timeout_ms
+        raise NotImplementedError(
+            "Active-element change waits are not supported by the urllib web session fallback."
+        )
+
     def wait_for_download_after_keypress(
         self,
         key: str,

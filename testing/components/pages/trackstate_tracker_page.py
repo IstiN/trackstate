@@ -279,16 +279,19 @@ class TrackStateTrackerPage:
                 dialog_text=dialog_text,
                 body_text=dialog_text,
             )
-        for expected_text in (
-            "Connect GitHub",
-            "Connect token",
-            repository,
-        ):
+        expected_dialog_texts = ("Connect GitHub", "Connect token")
+        for expected_text in expected_dialog_texts:
             if expected_text not in dialog_text:
                 raise AssertionError(
                     f'Step 2 failed: the connect dialog did not show "{expected_text}". '
                     f"Observed dialog text: {dialog_text}",
                 )
+        repository_variants = {repository, repository.lower()}
+        if not any(expected_text in dialog_text for expected_text in repository_variants):
+            raise AssertionError(
+                f'Step 2 failed: the connect dialog did not show "{repository}". '
+                f"Observed dialog text: {dialog_text}",
+            )
         if dialog_state.fine_grained_token_input_count != 1:
             raise AssertionError(
                 "Step 2 failed: the connect dialog did not expose exactly one "

@@ -1053,6 +1053,17 @@ class LiveIssueDetailCollaborationPage:
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
 
+    def wait_for_active_element_change(
+        self,
+        previous: FocusedElementObservation,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        return self._session.wait_for_active_element_change(
+            previous.outer_html,
+            timeout_ms=timeout_ms,
+        )
+
     def press_key(self, key: str) -> None:
         self._session.press_key(key, timeout_ms=30_000)
 
