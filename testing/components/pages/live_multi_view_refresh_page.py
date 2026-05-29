@@ -107,7 +107,7 @@ class SummaryRequiredValidationObservation:
 
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
+    _edit_button_selector = 'flt-semantics[role="button"]'
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
     _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
@@ -157,8 +157,16 @@ class LiveMultiViewRefreshPage:
             issue_key=issue_key,
             issue_summary=issue_summary,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
         return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
 
     def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
@@ -168,8 +176,16 @@ class LiveMultiViewRefreshPage:
             f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
             timeout_ms=30_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
         return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
 
     def open_edit_dialog_from_board_card(
@@ -218,8 +234,16 @@ class LiveMultiViewRefreshPage:
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._edit_button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
         return self._wait_for_edit_dialog(
             issue_key=issue_key,
             origin_label="current issue detail",
@@ -396,7 +420,8 @@ class LiveMultiViewRefreshPage:
         message_fragment: str,
     ) -> SummaryRequiredValidationObservation:
         self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
+            'flt-semantics[role="button"]',
+            has_text="Save",
             timeout_ms=30_000,
         )
         try:
@@ -1073,7 +1098,8 @@ class LiveMultiViewRefreshPage:
         expected_status: str,
     ) -> str:
         self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
+            'flt-semantics[role="button"]',
+            has_text="Save",
             timeout_ms=30_000,
         )
         try:
