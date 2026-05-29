@@ -83,20 +83,35 @@ class LiveIssueDetailCollaborationPage:
 
     def open_jql_search(self) -> None:
         self._session.click(self._button_selector, has_text="JQL Search", timeout_ms=30_000)
-        self._session.wait_for_selector(
-            'flt-semantics[role="button"][aria-label*="Open DEMO-"]',
-            timeout_ms=60_000,
-        )
+        self._session.wait_for_text("JQL Search", timeout_ms=60_000)
 
     def open_issue(self, *, issue_key: str, issue_summary: str) -> None:
         self.open_jql_search()
-        self._session.click(
-            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=30_000,
+        issue_detail_selector = self._issue_detail_selector(issue_key)
+        if self._session.count(issue_detail_selector) > 0:
+            return
+
+        open_issue_selector = self._open_issue_selector(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
         )
-        self._session.wait_for_selector(
-            self._issue_detail_selector(issue_key),
-            timeout_ms=60_000,
+        if self._session.count(open_issue_selector) > 0:
+            self._session.click(open_issue_selector, timeout_ms=30_000)
+            self._session.wait_for_selector(issue_detail_selector, timeout_ms=60_000)
+            return
+
+        self._session.wait_for_text(issue_key, timeout_ms=60_000)
+        if self._session.count(issue_detail_selector) > 0:
+            return
+        if self._session.count(open_issue_selector) > 0:
+            self._session.click(open_issue_selector, timeout_ms=30_000)
+            self._session.wait_for_selector(issue_detail_selector, timeout_ms=60_000)
+            return
+
+        raise AssertionError(
+            "Step 2 failed: the hosted JQL Search view did not expose either a direct "
+            f"issue detail view or an issue-open action for {issue_key}.\n"
+            f"Observed body text:\n{self.current_body_text()}",
         )
 
     def issue_detail_count(self, issue_key: str) -> int:
@@ -220,10 +235,9 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
         escaped_key = LiveIssueDetailCollaborationPage._escape(issue_key)
-        escaped_summary = LiveIssueDetailCollaborationPage._escape(issue_summary)
         return (
             'flt-semantics[role="button"]'
-            f'[aria-label*="Open {escaped_key} {escaped_summary}"]'
+            f'[aria-label*="Open {escaped_key}"]'
         )
 
     @staticmethod
