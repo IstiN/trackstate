@@ -5,5 +5,7 @@ environment:
   sdk: ^3.9.2
 
 dependencies:
+  flutter:
+    path: packages/flutter
   http:
     path: packages/http

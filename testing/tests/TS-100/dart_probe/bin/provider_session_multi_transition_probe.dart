@@ -98,6 +98,9 @@ class MutableTrackStateProviderAdapter implements TrackStateProviderAdapter {
   );
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<String> resolveWriteBranch() async => _connection?.branch ?? 'main';
 
   @override
@@ -281,45 +284,44 @@ Future<void> main() async {
     try {
       await secondConnectFuture;
       failures.add(
-        'Step 5 failed: the reconnect that should have driven the repository into its restricted/disconnected state unexpectedly succeeded.',
+        'Step 5 failed: the reconnect that should have driven the repository into its restricted failure state unexpectedly succeeded.',
       );
     } catch (error) {
       result['reconnectFailure'] = error.toString();
     }
 
-    final disconnectedSession = repository.session;
+    final failedSession = repository.session;
     result['disconnectedSessionReference'] = _serializeSession(sessionReference);
     result['disconnectedRepositorySession'] = _serializeSession(
-      disconnectedSession,
+      failedSession,
     );
     result['sameInstanceAfterDisconnect'] = identical(
       sessionReference,
-      disconnectedSession,
+      failedSession,
     );
 
     _expect(
-      disconnectedSession != null,
+      failedSession != null,
       'Step 6 failed: repository.session was null after the failed reconnect.',
       failures,
     );
-    if (disconnectedSession != null) {
+    if (failedSession != null) {
       _expect(
-        disconnectedSession.connectionState ==
-            ProviderConnectionState.disconnected,
-        'Step 6 failed: a fresh repository.session getter did not expose ProviderConnectionState.disconnected after the failed reconnect. '
-        'Observed ${disconnectedSession.connectionState}.',
+        failedSession.connectionState == ProviderConnectionState.error,
+        'Step 6 failed: a fresh repository.session getter did not expose ProviderConnectionState.error after the failed reconnect. '
+        'Observed ${failedSession.connectionState}.',
         failures,
       );
     }
     _expect(
-      sessionReference.connectionState == ProviderConnectionState.disconnected,
-      'Step 6 failed: the previously obtained session reference did not update to ProviderConnectionState.disconnected after the failed reconnect. '
+      sessionReference.connectionState == ProviderConnectionState.error,
+      'Step 6 failed: the previously obtained session reference did not update to ProviderConnectionState.error after the failed reconnect. '
       'Observed ${sessionReference.connectionState}.',
       failures,
     );
     _expect(
       sessionReference.resolvedUserIdentity == 'mock/repository',
-      'Step 6 failed: the previously obtained session reference did not expose the restricted/disconnected identity after the failed reconnect. '
+      'Step 6 failed: the previously obtained session reference did not expose the restricted failure identity after the failed reconnect. '
       'Observed ${sessionReference.resolvedUserIdentity}.',
       failures,
     );

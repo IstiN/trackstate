@@ -42,12 +42,13 @@ void main() {
       expect(session.canWrite, isTrue);
       expect(session.canCreateBranch, isTrue);
       expect(session.canManageAttachments, isTrue);
+      expect(session.supportsReleaseAttachmentWrites, isFalse);
       expect(session.canCheckCollaborators, isFalse);
     },
   );
 
   test(
-    'provider-backed repository exposes a restricted session after connect fails',
+    'provider-backed repository exposes an error session after connect fails',
     () async {
       final repository = ProviderBackedTrackStateRepository(
         provider: _FailingTrackStateProviderAdapter(),
@@ -71,12 +72,13 @@ void main() {
           ));
 
       expect(session.providerType, ProviderType.github);
-      expect(session.connectionState, ProviderConnectionState.disconnected);
+      expect(session.connectionState, ProviderConnectionState.error);
       expect(session.resolvedUserIdentity, 'mock/repository');
       expect(session.canRead, isFalse);
       expect(session.canWrite, isFalse);
       expect(session.canCreateBranch, isFalse);
       expect(session.canManageAttachments, isFalse);
+      expect(session.supportsReleaseAttachmentWrites, isFalse);
       expect(session.canCheckCollaborators, isFalse);
     },
   );
@@ -120,6 +122,7 @@ void main() {
       expect(initialSession.canWrite, isFalse);
       expect(initialSession.canCreateBranch, isFalse);
       expect(initialSession.canManageAttachments, isFalse);
+      expect(initialSession.supportsReleaseAttachmentWrites, isFalse);
       expect(initialSession.canCheckCollaborators, isFalse);
 
       provider.updatePermission(
@@ -129,6 +132,7 @@ void main() {
           isAdmin: false,
           canCreateBranch: true,
           canManageAttachments: true,
+          supportsReleaseAttachmentWrites: true,
           canCheckCollaborators: false,
         ),
       );
@@ -145,6 +149,7 @@ void main() {
       expect(finalSession.canWrite, isTrue);
       expect(finalSession.canCreateBranch, isTrue);
       expect(finalSession.canManageAttachments, isTrue);
+      expect(finalSession.supportsReleaseAttachmentWrites, isTrue);
       expect(finalSession.canCheckCollaborators, isFalse);
     },
   );
@@ -193,6 +198,7 @@ void main() {
           isAdmin: false,
           canCreateBranch: true,
           canManageAttachments: true,
+          supportsReleaseAttachmentWrites: true,
           canCheckCollaborators: false,
         ),
       );
@@ -211,15 +217,17 @@ void main() {
       expect(capturedSession.resolvedUserIdentity, 'mock-user');
       expect(capturedSession.canCreateBranch, isTrue);
       expect(capturedSession.canManageAttachments, isTrue);
+      expect(capturedSession.supportsReleaseAttachmentWrites, isTrue);
       expect(latestSession.connectionState, ProviderConnectionState.connected);
       expect(latestSession.resolvedUserIdentity, 'mock-user');
       expect(latestSession.canCreateBranch, isTrue);
       expect(latestSession.canManageAttachments, isTrue);
+      expect(latestSession.supportsReleaseAttachmentWrites, isTrue);
     },
   );
 
   test(
-    'provider-backed repository exposes a disconnected session before connect starts',
+    'provider-backed repository keeps the same session reference across connect start',
     () async {
       final provider = _FakeTrackStateProviderAdapter(
         permission: const RepositoryPermission(
@@ -250,6 +258,7 @@ void main() {
       expect(initialSession.canWrite, isFalse);
       expect(initialSession.canCreateBranch, isFalse);
       expect(initialSession.canManageAttachments, isFalse);
+      expect(initialSession.supportsReleaseAttachmentWrites, isFalse);
       expect(initialSession.canCheckCollaborators, isFalse);
 
       final connectFuture = repository.connect(
@@ -270,10 +279,10 @@ void main() {
         connectingSession.connectionState,
         ProviderConnectionState.connecting,
       );
-      expect(identical(initialSession, connectingSession), isFalse);
+      expect(identical(initialSession, connectingSession), isTrue);
       expect(
         initialSession.connectionState,
-        ProviderConnectionState.disconnected,
+        ProviderConnectionState.connecting,
       );
 
       provider.completeAuthentication();
@@ -287,10 +296,7 @@ void main() {
         connectedSession.connectionState,
         ProviderConnectionState.connected,
       );
-      expect(
-        initialSession.connectionState,
-        ProviderConnectionState.disconnected,
-      );
+      expect(initialSession.connectionState, ProviderConnectionState.connected);
     },
   );
 }
@@ -337,6 +343,23 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
 
   @override
   Future<RepositoryPermission> getPermission() async => _permission;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'mock-revision',
+      sessionRevision:
+          '${_permission.canRead}:${_permission.canWrite}:${_permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
@@ -423,6 +446,29 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
         canManageAttachments: false,
         canCheckCollaborators: false,
       );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'mock-revision',
+      sessionRevision: 'error',
+      connectionState: ProviderConnectionState.error,
+      permission: RepositoryPermission(
+        canRead: false,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      ),
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

@@ -118,16 +118,16 @@ class ProviderSessionMultiTransitionReactivityTest(unittest.TestCase):
                 "same instance returned by repository.session."
             )
 
-        if disconnected_latest_payload.get("connectionState") != "ProviderConnectionState.disconnected":
+        if disconnected_latest_payload.get("connectionState") != "ProviderConnectionState.error":
             failures.append(
                 "Step 6 failed: a fresh repository.session getter did not expose the "
-                "expected disconnected state after the failed reconnect. "
+                "expected error state after the failed reconnect. "
                 f"Observed latest session: {disconnected_latest_payload}"
             )
-        if disconnected_payload.get("connectionState") != "ProviderConnectionState.disconnected":
+        if disconnected_payload.get("connectionState") != "ProviderConnectionState.error":
             failures.append(
                 "Step 6 failed: the previously obtained session reference did not update "
-                "to the restricted disconnected state after the failed reconnect. "
+                "to the restricted error state after the failed reconnect. "
                 f"Observed session reference: {disconnected_payload}\n"
                 f"Observed fresh repository.session: {disconnected_latest_payload}"
             )
@@ -146,7 +146,7 @@ class ProviderSessionMultiTransitionReactivityTest(unittest.TestCase):
                 )
         if observation.get("sameInstanceAfterDisconnect") is not True:
             failures.append(
-                "Step 6 failed: the disconnected session was no longer the same instance "
+                "Step 6 failed: the failed session was no longer the same instance "
                 "returned by repository.session."
             )
 

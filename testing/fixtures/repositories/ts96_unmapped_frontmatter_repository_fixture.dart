@@ -62,18 +62,8 @@ class Ts96UnmappedFrontmatterRepositoryFixture {
     await repositoryFixture.writeFile(
       'DEMO/config/fields.json',
       '${jsonEncode([
-        {
-          'id': 'summary',
-          'name': 'Summary',
-          'type': 'string',
-          'required': true,
-        },
-        {
-          'id': 'priority',
-          'name': 'Priority',
-          'type': 'option',
-          'required': false,
-        },
+        {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+        {'id': 'priority', 'name': 'Priority', 'type': 'option', 'required': false},
       ])}\n',
     );
     await repositoryFixture.writeFile(
@@ -82,9 +72,7 @@ class Ts96UnmappedFrontmatterRepositoryFixture {
         {'id': 'high', 'name': 'High'},
       ])}\n',
     );
-    await repositoryFixture.writeFile(
-      issuePath,
-      '''
+    await repositoryFixture.writeFile(issuePath, '''
 ---
 key: $issueKey
 project: DEMO
@@ -94,6 +82,7 @@ priority: high
 summary: Preserve non-core frontmatter keys
 assignee: qa-user
 reporter: qa-admin
+created: 2026-05-08T23:59:59Z
 $unmappedFieldKey: $unmappedFieldValue
 updated: 2026-05-09T00:00:00Z
 ---
@@ -101,8 +90,7 @@ updated: 2026-05-09T00:00:00Z
 # Description
 
 Created from arbitrary frontmatter metadata.
-''',
-    );
+''');
     await repositoryFixture.stageAll();
     await repositoryFixture.commit('Seed TS-96 fixture');
   }

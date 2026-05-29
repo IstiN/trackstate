@@ -1,0 +1,9 @@
+test_id: TS-308
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: [TS-67]
+notes:
+  - Creates a disposable Local Git repository whose PROJECT-1 issue already has one markdown comment side-car file.
+  - Drives the production-visible comment composer in the issue detail screen instead of pre-authoring the expected second comment.
+  - Verifies Local Git writes PROJECT/PROJECT-1/comments/0002.md with author/created/updated frontmatter and preserves Jira-markup body text verbatim.

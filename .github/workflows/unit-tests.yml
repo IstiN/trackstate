@@ -18,11 +18,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Detect Flutter changes
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          token: ${{ github.token }}
           filters: |
             flutter:
               - 'lib/**'
@@ -37,6 +39,12 @@ jobs:
               - 'pubspec.lock'
               - 'analysis_options.yaml'
               - 'l10n.yaml'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'playwright.config.js'
+              - 'testing/accessibility/**'
+              - 'tool/**'
+              - '.dmtools/policies/**'
               - '.github/workflows/unit-tests.yml'
 
       - name: Skip full Flutter validation
@@ -59,6 +67,14 @@ jobs:
         if: steps.changes.outputs.flutter == 'true'
         run: flutter analyze
 
+      - name: Enforce theme tokens
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_theme_tokens.dart
+
+      - name: Check web safety
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_web_safety.dart
+
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
         run: flutter test --coverage
@@ -73,3 +89,132 @@ jobs:
             --dart-define TRACKSTATE_DATA_REF=main \
             --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
             --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+
+  accessibility-checks:
+    name: Accessibility checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Detect accessibility changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ github.token }}
+          filters: |
+            accessibility:
+              - 'lib/**'
+              - 'test/**'
+              - 'web/**'
+              - 'pubspec.yaml'
+              - 'pubspec.lock'
+              - 'l10n.yaml'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'playwright.config.js'
+              - 'testing/accessibility/**'
+              - '.github/workflows/unit-tests.yml'
+
+      - name: Skip accessibility validation
+        if: steps.changes.outputs.accessibility != 'true'
+        run: echo "No accessibility-relevant changes detected; skipping browser accessibility validation."
+
+      - name: Setup Flutter
+        if: steps.changes.outputs.accessibility == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: stable
+          cache: true
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.accessibility == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Validate accessibility workflow contract
+        if: steps.changes.outputs.accessibility == 'true'
+        run: node --test testing/accessibility/log_validation.node.test.js
+
+      - name: Install Flutter dependencies
+        if: steps.changes.outputs.accessibility == 'true'
+        run: flutter pub get
+
+      - name: Install accessibility dependencies
+        if: steps.changes.outputs.accessibility == 'true'
+        run: npm ci
+
+      - name: Install Chromium
+        if: steps.changes.outputs.accessibility == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build web app for accessibility scan
+        if: steps.changes.outputs.accessibility == 'true'
+        run: |
+          flutter build web --release \
+            --base-href / \
+            --pwa-strategy=none \
+            --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true \
+            --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
+            --dart-define TRACKSTATE_SOURCE_REF=main \
+            --dart-define TRACKSTATE_DATA_REF=main \
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+
+      - name: Run axe-core accessibility checks
+        id: axe_accessibility_scan
+        if: steps.changes.outputs.accessibility == 'true'
+        shell: bash
+        run: |
+          log_path="$RUNNER_TEMP/accessibility-check.log"
+          : > "$log_path"
+          set +e
+          npm run test:a11y 2>&1 | tee "$log_path"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: log-validation
+        if: ${{ always() && steps.changes.outputs.accessibility == 'true' }}
+        shell: bash
+        run: |
+          log_path="$RUNNER_TEMP/accessibility-check.log"
+          node testing/accessibility/log_validation.js "$log_path"
+
+      - name: Build web app for browser regressions
+        if: steps.changes.outputs.accessibility == 'true'
+        run: |
+          flutter build web --release \
+            --base-href / \
+            --pwa-strategy=none \
+            --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
+            --dart-define TRACKSTATE_SOURCE_REF=main \
+            --dart-define TRACKSTATE_DATA_REF=main \
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+
+      - name: Run browser regression checks
+        if: steps.changes.outputs.accessibility == 'true'
+        run: npx playwright test --config playwright.browser-regressions.config.js
+
+  deploy-preview:
+    name: Deploy preview
+    runs-on: ubuntu-latest
+    needs: [flutter-checks, accessibility-checks]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Publish preview
+        run: echo "All required pull-request checks passed; downstream publish paths remain blocked until this gate succeeds."

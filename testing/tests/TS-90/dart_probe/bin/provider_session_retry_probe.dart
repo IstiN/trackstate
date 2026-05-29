@@ -88,6 +88,9 @@ class RetryableTrackStateProviderAdapter implements TrackStateProviderAdapter {
   );
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<String> resolveWriteBranch() async => _connection?.branch ?? 'main';
 
   @override

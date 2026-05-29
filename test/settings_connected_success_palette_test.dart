@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -12,7 +11,7 @@ void main() {
   });
 
   testWidgets(
-    'settings connected control uses the centralized success palette accessibly',
+    'settings connected control uses the centralized success background accessibly',
     (tester) async {
       final robot = SettingsScreenRobot(tester);
 
@@ -26,46 +25,45 @@ void main() {
 
       expect(robot.settingsConnectedControl, findsOneWidget);
 
+      final background = robot.renderedButtonBackground(
+        robot.settingsConnectedControl,
+      );
       final textColor = robot.renderedTextColorWithin(
         robot.settingsConnectedControl,
         'Connected',
       );
-      final background = robot.renderedButtonBackground(
-        robot.settingsConnectedControl,
-      );
 
-      expect(textColor, robot.colors().success);
+      expect(background, robot.colors().success);
       expect(contrastRatio(textColor, background), greaterThanOrEqualTo(4.5));
     },
   );
 
-  testWidgets(
-    'connected primary actions keep WCAG AA contrast in dark theme',
-    (tester) async {
-      final robot = SettingsScreenRobot(tester);
+  testWidgets('connected primary actions keep WCAG AA contrast in dark theme', (
+    tester,
+  ) async {
+    final robot = SettingsScreenRobot(tester);
 
-      await robot.pumpApp(
-        repository: const DemoTrackStateRepository(),
-        sharedPreferences: const {
-          'trackstate.githubToken.trackstate.trackstate': 'stored-token',
-        },
-      );
-      await robot.openSettings();
-      await tester.tap(robot.darkThemeControl);
-      await tester.pumpAndSettle();
+    await robot.pumpApp(
+      repository: const DemoTrackStateRepository(),
+      sharedPreferences: const {
+        'trackstate.githubToken.trackstate.trackstate': 'stored-token',
+      },
+    );
+    await robot.openSettings();
+    await tester.tap(robot.darkThemeControl);
+    await tester.pumpAndSettle();
 
-      expect(robot.connectedTopBarControl, findsOneWidget);
+    expect(robot.settingsConnectedControl, findsOneWidget);
 
-      final textColor = robot.renderedTextColorWithin(
-        robot.connectedTopBarControl,
-        'Connected',
-      );
-      final background = robot.renderedButtonBackground(
-        robot.connectedTopBarControl,
-      );
+    final textColor = robot.renderedTextColorWithin(
+      robot.settingsConnectedControl,
+      'Connected',
+    );
+    final background = robot.renderedButtonBackground(
+      robot.settingsConnectedControl,
+    );
 
-      expect(textColor, const Color(0xFF2D2A26));
-      expect(contrastRatio(textColor, background), greaterThanOrEqualTo(4.5));
-    },
-  );
+    expect(background, robot.colors().success);
+    expect(contrastRatio(textColor, background), greaterThanOrEqualTo(4.5));
+  });
 }

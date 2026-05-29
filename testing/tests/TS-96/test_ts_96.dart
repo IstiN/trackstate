@@ -27,12 +27,20 @@ void main() {
             'keys inside customFields. $observedState',
       );
       expect(
-        issue.customFields[
-            Ts96UnmappedFrontmatterRepositoryFixture.unmappedFieldKey],
+        issue.customFields[Ts96UnmappedFrontmatterRepositoryFixture
+            .unmappedFieldKey],
         Ts96UnmappedFrontmatterRepositoryFixture.unmappedFieldValue,
         reason:
             'The parsed issue should map the unmapped_field frontmatter entry '
             'to "some_data" inside customFields. $observedState',
+      );
+      expect(
+        issue.customFields['created'],
+        '2026-05-08T23:59:59Z',
+        reason:
+            'Issue-level created metadata is not mapped onto TrackStateIssue, '
+            'so it must still be preserved inside customFields. '
+            '$observedState',
       );
       expect(
         issue.status,

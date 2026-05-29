@@ -24,7 +24,7 @@ flutter pub get
 ## Run this test
 
 ```bash
-/tmp/flutter/bin/flutter test testing/tests/TS-93/dirty_local_save_ui_responsiveness_test.dart --reporter expanded
+flutter test testing/tests/TS-93/dirty_local_save_ui_responsiveness_test.dart --reporter expanded
 ```
 
 ## Required environment and config

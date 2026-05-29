@@ -10,7 +10,7 @@ multiple consecutive lifecycle transitions:
    `resolvedUserIdentity == reactive-user` and confirm the same captured session
    object updates automatically.
 3. Trigger a failed reconnect that drives the public contract back to the
-   restricted `ProviderConnectionState.disconnected` state and confirm the same
+   restricted `ProviderConnectionState.error` state and confirm the same
    captured session object updates again.
 4. Recover with another successful reconnect using
    `resolvedUserIdentity == updated-user` and `canCreateBranch == false`,

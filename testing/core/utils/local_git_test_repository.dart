@@ -20,34 +20,34 @@ class LocalGitTestRepository {
     );
     _writeFile(
       directory,
-      'DEMO/project.json',
-      '{"key":"DEMO","name":"Local Demo"}\n',
+      'TRACK/project.json',
+      '{"key":"TRACK","name":"Local Track"}\n',
     );
     _writeFile(
       directory,
-      'DEMO/config/statuses.json',
+      'TRACK/config/statuses.json',
       '[{"name":"To Do"},{"name":"In Progress"},{"name":"Done"}]\n',
     );
     _writeFile(
       directory,
-      'DEMO/config/issue-types.json',
-      '[{"name":"Story"}]\n',
+      'TRACK/config/issue-types.json',
+      '[{"name":"Epic"},{"name":"Story"}]\n',
     );
     _writeFile(
       directory,
-      'DEMO/config/fields.json',
+      'TRACK/config/fields.json',
       '[{"name":"Summary"},{"name":"Priority"}]\n',
     );
-    _writeFile(directory, 'DEMO/DEMO-1/main.md', '''
+    _writeFile(directory, 'TRACK/TRACK-1/main.md', '''
 ---
-key: DEMO-1
-project: DEMO
-issueType: Story
+key: TRACK-1
+project: TRACK
+issueType: Epic
 status: In Progress
-priority: High
-summary: Local issue
-assignee: local-user
-reporter: local-admin
+priority: Highest
+summary: Platform Foundation
+assignee: ana
+reporter: uladzimir
 updated: 2026-05-05T00:00:00Z
 ---
 
@@ -57,13 +57,18 @@ Loaded from local git.
 ''');
     _writeFile(
       directory,
-      'DEMO/DEMO-1/acceptance_criteria.md',
+      'TRACK/TRACK-1/acceptance_criteria.md',
       '- Can be loaded from local Git\n',
     );
 
     _git(directory.path, ['init', '-b', 'main']);
-    _git(directory.path, ['config', 'user.name', 'Local Tester']);
-    _git(directory.path, ['config', 'user.email', 'local@example.com']);
+    _git(directory.path, ['config', '--local', 'user.name', 'Local Tester']);
+    _git(directory.path, [
+      'config',
+      '--local',
+      'user.email',
+      'local@example.com',
+    ]);
     _git(directory.path, ['add', '.']);
     _git(directory.path, ['commit', '-m', 'Initial import']);
 
@@ -93,7 +98,7 @@ Loaded from local git.
   }
 
   Future<String> readIssueMarkdown() async =>
-      File('$path/DEMO/DEMO-1/main.md').readAsStringSync();
+      File('$path/TRACK/TRACK-1/main.md').readAsStringSync();
 
   static void _writeFile(Directory root, String relativePath, String content) {
     final file = File('${root.path}/$relativePath');

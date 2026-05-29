@@ -19,6 +19,23 @@ class _IssueDetailTrackStateProvider implements TrackStateProviderAdapter {
 
   static const String _revision = 'read-only-test-revision';
 
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: _revision,
+      sessionRevision: 'readonly:$canWrite',
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: canWrite,
+        isAdmin: false,
+      ),
+    ),
+  );
+
   static const Map<String, String> _files = {
     'project.json': '''
 {
@@ -175,6 +192,9 @@ Read and write tracker files through GitHub Contents API.
       'TS-42 should not attempt to create commits in a read-only session.',
     );
   }
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<RepositoryWriteResult> writeTextFile(
