@@ -225,13 +225,17 @@ def main() -> None:
                             step_number=5,
                             layout_mode="desktop issue detail",
                         )
+                        _assert_desktop_drawer_layout(
+                            observation=desktop_detail_observation,
+                            step_number=5,
+                        )
                         _record_step(
                             result,
                             step=5,
                             status="passed",
                             action=(
-                                "Open Edit from the issue detail pane and verify the same issue "
-                                "metadata is preloaded on desktop."
+                                "Open Edit from the issue detail pane and verify the desktop "
+                                "drawer layout plus the same issue metadata is preloaded."
                             ),
                             observed=_format_observation(desktop_detail_observation),
                         )
@@ -241,8 +245,8 @@ def main() -> None:
                             step_failures,
                             step=5,
                             action=(
-                                "Open Edit from the issue detail pane and verify the same issue "
-                                "metadata is preloaded on desktop."
+                                "Open Edit from the issue detail pane and verify the desktop "
+                                "drawer layout plus the same issue metadata is preloaded."
                             ),
                             error=error,
                             observed=(
