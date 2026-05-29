@@ -53,7 +53,7 @@ class IssueDetailPage {
       driver.getActionAvailability('Edit', within: issueDetailLabel(issueKey));
 
   ActionAvailability commentAction(String issueKey) =>
-      _firstVisibleAction(issueKey, const ['Comments', 'Comment']);
+      _firstVisibleAction(issueKey, const ['Comment', 'Comments']);
 
   bool hasReadOnlyExplanation(String issueKey) => driver.hasAnyMessage([
     RegExp('permission required', caseSensitive: false),

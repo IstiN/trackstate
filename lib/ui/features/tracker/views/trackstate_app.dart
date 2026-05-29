@@ -13,6 +13,7 @@ import '../../../../../data/repositories/browser_local_workspace_repository.dart
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/providers/trackstate_provider.dart';
 import '../../../../../data/services/local_workspace_onboarding_service.dart';
 import '../../../../../data/services/trackstate_auth_store.dart';
 import '../../../../../data/services/workspace_profile_service.dart';
@@ -25,6 +26,10 @@ import '../services/attachment_picker.dart';
 import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
     as browser_focusable_control;
+import '../services/browser_text_field_value_sync_stub.dart'
+    if (dart.library.js_interop)
+        '../services/browser_text_field_value_sync_web.dart'
+    as browser_text_field_value_sync;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -6382,6 +6387,9 @@ String _attachmentsAccessMessage(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
+  final uploadMode =
+      viewModel.providerSession?.attachmentUploadMode ??
+      AttachmentUploadMode.none;
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected =>
       l10n.attachmentsAccessMessageDisconnected,
@@ -6389,7 +6397,10 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.usesGitHubReleasesAttachmentStorage
+      viewModel.usesGitHubReleasesAttachmentStorage &&
+              uploadMode == AttachmentUploadMode.noLfs
+          ? l10n.attachmentsDownloadOnlyMessage
+          : viewModel.usesGitHubReleasesAttachmentStorage
           ? l10n.attachmentsGitHubReleasesUnsupportedMessage
           : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
@@ -13583,6 +13594,49 @@ class _SettingsTextField extends StatelessWidget {
       return helperBaseStyle.copyWith(color: colors.muted);
     });
 
+    if (kIsWeb && controller != null) {
+      final textController = controller!;
+      return ValueListenableBuilder<TextEditingValue>(
+        valueListenable: textController,
+        builder: (context, value, _) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            browser_text_field_value_sync.syncBrowserTextFieldValue(
+              label: label,
+              value: value.text,
+              enabled: enabled,
+              readOnly: !enabled,
+            );
+          });
+          return Semantics(
+            label: label,
+            textField: true,
+            enabled: enabled,
+            value: value.text,
+            child: ExcludeSemantics(
+              child: TextField(
+                key: fieldKey,
+                controller: textController,
+                focusNode: focusNode,
+                autofocus: autofocus,
+                enabled: enabled,
+                onChanged: onChanged,
+                style: helperBaseStyle.copyWith(
+                  color: enabled ? colors.text : colors.muted,
+                ),
+                decoration: InputDecoration(
+                  labelText: label,
+                  helperText: helperText,
+                  labelStyle: labelStyle,
+                  floatingLabelStyle: labelStyle,
+                  helperStyle: helperStyle,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     return TextFormField(
       key: fieldKey,
       controller: controller,
@@ -17310,9 +17364,7 @@ class _HistoryRow extends StatelessWidget {
                   ),
                   Text(
                     '${entry.author} · ${entry.timestamp}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    style: _collaborationMetadataTextStyle(context),
                   ),
                   if ((entry.before ?? '').isNotEmpty ||
                       (entry.after ?? '').isNotEmpty)
@@ -17370,9 +17422,7 @@ class _CommentBubble extends StatelessWidget {
                     ),
                     Text(
                       metadata,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                      style: _collaborationMetadataTextStyle(context),
                     ),
                     const SizedBox(height: 6),
                     Text(comment.body),
@@ -17394,6 +17444,17 @@ String _commentMetadata(IssueComment comment, AppLocalizations l10n) {
     return '$createdAt · ${l10n.editedAt(updatedAt)}';
   }
   return createdAt;
+}
+
+TextStyle? _collaborationMetadataTextStyle(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.textTheme.labelSmall?.copyWith(
+    color: context.ts.text,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    height: 1.2,
+    letterSpacing: .24,
+  );
 }
 
 String _formatAttachmentFileSize(int sizeBytes) {
