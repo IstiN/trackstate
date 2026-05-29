@@ -48,9 +48,7 @@ void main() {
             '';
         expect(
           malformedFieldsContents,
-          contains(
-            '{"id":"summary","name":"Summary","type":"string","required":true}',
-          ),
+          contains('{"name":"Summary"}'),
           reason:
               'TS-208 must exercise a malformed DEMO/config/fields.json fixture.',
         );
