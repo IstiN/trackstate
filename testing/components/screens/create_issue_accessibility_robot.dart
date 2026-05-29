@@ -83,7 +83,6 @@ class CreateIssueAccessibilityRobot {
     of: createIssueSurface.first,
     matching: find.byType(Scrollable),
   );
-
   void expectCreateIssueSurfaceVisible() {
     if (createIssueSurface.evaluate().isEmpty) {
       throw StateError('The Create issue surface is not visible.');
@@ -277,6 +276,7 @@ class CreateIssueAccessibilityRobot {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
   }
+
   CreateIssueTextContrastObservation observeTextContrast(String text) {
     final foreground = _renderedTextColor(text);
     final background = _surfaceBackgroundColor();
