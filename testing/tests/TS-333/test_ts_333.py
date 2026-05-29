@@ -450,6 +450,9 @@ def _build_pr_body(payload: dict[str, object], *, status: str) -> str:
         f"**Repository**: {payload.get('repository', 'n/a')}@{payload.get('repository_ref', 'n/a')}",
         f"**Issue**: {payload.get('issue_key', 'n/a')} - {payload.get('issue_summary', 'n/a')}",
         "",
+        "## Review fixes",
+        *_markdown_list(_rework_summary_lines()),
+        "",
         "## What automation checked",
         *_markdown_list(_automation_checks(payload)),
         "",
@@ -482,6 +485,9 @@ def _build_jira_comment(payload: dict[str, object], *, status: str) -> str:
         f"*Repository*: {{{{ {payload.get('repository', 'n/a')}@{payload.get('repository_ref', 'n/a')} }}}}",
         f"*Issue*: {{{{ {payload.get('issue_key', 'n/a')} - {payload.get('issue_summary', 'n/a')} }}}}",
         "",
+        "h4. Review fixes",
+        *_jira_list(_rework_summary_lines()),
+        "",
         "h4. What automation checked",
         *_jira_list(_automation_checks(payload)),
         "",
@@ -509,6 +515,10 @@ def _build_response(payload: dict[str, object], *, status: str) -> str:
     lines = [
         f"# {TICKET_KEY} {status_label}",
         "",
+        "## Fixed",
+        *_markdown_list(_rework_summary_lines()),
+        "",
+        "## Result",
         payload.get("summary", EXPECTED_RESULT if status == "passed" else str(payload.get("error", ""))),
         "",
         "## Observed themes",
@@ -564,6 +574,13 @@ def _automation_checks(payload: dict[str, object]) -> list[str]:
             f'"{COMMENT_AUTHOR}", "{COMMENT_BODY}", and "{COMMENT_TIMESTAMP}" remained visible.'
         ),
         "Measured the rendered metadata contrast in the current theme, toggled the app theme, and measured the rendered metadata again in the second theme.",
+    ]
+
+
+def _rework_summary_lines() -> list[str]:
+    return [
+        "Restored PR-thread filtering so `review_replies.json` only includes unresolved review threads with both `rootCommentId` and `threadId`.",
+        "Kept automation-only summary comments out of reply payload generation so downstream rework posting does not attempt replies to null IDs.",
     ]
 
 
@@ -809,7 +826,12 @@ def _discussion_threads() -> list[dict[str, object]]:
         return []
     normalized_threads: list[dict[str, object]] = []
     for thread in threads:
-        if isinstance(thread, dict) and thread.get("resolved") is not True:
+        if (
+            isinstance(thread, dict)
+            and thread.get("resolved") is not True
+            and thread.get("rootCommentId") is not None
+            and thread.get("threadId") is not None
+        ):
             normalized_threads.append(thread)
     return normalized_threads
 
@@ -821,11 +843,10 @@ def _review_reply_text(payload: dict[str, object], *, status: str) -> str:
         else f"Re-ran `{RUN_COMMAND}`: failed with `{str(payload.get('error', '')).strip()}`."
     )
     return (
-        "Fixed: TS-333 now measures the weakest visible metadata color inside the comment "
-        "header band instead of the strongest text in an expanded timestamp crop. The probe "
-        "uses the specific seeded comment card, limits sampling to the metadata strip, and "
-        "evaluates the minimum significant foreground contrast so darker nearby body text "
-        f"cannot mask a muted timestamp token. {rerun_summary}"
+        "Fixed: `review_replies.json` now only includes unresolved GitHub PR review threads "
+        "that expose both `rootCommentId` and `threadId`, so automation-only summary comments "
+        f"with null reply metadata are documented in `response.md` instead of producing invalid "
+        f"thread-reply payloads. {rerun_summary}"
     )
 
 
