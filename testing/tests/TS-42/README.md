@@ -21,13 +21,15 @@ flutter test testing/tests/TS-42/test_ts_42.dart
 ## Environment requirements
 
 - No additional environment variables are required.
-- The test uses an in-memory repository snapshot with `TRACK-1`, `TRACK-2`,
-  and `TRACK-3`, then starts the real app against that data.
+- The test uses the shared read-only and writable issue-detail fixtures.
+- The scenario opens issue `TRACK-12` through the supported search flow and
+  compares a writable baseline with a read-only `canWrite=false` session.
 
 ## Expected passing output
 
-The test passes when booting the app with the initial route
-`/issues/TRACK-3` renders the primary issue detail surface for `TRACK-3`
-after loading completes. It should fail if startup falls back to another issue
-or to the default dashboard/search experience instead of honoring the route
-issue key.
+The test passes when the issue detail screen guards write actions up front for a
+read-only session. `Transition`, `Edit`, and `Comment` must be disabled or
+hidden when `canWrite=false`, and a visible permission/read-only explanation
+must be present. The test also checks the writable baseline so it only treats an
+action as capability-guarded if the same control is exposed and enabled when
+`canWrite=true`.
