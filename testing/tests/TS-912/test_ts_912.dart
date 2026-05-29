@@ -24,6 +24,7 @@ const List<String> _requestSteps = <String>[
   'Follow the browser prompt to grant file system access to the directory.',
 ];
 const List<String> _linkedBugs = <String>[
+  'TS-1258',
   'TS-1233',
   'TS-1209',
   'TS-1146',
@@ -343,6 +344,7 @@ void main() {
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 Directory get _inputDir =>
     Directory('${Directory.current.path}/input/$_ticketKey');
+File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
@@ -395,6 +397,7 @@ void _writePassOutputs(Map<String, Object?> result) {
         }) +
         '\n',
   );
+  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
@@ -414,10 +417,64 @@ void _writeFailureOutputs(Map<String, Object?> result) {
         }) +
         '\n',
   );
+  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
-  _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
+  if (_shouldWriteBugDescription(result)) {
+    _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
+  } else if (_bugDescriptionFile.existsSync()) {
+    _bugDescriptionFile.deleteSync(recursive: false);
+  }
+}
+
+String _jiraComment(Map<String, Object?> result, {required bool passed}) {
+  final status = passed ? '✅ PASSED' : '❌ FAILED';
+  final lines = <String>[
+    'h3. Test Automation Result',
+    '',
+    '*Status:* $status',
+    '*Test Case:* $_ticketKey - $_ticketSummary',
+    '',
+    'h4. What was tested',
+    '* Launched the production tracker in the supported Flutter widget runtime with one hosted active workspace and one saved local workspace marked unavailable.',
+    '* Opened the workspace switcher, verified the saved local row showed {{Unavailable}}, and activated the visible {{Retry}} or {{Re-authenticate}} action.',
+    '* Verified the post-grant user-visible outcome: the same workspace should become active as {{Local Git}}, the retry action should disappear, and the seeded local issue content should load from the restored repository.',
+    '',
+    'h4. Result',
+    passed
+        ? '* Matched the expected result.'
+        : '* ${_jiraEscape(_failureSummary(result))}',
+    '* Environment: {{flutter test}}, OS {{${result['os']}}}, viewport {{1440x900}}, run command {{$_runCommand}}.',
+    '',
+    'h4. Test file',
+    '{code}',
+    _testFilePath,
+    '{code}',
+    '',
+    'h4. Run command',
+    '{code:bash}',
+    _runCommand,
+    '{code}',
+    '',
+    'h4. Step results',
+    ..._stepLines(result, jira: true),
+    '',
+    'h4. Human-style verification',
+    ..._humanVerificationLines(result, jira: true),
+  ];
+  if (!passed) {
+    lines.addAll(<String>[
+      '',
+      'h4. Exact error',
+      '{code}',
+      '${result['error'] ?? ''}',
+      if ((result['traceback'] as String?)?.isNotEmpty ?? false) '',
+      '${result['traceback'] ?? result['error'] ?? ''}',
+      '{code}',
+    ]);
+  }
+  return '${lines.join('\n')}\n';
 }
 
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
@@ -429,7 +486,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     passed
         ? 'The Flutter widget harness completed the manual access-grant step and the saved workspace restored to `Local Git`.'
-        : _failureResponseSummary(result),
+        : _failureSummary(result),
     '',
     passed
         ? 'The restored workspace also loaded the seeded local issue detail (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`), so the result covers content loading rather than the state label alone.'
@@ -614,30 +671,47 @@ List<String> _bugStepLines(Map<String, Object?> result) {
       .toList(growable: false);
 }
 
-List<String> _stepLines(Map<String, Object?> result) {
+List<String> _stepLines(Map<String, Object?> result, {bool jira = false}) {
   final steps = result['steps'];
   if (steps is! List) {
-    return <String>['- <no step data>'];
+    return <String>[jira ? '* <no step data>' : '- <no step data>'];
   }
   return steps
       .whereType<Map<Object?, Object?>>()
-      .map(
-        (step) =>
-            '- Step ${step['step']} **${step['status']}** — ${step['action']}  \n  Observed: `${step['observed']}`',
-      )
+      .map((step) {
+        final marker = step['status'] == 'passed' ? '✅' : '❌';
+        final observed = jira
+            ? _jiraEscape('${step['observed']}')
+            : '${step['observed']}';
+        if (jira) {
+          return '* $marker Step ${step['step']}: ${step['action']} Observed: $observed';
+        }
+        return '- Step ${step['step']} **${step['status']}** — ${step['action']}  \n  Observed: `$observed`';
+      })
       .toList(growable: false);
 }
 
-List<String> _humanVerificationLines(Map<String, Object?> result) {
+List<String> _humanVerificationLines(
+  Map<String, Object?> result, {
+  bool jira = false,
+}) {
   final checks = result['human_verification'];
   if (checks is! List) {
-    return <String>['- <no human verification>'];
+    return <String>[
+      jira ? '* <no human verification>' : '- <no human verification>',
+    ];
   }
   return checks
       .whereType<Map<Object?, Object?>>()
-      .map(
-        (check) => '- **${check['check']}** Observed: `${check['observed']}`',
-      )
+      .map((check) {
+        final observed = jira
+            ? _jiraEscape('${check['observed']}')
+            : '${check['observed']}';
+        if (jira) {
+          return '* ${check['check']} Observed: $observed';
+        }
+        return '- **${check['check']}** Observed: `$observed`';
+      })
       .toList(growable: false);
 }
 
@@ -704,6 +778,18 @@ List<String> _stringList(Object? value) {
       .map((entry) => '$entry'.trim())
       .where((entry) => entry.isNotEmpty)
       .toList(growable: false);
+}
+
+bool _shouldWriteBugDescription(Map<String, Object?> result) {
+  final error = '${result['error'] ?? ''}';
+  return error.contains('AssertionError');
+}
+
+String _jiraEscape(String value) {
+  return value
+      .replaceAll('\\', '\\\\')
+      .replaceAll('{', '\\{')
+      .replaceAll('}', '\\}');
 }
 
 String _formatList(Iterable<Object?> values, {int limit = 16}) {
