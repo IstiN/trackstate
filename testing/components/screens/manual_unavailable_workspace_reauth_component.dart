@@ -69,6 +69,11 @@ class ManualUnavailableWorkspaceReauthScreen
   }
 
   @override
+  Future<void> openSection(String label) {
+    return _appScreen.openSection(label);
+  }
+
+  @override
   Future<void> openIssue(String key, String summary) {
     return _appScreen.openIssue(key, summary);
   }
