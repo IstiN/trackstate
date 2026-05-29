@@ -533,13 +533,12 @@ def _attachment_upload_controls_human_observation(attachments_body_text: str) ->
         else:
             joined_copy = visible_copy[-1]
         return (
-            "The page showed browser-upload limitations instead of an actionable "
-            f"duplicate upload flow. Verified visible copy: {joined_copy}."
+            "The duplicate upload flow was unavailable. "
+            f"Verified visible copy: {joined_copy}."
         )
 
     return (
-        "The page showed browser-upload limitations instead of an actionable "
-        "duplicate upload flow. Observed body text:\n"
+        "The duplicate upload flow was unavailable. Observed body text:\n"
         f"{attachments_body_text}"
     )
 
