@@ -1,0 +1,9 @@
+test_id: TS-1239
+type: web
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the shared TrackState app component and the hosted reactive repository fixture instead of mocking the repository-access UI.
+  - Verifies the unauthenticated, read-only, and full-access 1440x960 surfaces with approved goldens.
+  - Confirms the read-only banner wraps its long message without RenderFlex overflow errors before asserting the golden baseline.
