@@ -26,6 +26,10 @@ import '../services/attachment_picker.dart';
 import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
     as browser_focusable_control;
+import '../services/browser_text_field_value_sync_stub.dart'
+    if (dart.library.js_interop)
+        '../services/browser_text_field_value_sync_web.dart'
+    as browser_text_field_value_sync;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -13589,6 +13593,49 @@ class _SettingsTextField extends StatelessWidget {
       }
       return helperBaseStyle.copyWith(color: colors.muted);
     });
+
+    if (kIsWeb && controller != null) {
+      final textController = controller!;
+      return ValueListenableBuilder<TextEditingValue>(
+        valueListenable: textController,
+        builder: (context, value, _) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            browser_text_field_value_sync.syncBrowserTextFieldValue(
+              label: label,
+              value: value.text,
+              enabled: enabled,
+              readOnly: !enabled,
+            );
+          });
+          return Semantics(
+            label: label,
+            textField: true,
+            enabled: enabled,
+            value: value.text,
+            child: ExcludeSemantics(
+              child: TextField(
+                key: fieldKey,
+                controller: textController,
+                focusNode: focusNode,
+                autofocus: autofocus,
+                enabled: enabled,
+                onChanged: onChanged,
+                style: helperBaseStyle.copyWith(
+                  color: enabled ? colors.text : colors.muted,
+                ),
+                decoration: InputDecoration(
+                  labelText: label,
+                  helperText: helperText,
+                  labelStyle: labelStyle,
+                  floatingLabelStyle: labelStyle,
+                  helperStyle: helperStyle,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
 
     return TextFormField(
       key: fieldKey,
