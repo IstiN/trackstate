@@ -160,7 +160,19 @@ def main() -> None:
                 result["tab_traversal"] = traversal
 
                 focused_download = _find_download_focus(traversal, expected_download_label)
-                if focused_download is None:
+                if focused_download.kind == "missing-semantic-label":
+                    result["focused_download_without_semantic_label"] = focused_download.observation
+                    raise AssertionError(
+                        "Step 4 failed: keyboard Tab navigation reached the visible attachment "
+                        "download control, but the focused control did not expose the expected "
+                        "localized semantic label.\n"
+                        f"Expected semantic label: {expected_download_label}\n"
+                        "Observed focused control semantic label: <missing>\n"
+                        f"Observed focused control text: {focused_download.observation.get('text')}\n"
+                        f"Observed focus traversal: {_format_focus_traversal(traversal)}\n"
+                        f"Observed Attachments text:\n{attachments_text}",
+                    )
+                if focused_download.kind == "not-found":
                     raise AssertionError(
                         "Step 4 failed: keyboard Tab navigation did not move focus from the "
                         "Attachments tab to the attachment download control.\n"
@@ -251,14 +263,34 @@ def _focused_element_dict(observation) -> dict[str, str | None]:
 def _find_download_focus(
     traversal: list[dict[str, str | None]],
     expected_download_label: str,
-) -> dict[str, str | None] | None:
+) -> DownloadFocusMatch:
+    visible_only_match: dict[str, str | None] | None = None
     for observation in traversal:
         if observation.get("role") != "button":
             continue
         accessible_name = (observation.get("accessible_name") or "").strip()
+        text = (observation.get("text") or "").strip()
         if accessible_name == expected_download_label:
-            return observation
-    return None
+            return DownloadFocusMatch(kind="semantic-label", observation=observation)
+        if text == expected_download_label and visible_only_match is None:
+            visible_only_match = observation
+    if visible_only_match is not None:
+        return DownloadFocusMatch(
+            kind="missing-semantic-label",
+            observation=visible_only_match,
+        )
+    return DownloadFocusMatch(kind="not-found", observation=None)
+
+
+class DownloadFocusMatch:
+    def __init__(
+        self,
+        *,
+        kind: str,
+        observation: dict[str, str | None] | None,
+    ) -> None:
+        self.kind = kind
+        self.observation = observation
 
 
 def _format_focus_traversal(traversal: list[dict[str, str | None]]) -> str:
