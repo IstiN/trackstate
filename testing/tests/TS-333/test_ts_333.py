@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -640,7 +641,7 @@ def _step_status_map(payload: dict[str, object]) -> dict[int, str]:
     statuses: dict[int, str] = {}
     steps = payload.get("steps", [])
     if not isinstance(steps, list):
-        return statuses
+        return _apply_failed_step_overrides(statuses, payload)
     for entry in steps:
         if not isinstance(entry, dict):
             continue
@@ -648,6 +649,16 @@ def _step_status_map(payload: dict[str, object]) -> dict[int, str]:
         status = entry.get("status")
         if isinstance(step_number, int) and isinstance(status, str):
             statuses[step_number] = status
+    return _apply_failed_step_overrides(statuses, payload)
+
+
+def _apply_failed_step_overrides(
+    statuses: dict[int, str],
+    payload: dict[str, object],
+) -> dict[int, str]:
+    error_text = str(payload.get("error", ""))
+    for match in re.finditer(r"Step ([1-4]) failed", error_text):
+        statuses[int(match.group(1))] = "failed"
     return statuses
 
 
