@@ -122,6 +122,10 @@ class LiveProjectSettingsPage:
     _settings_nav_selector = 'flt-semantics[role="button"]'
     _settings_heading = "Project Settings"
     _settings_admin_heading = "Project settings administration"
+    _write_blocked_markers = (
+        *TrackStateTrackerPage.DISCONNECTED_MARKERS,
+        "Current session flags: canWrite=false",
+    )
     _status_id_selector = 'input[aria-label="ID"]'
     _status_name_selector = 'input[aria-label="Name"]'
     _transition_name_selector = 'input[aria-label="Transition name"]'
@@ -237,24 +241,11 @@ class LiveProjectSettingsPage:
             repository=repository,
         )
         current_body = self.body_text()
-        if TrackStateTrackerPage.body_has_authenticated_session(
+        if self._body_has_write_capable_connection(
             current_body,
-            user_login=user_login,
-            repository=repository,
+            connected_banners=connected_banners,
         ):
             return current_body
-
-        connect_via_aria = self._session.count(self._connect_selector) > 0
-        connect_via_text = self._session.count(
-            self._visible_button_selector,
-            has_text="Connect GitHub",
-        ) > 0
-        if not connect_via_aria and not connect_via_text:
-            raise AssertionError(
-                "Step 2 failed: the hosted runtime did not expose the Connect GitHub "
-                "action needed to reach a write-capable session.\n"
-                f"Observed body text:\n{current_body}",
-            )
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
@@ -273,22 +264,11 @@ class LiveProjectSettingsPage:
                 )
 
             try:
-                wait_match = self._session.wait_for_any_text(
-                    [
-                        *connected_banners,
-                        "Attachments limited",
-                        "Manage GitHub access",
-                        "GitHub connection failed:",
-                    ],
+                connected_body = self._wait_for_write_capable_connection(
+                    connected_banners=connected_banners,
                     timeout_ms=timeout_seconds * 1_000,
                 )
-                if wait_match.matched_text == "GitHub connection failed:":
-                    raise AssertionError(
-                        "Step 2 failed: submitting the fine-grained token did not "
-                        "reach a write-capable hosted session.\n"
-                        f"Observed body text:\n{wait_match.body_text}",
-                    )
-                return self.body_text()
+                return connected_body
             except WebAppTimeoutError:
                 current_body = self.body_text()
                 if "GitHub connection failed:" in current_body:
@@ -297,13 +277,9 @@ class LiveProjectSettingsPage:
                         "reach a write-capable hosted session.\n"
                         f"Observed body text:\n{current_body}",
                     ) from None
-                if any(
-                    marker in current_body
-                    for marker in (
-                        *connected_banners,
-                        "Attachments limited",
-                        "Manage GitHub access",
-                    )
+                if self._body_has_write_capable_connection(
+                    current_body,
+                    connected_banners=connected_banners,
                 ):
                     return current_body
                 if attempt == 0:
@@ -318,6 +294,55 @@ class LiveProjectSettingsPage:
         raise AssertionError(
             "Step 2 failed: the hosted write-capable connection flow could not complete.",
         )
+
+    def _body_has_write_capable_connection(
+        self,
+        body_text: str,
+        *,
+        connected_banners: Sequence[str],
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(marker.casefold() in normalized_body for marker in self._write_blocked_markers):
+            return False
+        if any(" ".join(banner.split()).casefold() in normalized_body for banner in connected_banners):
+            return True
+        return (
+            "connected as " in normalized_body
+            and " to " in normalized_body
+            and "workspace switcher" in normalized_body
+        )
+
+    def _wait_for_write_capable_connection(
+        self,
+        *,
+        connected_banners: Sequence[str],
+        timeout_ms: int,
+    ) -> str:
+        payload = self._session.wait_for_function(
+            """
+            ({ connectedBanners, writeBlockedMarkers }) => {
+              const bodyText = document.body?.innerText ?? '';
+              const normalizedBody = bodyText.replace(/\\s+/g, ' ').trim().toLowerCase();
+              const contains = (value) => normalizedBody.includes(String(value || '').toLowerCase());
+              if (writeBlockedMarkers.some(contains)) {
+                return null;
+              }
+              if (
+                connectedBanners.some(contains)
+                || (contains('connected as ') && contains(' to ') && contains('workspace switcher'))
+              ) {
+                return bodyText;
+              }
+              return null;
+            }
+            """,
+            arg={
+                "connectedBanners": list(connected_banners),
+                "writeBlockedMarkers": list(self._write_blocked_markers),
+            },
+            timeout_ms=timeout_ms,
+        )
+        return str(payload)
 
     def dismiss_connection_banner(self) -> None:
         if self._session.count(self._close_selector) == 0:
@@ -1731,9 +1756,18 @@ class LiveProjectSettingsPage:
             self._session.click(self._connect_selector, timeout_ms=30_000)
             return
 
+        for label in ("Connect GitHub", "Manage GitHub access"):
+            if self._session.count(self._visible_button_selector, has_text=label) > 0:
+                self._session.click(
+                    self._visible_button_selector,
+                    has_text=label,
+                    timeout_ms=30_000,
+                )
+                return
+
         payload = self._session.evaluate(
             """
-            (expectedText) => {
+            (expectedLabels) => {
               const isVisible = (candidate) => {
                 const rect = candidate.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
@@ -1745,7 +1779,9 @@ class LiveProjectSettingsPage:
                   const role = (candidate.getAttribute('role') ?? '').trim();
                   return role === 'button'
                     && isVisible(candidate)
-                    && (text === expectedText || ariaLabel === expectedText);
+                    && expectedLabels.some(
+                      (expectedLabel) => text === expectedLabel || ariaLabel === expectedLabel,
+                    );
                 })
                 .sort((left, right) => {
                   const leftRect = left.getBoundingClientRect();
@@ -1764,12 +1800,12 @@ class LiveProjectSettingsPage:
               };
             }
             """,
-            arg="Connect GitHub",
+            arg=["Connect GitHub", "Manage GitHub access"],
         )
         if not isinstance(payload, dict):
             raise AssertionError(
                 'Step 2 failed: the hosted runtime did not expose a visible "Connect GitHub" '
-                "control.\n"
+                'or "Manage GitHub access" control.\n'
                 f"Observed body text:\n{self.body_text()}",
             )
         self._session.mouse_click(
