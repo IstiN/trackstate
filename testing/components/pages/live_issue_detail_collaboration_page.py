@@ -1814,22 +1814,6 @@ class LiveIssueDetailCollaborationPage:
     def _connected_message(*, user_login: str, repository: str) -> str:
         return f"Connected as {user_login} to {repository}."
 
-    def _connect_button_count(self) -> int:
-        count = self._session.count(self._connect_button_selector)
-        if count > 0:
-            return count
-        return self._session.count(self._button_selector, has_text=self._connect_button_label)
-
-    def _click_connect_button(self, *, timeout_ms: int) -> None:
-        if self._session.count(self._connect_button_selector) > 0:
-            self._session.click(self._connect_button_selector, timeout_ms=timeout_ms)
-            return
-        self._session.click(
-            self._button_selector,
-            has_text=self._connect_button_label,
-            timeout_ms=timeout_ms,
-        )
-
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
         escaped_key = LiveIssueDetailCollaborationPage._escape(issue_key)
