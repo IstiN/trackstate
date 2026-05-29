@@ -119,6 +119,119 @@ Hosted projects without explicit attachmentStorage should keep repository-path a
   );
 
   test(
+    'provider-backed project settings save reuses tree revisions for existing config files',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do', 'category': 'new'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/config/workflows.json': jsonEncode([
+            {
+              'id': 'story-flow',
+              'name': 'Story Flow',
+              'issueTypeIds': ['story'],
+              'statuses': ['todo'],
+              'transitions': [],
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'medium', 'name': 'Medium'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([
+            {'id': 'v1', 'name': 'v1'},
+          ]),
+          'DEMO/config/components.json': jsonEncode([
+            {'id': 'core', 'name': 'Core'},
+          ]),
+          'DEMO/config/resolutions.json': jsonEncode([
+            {'id': 'done', 'name': 'Done'},
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Settings fixture issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-13T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Settings fixture issue
+updated: 2026-05-13T00:00:00Z
+---
+
+# Description
+
+Minimal issue fixture for project settings tests.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+      final snapshot = await repository.loadSnapshot();
+      provider.readTextFilePaths.clear();
+
+      await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          priorityDefinitions: [
+            ...snapshot.project.priorityDefinitions,
+            const TrackStateConfigEntry(id: 'high', name: 'High'),
+          ],
+        ),
+      );
+
+      expect(
+        provider.readTextFilePaths,
+        equals(const ['DEMO/project.json', 'DEMO/config/fields.json']),
+      );
+      expect(provider.lastFileChangeRequest, isNotNull);
+      expect(
+        provider.lastFileChangeRequest!.changes
+            .whereType<RepositoryTextFileChange>()
+            .map((change) => change.expectedRevision)
+            .whereType<String>()
+            .every((revision) => revision.startsWith('tree:')),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'setup repository resolves github releases attachment storage and metadata',
     () async {
       final repository = _mockSetupRepository(
@@ -794,7 +907,161 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
-    'checked-in setup template includes repository index artifacts and richer fixtures',
+    'provider-backed repository detail hydration keeps index-backed links when no issue-local links.json exists',
+    () async {
+      final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
+      files.remove('DEMO/DEMO-1/DEMO-2/links.json');
+      final issuesIndex =
+          jsonDecode(files['DEMO/.trackstate/index/issues.json']!)
+              as List<dynamic>;
+      final sourceEntry = issuesIndex
+          .whereType<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['key'] == 'DEMO-2');
+      sourceEntry['links'] = [
+        {'type': 'blocks', 'target': 'DEMO-4', 'direction': 'outward'},
+      ];
+      files['DEMO/.trackstate/index/issues.json'] = jsonEncode(issuesIndex);
+
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: files,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      final indexEntry = snapshot.repositoryIndex.entryForKey('DEMO-2');
+      final summaryIssue = snapshot.issues.firstWhere(
+        (issue) => issue.key == 'DEMO-2',
+      );
+
+      expect(indexEntry, isNotNull);
+      expect(indexEntry!.links, hasLength(1));
+      expect(indexEntry.links.single.targetKey, 'DEMO-4');
+      expect(summaryIssue.links, isEmpty);
+
+      final hydrated = await repository.hydrateIssue(
+        summaryIssue,
+        scopes: const {IssueHydrationScope.detail},
+      );
+
+      expect(hydrated.hasDetailLoaded, isTrue);
+      expect(hydrated.links, hasLength(1));
+      expect(hydrated.links.single.type, 'blocks');
+      expect(hydrated.links.single.direction, 'outward');
+      expect(hydrated.links.single.targetKey, 'DEMO-4');
+    },
+  );
+
+  test(
+    'provider-backed repository force refresh reloads updated comment content',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Sync refresh should not keep stale comments',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-25T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Sync refresh should not keep stale comments
+updated: 2026-05-25T00:00:00Z
+---
+
+# Description
+
+Force refreshes should reread repository comments.
+''',
+          'DEMO/DEMO-1/comments/0001.md': '''
+---
+author: demo-user
+created: 2026-05-25T00:00:00Z
+---
+
+Original comment body.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      final initial = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.comments},
+      );
+
+      expect(initial.comments.single.body, 'Original comment body.');
+
+      provider.files['DEMO/DEMO-1/comments/0001.md'] = '''
+---
+author: demo-user
+created: 2026-05-25T00:00:00Z
+updated: 2026-05-25T00:05:00Z
+---
+
+Updated comment body from sync.
+''';
+
+      final refreshed = await repository.hydrateIssue(
+        initial,
+        scopes: const {IssueHydrationScope.comments},
+        force: true,
+      );
+
+      expect(refreshed.comments.single.body, 'Updated comment body from sync.');
+      expect(refreshed.comments.single.updatedAt, '2026-05-25T00:05:00Z');
+    },
+  );
+
+  test(
+    'checked-in setup template includes repository index artifacts',
     () async {
       final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
 
@@ -862,9 +1129,148 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
       expect(epicIssue.customFields['created'], '2026-05-05T00:00:00Z');
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
-      expect(boardIssue.attachments.single.name, 'board-preview.svg');
+      expect(
+        boardIssue.attachments.map((attachment) => attachment.name),
+        contains('board-preview.svg'),
+      );
       expect(doneIssue.statusId, 'done');
       expect(doneIssue.resolutionId, 'done');
+    },
+  );
+
+  test(
+    'provider-backed deleteIssue preserves legacy deleted.json while writing tombstones',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Delete me',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-25T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/deleted.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'project': 'DEMO',
+              'formerPath': 'DEMO/DEMO-99/main.md',
+              'deletedAt': '2026-05-01T00:00:00Z',
+              'summary': 'Legacy deleted issue',
+              'issueType': 'story',
+              'parent': null,
+              'epic': null,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Delete me
+updated: 2026-05-25T00:00:00Z
+---
+
+# Description
+
+Issue targeted by the delete workflow.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+      final snapshot = await repository.loadSnapshot();
+      final legacyDeletedIndexBefore =
+          provider.files['DEMO/.trackstate/index/deleted.json'];
+
+      final tombstone = await repository.deleteIssue(snapshot.issues.single);
+
+      expect(tombstone.key, 'DEMO-1');
+      expect(
+        provider.lastFileChangeRequest,
+        isNotNull,
+        reason:
+            'deleteIssue should persist its changes through applyFileChanges.',
+      );
+      final deletePaths = provider.lastFileChangeRequest!.changes
+          .whereType<RepositoryDeleteFileChange>()
+          .map((change) => change.path)
+          .toList(growable: false);
+      final rewrittenPaths = provider.lastFileChangeRequest!.changes
+          .whereType<RepositoryTextFileChange>()
+          .map((change) => change.path)
+          .toList(growable: false);
+      expect(
+        deletePaths,
+        isNot(contains('DEMO/.trackstate/index/deleted.json')),
+      );
+      expect(
+        rewrittenPaths,
+        containsAll(<String>[
+          'DEMO/.trackstate/index/issues.json',
+          'DEMO/.trackstate/index/tombstones.json',
+          'DEMO/.trackstate/tombstones/DEMO-1.json',
+        ]),
+      );
+      expect(
+        rewrittenPaths,
+        isNot(contains('DEMO/.trackstate/index/deleted.json')),
+      );
+      expect(
+        provider.files['DEMO/.trackstate/index/deleted.json'],
+        legacyDeletedIndexBefore,
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/index/issues.json']!)
+            as List<Object?>,
+        isEmpty,
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/index/tombstones.json']!)
+            as List<Object?>,
+        [
+          {'key': 'DEMO-1', 'path': 'DEMO/.trackstate/tombstones/DEMO-1.json'},
+        ],
+      );
+      expect(
+        jsonDecode(provider.files['DEMO/.trackstate/tombstones/DEMO-1.json']!)
+            as Map<String, Object?>,
+        containsPair('formerPath', 'DEMO/DEMO-1/main.md'),
+      );
     },
   );
 
@@ -1023,7 +1429,7 @@ Summary data stays available.
   );
 
   test(
-    'setup repository keeps startup blocked when issue summary index is rate limited',
+    'setup repository publishes startup recovery when issue summary index is rate limited',
     () async {
       final repository = _mockSetupRepository(
         files: {
@@ -1071,9 +1477,410 @@ updated: 2026-05-05T00:00:00Z
         },
       );
 
-      await expectLater(
-        repository.loadSnapshot,
-        throwsA(isA<GitHubRateLimitException>()),
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.startupRecovery, isNotNull);
+      expect(
+        snapshot.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(snapshot.issues, hasLength(1));
+      expect(snapshot.repositoryIndex.entries, hasLength(1));
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.settings),
+        TrackerLoadState.ready,
+      );
+      expect(
+        snapshot.readiness.sectionState(TrackerSectionKey.board),
+        isNot(TrackerLoadState.ready),
+      );
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed project metadata completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Indexed markdown issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Indexed markdown issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/project.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode({
+              'key': 'DEMO',
+              'name': 'Demo Project',
+              'defaultLocale': 'en',
+            }),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(snapshot.project.key, 'DEMO');
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed summary issue index completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'epic', 'name': 'Epic'},
+            {'id': 'story', 'name': 'Story'},
+            {'id': 'subtask', 'name': 'Sub-task'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: epic
+status: todo
+priority: medium
+summary: Bootstrap summary fallback
+updated: 2026-05-05T00:05:00Z
+---
+''',
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Child issue
+updated: 2026-05-05T00:06:00Z
+epic: DEMO-1
+---
+''',
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Bootstrap summary fallback',
+              'issueType': 'epic',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': ['DEMO-2'],
+              'archived': false,
+            },
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'summary': 'Child issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:06:00Z',
+              'epic': 'DEMO-1',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/index/issues.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode([
+              {
+                'key': 'DEMO-1',
+                'path': 'DEMO/DEMO-1/main.md',
+                'summary': 'Bootstrap summary fallback',
+                'issueType': 'epic',
+                'status': 'todo',
+                'updated': '2026-05-05T00:05:00Z',
+                'children': ['DEMO-2'],
+                'archived': false,
+              },
+              {
+                'key': 'DEMO-2',
+                'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+                'summary': 'Child issue',
+                'issueType': 'story',
+                'status': 'todo',
+                'updated': '2026-05-05T00:06:00Z',
+                'epic': 'DEMO-1',
+                'children': [],
+                'archived': false,
+              },
+            ]),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1', 'DEMO-2']);
+      expect(snapshot.issues.first.summary, 'DEMO-1');
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/index/issues.json',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'setup repository returns hosted shell bootstrap before delayed tombstone metadata completes',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'summary': 'Live issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
+            },
+          ]),
+          'DEMO/.trackstate/tombstones/DEMO-99.json': jsonEncode({
+            'key': 'DEMO-99',
+            'project': 'DEMO',
+            'formerPath': 'DEMO/DEMO-99/main.md',
+            'deletedAt': '2026-05-05T00:07:00Z',
+            'summary': 'Deleted issue',
+          }),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Live issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+        },
+        hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+        asyncResponseOverride: (filePath) async {
+          if (filePath != 'DEMO/.trackstate/tombstones/DEMO-99.json') {
+            return null;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return _contentResponse(
+            jsonEncode({
+              'key': 'DEMO-99',
+              'project': 'DEMO',
+              'formerPath': 'DEMO/DEMO-99/main.md',
+              'deletedAt': '2026-05-05T00:07:00Z',
+              'summary': 'Deleted issue',
+            }),
+          );
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 80),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(snapshot.repositoryIndex.deleted, isEmpty);
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/.trackstate/tombstones/DEMO-99.json',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'setup repository applies the hosted startup timeout across the full bootstrap load',
+    () async {
+      final files = <String, String>{
+        'DEMO/project.json': jsonEncode({
+          'key': 'DEMO',
+          'name': 'Demo Project',
+          'defaultLocale': 'en',
+        }),
+        'DEMO/config/statuses.json': jsonEncode([
+          {'id': 'todo', 'name': 'To Do'},
+        ]),
+        'DEMO/config/issue-types.json': jsonEncode([
+          {'id': 'story', 'name': 'Story'},
+        ]),
+        'DEMO/config/fields.json': jsonEncode([
+          {
+            'id': 'summary',
+            'name': 'Summary',
+            'type': 'string',
+            'required': true,
+          },
+        ]),
+        'DEMO/.trackstate/index/issues.json': jsonEncode([
+          {
+            'key': 'DEMO-1',
+            'path': 'DEMO/DEMO-1/main.md',
+            'parent': null,
+            'epic': null,
+            'summary': 'Indexed markdown issue',
+            'issueType': 'story',
+            'status': 'todo',
+            'labels': [],
+            'updated': '2026-05-05T00:05:00Z',
+            'children': [],
+            'archived': false,
+          },
+        ]),
+        'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Indexed markdown issue
+updated: 2026-05-05T00:05:00Z
+---
+''',
+      };
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            await Future<void>.delayed(const Duration(milliseconds: 75));
+            final tree = files.keys
+                .map((filePath) => {'path': filePath, 'type': 'blob'})
+                .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          final contentsPrefix =
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
+          if (path.startsWith(contentsPrefix)) {
+            final filePath = path.substring(contentsPrefix.length);
+            if (filePath == 'DEMO/project.json') {
+              await Future<void>.delayed(const Duration(milliseconds: 80));
+            }
+            final content = files[filePath];
+            if (content != null) {
+              return _contentResponse(content);
+            }
+          }
+          return http.Response('', 404);
+        }),
+        hostedStartupProbeTimeout: const Duration(milliseconds: 100),
+      );
+
+      final snapshot = await repository.loadSnapshot().timeout(
+        const Duration(milliseconds: 140),
+      );
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1']);
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Hosted startup deferred DEMO/project.json after 100 ms. TrackState.AI loaded fallback project metadata so the shell can open while repository data keeps loading.',
+          ),
+        ),
       );
     },
   );
@@ -2010,6 +2817,184 @@ size 6
   );
 
   test(
+    'provider-backed repository queues hosted release-backed uploads through the inbox when direct release writes are unavailable',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.full,
+          supportsReleaseAttachmentWrites: false,
+          canCheckCollaborators: false,
+        ),
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap')),
+      );
+
+      expect(updated.attachments, isEmpty);
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/.trackstate/upload-inbox/DEMO-1/release-plan.txt',
+      );
+      expect(
+        provider
+            .binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-1/release-plan.txt'],
+        Uint8List.fromList(utf8.encode('roadmap')),
+      );
+      expect(provider.files['DEMO/DEMO-1/attachments.json'], '[]\n');
+    },
+  );
+
+  test(
+    'provider-backed repository overwrites legacy repository-path attachments directly when hosted release writes are unavailable',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.full,
+          supportsReleaseAttachmentWrites: false,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Nested release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Nested release-backed attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Nested release-backed attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
+              '%PDF-1.4\nlegacy repository attachment\n',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+      expect(
+        provider.binaryFiles.containsKey(
+          'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
+        ),
+        isFalse,
+      );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(
+        updated.attachments.single.repositoryPath,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+    },
+  );
+
+  test(
     'provider-backed repository replaces a legacy repository-path attachment with github-releases metadata',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
@@ -2132,7 +3117,7 @@ Nested release-backed attachment issue.
         {
           'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
           'name': 'manual.pdf',
-          'mediaType': 'application/octet-stream',
+          'mediaType': 'application/pdf',
           'sizeBytes': utf8.encode('replacement attachment').length,
           'author': 'demo-user',
           'createdAt': updated.attachments.single.createdAt,
@@ -2438,6 +3423,9 @@ Nested release-backed attachment issue.
                 'id': 21,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': currentReleaseAssetId.isEmpty
                     ? const <Object?>[]
                     : [
@@ -2521,6 +3509,7 @@ Nested release-backed attachment issue.
     'github provider reuses a matching draft release when tag lookup misses it',
     () async {
       var createdDuplicateRelease = false;
+      var patchedRelease = false;
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
         dataRef: 'main',
@@ -2550,13 +3539,20 @@ Nested release-backed attachment issue.
                   'id': 10,
                   'tag_name': 'trackstate-attachments-DEMO-1',
                   'name': 'Attachments for DEMO-1',
-                  'body': 'Manual Notes',
+                  'body':
+                      'TrackState-managed attachment container for DEMO-1.\n',
                   'draft': true,
+                  'prerelease': false,
                   'assets': const <Object?>[],
                 },
               ]),
               200,
             );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/10' &&
+              request.method == 'PATCH') {
+            patchedRelease = true;
+            return http.Response('', 500);
           }
           if (path == '/repos/IstiN/trackstate/releases' &&
               request.method == 'POST') {
@@ -2599,6 +3595,109 @@ Nested release-backed attachment issue.
       );
 
       expect(createdDuplicateRelease, isFalse);
+      expect(patchedRelease, isFalse);
+      expect(result.assetId, '2');
+    },
+  );
+
+  test(
+    'github provider normalizes reused release metadata before uploading assets',
+    () async {
+      var patchedReleaseBody = '';
+      var patchedReleaseName = '';
+      var patchedReleaseTagName = '';
+      var patchedDraft = false;
+      var patchedPrerelease = true;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'body': 'Custom release body edited by a user',
+                'draft': true,
+                'prerelease': false,
+                'assets': const <Object?>[],
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/10' &&
+              request.method == 'PATCH') {
+            final body = jsonDecode(request.body) as Map<String, Object?>;
+            patchedReleaseBody = body['body']?.toString() ?? '';
+            patchedReleaseName = body['name']?.toString() ?? '';
+            patchedReleaseTagName = body['tag_name']?.toString() ?? '';
+            patchedDraft = body['draft'] as bool? ?? false;
+            patchedPrerelease = body['prerelease'] as bool? ?? true;
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': patchedReleaseName,
+                'body': patchedReleaseBody,
+                'draft': patchedDraft,
+                'prerelease': patchedPrerelease,
+                'assets': const <Object?>[],
+              }),
+              200,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(
+        patchedReleaseBody,
+        'TrackState-managed attachment container for DEMO-1.\n',
+      );
+      expect(patchedReleaseTagName, 'trackstate-attachments-DEMO-1');
+      expect(patchedReleaseName, 'Attachments for DEMO-1');
+      expect(patchedDraft, isTrue);
+      expect(patchedPrerelease, isFalse);
       expect(result.assetId, '2');
     },
   );
@@ -2638,6 +3737,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': assets,
               }),
               200,
@@ -2725,6 +3827,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': assets,
               }),
               200,
@@ -2807,6 +3912,9 @@ Nested release-backed attachment issue.
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
+                'body': 'TrackState-managed attachment container for DEMO-1.\n',
+                'draft': true,
+                'prerelease': false,
                 'assets': [
                   {'id': 3, 'name': 'foreign.bin', 'size': 9},
                 ],
@@ -2910,6 +4018,96 @@ Nested release-backed attachment issue.
       ),
     );
   });
+
+  test(
+    'github provider surfaces release creation validation details from GitHub',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'GET') {
+            return http.Response('[]', 200);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({
+                'message': 'Validation Failed',
+                'errors': [
+                  {
+                    'resource': 'Release',
+                    'field': 'target_commitish',
+                    'code': 'invalid',
+                    'message': 'target_commitish is invalid',
+                  },
+                ],
+              }),
+              422,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await expectLater(
+        () => provider.writeReleaseAttachment(
+          RepositoryReleaseAttachmentWriteRequest(
+            issueKey: 'DEMO-1',
+            releaseTag: 'trackstate-attachments-DEMO-1',
+            releaseTitle: 'Attachments for DEMO-1',
+            assetName: 'design.png',
+            bytes: Uint8List.fromList(const [1, 2, 3]),
+            mediaType: 'image/png',
+            branch: 'feature-unpushed',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Could not create GitHub release'),
+              )
+              .having((error) => error.message, 'message', contains('(422)'))
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Validation Failed'),
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                contains('target_commitish'),
+              ),
+        ),
+      );
+    },
+  );
 
   test(
     'github provider falls back to release lookup when stored asset id is stale',
@@ -3167,6 +4365,8 @@ Nested release-backed attachment issue.
 SetupTrackStateRepository _mockSetupRepository({
   required Map<String, String> files,
   Map<String, http.Response> responseOverrides = const {},
+  Duration hostedStartupProbeTimeout = const Duration(seconds: 11),
+  Future<http.Response?> Function(String filePath)? asyncResponseOverride,
 }) {
   return SetupTrackStateRepository(
     client: MockClient((request) async {
@@ -3181,6 +4381,13 @@ SetupTrackStateRepository _mockSetupRepository({
           '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
       if (path.startsWith(contentsPrefix)) {
         final filePath = path.substring(contentsPrefix.length);
+        final asyncOverride = asyncResponseOverride;
+        if (asyncOverride != null) {
+          final response = await asyncOverride(filePath);
+          if (response != null) {
+            return response;
+          }
+        }
         final override = responseOverrides[filePath];
         if (override != null) {
           return override;
@@ -3192,6 +4399,7 @@ SetupTrackStateRepository _mockSetupRepository({
       }
       return http.Response('', 404);
     }),
+    hostedStartupProbeTimeout: hostedStartupProbeTimeout,
   );
 }
 
@@ -3220,7 +4428,10 @@ http.Response _binaryContentResponse(Uint8List content, {String? downloadUrl}) {
 }
 
 class _FakeReleaseAttachmentProvider
-    implements TrackStateProviderAdapter, RepositoryReleaseAttachmentStore {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryReleaseAttachmentStore,
+        RepositoryFileMutator {
   _FakeReleaseAttachmentProvider({
     required this.permission,
     required Map<String, String> files,
@@ -3229,7 +4440,11 @@ class _FakeReleaseAttachmentProvider
 
   final RepositoryPermission permission;
   final Map<String, String> files;
+  final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final List<String> readTextFilePaths = <String>[];
+  RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
+  RepositoryFileChangeRequest? lastFileChangeRequest;
   RepositoryConnection? _connection;
 
   @override
@@ -3251,7 +4466,9 @@ class _FakeReleaseAttachmentProvider
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     return [
       for (final path in files.keys)
-        RepositoryTreeEntry(path: path, type: 'blob'),
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
+      for (final path in binaryFiles.keys)
+        RepositoryTreeEntry(path: path, type: 'blob', revision: 'tree:$path'),
     ];
   }
 
@@ -3260,6 +4477,7 @@ class _FakeReleaseAttachmentProvider
     String path, {
     required String ref,
   }) async {
+    readTextFilePaths.add(path);
     final content = files[path];
     if (content == null) {
       throw TrackStateProviderException('File not found: $path');
@@ -3295,6 +4513,36 @@ class _FakeReleaseAttachmentProvider
   }
 
   @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    lastFileChangeRequest = request;
+    for (final change in request.changes) {
+      if (change is RepositoryTextFileChange) {
+        if (enforceExistingRevisionOnWrite &&
+            files.containsKey(change.path) &&
+            (change.expectedRevision?.isNotEmpty != true)) {
+          throw TrackStateProviderException(
+            'Cannot save ${change.path} because it changed in the current '
+            'branch. Expected revision for existing file was not provided.',
+          );
+        }
+        files[change.path] = change.content;
+      } else if (change is RepositoryDeleteFileChange) {
+        files.remove(change.path);
+        binaryFiles.remove(change.path);
+      } else if (change is RepositoryBinaryFileChange) {
+        binaryFiles[change.path] = Uint8List.fromList(change.bytes);
+      }
+    }
+    return RepositoryCommitResult(
+      branch: request.branch,
+      message: request.message,
+      revision: 'commit-sha',
+    );
+  }
+
+  @override
   Future<RepositoryCommitResult> createCommit(
     RepositoryCommitRequest request,
   ) async => RepositoryCommitResult(
@@ -3310,10 +4558,32 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryPermission> getPermission() async => permission;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-release-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
   }) async {
+    final binary = binaryFiles[path];
+    if (binary != null) {
+      return RepositoryAttachment(
+        path: path,
+        bytes: Uint8List.fromList(binary),
+        revision: 'attachment-sha',
+        declaredSizeBytes: binary.length,
+      );
+    }
     final content = files[path];
     if (content == null) {
       throw TrackStateProviderException('Attachment not found: $path');
@@ -3330,7 +4600,13 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
-    throw UnimplementedError();
+    lastAttachmentWriteRequest = request;
+    binaryFiles[request.path] = Uint8List.fromList(request.bytes);
+    return RepositoryAttachmentWriteResult(
+      path: request.path,
+      branch: request.branch,
+      revision: 'attachment-sha',
+    );
   }
 
   @override
@@ -3383,6 +4659,19 @@ class _FakeRemoteIdentityProvider
 
   @override
   String get dataRef => 'HEAD';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-remote-identity-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {

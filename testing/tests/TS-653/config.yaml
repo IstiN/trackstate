@@ -1,0 +1,11 @@
+test_id: TS-653
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN, or bootstrapped by the shared Dart probe runtime
+notes:
+  - Passes the canonical link payload from the Python test config into a Dart probe.
+  - Invokes the production CLI formatter success path for both JSON and text output.
+  - Verifies the real formatted payload still renders and that stderr remains empty for canonical relationship metadata.

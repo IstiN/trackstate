@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 import json
-from typing import Sequence
+from typing import Any, Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
 
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
@@ -351,7 +360,6 @@ class PlaywrightWebAppSession(WebAppSession):
         timeout_ms: int = 60_000,
     ) -> str:
         return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
-
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -406,11 +414,73 @@ class PlaywrightWebAppSession(WebAppSession):
                 "Timed out waiting for the page to satisfy a function condition.",
             ) from error
         return wait_handle.json_value()
-
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """
             () => {
+                const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+                const labelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const ariaLabel = normalize(element.getAttribute("aria-label"));
+                    if (ariaLabel) {
+                        return ariaLabel;
+                    }
+                    const placeholder = normalize(element.getAttribute("placeholder"));
+                    if (placeholder) {
+                        return placeholder;
+                    }
+                    const title = normalize(element.getAttribute("title"));
+                    if (title) {
+                        return title;
+                    }
+                    if (
+                        element instanceof HTMLInputElement
+                        || element instanceof HTMLTextAreaElement
+                        || element instanceof HTMLSelectElement
+                    ) {
+                        const value = normalize(element.value);
+                        if (value) {
+                            return value;
+                        }
+                    }
+                    return null;
+                };
+                const derivedOwnedLabelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const visited = new Set();
+                    const queue = [element];
+                    while (queue.length > 0) {
+                        const candidate = queue.shift();
+                        if (!(candidate instanceof Element) || visited.has(candidate)) {
+                            continue;
+                        }
+                        visited.add(candidate);
+                        const candidateLabel = labelFor(candidate);
+                        if (candidateLabel && candidate !== element) {
+                            return candidateLabel;
+                        }
+                        const ownedIds = normalize(candidate.getAttribute("aria-owns"))
+                            .split(" ")
+                            .map((value) => value.trim())
+                            .filter(Boolean);
+                        for (const ownedId of ownedIds) {
+                            const ownedElement = document.getElementById(ownedId);
+                            if (ownedElement instanceof Element) {
+                                queue.push(ownedElement);
+                            }
+                        }
+                        for (const descendant of candidate.querySelectorAll("*")) {
+                            if (descendant instanceof Element) {
+                                queue.push(descendant);
+                            }
+                        }
+                    }
+                    return null;
+                };
                 const active = document.activeElement;
                 if (!active) {
                     return {
@@ -422,12 +492,15 @@ class PlaywrightWebAppSession(WebAppSession):
                         outerHtml: "",
                     };
                 }
-                const text = (active.textContent || "").trim();
-                const ariaLabel = active.getAttribute("aria-label");
+                const text = normalize(active.textContent);
+                const accessibleName =
+                    labelFor(active)
+                    || derivedOwnedLabelFor(active)
+                    || null;
                 return {
                     tagName: active.tagName,
                     role: active.getAttribute("role"),
-                    accessibleName: ariaLabel || text || null,
+                    accessibleName,
                     text,
                     tabindex: active.getAttribute("tabindex"),
                     outerHtml: active.outerHTML.slice(0, 400),
@@ -447,6 +520,23 @@ class PlaywrightWebAppSession(WebAppSession):
             tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
             outer_html=str(payload["outerHtml"]),
         )
+
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
 
     def wait_for_download_after_keypress(
         self,
@@ -600,8 +690,8 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out selecting files after clicking selector "{trigger_selector}".',
             ) from error
 
-    def screenshot(self, path: str) -> None:
-        self._page.screenshot(path=path, full_page=True)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._page.screenshot(path=path, full_page=full_page)
 
     def bounding_box(
         self,
@@ -731,18 +821,27 @@ class PlaywrightStoredTokenWebAppRuntime(
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_key = self._repository.replace("/", ".")
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
+        )
         self._context.add_init_script(
             script=(
                 "(() => {"
-                f"const repositoryStorageKey = {json.dumps(storage_key)};"
+                f"const repositoryStorageKeys = {json.dumps(storage_keys)};"
                 f"const token = {json.dumps(self._token)};"
-                "const keys = ["
-                "  `trackstate.githubToken.${repositoryStorageKey}`,"
-                "  `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
-                "];"
-                "for (const key of keys) {"
-                "  window.localStorage.setItem(key, token);"
+                "for (const repositoryStorageKey of repositoryStorageKeys) {"
+                "  const keys = ["
+                "    `trackstate.githubToken.${repositoryStorageKey}`,"
+                "    `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "  ];"
+                "  for (const key of keys) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
                 "}"
                 "})()"
             ),

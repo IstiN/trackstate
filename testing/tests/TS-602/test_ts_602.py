@@ -200,6 +200,7 @@ class TrackStateCliLinksJsonHierarchyExclusionTest(unittest.TestCase):
             f"Observed payload: {link_payload}",
         )
 
+
         with self.subTest(step="repository-root links.json"):
             links_payload = observation.links_json_payload
             self.assertIsInstance(
@@ -329,6 +330,7 @@ class TrackStateCliLinksJsonHierarchyExclusionTest(unittest.TestCase):
                     f"Missing fragment: {fragment}\n"
                     f"Observed stdout:\n{observation.link_observation.result.stdout}",
                 )
+
 
     def _assert_command_was_executed_exactly(
         self,

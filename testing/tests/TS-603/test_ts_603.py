@@ -89,6 +89,9 @@ class Ts603AttachmentStorageModeValidationScenario:
             "project_key": self.config.project_key,
             "issue_key": self.config.issue_key,
             "unsupported_attachment_mode": self.config.unsupported_attachment_mode,
+            "allowed_error_contracts": [
+                contract.to_dict() for contract in self.config.allowed_error_contracts
+            ],
             "stdout": validation.observation.result.stdout,
             "stderr": validation.observation.result.stderr,
             "process_exit_code": validation.observation.result.exit_code,
@@ -212,11 +215,10 @@ class Ts603AttachmentStorageModeValidationScenario:
         visible_error = _visible_error_text(payload, stdout=stdout, stderr=stderr)
         result["visible_error_text"] = visible_error
 
-        if observation.result.exit_code != self.config.expected_exit_code:
+        if observation.result.exit_code == 0:
             failures.append(
-                "Step 1 failed: the local attachment operation did not return the "
-                "documented non-zero exit code for the invalid configuration.\n"
-                f"Expected exit code: {self.config.expected_exit_code}\n"
+                "Step 1 failed: the local attachment operation unexpectedly succeeded for "
+                "the invalid configuration.\n"
                 f"Observed output:\n{_observed_command_output(stdout=stdout, stderr=stderr)}"
             )
             return failures
@@ -301,6 +303,40 @@ class Ts603AttachmentStorageModeValidationScenario:
         observed_code = error_dict.get("code")
         observed_category = error_dict.get("category")
         observed_message = str(error_dict.get("message") or "")
+        observed_error_exit_code = error_dict.get("exitCode")
+        if observed_error_exit_code != observation.result.exit_code:
+            failures.append(
+                "Step 2 failed: the machine-readable error exit code did not match the "
+                "process exit code for the invalid configuration.\n"
+                f"Process exit code: {observation.result.exit_code}\n"
+                f"Observed error.exitCode: {observed_error_exit_code}\n"
+                f"Observed payload: {json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
+        allowed_contract_descriptions = ", ".join(
+            contract.describe() for contract in self.config.allowed_error_contracts
+        )
+        matching_contract = next(
+            (
+                contract
+                for contract in self.config.allowed_error_contracts
+                if contract.matches(
+                    observed_code=observed_code if isinstance(observed_code, str) else None,
+                    observed_category=(
+                        observed_category if isinstance(observed_category, str) else None
+                    ),
+                    observed_exit_code=(
+                        observed_error_exit_code
+                        if isinstance(observed_error_exit_code, int)
+                        else None
+                    ),
+                )
+            ),
+            None,
+        )
+        result["matched_error_contract"] = (
+            matching_contract.to_dict() if matching_contract is not None else None
+        )
+
         if (
             observed_code == self.config.disallowed_error_code
             and observed_category == self.config.disallowed_error_category
@@ -315,6 +351,16 @@ class Ts603AttachmentStorageModeValidationScenario:
                 f"Observed error.message: {observed_message}\n"
                 f"Observed payload: {json.dumps(payload_dict, indent=2, sort_keys=True)}"
             )
+        elif matching_contract is None:
+            failures.append(
+                "Step 2 failed: the machine-readable error contract did not match any "
+                "ticket-approved validation/provider-failure outcome.\n"
+                f"Allowed contracts: {allowed_contract_descriptions}\n"
+                f"Observed error.code: {observed_code}\n"
+                f"Observed error.category: {observed_category}\n"
+                f"Observed error.exitCode: {observed_error_exit_code}\n"
+                f"Observed payload: {json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
         else:
             _record_step(
                 result,
@@ -325,7 +371,10 @@ class Ts603AttachmentStorageModeValidationScenario:
                     "attachment storage mode is rejected before the upload path reports a "
                     "generic repository failure."
                 ),
-                observed=json.dumps(error_dict, sort_keys=True),
+                observed=(
+                    f"matched_contract={matching_contract.describe()}; "
+                    f"error={json.dumps(error_dict, sort_keys=True)}"
+                ),
             )
         return failures
 
@@ -401,6 +450,8 @@ def main() -> None:
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
+    if BUG_DESCRIPTION_PATH.exists():
+        BUG_DESCRIPTION_PATH.unlink()
     RESULT_PATH.write_text(
         json.dumps(
             {
