@@ -96,9 +96,7 @@ def main() -> None:
 
                 observation = search_page.search_with_expected_counts(
                     query="",
-                    expected_count_summaries=_observable_count_summaries(
-                        expected_issue_count,
-                    ),
+                    expected_count_summaries=(expected_count_summary,),
                 )
                 search_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["observation"] = _observation_to_dict(observation)
@@ -207,32 +205,28 @@ def _assert_empty_query_results(
             f"Expected visible text: {expected_count_summary}\n"
             f"Observed body text:\n{observation.body_text}",
         )
+    visible_issue_labels = tuple(observation.issue_result_labels)
     for fixture in expected_issues:
-        if fixture.key not in observation.body_text:
+        if not any(fixture.key in label for label in visible_issue_labels):
             raise AssertionError(
                 "Human-style verification failed: a live issue key was missing from the "
                 "visible empty-query result list.\n"
                 f"Missing issue key: {fixture.key}\n"
+                f"Observed result labels: {list(visible_issue_labels)}\n"
                 f"Observed body text:\n{observation.body_text}",
             )
-        if fixture.summary not in observation.body_text:
+        if not any(
+            fixture.key in label and fixture.summary in label
+            for label in visible_issue_labels
+        ):
             raise AssertionError(
                 "Human-style verification failed: a live issue summary was missing from "
                 "the visible empty-query result list.\n"
                 f"Missing issue summary: {fixture.summary}\n"
                 f"Issue key: {fixture.key}\n"
+                f"Observed result labels: {list(visible_issue_labels)}\n"
                 f"Observed body text:\n{observation.body_text}",
             )
-
-
-def _observable_count_summaries(expected_issue_count: int) -> tuple[str, ...]:
-    upper_bound = max(expected_issue_count, 1) + 5
-    summaries = ["No issues"]
-    for count in range(1, upper_bound + 1):
-        label = "issue" if count == 1 else "issues"
-        summaries.append(f"{count} {label}")
-    return tuple(summaries)
-
 
 def _observation_to_dict(observation) -> dict[str, object]:
     return {
@@ -240,6 +234,7 @@ def _observation_to_dict(observation) -> dict[str, object]:
         "visible_query": observation.visible_query,
         "count_summary": observation.count_summary,
         "issue_result_count": observation.issue_result_count,
+        "issue_result_labels": list(observation.issue_result_labels),
         "body_text": observation.body_text,
     }
 

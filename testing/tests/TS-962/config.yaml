@@ -1,0 +1,45 @@
+test_id: TS-962
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - Playwright browser automation for contributor-visible GitHub workflow page verification
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts962_accessibility_cancellation_delay.js
+  probe_render_host_path: testing/accessibility/accessibility_gate.spec.js
+  branch_prefix: ts962-log-validation-cancel
+  commit_message: "TS-962 probe: verify log-validation starts after run cancellation"
+  pull_request_title: "TS-962 disposable probe: verify log-validation is not skipped after cancellation"
+  pull_request_body: "Disposable PR created by TS-962 automation to keep the live accessibility scan step in progress long enough to cancel the run and verify that the `log-validation` step still attempts to execute because of `always()`."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - log-validation
+    - cancelled
+    - canceled
+  contrast_evidence_markers:
+    - TS-962 cancellation hold started
+    - log-validation
+    - cancelled
+    - canceled
+  semantic_evidence_markers:
+    - Accessibility checks
+    - Run axe-core accessibility checks
+    - log-validation
+  poll_interval_seconds: 5
+  run_timeout_seconds: 1800
+  pull_request_timeout_seconds: 240
+  ui_timeout_seconds: 60
+  cancellation_hold_seconds: 45
+  accessibility_job_name: Accessibility checks
+  axe_step_name: Run axe-core accessibility checks
+  log_validation_step_name: log-validation
+notes:
+  - Creates a disposable pull request that changes only testing/accessibility files and holds the accessibility spec open long enough to cancel the live run while the axe step is still in progress.
+  - Verifies the workflow contract still uses always() for log-validation and the cancelled live run exposes log-validation as attempted instead of skipped.
