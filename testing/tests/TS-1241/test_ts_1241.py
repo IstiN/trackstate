@@ -6,9 +6,7 @@ import re
 import sys
 import traceback
 import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -18,8 +16,10 @@ from testing.components.pages.live_multi_view_refresh_page import (  # noqa: E40
     EditControlObservation,
     LiveMultiViewRefreshPage,
 )
+from testing.components.services.github_save_sequence_probe import (  # noqa: E402
+    GitHubSaveSequenceProbe,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
-    GitHubAuthenticatedUser,
     LiveHostedIssueFixture,
     LiveHostedRepositoryFile,
     LiveSetupRepositoryService,
@@ -71,7 +71,6 @@ EXPECTED_RESULT = (
     "completes successfully without a 422 'Invalid object requested' error. A "
     "success banner appears and the editor closes."
 )
-_GITHUB_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def main() -> None:
@@ -124,7 +123,7 @@ def main() -> None:
         )
         result["precondition"] = precondition
 
-        stale_write_sha = _fetch_branch_head_sha(service=service, branch=service.ref)
+        stale_write_sha = service.fetch_branch_head_sha(service.ref)
         result["stale_write_branch"] = stale_write_sha
 
         workspace_state = _workspace_state(
@@ -146,6 +145,10 @@ def main() -> None:
             ),
         ) as tracker_page:
             app_page = LiveMultiViewRefreshPage(tracker_page)
+            save_sequence_probe = GitHubSaveSequenceProbe(
+                session=tracker_page.session,
+                repository=service.repository,
+            )
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
@@ -220,10 +223,7 @@ def main() -> None:
                     ),
                 )
 
-                _install_github_network_probe(
-                    session=tracker_page.session,
-                    repository=service.repository,
-                )
+                save_sequence_probe.install()
                 concurrent_commit = _create_concurrent_commit(
                     service=service,
                     stale_write_sha=stale_write_sha,
@@ -280,8 +280,7 @@ def main() -> None:
                 )
 
                 try:
-                    network_observation = _wait_for_network_sequence(
-                        session=tracker_page.session,
+                    network_observation = save_sequence_probe.wait_for_fetch_before_write_sequence(
                         stale_write_sha=stale_write_sha,
                     )
                 except AssertionError as error:
@@ -293,13 +292,13 @@ def main() -> None:
                         observed=str(error),
                     )
                     raise
-                result["network_observation"] = network_observation
+                result["network_observation"] = network_observation.as_dict()
                 _record_step(
                     result,
                     step=6,
                     status="passed",
                     action=REQUEST_STEPS[5],
-                    observed=_network_sequence_summary(network_observation),
+                    observed=network_observation.summary(),
                 )
 
                 detail_text = app_page.wait_for_issue_detail_state(
@@ -503,154 +502,6 @@ def _workspace_state(
     }
 
 
-def _install_github_network_probe(*, session: Any, repository: str) -> None:
-    session.evaluate(
-        """
-        ({ repository }) => {
-          const repoFragment = `/repos/${repository}/git/`;
-          const toText = async (response) => {
-            try {
-              return await response.clone().text();
-            } catch (error) {
-              return `[[unreadable response body: ${String(error)}]]`;
-            }
-          };
-          const ensureStore = () => {
-            const existing = window.__ts1241GithubNetwork;
-            if (existing && Array.isArray(existing.entries)) {
-              return existing;
-            }
-            const created = {
-              installed: true,
-              nextId: 1,
-              entries: [],
-            };
-            window.__ts1241GithubNetwork = created;
-            return created;
-          };
-          const store = ensureStore();
-          const pushEntry = (entry) => {
-            store.entries.push({
-              ...entry,
-              order: store.entries.length + 1,
-              timestamp: new Date().toISOString(),
-            });
-          };
-          const trackedUrl = (value) =>
-            typeof value === 'string' && value.includes(repoFragment);
-          if (!window.__ts1241GithubNetworkFetchWrapped && typeof window.fetch === 'function') {
-            const originalFetch = window.fetch.bind(window);
-            window.fetch = async (input, init) => {
-              const requestUrl =
-                typeof input === 'string'
-                  ? input
-                  : (input && typeof input.url === 'string' ? input.url : '');
-              const method = String(
-                (init && init.method)
-                  || (typeof input !== 'string' && input && input.method)
-                  || 'GET',
-              ).toUpperCase();
-              const requestId = `fetch-${store.nextId++}`;
-              const requestBody =
-                init && typeof init.body === 'string'
-                  ? init.body
-                  : (init && init.body ? String(init.body) : '');
-              if (trackedUrl(requestUrl)) {
-                pushEntry({
-                  phase: 'request',
-                  transport: 'fetch',
-                  requestId,
-                  method,
-                  url: requestUrl,
-                  bodyText: requestBody,
-                });
-              }
-              try {
-                const response = await originalFetch(input, init);
-                if (trackedUrl(requestUrl)) {
-                  pushEntry({
-                    phase: 'response',
-                    transport: 'fetch',
-                    requestId,
-                    method,
-                    url: requestUrl,
-                    status: response.status,
-                    responseText: await toText(response),
-                  });
-                }
-                return response;
-              } catch (error) {
-                if (trackedUrl(requestUrl)) {
-                  pushEntry({
-                    phase: 'error',
-                    transport: 'fetch',
-                    requestId,
-                    method,
-                    url: requestUrl,
-                    errorText: String(error),
-                  });
-                }
-                throw error;
-              }
-            };
-            window.__ts1241GithubNetworkFetchWrapped = true;
-          }
-
-          if (!window.__ts1241GithubNetworkXhrWrapped && window.XMLHttpRequest) {
-            const originalOpen = window.XMLHttpRequest.prototype.open;
-            const originalSend = window.XMLHttpRequest.prototype.send;
-            window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-              this.__ts1241GithubNetwork = {
-                method: String(method || 'GET').toUpperCase(),
-                url: String(url || ''),
-                requestId: `xhr-${store.nextId++}`,
-              };
-              return originalOpen.call(this, method, url, ...rest);
-            };
-            window.XMLHttpRequest.prototype.send = function(body) {
-              const meta = this.__ts1241GithubNetwork;
-              if (meta && trackedUrl(meta.url)) {
-                pushEntry({
-                  phase: 'request',
-                  transport: 'xhr',
-                  requestId: meta.requestId,
-                  method: meta.method,
-                  url: meta.url,
-                  bodyText: typeof body === 'string' ? body : (body ? String(body) : ''),
-                });
-                this.addEventListener(
-                  'loadend',
-                  () => {
-                    pushEntry({
-                      phase: 'response',
-                      transport: 'xhr',
-                      requestId: meta.requestId,
-                      method: meta.method,
-                      url: meta.url,
-                      status: this.status,
-                      responseText:
-                        typeof this.responseText === 'string' ? this.responseText : '',
-                    });
-                  },
-                  { once: true },
-                );
-              }
-              return originalSend.call(this, body);
-            };
-            window.__ts1241GithubNetworkXhrWrapped = true;
-          }
-
-          store.entries.length = 0;
-          return {
-            installed: true,
-            repository,
-          };
-        }
-        """,
-        arg={"repository": repository},
-    )
-
-
 def _create_concurrent_commit(
     *,
     service: LiveSetupRepositoryService,
@@ -667,7 +518,7 @@ def _create_concurrent_commit(
         message=f"{TICKET_KEY}: create concurrent hosted commit",
     )
     matched, observed_head_sha = poll_until(
-        probe=lambda: _fetch_branch_head_sha(service=service, branch=service.ref),
+        probe=lambda: service.fetch_branch_head_sha(service.ref),
         is_satisfied=lambda sha: sha != stale_write_sha,
         timeout_seconds=90,
         interval_seconds=2,
@@ -683,167 +534,6 @@ def _create_concurrent_commit(
         "probe_file_path": PROBE_FILE_PATH,
         "head_sha_after_commit": observed_head_sha,
     }
-
-
-def _wait_for_network_sequence(
-    *,
-    session: Any,
-    stale_write_sha: str,
-) -> dict[str, object]:
-    payload = session.wait_for_function(
-        """
-        ({ staleWriteSha }) => {
-          const store = window.__ts1241GithubNetwork;
-          if (!store || !Array.isArray(store.entries)) {
-            return null;
-          }
-          const entries = store.entries.slice();
-          const requestMatches = (entry, method, fragment) =>
-            entry
-            && entry.phase === 'request'
-            && entry.method === method
-            && typeof entry.url === 'string'
-            && entry.url.includes(fragment);
-          const responseFor = (requestEntry) =>
-            entries.find(
-              (entry) =>
-                entry.phase === 'response' && entry.requestId === requestEntry.requestId,
-            ) || null;
-          const refRequest = [...entries]
-            .reverse()
-            .find((entry) => requestMatches(entry, 'GET', '/git/refs/heads/'));
-          if (!refRequest) {
-            return null;
-          }
-          const refResponse = responseFor(refRequest);
-          if (!refResponse || refResponse.status !== 200) {
-            return null;
-          }
-          let refSha = null;
-          try {
-            const refJson = JSON.parse(refResponse.responseText || '{}');
-            refSha =
-              refJson && refJson.object && typeof refJson.object.sha === 'string'
-                ? refJson.object.sha
-                : null;
-          } catch (error) {
-            return {
-              kind: 'invalid-ref-response',
-              entries,
-              refRequest,
-              refResponse,
-              parseError: String(error),
-            };
-          }
-          if (!refSha) {
-            return {
-              kind: 'missing-ref-sha',
-              entries,
-              refRequest,
-              refResponse,
-            };
-          }
-          const commitRequest = entries.find(
-            (entry) =>
-              requestMatches(entry, 'GET', `/git/commits/${refSha}`)
-              && entry.order > refRequest.order,
-          );
-          if (!commitRequest) {
-            return null;
-          }
-          const commitResponse = responseFor(commitRequest);
-          if (!commitResponse || commitResponse.status !== 200) {
-            return null;
-          }
-          const treeRequest = entries.find(
-            (entry) =>
-              requestMatches(entry, 'POST', '/git/trees')
-              && entry.order > commitRequest.order,
-          );
-          if (!treeRequest) {
-            return null;
-          }
-          const refWasStale = typeof staleWriteSha === 'string' && refSha !== staleWriteSha;
-          const statuses = entries
-            .filter((entry) => entry.phase === 'response')
-            .map((entry) => entry.status);
-          return {
-            kind: 'observed',
-            entries,
-            refRequest,
-            refResponse,
-            refSha,
-            commitRequest,
-            commitResponse,
-            treeRequest,
-            refWasStale,
-            statuses,
-          };
-        }
-        """,
-        arg={"staleWriteSha": stale_write_sha},
-        timeout_ms=60_000,
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            "Step 6 failed: the hosted save flow never exposed the expected GitHub ref, "
-            "commit, and tree request sequence after clicking Save.\n"
-            f"Observed network log: {_read_network_log(session)}",
-        )
-    kind = str(payload.get("kind"))
-    if kind == "invalid-ref-response":
-        raise AssertionError(
-            "Step 6 failed: the GitHub ref lookup response could not be parsed while "
-            "verifying the fetch-before-write sequence.\n"
-            f"Observed payload: {payload}",
-        )
-    if kind == "missing-ref-sha":
-        raise AssertionError(
-            "Step 6 failed: the GitHub ref lookup response did not expose a branch head "
-            "SHA before the tree update.\n"
-            f"Observed payload: {payload}",
-        )
-    if kind != "observed":
-        raise AssertionError(
-            "Step 6 failed: the hosted save flow did not expose an observable "
-            "fetch-before-write sequence.\n"
-            f"Observed payload: {payload}",
-        )
-    if not bool(payload.get("refWasStale")):
-        raise AssertionError(
-            "Step 6 failed: the save flow did not prove that the branch ref lookup moved "
-            "past the stale stored SHA before the tree update.\n"
-            f"Stale write SHA: {stale_write_sha}\n"
-            f"Observed payload: {payload}",
-        )
-    statuses = payload.get("statuses", [])
-    if isinstance(statuses, list) and any(int(status) == 422 for status in statuses if status is not None):
-        raise AssertionError(
-            "Step 6 failed: the save network sequence still hit GitHub HTTP 422 during "
-            "the stale-base-SHA scenario.\n"
-            f"Observed payload: {payload}",
-        )
-    return payload
-
-
-def _network_sequence_summary(observation: dict[str, object]) -> str:
-    ref_request = observation.get("refRequest", {})
-    commit_request = observation.get("commitRequest", {})
-    tree_request = observation.get("treeRequest", {})
-    return (
-        "Observed GitHub save sequence "
-        f"{ref_request.get('method')} {ref_request.get('url')} -> "
-        f"{commit_request.get('method')} {commit_request.get('url')} -> "
-        f"{tree_request.get('method')} {tree_request.get('url')}. "
-        f"Branch ref SHA {observation.get('refSha')} replaced stale write SHA. "
-        f"Response statuses={observation.get('statuses')}."
-    )
-
-
-def _read_network_log(session: Any) -> object:
-    return session.evaluate(
-        "() => window.__ts1241GithubNetwork?.entries ?? []",
-    )
 
 
 def _assert_seeded_controls(
@@ -908,41 +598,6 @@ def _front_matter(markdown: str) -> str:
     if match is None:
         raise AssertionError("Precondition failed: the issue markdown did not contain front matter.")
     return match.group(1)
-
-
-def _fetch_branch_head_sha(*, service: LiveSetupRepositoryService, branch: str) -> str:
-    response = _github_json(
-        service=service,
-        path=f"/repos/{service.repository}/git/ref/heads/{branch}",
-    )
-    if not isinstance(response, dict):
-        raise RuntimeError(
-            f"GitHub ref lookup for {branch} did not return an object: {response!r}",
-        )
-    obj = response.get("object")
-    sha = obj.get("sha") if isinstance(obj, dict) else None
-    if not isinstance(sha, str) or not _GITHUB_SHA_PATTERN.match(sha):
-        raise RuntimeError(
-            f"GitHub ref lookup for {branch} did not expose a full commit SHA: {response!r}",
-        )
-    return sha
-
-
-def _github_json(*, service: LiveSetupRepositoryService, path: str) -> object:
-    request = urllib.request.Request(
-        f"https://api.github.com{path}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            **(
-                {"Authorization": f"Bearer {service.token}"}
-                if service.token
-                else {}
-            ),
-        },
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def _fetch_optional_repo_file(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import urllib.error
 from urllib.parse import quote
 import urllib.request
@@ -93,6 +94,9 @@ class LiveHostedRelease:
     draft: bool = False
     prerelease: bool = False
     target_commitish: str = ""
+
+
+_GITHUB_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 class LiveSetupRepositoryService:
@@ -262,6 +266,27 @@ class LiveSetupRepositoryService:
 
     def fetch_repo_text(self, path: str) -> str:
         return self.fetch_repo_file(path).content
+
+    def fetch_branch_head_sha(self, branch: str | None = None) -> str:
+        branch_name = (branch or self.ref).strip()
+        if not branch_name:
+            raise RuntimeError("GitHub branch head lookup requires a branch name.")
+
+        response = self._read_json(
+            f"/repos/{self.repository}/git/ref/heads/{quote(branch_name, safe='')}",
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not return an object: {response!r}",
+            )
+        obj = response.get("object")
+        sha = obj.get("sha") if isinstance(obj, dict) else None
+        if not isinstance(sha, str) or not _GITHUB_SHA_PATTERN.match(sha):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not expose a full commit SHA: "
+                f"{response!r}",
+            )
+        return sha
 
     def write_repo_text(self, path: str, *, content: str, message: str) -> None:
         sha: str | None = None
