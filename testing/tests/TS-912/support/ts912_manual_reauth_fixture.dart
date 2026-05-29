@@ -16,7 +16,9 @@ class Ts912ManualReauthFixture {
     required this.localWorkspace,
     required this.hostedWorkspace,
     required LocalGitTestRepository localRepositoryHandle,
-  }) : _localRepositoryHandle = localRepositoryHandle;
+    required TrackStateRepository browserLocalRepository,
+  }) : _localRepositoryHandle = localRepositoryHandle,
+       _browserLocalRepository = browserLocalRepository;
 
   static const String localDisplayName = 'Restorable local workspace';
   static const String hostedDisplayName = 'stable/repo';
@@ -32,6 +34,7 @@ class Ts912ManualReauthFixture {
   final WorkspaceProfile localWorkspace;
   final WorkspaceProfile hostedWorkspace;
   final LocalGitTestRepository _localRepositoryHandle;
+  final TrackStateRepository _browserLocalRepository;
 
   final List<String?> directoryPickerConfirmButtons = <String?>[];
   final List<String?> directoryPickerInitialDirectories = <String?>[];
@@ -50,6 +53,10 @@ class Ts912ManualReauthFixture {
     SharedPreferences.setMockInitialValues(const <String, Object>{});
 
     final localRepositoryHandle = await LocalGitTestRepository.create();
+    final browserLocalRepository = await createLocalGitTestRepository(
+      tester: tester,
+      repositoryPath: localRepositoryHandle.path,
+    );
     final workspaceProfileService = SharedPreferencesWorkspaceProfileService(
       now: () => DateTime.utc(2026, 5, 28, 11, 30),
     );
@@ -81,6 +88,7 @@ class Ts912ManualReauthFixture {
       localWorkspace: localWorkspace,
       hostedWorkspace: hostedWorkspace,
       localRepositoryHandle: localRepositoryHandle,
+      browserLocalRepository: browserLocalRepository,
     );
   }
 
@@ -119,10 +127,7 @@ class Ts912ManualReauthFixture {
                 repositoryPath != localRepositoryPath) {
               return null;
             }
-            return createLocalGitTestRepository(
-              tester: tester,
-              repositoryPath: repositoryPath,
-            );
+            return _browserLocalRepository;
           },
       requestBrowserLocalRepositoryAccess:
           ({
@@ -137,12 +142,8 @@ class Ts912ManualReauthFixture {
               return null;
             }
             try {
-              final repository = await createLocalGitTestRepository(
-                tester: tester,
-                repositoryPath: repositoryPath,
-              );
               browserAccessRequestResults.add('repository');
-              return repository;
+              return _browserLocalRepository;
             } catch (error) {
               browserAccessRequestErrors.add('$error');
               rethrow;
