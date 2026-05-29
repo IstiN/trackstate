@@ -8,7 +8,7 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 void main() {
   testWidgets(
-    'issue detail collaboration metadata uses the readable collaboration token in light theme',
+    'issue detail collaboration metadata uses the readable collaboration token in both themes',
     (tester) async {
       final semantics = tester.ensureSemantics();
 
@@ -19,26 +19,38 @@ void main() {
         await screen.openSearch();
         await screen.selectIssue('TRACK-12', 'Implement Git sync service');
 
-        await screen.selectCollaborationTab('TRACK-12', 'Comments');
-        final commentMetadata = find.text(
-          '2026-05-05T00:10:00Z',
-          findRichText: true,
-        );
-        expect(commentMetadata, findsOneWidget);
-        _expectReadableCollaborationMetadataStyle(tester, commentMetadata);
+        await _expectReadableMetadataAcrossCollaborationTabs(tester, screen);
 
-        await screen.selectCollaborationTab('TRACK-12', 'History');
-        final historyMetadata = find.text(
-          'ana · 2026-05-05T00:10:00Z',
-          findRichText: true,
-        );
-        expect(historyMetadata, findsOneWidget);
-        _expectReadableCollaborationMetadataStyle(tester, historyMetadata);
+        await tester.tap(find.bySemanticsLabel(RegExp(r'^Dark theme$')).last);
+        await tester.pumpAndSettle();
+
+        await _expectReadableMetadataAcrossCollaborationTabs(tester, screen);
       } finally {
         semantics.dispose();
       }
     },
   );
+}
+
+Future<void> _expectReadableMetadataAcrossCollaborationTabs(
+  WidgetTester tester,
+  IssueDetailAccessibilityScreenHandle screen,
+) async {
+  await screen.selectCollaborationTab('TRACK-12', 'Comments');
+  final commentMetadata = find.text(
+    '2026-05-05T00:10:00Z',
+    findRichText: true,
+  );
+  expect(commentMetadata, findsOneWidget);
+  _expectReadableCollaborationMetadataStyle(tester, commentMetadata);
+
+  await screen.selectCollaborationTab('TRACK-12', 'History');
+  final historyMetadata = find.text(
+    'ana · 2026-05-05T00:10:00Z',
+    findRichText: true,
+  );
+  expect(historyMetadata, findsOneWidget);
+  _expectReadableCollaborationMetadataStyle(tester, historyMetadata);
 }
 
 void _expectReadableCollaborationMetadataStyle(
