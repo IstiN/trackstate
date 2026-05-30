@@ -1016,8 +1016,6 @@ def _workspace_display_name(row: WorkspaceSwitcherRowObservation) -> str:
 def _workspace_display_name_from_result(row: dict[str, object]) -> str:
     display_name = str(row.get("display_name") or "").strip()
     return display_name or HOSTED_DISPLAY_NAME
-
-
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])
