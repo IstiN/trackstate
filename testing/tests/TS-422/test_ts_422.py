@@ -22,8 +22,13 @@ from testing.tests.support.ts422_missing_index_runtime import (  # noqa: E402
 )
 
 TICKET_KEY = "TS-422"
+TEST_CASE_SUMMARY = (
+    "Hosted recovery behavior — missing index prevents silent full scan"
+)
 BLOCKED_BOOTSTRAP_PATH = "DEMO/.trackstate/index/issues.json"
 OBSERVATION_WINDOW_SECONDS = 8
+RUN_COMMAND = "python testing/tests/TS-422/test_ts_422.py"
+TEST_FILE_PATH = "testing/tests/TS-422/test_ts_422.py"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -156,6 +161,11 @@ def main() -> None:
 
                 _record_human_verification(
                     result,
+                    status=(
+                        "passed"
+                        if failure_surface.regenerate_guidance_visible
+                        else "failed"
+                    ),
                     check=(
                         "Verified the user-visible failure copy explains that the hosted "
                         "bootstrap index must be regenerated."
@@ -167,6 +177,7 @@ def main() -> None:
                 )
                 _record_human_verification(
                     result,
+                    status="passed" if failure_surface.retry_visible else "failed",
                     check=(
                         "Verified the user-visible failure surface exposes a Retry control "
                         "instead of silently continuing with repository scanning."
@@ -177,62 +188,102 @@ def main() -> None:
                     ),
                 )
 
-                _assert_failure_surface(failure_surface)
+                step_3_error = _failure_surface_error(failure_surface)
                 _record_step(
                     result,
                     step=3,
-                    status="passed",
+                    status="failed" if step_3_error else "passed",
                     action="Observe the visible UI state.",
-                    observed=failure_surface.body_text,
+                    observed=step_3_error or failure_surface.body_text,
                 )
 
+                verification_errors: list[str] = []
+                if step_3_error:
+                    verification_errors.append(step_3_error)
+                if not failure_surface.regenerate_guidance_visible:
+                    verification_errors.append(
+                        "Human-style verification failed: the missing-index failure surface "
+                        "did not explain that the tracker indexes must be regenerated.\n"
+                        f"Observed body text:\n{failure_surface.body_text}",
+                    )
                 if not failure_surface.retry_visible:
-                    raise AssertionError(
+                    verification_errors.append(
                         "Human-style verification failed: the missing-index failure surface "
                         "did not render a visible Retry action the user could choose.\n"
                         f"Visible buttons: {failure_surface.visible_button_labels}\n"
                         f"Observed body text:\n{failure_surface.body_text}",
                     )
 
-                retry_tree_count = len(request_observation.tree_urls)
-                page.tap_retry()
-                retried = page.wait_for_failure_surface(timeout_ms=60_000)
-                result["retry_failure_surface"] = _failure_surface_payload(retried)
-                if len(request_observation.tree_urls) <= retry_tree_count:
-                    raise AssertionError(
-                        "Human-style verification failed: clicking Retry did not trigger a "
-                        "new hosted bootstrap attempt.\n"
-                        f"Initial tree count: {retry_tree_count}\n"
-                        f"Observed tree URLs: {request_observation.tree_urls}\n"
-                        f"Observed body text:\n{retried.body_text}",
+                if failure_surface.retry_visible:
+                    retry_tree_count = len(request_observation.tree_urls)
+                    page.tap_retry()
+                    retried = page.wait_for_failure_surface(timeout_ms=60_000)
+                    result["retry_failure_surface"] = _failure_surface_payload(retried)
+
+                    retry_error: str | None = None
+                    if len(request_observation.tree_urls) <= retry_tree_count:
+                        retry_error = (
+                            "Human-style verification failed: clicking Retry did not trigger "
+                            "a new hosted bootstrap attempt.\n"
+                            f"Initial tree count: {retry_tree_count}\n"
+                            f"Observed tree URLs: {request_observation.tree_urls}\n"
+                            f"Observed body text:\n{retried.body_text}"
+                        )
+                    elif (
+                        not retried.regenerate_guidance_visible
+                        or not retried.retry_visible
+                    ):
+                        retry_error = (
+                            "Human-style verification failed: after clicking Retry, the app "
+                            "did not return to the same visible recoverable failure surface.\n"
+                            f"Observed body text:\n{retried.body_text}"
+                        )
+                    elif request_observation.issue_content_urls:
+                        retry_error = (
+                            "Human-style verification failed: after clicking Retry, the app "
+                            "started hydrating issue `main.md` files instead of staying in "
+                            "the explicit missing-index failure state.\n"
+                            "Observed issue content URLs: "
+                            f"{request_observation.issue_content_urls}\n"
+                            f"Observed body text:\n{retried.body_text}"
+                        )
+
+                    _record_human_verification(
+                        result,
+                        status="failed" if retry_error else "passed",
+                        check=(
+                            "Clicked Retry and confirmed the app performed one explicit retry "
+                            "attempt while keeping the same visible index-regeneration failure "
+                            "guidance on screen."
+                        ),
+                        observed=(
+                            retry_error
+                            or (
+                                f"tree_requests_before_retry={retry_tree_count}; "
+                                f"tree_requests_after_retry={len(request_observation.tree_urls)}; "
+                                f"issue_main_reads={len(request_observation.issue_content_urls)}"
+                            )
+                        ),
                     )
-                if not retried.regenerate_guidance_visible or not retried.retry_visible:
-                    raise AssertionError(
-                        "Human-style verification failed: after clicking Retry, the app did "
-                        "not return to the same visible recoverable failure surface.\n"
-                        f"Observed body text:\n{retried.body_text}",
+                    if retry_error:
+                        verification_errors.append(retry_error)
+                else:
+                    _record_human_verification(
+                        result,
+                        status="failed",
+                        check=(
+                            "Clicked Retry and confirmed the app performed one explicit retry "
+                            "attempt while keeping the same visible index-regeneration failure "
+                            "guidance on screen."
+                        ),
+                        observed=(
+                            "Retry could not be exercised because the failure surface only "
+                            f"showed {failure_surface.visible_button_labels}."
+                        ),
                     )
-                if request_observation.issue_content_urls:
-                    raise AssertionError(
-                        "Human-style verification failed: after clicking Retry, the app "
-                        "started hydrating issue `main.md` files instead of staying in the "
-                        "explicit missing-index failure state.\n"
-                        f"Observed issue content URLs: {request_observation.issue_content_urls}\n"
-                        f"Observed body text:\n{retried.body_text}",
-                    )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Clicked Retry and confirmed the app performed one explicit retry "
-                        "attempt while keeping the same visible index-regeneration failure "
-                        "guidance on screen."
-                    ),
-                    observed=(
-                        f"tree_requests_before_retry={retry_tree_count}; "
-                        f"tree_requests_after_retry={len(request_observation.tree_urls)}; "
-                        f"issue_main_reads={len(request_observation.issue_content_urls)}"
-                    ),
-                )
+
+                if verification_errors:
+                    raise AssertionError("\n\n".join(verification_errors))
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -253,25 +304,29 @@ def main() -> None:
         raise
 
 
-def _assert_failure_surface(observation: HostedIndexRecoveryObservation) -> None:
+def _failure_surface_error(observation: HostedIndexRecoveryObservation) -> str | None:
+    issues: list[str] = []
     if not observation.tracker_data_not_found_visible:
-        raise AssertionError(
-            "Step 3 failed: the failure surface did not explain that TrackState data could "
-            "not be loaded.\n"
-            f"Observed body text:\n{observation.body_text}",
+        issues.append(
+            "the failure surface did not explicitly explain that the hosted issue "
+            "index needed regeneration."
         )
     if not observation.regenerate_guidance_visible:
-        raise AssertionError(
-            "Step 3 failed: the failure surface did not include guidance to regenerate the "
-            "tracker indexes.\n"
-            f"Observed body text:\n{observation.body_text}",
+        issues.append(
+            "the failure surface did not include guidance to regenerate the tracker "
+            "indexes."
         )
     if not observation.retry_visible:
-        raise AssertionError(
-            "Step 3 failed: the failure surface did not render a visible Retry action.\n"
-            f"Visible buttons: {observation.visible_button_labels}\n"
-            f"Observed body text:\n{observation.body_text}",
-        )
+        issues.append("the failure surface did not render a visible Retry action.")
+    if not issues:
+        return None
+    return (
+        "Step 3 failed: "
+        + " ".join(issues)
+        + "\n"
+        f"Visible buttons: {observation.visible_button_labels}\n"
+        f"Observed body text:\n{observation.body_text}"
+    )
 
 
 def _record_step(
@@ -297,12 +352,13 @@ def _record_step(
 def _record_human_verification(
     result: dict[str, object],
     *,
+    status: str,
     check: str,
     observed: str,
 ) -> None:
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
-    checks.append({"check": check, "observed": observed})
+    checks.append({"status": status, "check": check, "observed": observed})
 
 
 def _failure_surface_payload(
@@ -376,12 +432,15 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = "✅ PASSED" if passed else "❌ FAILED"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
-        f"h3. {TICKET_KEY} {status}",
+        "h3. Test Automation Result",
         "",
-        "*Automation coverage*",
+        f"*Status:* {status}",
+        f"*Test Case:* {TICKET_KEY} — {TEST_CASE_SUMMARY}",
+        "",
+        "h4. What was tested",
         (
             f"* Removed {{{{{BLOCKED_BOOTSTRAP_PATH}}}}} from the intercepted recursive "
             "GitHub tree response while bootstrapping the deployed hosted app."
@@ -390,13 +449,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"* Observed GitHub API traffic for {OBSERVATION_WINDOW_SECONDS} seconds to "
             "check for fallback tree replay or issue-file hydration."
         ),
-        "* Checked the visible user-facing failure copy and Retry affordance.",
+        "* Checked the visible user-facing failure copy, guidance text, and Retry affordance.",
         "",
-        "*Observed result*",
+        "h4. Result",
         (
             "* Matched the expected result."
             if passed
-            else "* Did not match the expected result."
+            else f"* Did not match the expected result. {_failure_summary(result)}"
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -405,17 +464,27 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         f"* Screenshot: {{{{{screenshot_path}}}}}",
         "",
-        "*Step results*",
+        "h4. Step results",
         *_step_lines(result, jira=True),
         "",
-        "*Human-style verification*",
+        "h4. Real user-style verification",
         *_human_lines(result, jira=True),
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        RUN_COMMAND,
+        "{code}",
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "*Exact error*",
+                "h4. Exact error",
                 "{code}",
                 str(result.get("traceback", result.get("error", ""))),
                 "{code}",
@@ -425,21 +494,24 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
-    status = "Passed" if passed else "Failed"
+    status = "✅ PASSED" if passed else "❌ FAILED"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
-        f"## {TICKET_KEY} {status}",
+        "## Test Automation Result",
         "",
-        "### Automation",
+        f"**Status:** {status}",
+        f"**Test Case:** {TICKET_KEY} — {TEST_CASE_SUMMARY}",
+        "",
+        "## What was automated",
         f"- Removed `{BLOCKED_BOOTSTRAP_PATH}` from the intercepted recursive GitHub tree response while bootstrapping the deployed hosted app.",
         f"- Observed GitHub API traffic for {OBSERVATION_WINDOW_SECONDS} seconds to detect fallback tree replay or issue `main.md` hydration.",
-        "- Verified the user-visible failure copy and Retry affordance on the live app.",
+        "- Verified the live user-facing failure copy, regeneration guidance, and Retry affordance.",
         "",
-        "### Observed result",
+        "## Result",
         (
             "- Matched the expected result."
             if passed
-            else "- Did not match the expected result."
+            else f"- Did not match the expected result: {_failure_summary(result)}"
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -450,8 +522,16 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "### Step results",
         *_step_lines(result, jira=False),
         "",
-        "### Human-style verification",
+        "### Real user-style verification",
         *_human_lines(result, jira=False),
+        "",
+        "## Test file",
+        f"`{TEST_FILE_PATH}`",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
     ]
     if not passed:
         lines.extend(
@@ -472,6 +552,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
+        f"**Test Case:** {TEST_CASE_SUMMARY}",
+        "",
+        "## Summary",
         (
             f"Ran the deployed hosted app with `{BLOCKED_BOOTSTRAP_PATH}` removed from the "
             "intercepted GitHub tree response."
@@ -503,60 +586,77 @@ def _bug_description(result: dict[str, object]) -> str:
     request_observation = result.get("request_observation")
     failure_surface = result.get("failure_surface")
     lines = [
-        f"# {TICKET_KEY} - Missing hosted index recovery regression",
+        f"h3. {TICKET_KEY} — {TEST_CASE_SUMMARY}",
         "",
-        "## Steps to reproduce",
-        "1. Open the deployed hosted TrackState app.",
-        f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-        "2. Remove `DEMO/.trackstate/index/issues.json` from the hosted repository tree seen by the browser and continue startup.",
-        f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
-        "3. Watch GitHub API requests and observe the visible UI state.",
-        f"   - {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
-        "4. Click the visible `Retry` action if one is shown.",
-        (
-            f"   - {'✅' if _human_check_passed(result, 3) else '❌'} "
-            f"{_human_observation(result, 3)}"
-        ),
+        "h4. Environment",
+        f"* URL: {{{{{result['app_url']}}}}}",
+        f"* Repository: {{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}",
+        "* Browser: {{Chromium (Playwright)}}",
+        f"* OS: {{{{{platform.platform()}}}}}",
+        f"* Removed bootstrap artifact from tree: {{{{{BLOCKED_BOOTSTRAP_PATH}}}}}",
+        f"* Observation window: {{{{{OBSERVATION_WINDOW_SECONDS} seconds}}}}",
         "",
-        "## Actual vs Expected",
+        "h4. Steps to Reproduce",
         (
-            "- Expected: the hosted runtime fails explicitly with a visible recoverable "
-            "state, shows `Retry`, shows guidance to regenerate the tracker indexes, and "
-            "does not silently read issue `main.md` files or replay recursive tree scans "
-            "while the failure is visible."
+            "# Attempt to bootstrap the hosted web app. "
+            f"{_status_icon(_step_status(result, 1))} {_step_observation(result, 1)}"
         ),
         (
-            "- Actual: "
-            + str(
-                result.get("error")
-                or "the visible runtime behavior did not match the recoverable missing-index flow."
-            )
+            "# Monitor GitHub API calls to ensure no recursive tree walk or mass-file "
+            f"hydration occurs as a fallback. {_status_icon(_step_status(result, 2))} "
+            f"{_step_observation(result, 2)}"
+        ),
+        (
+            "# Observe the UI state. "
+            f"{_status_icon(_step_status(result, 3))} {_step_observation(result, 3)}"
+        ),
+        (
+            "# Click the visible {{Retry}} option and observe the recovery state. "
+            f"{_status_icon(_human_status(result, 3))} {_human_observation(result, 3)}"
         ),
         "",
-        "## Exact error message",
-        "```text",
+        "h4. Expected Result",
+        (
+            "The app shows a recoverable failure state with a visible {{Retry}} option and "
+            "guidance on index regeneration. No silent full-scan fallback is performed."
+        ),
+        "",
+        "h4. Actual Result",
+        _bug_actual_result(result),
+        "",
+        "h4. Logs / Error Output",
+        "{code}",
         str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "{code}",
         "",
-        "## Environment",
-        f"- URL: `{result['app_url']}`",
-        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
-        "- Browser: `Chromium (Playwright)`",
-        f"- OS: `{platform.platform()}`",
-        f"- Removed bootstrap artifact from tree: `{BLOCKED_BOOTSTRAP_PATH}`",
-        f"- Observation window: `{OBSERVATION_WINDOW_SECONDS}` seconds",
-        "",
-        "## Evidence",
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        "h4. Notes",
+        f"* Screenshot: {{{{{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}}}}}",
     ]
     if isinstance(failure_surface, dict):
-        lines.append(f"- Visible failure body text: `{failure_surface.get('body_text', '')}`")
+        lines.extend(
+            [
+                (
+                    "* Visible failure body text: "
+                    f"{{{{{failure_surface.get('body_text', '')}}}}}"
+                ),
+                (
+                    "* Visible buttons: "
+                    f"{{{{{failure_surface.get('visible_button_labels', [])}}}}}"
+                ),
+            ]
+        )
     if isinstance(request_observation, dict):
         lines.extend(
             [
-                f"- Recursive tree URLs: `{request_observation.get('tree_urls', [])}`",
-                f"- Issue content URLs: `{request_observation.get('issue_content_urls', [])}`",
-                f"- Other content URLs: `{request_observation.get('other_content_urls', [])}`",
+                f"* Recursive tree URLs: {{{{{request_observation.get('tree_urls', [])}}}}}",
+                (
+                    "* Issue content URLs: "
+                    f"{{{{{request_observation.get('issue_content_urls', [])}}}}}"
+                ),
+                (
+                    "* Other content URLs: "
+                    f"{{{{{request_observation.get('other_content_urls', [])}}}}}"
+                ),
             ]
         )
     return "\n".join(lines) + "\n"
@@ -582,7 +682,10 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         if not isinstance(check, dict):
             continue
         prefix = "*" if jira else "-"
-        lines.append(f"{prefix} {check['check']} Observed: {check['observed']}")
+        status = str(check.get("status", "passed")).upper()
+        lines.append(
+            f"{prefix} [{status}] {check['check']} Observed: {check['observed']}"
+        )
     if not lines:
         lines.append("* No human-style verification was recorded." if jira else "- No human-style verification was recorded.")
     return lines
@@ -606,7 +709,18 @@ def _human_check_passed(result: dict[str, object], index: int) -> bool:
     checks = result.get("human_verification", [])
     if not isinstance(checks, list) or index - 1 >= len(checks):
         return False
-    return True
+    check = checks[index - 1]
+    return isinstance(check, dict) and check.get("status") == "passed"
+
+
+def _human_status(result: dict[str, object], index: int) -> str:
+    checks = result.get("human_verification", [])
+    if not isinstance(checks, list) or index - 1 >= len(checks):
+        return "failed"
+    check = checks[index - 1]
+    if not isinstance(check, dict):
+        return "failed"
+    return str(check.get("status", "failed"))
 
 
 def _human_observation(result: dict[str, object], index: int) -> str:
@@ -619,5 +733,28 @@ def _human_observation(result: dict[str, object], index: int) -> str:
     return str(check.get("observed", "No human verification recorded."))
 
 
+def _status_icon(status: str) -> str:
+    return "✅" if status == "passed" else "❌"
+
+
+def _failure_summary(result: dict[str, object]) -> str:
+    step_observation = _step_observation(result, 3).strip()
+    if step_observation:
+        return step_observation.splitlines()[0]
+    return str(result.get("error", "The test failed without a recorded step observation."))
+
+
+def _bug_actual_result(result: dict[str, object]) -> str:
+    failure_surface = result.get("failure_surface")
+    if not isinstance(failure_surface, dict):
+        return _failure_summary(result)
+
+    body_text = str(failure_surface.get("body_text", "")).strip()
+    visible_buttons = tuple(failure_surface.get("visible_button_labels", ()))
+    return (
+        "Observed the hosted missing-index recovery surface with body text "
+        f"{{{{{body_text}}}}} and visible buttons {{{{{visible_buttons}}}}}. "
+        f"{_failure_summary(result)}"
+    )
 if __name__ == "__main__":
     main()

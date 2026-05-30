@@ -183,25 +183,31 @@ class WorkspaceProfilesState {
     this.profiles = const <WorkspaceProfile>[],
     this.activeWorkspaceId,
     this.migrationComplete = false,
+    this.unavailableLocalWorkspaceIds = const <String>{},
   });
 
   final List<WorkspaceProfile> profiles;
   final String? activeWorkspaceId;
   final bool migrationComplete;
+  final Set<String> unavailableLocalWorkspaceIds;
 
   bool get hasProfiles => profiles.isNotEmpty;
 
-  WorkspaceProfile? get activeWorkspace {
+  WorkspaceProfile? get selectedWorkspace {
     final activeWorkspaceId = this.activeWorkspaceId;
     if (activeWorkspaceId == null || activeWorkspaceId.isEmpty) {
-      return mostRecentlyOpenedWorkspace;
+      return null;
     }
     for (final profile in profiles) {
       if (profile.id == activeWorkspaceId) {
         return profile;
       }
     }
-    return mostRecentlyOpenedWorkspace;
+    return null;
+  }
+
+  WorkspaceProfile? get activeWorkspace {
+    return selectedWorkspace ?? mostRecentlyOpenedWorkspace;
   }
 
   WorkspaceProfile? get mostRecentlyOpenedWorkspace {
@@ -217,6 +223,7 @@ class WorkspaceProfilesState {
     List<WorkspaceProfile>? profiles,
     Object? activeWorkspaceId = _workspaceProfileNoop,
     bool? migrationComplete,
+    Set<String>? unavailableLocalWorkspaceIds,
   }) {
     return WorkspaceProfilesState(
       profiles: profiles ?? this.profiles,
@@ -224,6 +231,8 @@ class WorkspaceProfilesState {
           ? this.activeWorkspaceId
           : activeWorkspaceId as String?,
       migrationComplete: migrationComplete ?? this.migrationComplete,
+      unavailableLocalWorkspaceIds:
+          unavailableLocalWorkspaceIds ?? this.unavailableLocalWorkspaceIds,
     );
   }
 }

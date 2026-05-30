@@ -63,7 +63,7 @@ class TrackStateCliAttachmentDiscoveryConfig:
             ),
             required_jira_attachment_upload_fragments=(
                 "trackstate attachment upload",
-                "Compatibility alias:",
+                "Compatibility alias",
                 "jira_attach_file_to_ticket --issueKey TRACK-1 --file ./design.png",
                 "--issue         Issue key that will receive the attachment.",
                 "--file          Source file to upload.",

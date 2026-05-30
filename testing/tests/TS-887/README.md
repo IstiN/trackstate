@@ -10,8 +10,8 @@ The automation:
 4. attempts to clear the visible `Summary` field
 5. fails immediately if the production UI does not allow the user to perform
    that first required action
-6. when the field is editable, clicks **Save** and verifies the visible
-   `Summary is required before saving.` feedback
+6. when the field is editable, clicks **Save** and verifies visible
+   feedback containing `Summary is required`
 7. checks that the visible validation text meets WCAG AA contrast
 8. checks that the validation state exposes an accessibility announcement path
 

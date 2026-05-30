@@ -11,11 +11,13 @@ import '../../core/interfaces/issue_transition_mutation_port.dart';
 import '../../core/interfaces/issue_reassignment_driver.dart';
 import '../../core/interfaces/issue_reassignment_port.dart';
 import '../../core/interfaces/local_git_repository_port.dart';
+import '../../core/interfaces/manual_unavailable_workspace_reauth_component.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../frameworks/flutter/flutter_issue_archive_mutation_driver.dart';
 import '../../frameworks/flutter/flutter_issue_link_mutation_driver.dart';
 import '../../frameworks/flutter/flutter_issue_transition_mutation_driver.dart';
 import '../../frameworks/flutter/flutter_issue_reassignment_driver.dart';
+import '../screens/manual_unavailable_workspace_reauth_component.dart';
 import '../screens/trackstate_app_screen.dart';
 import '../services/issue_aggregate_probe.dart';
 import '../services/issue_archive_mutation_service.dart';
@@ -75,5 +77,12 @@ class DefaultTestingDependencyFactory {
       TrackStateAppScreen(
         tester,
         repositoryService: createLocalGitRepositoryPort(tester),
+      );
+
+  ManualUnavailableWorkspaceReauthComponent
+  createManualUnavailableWorkspaceReauthScreen(WidgetTester tester) =>
+      ManualUnavailableWorkspaceReauthScreen(
+        tester,
+        createTrackStateAppScreen(tester),
       );
 }
