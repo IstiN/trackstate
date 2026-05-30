@@ -88,6 +88,21 @@ def main() -> None:
                         f"Observed body text:\n{runtime_state.body_text}",
                     )
 
+                try:
+                    shell_ready_observation = page.wait_for_shell_ready(timeout_ms=120_000)
+                    result["shell_ready_observation"] = _shell_ready_payload(
+                        shell_ready_observation,
+                    )
+                except Exception as error:
+                    shell_ready_observation = None
+                    shell_ready_failure = (
+                        "The hosted shell never reached a verified ready state with full "
+                        "navigation visible before the deferred-bootstrap ordering check.\n"
+                        f"Observed body text:\n{page.current_body_text()}\n"
+                        f"Underlying error: {type(error).__name__}: {error}"
+                    )
+                    result["shell_ready_failure"] = shell_ready_failure
+
                 blocked_detected, blocked_requests = poll_until(
                     probe=lambda: tuple(rate_limit_observation.blocked_requests),
                     is_satisfied=lambda blocked: len(blocked) > 0,
@@ -99,11 +114,14 @@ def main() -> None:
                 step_failures: list[str] = []
                 shell_observation: StartupRecoveryShellObservation | None = None
 
+                step_one_passed = False
+
                 if not blocked_detected:
                     blocked_failure = (
                         "Step 1 failed: the live app never requested the deferred bootstrap "
                         f"artifact `{BLOCKED_BOOTSTRAP_PATH}`, so the recoverable rate-limit "
                         "path was not exercised.\n"
+                        f"{result.get('shell_ready_failure', _shell_ready_snapshot_text(shell_ready_observation))}\n"
                         f"Observed blocked URLs: {list(blocked_urls)}\n"
                         f"Observed body text:\n{page.current_body_text()}"
                     )
@@ -132,6 +150,7 @@ def main() -> None:
                             "recovery path where mandatory data was already available or "
                             "partially rendered.\n"
                             f"{_blocked_request_summary(first_blocked_request)}\n"
+                            f"{_blocked_request_shell_ready_summary(first_blocked_request)}\n"
                             f"Observed blocked URLs: {list(blocked_urls)}\n"
                             "Observed UI snapshot at interception:\n"
                             f"{first_blocked_request.body_text_snapshot}\n"
@@ -151,6 +170,7 @@ def main() -> None:
                         )
                         step_failures.append(blocked_failure)
                     else:
+                        step_one_passed = True
                         _record_step(
                             result,
                             step=1,
@@ -162,6 +182,7 @@ def main() -> None:
                             ),
                             observed=(
                                 f"{_blocked_request_summary(first_blocked_request)}\n"
+                                f"{_blocked_request_shell_ready_summary(first_blocked_request)}\n"
                                 f"visible_navigation_labels={first_blocked_request.visible_navigation_labels}; "
                                 f"settings_selected={first_blocked_request.settings_selected}; "
                                 f"settings_heading_visible={first_blocked_request.settings_heading_visible}; "
@@ -257,6 +278,19 @@ def main() -> None:
                     )
 
                 if shell_observation is not None:
+                    if step_one_passed:
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the deferred tombstones rate-limit request was "
+                                "captured during deferred bootstrap after the hosted UI "
+                                "exposed shell markers."
+                            ),
+                            observed=(
+                                f"shell_ready={result.get('shell_ready_observation', {})}; "
+                                f"first_blocked_request={result.get('first_blocked_request')}"
+                            ),
+                        )
                     _record_human_verification(
                         result,
                         check=(
@@ -399,6 +433,23 @@ def _blocked_request_payload(
     }
 
 
+def _shell_ready_payload(observation: object) -> dict[str, object]:
+    return {
+        "body_text": str(getattr(observation, "body_text", "")),
+        "location_href": str(getattr(observation, "location_href", "")),
+        "location_hash": str(getattr(observation, "location_hash", "")),
+        "location_pathname": str(getattr(observation, "location_pathname", "")),
+        "visible_navigation_labels": list(
+            getattr(observation, "visible_navigation_labels", ()),
+        ),
+        "visible_button_labels": list(getattr(observation, "visible_button_labels", ())),
+        "workspace_switcher_visible": bool(
+            getattr(observation, "workspace_switcher_visible", False),
+        ),
+        "add_workspace_visible": bool(getattr(observation, "add_workspace_visible", False)),
+    }
+
+
 def _blocked_request_summary(
     observation: StartupRecoveryBlockedRequestObservation,
 ) -> str:
@@ -411,6 +462,33 @@ def _blocked_request_summary(
         f"settings_selected:{observation.settings_selected}, "
         f"settings_heading_visible:{observation.settings_heading_visible}, "
         f"topbar_title_visible:{observation.topbar_title_visible}"
+    )
+
+
+def _blocked_request_shell_ready_summary(
+    observation: StartupRecoveryBlockedRequestObservation,
+) -> str:
+    return (
+        "shell_ready_snapshot="
+        f"before_request:{observation.shell_ready_observed_before_request}, "
+        f"order:{observation.shell_ready_observed_order}, "
+        f"performance_ms:{observation.shell_ready_observed_at_performance_ms}, "
+        f"visible_navigation_labels:{observation.shell_ready_visible_navigation_labels}, "
+        f"visible_button_labels:{observation.shell_ready_visible_button_labels}, "
+        f"workspace_switcher_visible:{observation.shell_ready_workspace_switcher_visible}, "
+        f"add_workspace_visible:{observation.shell_ready_add_workspace_visible}\n"
+        f"{observation.shell_ready_body_text_snapshot}"
+    )
+
+
+def _shell_ready_snapshot_text(observation: object | None) -> str:
+    if observation is None:
+        return "<no shell-ready snapshot recorded>"
+    return (
+        f"visible_navigation_labels={getattr(observation, 'visible_navigation_labels', ())}; "
+        f"workspace_switcher_visible={getattr(observation, 'workspace_switcher_visible', False)}; "
+        f"add_workspace_visible={getattr(observation, 'add_workspace_visible', False)}\n"
+        f"{getattr(observation, 'body_text', '')}"
     )
 
 
@@ -494,7 +572,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"* Confirmed the visible recovery callout stated "
             f"{{{{{STARTUP_RECOVERY_MESSAGE}}}}}."
         ),
-        "* Confirmed the app stayed in the hosted shell with Settings content visible.",
+        "* Confirmed the app stayed in the hosted shell with sidebar navigation and recovery UI visible.",
         "* Confirmed the visible selected navigation target was Settings.",
         "",
         "*Observed result*",
@@ -541,7 +619,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "### Automation",
         f"- Blocked `{BLOCKED_BOOTSTRAP_PATH}` with a synthetic GitHub 403 rate-limit response during deferred bootstrap.",
         f"- Verified the visible recovery callout stated `{STARTUP_RECOVERY_MESSAGE}`.",
-        "- Verified the hosted app shell stayed visible with sidebar navigation and Settings content rendered.",
+        "- Verified the hosted app shell stayed visible with sidebar navigation and recovery UI rendered.",
         "- Verified the visible selected navigation target was `Settings`.",
         "",
         "### Observed result",
@@ -583,6 +661,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         "",
         "## Observed",
+        f"- Shell-ready snapshot: {result.get('shell_ready_observation', {})}",
+        f"- Step 1 status: {_step_status(result, 1)}",
         f"- Selected buttons: {result.get('shell_observation', {}).get('selected_button_labels', []) if isinstance(result.get('shell_observation'), dict) else []}",
         f"- Recovery title visible: {STARTUP_RECOVERY_TITLE in str(result.get('shell_observation', {}).get('body_text', '')) if isinstance(result.get('shell_observation'), dict) else False}",
         f"- Screenshot: `{screenshot_path}`",
