@@ -5682,6 +5682,13 @@ class LiveWorkspaceSwitcherPage:
         self._click_trigger(timeout_ms=timeout_ms)
         return self.observe_open_switcher(timeout_ms=timeout_ms)
 
+    def observe_saved_workspace_rows(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
+        return self._accessible_saved_workspace_rows(timeout_ms=timeout_ms)
+
     def switch_to_workspace(
         self,
         *,

@@ -18,6 +18,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherRowObservation,
+    WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
@@ -224,16 +225,27 @@ def main() -> None:
                         f"row_count={switcher.row_count}; "
                         f"switcher_text={switcher.switcher_text!r}"
                     )
+                saved_workspace_rows = page.observe_saved_workspace_rows(timeout_ms=20_000)
                 result["switcher_observation"] = _switcher_payload(switcher)
+                result["saved_workspace_rows"] = [
+                    _saved_workspace_row_payload(row) for row in saved_workspace_rows
+                ]
                 _record_step(
                     result,
                     step=3,
                     status="passed",
                     action=REQUEST_STEPS[2],
-                    observed=step_3_observed,
+                    observed=(
+                        f"{step_3_observed}\n"
+                        f"saved_workspace_row_count={len(saved_workspace_rows)}; "
+                        "saved_workspace_rows="
+                        f"{json.dumps(result['saved_workspace_rows'], ensure_ascii=True)}"
+                    ),
                 )
 
-                local_row = _find_named_local_row(switcher)
+                local_row = _find_named_saved_local_row(saved_workspace_rows)
+                if local_row is None:
+                    local_row = _find_named_local_row(switcher)
                 selected_row = _find_selected_row(switcher)
                 if selected_row is None and final_trigger is not None:
                     selected_row = _selected_row_from_trigger(final_trigger)
@@ -278,7 +290,9 @@ def main() -> None:
                     ),
                     observed=(
                         f"selected_row={json.dumps(_row_payload(selected_row), ensure_ascii=True)}; "
-                        f"local_row={json.dumps(_row_payload(local_row), ensure_ascii=True)}"
+                        f"local_row={json.dumps(_row_payload(local_row), ensure_ascii=True)}; "
+                        "saved_workspace_rows="
+                        f"{json.dumps(result['saved_workspace_rows'], ensure_ascii=True)}"
                     ),
                 )
 
@@ -505,6 +519,15 @@ def _find_named_local_row(
     return _fallback_local_row_from_switcher_text(switcher.switcher_text)
 
 
+def _find_named_saved_local_row(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> WorkspaceSwitcherRowObservation | None:
+    for row in rows:
+        if row.target_type_label == "Local" and LOCAL_TARGET in row.detail_text:
+            return _saved_row_as_workspace_row(row)
+    return None
+
+
 def _find_selected_row(
     switcher: WorkspaceSwitcherObservation,
 ) -> WorkspaceSwitcherRowObservation | None:
@@ -528,6 +551,33 @@ def _selected_row_from_trigger(
         icon_accessibility_label=None,
         action_labels=("Active",),
         button_labels=(),
+    )
+
+
+def _saved_row_as_workspace_row(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation,
+) -> WorkspaceSwitcherRowObservation:
+    return WorkspaceSwitcherRowObservation(
+        display_name=row.display_name,
+        target_type_label=row.target_type_label,
+        state_label=row.state_label,
+        detail_text=row.detail_text,
+        visible_text=" ".join(
+            value
+            for value in (
+                row.display_name,
+                row.target_type_label,
+                row.state_label,
+                row.detail_text,
+                *row.action_labels,
+            )
+            if value
+        ),
+        selected=row.selected,
+        semantics_label=None,
+        icon_accessibility_label=None,
+        action_labels=row.action_labels,
+        button_labels=row.action_labels,
     )
 
 
@@ -1092,6 +1142,23 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
         "switcher_text": switcher.switcher_text,
         "row_count": switcher.row_count,
         "rows": [_row_payload(row) for row in switcher.rows],
+    }
+
+
+def _saved_workspace_row_payload(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation,
+) -> dict[str, object]:
+    return {
+        "display_name": row.display_name,
+        "target_type_label": row.target_type_label,
+        "state_label": row.state_label,
+        "detail_text": row.detail_text,
+        "selected": row.selected,
+        "action_labels": list(row.action_labels),
+        "left": row.left,
+        "top": row.top,
+        "width": row.width,
+        "height": row.height,
     }
 
 
