@@ -77,5 +77,5 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
 
         raise AssertionError(
             "Precondition failed: TS-409 requires the installed `trackstate` CLI "
-            "to be available on PATH for the hosted session parity check."
+            "on PATH so Step 5 validates the packaged `trackstate session` surface."
         )

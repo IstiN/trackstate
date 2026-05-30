@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
@@ -23,6 +24,13 @@ class EditControlObservation:
         return fragment in self.text or (
             self.label is not None and fragment in self.label
         )
+
+
+@dataclass(frozen=True)
+class BoardIssueObservation:
+    key: str
+    summary: str
+    label: str
 
 
 @dataclass(frozen=True)
@@ -107,7 +115,7 @@ class SummaryRequiredValidationObservation:
 
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
+    _edit_button_selector = 'flt-semantics[role="button"]'
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
     _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
@@ -129,6 +137,9 @@ class LiveMultiViewRefreshPage:
             user_login=user_login,
         )
 
+    def dismiss_connection_banner(self) -> None:
+        self._issue_page.dismiss_connection_banner()
+
     def set_viewport(self, *, width: int, height: int) -> None:
         self._session.set_viewport_size(width=width, height=height)
         try:
@@ -148,29 +159,72 @@ class LiveMultiViewRefreshPage:
             ) from error
 
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
-        self.navigate_to_section("JQL Search")
-        self._session.wait_for_selector(
-            self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=60_000,
-        )
-        self.open_issue_from_current_section(
-            issue_key=issue_key,
-            issue_summary=issue_summary,
-        )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            if self._button_bounds_for_sidebar_label("JQL Search") is not None:
+                self.navigate_to_section("JQL Search")
+            if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+                self._session.wait_for_text(issue_key, timeout_ms=60_000)
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
-    def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
-        self.navigate_to_section("JQL Search")
-        label = self.visible_issue_open_label(issue_key=issue_key)
-        self._session.click(
-            f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+    def open_edit_dialog_for_issue_key(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str | None = None,
+    ) -> str:
+        for attempt in range(2):
+            try:
+                self.navigate_to_section("JQL Search")
+                break
+            except AssertionError:
+                current_body = self.current_body_text()
+                summary_fragment = issue_summary or ""
+                if attempt == 0 and (
+                    "Project Settings" in current_body
+                    or "GitHub startup limit reached" in current_body
+                    or self._session.count('flt-semantics[aria-label="Close"]') > 0
+                ):
+                    continue
+                if (
+                    "JQL Search" not in current_body
+                    and issue_key not in current_body
+                    and summary_fragment not in current_body
+                ):
+                    raise
+
+        current_body = self.current_body_text()
+        if issue_key not in current_body or "Edit" not in current_body:
+            try:
+                self._session.wait_for_function(
+                    """
+                    ({ issueKey }) => {
+                      const bodyText = document.body?.innerText ?? '';
+                      return bodyText.includes(issueKey) && bodyText.includes('Edit');
+                    }
+                    """,
+                    arg={"issueKey": issue_key},
+                    timeout_ms=15_000,
+                )
+                current_body = self.current_body_text()
+            except WebAppTimeoutError:
+                current_body = self.current_body_text()
+        if issue_key not in current_body or "Edit" not in current_body:
+            if issue_summary is None or not issue_summary.strip():
+                label = self.visible_issue_open_label(issue_key=issue_key)
+                self._session.click(
+                    f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
+                    timeout_ms=30_000,
+                )
+            else:
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
     def open_edit_dialog_from_board_card(
         self,
@@ -218,12 +272,31 @@ class LiveMultiViewRefreshPage:
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._click_edit_button()
         return self._wait_for_edit_dialog(
             issue_key=issue_key,
             origin_label="current issue detail",
         )
+
+    def _click_edit_button(self) -> None:
+        if self._session.count(self._edit_button_selector, has_text="Edit") > 0:
+            self._session.wait_for_selector(
+                self._edit_button_selector,
+                has_text="Edit",
+                timeout_ms=30_000,
+            )
+            self._session.click(
+                self._edit_button_selector,
+                has_text="Edit",
+                timeout_ms=30_000,
+            )
+            return
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(self._button_selector, has_text="Edit", timeout_ms=30_000)
 
     def close_edit_dialog(self) -> None:
         self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
@@ -395,10 +468,13 @@ class LiveMultiViewRefreshPage:
         *,
         message_fragment: str,
     ) -> SummaryRequiredValidationObservation:
-        self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
-            timeout_ms=30_000,
-        )
+        if self._session.count('flt-semantics[role="button"][aria-label="Save"]') > 0:
+            self._session.click(
+                'flt-semantics[role="button"][aria-label="Save"]',
+                timeout_ms=30_000,
+            )
+        else:
+            self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
         try:
             payload = self._session.wait_for_function(
                 """
@@ -983,7 +1059,6 @@ class LiveMultiViewRefreshPage:
             listbox_count=int(payload.get("listboxCount", 0)),
             menu_item_count=int(payload.get("menuItemCount", 0)),
         )
-
     def change_priority(self, target_label: str) -> EditControlObservation:
         control = self.priority_control()
         if control.contains(target_label):
@@ -1029,8 +1104,8 @@ class LiveMultiViewRefreshPage:
             )
         if control.contains("No workflow transitions available."):
             raise AssertionError(
-                "Step 5 failed: the Edit issue surface for DEMO-3 did not expose any "
-                "workflow transitions, so the scenario could not change the Status to "
+                "Step 5 failed: the Edit issue surface did not expose any workflow "
+                f"transitions, so the scenario could not change the Status to "
                 f"{target_label} before saving.\n"
                 f"Observed status control label: {control.label}\n"
                 f"Observed status helper text: {control.text}\n"
@@ -1066,14 +1141,85 @@ class LiveMultiViewRefreshPage:
             )
         return updated
 
+    def available_status_transitions(self) -> tuple[str, ...]:
+        options = self._open_focusable_dropdown(
+            selector='flt-semantics[role="button"][aria-label*="Status"]',
+            has_text=None,
+            control_name="Status",
+        )
+        self._session.press_key("Escape")
+        self._session.wait_for_function(
+            """
+            () =>
+              document.querySelectorAll('flt-semantics[role="menuitem"]').length === 0
+              && (document.body?.innerText ?? '').includes('Edit issue')
+            """,
+            timeout_ms=30_000,
+        )
+        return options
+
+    def visible_board_issues(self) -> tuple[BoardIssueObservation, ...]:
+        self.navigate_to_section("Board")
+        payload = self._session.evaluate(
+            """
+            () => {
+              const issuePattern = /^Open ([A-Z][A-Z0-9]+-\\d+)\\s+(.+)$/;
+              const issues = [];
+              for (const element of document.querySelectorAll('flt-semantics[role="button"]')) {
+                const label = (element.getAttribute('aria-label') ?? '').trim();
+                const text = (element.innerText || element.textContent || '').trim();
+                const source = label || text;
+                const match = issuePattern.exec(source);
+                if (!match) {
+                  continue;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  continue;
+                }
+                issues.push({
+                  key: match[1],
+                  summary: match[2],
+                  label: source,
+                });
+              }
+              return issues;
+            }
+            """,
+        )
+        if not isinstance(payload, list):
+            return ()
+        issues: list[BoardIssueObservation] = []
+        seen_keys: set[str] = set()
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            key = str(entry.get("key", "")).strip()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            issues.append(
+                BoardIssueObservation(
+                    key=key,
+                    summary=str(entry.get("summary", "")).strip(),
+                    label=str(entry.get("label", "")).strip(),
+                ),
+            )
+        return tuple(issues)
     def save_issue_edits(
         self,
         *,
         issue_key: str,
         expected_status: str,
     ) -> str:
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Save",
+            timeout_ms=30_000,
+        )
         self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
+            self._button_selector,
+            has_text="Save",
             timeout_ms=30_000,
         )
         try:
@@ -1343,6 +1489,10 @@ class LiveMultiViewRefreshPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    @staticmethod
+    def _escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
     def visible_issue_open_label(self, *, issue_key: str) -> str:
         payload = self._session.evaluate(
             """
@@ -1368,7 +1518,13 @@ class LiveMultiViewRefreshPage:
             """,
             arg=issue_key,
         )
-        label = str(payload).strip()
+        if not isinstance(payload, str):
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        label = payload.strip()
         if not label:
             raise AssertionError(
                 f"Step failed: the hosted tracker did not expose a visible JQL Search row "
@@ -1376,7 +1532,6 @@ class LiveMultiViewRefreshPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return label
-
     def _wait_for_issue_projection(
         self,
         *,
@@ -1793,7 +1948,6 @@ class LiveMultiViewRefreshPage:
               return candidates[0] ?? null;
             }
         """
-
     def _open_focusable_dropdown(
         self,
         *,
@@ -1948,6 +2102,17 @@ class LiveMultiViewRefreshPage:
             f'[aria-label="Open {issue_key} {escaped_summary}"]'
         )
 
+    @classmethod
+    def _issue_button_text(cls, *, issue_key: str, issue_summary: str) -> str:
+        normalized_summary = cls._normalized_issue_summary(issue_summary)
+        return f"Open {issue_key} {normalized_summary}"
+
+    @staticmethod
+    def _normalized_issue_summary(issue_summary: str) -> str:
+        stripped = issue_summary.strip()
+        if re.fullmatch(r'"[^"]+"', stripped):
+            return stripped[1:-1]
+        return stripped
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
         escaped = issue_key.replace("\\", "\\\\").replace('"', '\\"')
@@ -1957,7 +2122,3 @@ class LiveMultiViewRefreshPage:
             'flt-semantics-img[aria-label*="Issue detail '
             f'{escaped}"]'
         )
-
-    @staticmethod
-    def _escape(value: str) -> str:
-        return value.replace("\\", "\\\\").replace('"', '\\"')

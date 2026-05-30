@@ -13,6 +13,7 @@ import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
 import '../../../../domain/models/trackstate_models.dart';
+import '../services/attachment_download_launcher.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
 
@@ -488,7 +489,12 @@ class TrackerViewModel extends ChangeNotifier {
         !session.canWrite) {
       return false;
     }
-    return session.canManageAttachments;
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.canManageAttachments &&
+          session.supportsReleaseAttachmentWrites;
+    }
+    return session.canManageAttachments &&
+        session.attachmentUploadMode != AttachmentUploadMode.none;
   }
 
   bool get hasBlockedWriteAccess =>
@@ -1760,12 +1766,11 @@ class TrackerViewModel extends ChangeNotifier {
   Future<void> downloadIssueAttachment(IssueAttachment attachment) async {
     try {
       final bytes = await _repository.downloadAttachment(attachment);
-      final uri = Uri.dataFromBytes(
+      final launched = await launchAttachmentDownload(
         bytes,
-        mimeType: attachment.mediaType,
-        parameters: {'name': attachment.name},
+        fileName: attachment.name,
+        mediaType: attachment.mediaType,
       );
-      final launched = await launchUrl(uri, webOnlyWindowName: '_blank');
       if (!launched) {
         throw TrackStateRepositoryException(
           'Unable to open ${attachment.name} for download.',

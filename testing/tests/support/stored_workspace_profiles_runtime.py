@@ -65,11 +65,18 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
         *,
         repository: str,
         token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
         workspace_state: dict[str, object],
         workspace_token_profile_ids: tuple[str, ...] = (),
         restore_local_workspace_handles: bool = True,
     ) -> None:
-        super().__init__(repository=repository, token=token)
+        super().__init__(
+            repository=repository,
+            token=token,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+        )
         self._workspace_state = workspace_state
         self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
         self._restore_local_workspace_handles = restore_local_workspace_handles
@@ -478,7 +485,15 @@ def _workspace_token_storage_keys(
         return []
     allowed_profile_ids = {profile_id for profile_id in workspace_token_profile_ids if profile_id}
     if not allowed_profile_ids:
-        return []
+        allowed_profile_ids = {
+            str(profile.get("id", "")).strip()
+            for profile in raw_profiles
+            if isinstance(profile, dict) and str(profile.get("id", "")).strip()
+        }
+    if not allowed_profile_ids:
+        active_workspace_id = str(workspace_state.get("activeWorkspaceId", "")).strip()
+        if active_workspace_id:
+            allowed_profile_ids = {active_workspace_id}
     keys: list[str] = []
     for profile in raw_profiles:
         if not isinstance(profile, dict):

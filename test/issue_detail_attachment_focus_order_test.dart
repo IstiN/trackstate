@@ -93,7 +93,9 @@ void main() {
         );
         final downloadAttachmentButton = find.descendant(
           of: attachmentRow,
-          matching: find.byType(IconButton),
+          matching: find.bySemanticsLabel(
+            RegExp('^${RegExp.escape(_downloadAttachmentLabel)}\$'),
+          ),
         );
         final focusCandidates = <String, Finder>{
           _openSettingsLabel: openSettingsButton,
