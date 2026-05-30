@@ -6,7 +6,6 @@ import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 void main() {
   const desktopViewportWidth = 1440.0;
   const desktopViewportHeight = 900.0;
-
   testWidgets(
     'TS-334 Create issue desktop surface is flush with the right viewport edge',
     (tester) async {

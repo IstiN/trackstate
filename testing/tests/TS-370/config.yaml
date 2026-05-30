@@ -1,0 +1,8 @@
+test_id: TS-370
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Opens the deployed hosted TrackState app in an unauthenticated browser session and verifies the persistent repository-access banner across Dashboard, Board, JQL Search, Hierarchy, and issue detail.
+  - Connects through the visible PAT dialog while patching the live repository permissions response to read-only, then verifies the banner switches to read-only and the recovery CTA opens the canonical settings/auth surface.

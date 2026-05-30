@@ -4,5 +4,5 @@ framework: flutter_test
 platform: widget
 dependencies: []
 notes:
-  - Verifies the Create issue surface adapts from a desktop side sheet to a compact full-screen layout.
+  - Verifies the Create issue surface adapts from a 1440x900 desktop side sheet to a 390x844 compact full-screen layout.
   - Confirms visible form labels, placeholder copy, accessibility traversal order, and WCAG AA contrast on the rendered Create issue form.

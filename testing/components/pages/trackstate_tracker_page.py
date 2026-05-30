@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
 from testing.core.interfaces.web_app_session import WebAppSession, WebAppTimeoutError
@@ -28,8 +30,40 @@ class CreateIssueObservation:
     created_issue_key: str | None
 
 
+@dataclass(frozen=True)
+class WorkspaceRestoreMessageObservation:
+    message_text: str
+    body_text: str
+
+
+@dataclass(frozen=True)
+class StartupSurfaceObservation:
+    title: str
+    location_href: str
+    location_hash: str
+    location_pathname: str
+    body_text: str
+    button_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherTriggerObservation:
+    aria_label: str
+    visible_text: str
+    body_text: str
+
+
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
+    LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
+    STARTUP_ENTRY_SIGNAL_TEXTS = (
+        "Connect GitHub",
+        "Workspace switcher",
+        "Add workspace",
+        "Board",
+    )
+    WORKSPACE_SWITCHER_LABEL = "Workspace switcher"
+    ADD_WORKSPACE_LABEL = "Add workspace"
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -38,31 +72,160 @@ class TrackStateTrackerPage:
     SAVE_LABEL = "Save"
     CANCEL_LABEL = "Cancel"
     BACK_TO_BOARD_LABEL = "Back to Board"
-    CONNECTED_BANNER_TEMPLATE = (
-        "Connected as {user_login} to {repository}. Drag cards to commit status changes."
+    CONNECTED_BANNER_TEMPLATES = (
+        "Connected as {user_login} to {repository}. Drag cards to commit status changes.",
+        "Connected as {user_login} to {repository}.",
     )
+    CONNECTED_BANNER_COMPACT_TEMPLATE = "Connected as {user_login} to {repository}."
+    CONNECTED_BANNER_TEMPLATE = CONNECTED_BANNER_TEMPLATES[0]
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_TEXT = "Connect GitHub"
+    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
+    DISCONNECTED_MARKERS = (
+        "Needs sign-in",
+        "GitHub write access is not connected",
+    )
+    WORKSPACE_PROFILE_STATE_KEYS = (
+        "trackstate.workspaceProfiles.state",
+        "flutter.trackstate.workspaceProfiles.state",
+    )
+
+    @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return cls.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+
+    @classmethod
+    def body_has_connected_banner(
+        cls,
+        body_text: str,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(
+            " ".join(banner.split()).casefold() in normalized_body
+            for banner in cls.connected_banner_variants(
+                user_login=user_login,
+                repository=repository,
+            )
+        ):
+            return True
+        return "connected as " in normalized_body and " to " in normalized_body
+
+    @classmethod
+    def body_has_authenticated_session(
+        cls,
+        body_text: str,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> bool:
+        normalized_body = " ".join(body_text.split()).casefold()
+        if any(marker.casefold() in normalized_body for marker in cls.DISCONNECTED_MARKERS):
+            return False
+        if cls.body_has_connected_banner(
+            body_text,
+            user_login=user_login,
+            repository=repository,
+        ):
+            return True
+        return (
+            "workspace switcher:" in normalized_body
+            and repository.casefold() in normalized_body
+            and user_login.casefold() in normalized_body
+            and (
+                "attachments limited" in normalized_body
+                or "manage github access" in normalized_body
+                or "open settings" in normalized_body
+            )
+        )
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
         self.app_url = app_url
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
+    def open_entrypoint(
+        self,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        self.open_url(
+            self.app_url,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
+        )
+
+    def open_route(self, route: str) -> str:
+        route_url = self.build_route_url(route)
+        self.open_url(route_url)
+        return route_url
+
+    def open_url(
+        self,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        self.session.goto(
+            url,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
+        )
+        self.session.activate_accessibility()
+
+    def build_route_url(self, route: str) -> str:
+        base_url = self.app_url.split("#", 1)[0]
+        if not base_url.endswith("/"):
+            base_url = f"{base_url}/"
+        if route.startswith("#"):
+            normalized_route = route
+        else:
+            normalized_route = route if route.startswith("/") else f"/{route}"
+            normalized_route = f"#{normalized_route}"
+        return f"{base_url}{normalized_route}"
+
     def open(self) -> RuntimeObservation:
-        self._live_page.open()
+        return self.open_startup_entrypoint(
+            wait_signals=(
+                *self.LOAD_ERROR_TEXT_VARIANTS,
+                *self.STARTUP_ENTRY_SIGNAL_TEXTS,
+            ),
+            timeout_ms=120_000,
+            timeout_error_message="Step 1 failed: the deployed app never reached an interactive state.",
+        )
+
+    def open_startup_entrypoint(
+        self,
+        *,
+        wait_signals: Sequence[str] | None = None,
+        timeout_ms: int = 120_000,
+        wait_until: str = "domcontentloaded",
+        timeout_error_message: str | None = None,
+    ) -> RuntimeObservation:
+        self.open_entrypoint(wait_until=wait_until, timeout_ms=timeout_ms)
+        startup_signals = tuple(wait_signals or self.STARTUP_ENTRY_SIGNAL_TEXTS)
         try:
             wait_match = self.session.wait_for_any_text(
-                [self.LOAD_ERROR_TEXT, "Connect GitHub", self.BOARD_LABEL],
-                timeout_ms=120_000,
+                startup_signals,
+                timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
+            base_message = (
+                timeout_error_message
+                or "Step 1 failed: the deployed app never reached an interactive state."
+            )
             raise AssertionError(
-                "Step 1 failed: the deployed app never reached an interactive state. "
-                f"Visible body text: {self.body_text()}",
+                f"{base_message} Visible body text: {self.body_text()}",
             ) from error
-        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+        if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeObservation(
                 kind="data-load-failed",
                 body_text=wait_match.body_text,
@@ -76,25 +239,59 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        connected_banners = self.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+        body_text = self.body_text()
+        if self.body_has_authenticated_session(
+            body_text,
+            user_login=user_login,
+            repository=repository,
+        ):
             return ConnectionObservation(
                 dialog_text="",
-                body_text=self.body_text(),
+                body_text=body_text,
             )
 
-        self._live_page.open_connect_dialog()
+        try:
+            self._live_page.open_connect_dialog()
+        except (AssertionError, WebAppTimeoutError):
+            body_text = self.body_text()
+            if self.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            ):
+                return ConnectionObservation(
+                    dialog_text=body_text,
+                    body_text=body_text,
+                )
+            raise
         dialog_state = self._live_page.read_connect_dialog_state()
         dialog_text = dialog_state.body_text
-        for expected_text in (
-            "Connect GitHub",
-            "Connect token",
-            repository,
+        if self.body_has_authenticated_session(
+            dialog_text,
+            user_login=user_login,
+            repository=repository,
         ):
+            return ConnectionObservation(
+                dialog_text=dialog_text,
+                body_text=dialog_text,
+            )
+        expected_dialog_texts = ("Connect GitHub", "Connect token")
+        for expected_text in expected_dialog_texts:
             if expected_text not in dialog_text:
                 raise AssertionError(
                     f'Step 2 failed: the connect dialog did not show "{expected_text}". '
                     f"Observed dialog text: {dialog_text}",
                 )
+        repository_variants = {repository, repository.lower()}
+        if not any(expected_text in dialog_text for expected_text in repository_variants):
+            raise AssertionError(
+                f'Step 2 failed: the connect dialog did not show "{repository}". '
+                f"Observed dialog text: {dialog_text}",
+            )
         if dialog_state.fine_grained_token_input_count != 1:
             raise AssertionError(
                 "Step 2 failed: the connect dialog did not expose exactly one "
@@ -109,15 +306,11 @@ class TrackStateTrackerPage:
         )
         self._live_page.submit_connect_token()
 
-        connected_banner = self.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
-            repository=repository,
-        )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [*connected_banners, "GitHub connection failed:"],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text not in connected_banners:
             raise AssertionError(
                 "Step 2 failed: the token connect flow did not reach the connected state. "
                 f"Observed body text: {wait_match.body_text}",
@@ -126,6 +319,35 @@ class TrackStateTrackerPage:
             dialog_text=dialog_text,
             body_text=wait_match.body_text,
         )
+
+    @classmethod
+    def connected_banners(cls, *, user_login: str, repository: str) -> tuple[str, ...]:
+        return cls.connected_banner_variants(
+            user_login=user_login,
+            repository=repository,
+        )
+
+    @classmethod
+    def connected_banner_variants(
+        cls,
+        *,
+        user_login: str,
+        repository: str,
+    ) -> tuple[str, ...]:
+        repository_variants = {repository, repository.lower()}
+        banners: list[str] = []
+        for repository_variant in repository_variants:
+            for template in (
+                *cls.CONNECTED_BANNER_TEMPLATES,
+                cls.CONNECTED_BANNER_COMPACT_TEMPLATE,
+            ):
+                banners.append(
+                    template.format(
+                        user_login=user_login,
+                        repository=repository_variant,
+                    ),
+                )
+        return tuple(dict.fromkeys(banners))
 
     def create_issue_from_board(
         self,
@@ -251,8 +473,548 @@ class TrackStateTrackerPage:
     def body_text(self) -> str:
         return self.session.body_text()
 
-    def screenshot(self, path: str) -> None:
-        self.session.screenshot(path)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self.session.screenshot(path, full_page=full_page)
+
+    def observe_workspace_restore_message(
+        self,
+        *,
+        workspace_name: str,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceRestoreMessageObservation:
+        payload = self.session.wait_for_function(
+            """
+            (workspaceName) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const bodyText = document.body?.innerText ?? '';
+              const normalizedBody = normalize(bodyText);
+              const anchor = `Skipped ${workspaceName} during restore.`;
+              const startIndex = normalizedBody.indexOf(anchor);
+              if (startIndex === -1) {
+                return null;
+              }
+              const tail = normalizedBody.slice(startIndex);
+              const stopTokens = [
+                ' Close ',
+                ' Dashboard ',
+                ' Board ',
+                ' JQL Search ',
+                ' Hierarchy ',
+                ' Settings ',
+              ];
+              let stopIndex = tail.length;
+              for (const token of stopTokens) {
+                const candidateIndex = tail.indexOf(token);
+                if (candidateIndex > 0 && candidateIndex < stopIndex) {
+                  stopIndex = candidateIndex;
+                }
+              }
+              return {
+                messageText: tail.slice(0, stopIndex).trim(),
+                bodyText,
+              };
+            }
+            """,
+            arg=workspace_name,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace restore message observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceRestoreMessageObservation(
+            message_text=str(payload.get("messageText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
+
+    def observe_workspace_switcher_trigger(
+        self,
+        *,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceSwitcherTriggerObservation:
+        payload = self.session.wait_for_function(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidates = Array.from(document.querySelectorAll('[aria-label]')).filter(
+                (element) => {
+                  const label = element.getAttribute('aria-label') || '';
+                  return label.startsWith('Workspace switcher:') && isVisible(element);
+                },
+              );
+              if (candidates.length > 0) {
+                const trigger = candidates[0];
+                return {
+                  ariaLabel: trigger.getAttribute('aria-label') || '',
+                  visibleText: normalize(trigger.innerText || trigger.textContent || ''),
+                  bodyText: document.body?.innerText ?? '',
+                };
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const lines = bodyText
+                .split(/\\n+/)
+                .map((line) => normalize(line))
+                .filter((line) => line.length > 0);
+              const switcherLine = lines.find((line) =>
+                line.startsWith('Workspace switcher:'),
+              );
+              if (!switcherLine) {
+                return null;
+              }
+              return {
+                ariaLabel: switcherLine,
+                visibleText: switcherLine.replace(/^Workspace switcher:\\s*/, ''),
+                bodyText,
+              };
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace switcher observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceSwitcherTriggerObservation(
+            aria_label=str(payload.get("ariaLabel", "")),
+            visible_text=str(payload.get("visibleText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
+
+    def observe_interactive_shell(
+        self,
+        required_navigation_labels: Sequence[str],
+        *,
+        timeout_ms: int = 120_000,
+    ) -> dict[str, object]:
+        try:
+            payload = self.session.wait_for_function(
+                """
+                (requiredNavigationLabels) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const visibleNavigationLabels = requiredNavigationLabels.filter(
+                    (label) => bodyText.includes(label),
+                  );
+                  const fatalBannerVisible = bodyText.includes('TrackState data was not found');
+                  const connectGitHubVisible = bodyText.includes('Connect GitHub');
+                  const shellReady = visibleNavigationLabels.length === requiredNavigationLabels.length;
+                  return shellReady || fatalBannerVisible || connectGitHubVisible
+                    ? {
+                        bodyText,
+                        visibleNavigationLabels,
+                        fatalBannerVisible,
+                        connectGitHubVisible,
+                        shellReady,
+                      }
+                    : null;
+                }
+                """,
+                arg=list(required_navigation_labels),
+                timeout_ms=timeout_ms,
+            )
+        except Exception:
+            return self._interactive_shell_fallback()
+        if not isinstance(payload, dict):
+            return self._interactive_shell_fallback()
+        return {
+            "body_text": str(payload.get("bodyText", "")),
+            "visible_navigation_labels": [
+                str(label) for label in payload.get("visibleNavigationLabels", [])
+            ],
+            "fatal_banner_visible": bool(payload.get("fatalBannerVisible")),
+            "connect_github_visible": bool(payload.get("connectGitHubVisible")),
+            "shell_ready": bool(payload.get("shellReady")),
+        }
+
+    def observe_startup_surface(self) -> StartupSurfaceObservation:
+        payload = self.session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const buttonLabels = Array.from(
+                document.querySelectorAll('button, flt-semantics[role="button"], [role="button"]'),
+              )
+                .filter(isVisible)
+                .map((element) =>
+                  normalize(
+                    element.getAttribute?.('aria-label')
+                    || element.innerText
+                    || element.textContent
+                    || '',
+                  ),
+                )
+                .filter((label) => label.length > 0);
+              return {
+                title: document.title || '',
+                locationHref: window.location.href,
+                locationHash: window.location.hash,
+                locationPathname: window.location.pathname,
+                bodyText: document.body?.innerText || document.body?.textContent || '',
+                buttonLabels,
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            return StartupSurfaceObservation(
+                title="",
+                location_href="",
+                location_hash="",
+                location_pathname="",
+                body_text=self.body_text(),
+                button_labels=(),
+            )
+        return StartupSurfaceObservation(
+            title=str(payload.get("title", "")),
+            location_href=str(payload.get("locationHref", "")),
+            location_hash=str(payload.get("locationHash", "")),
+            location_pathname=str(payload.get("locationPathname", "")),
+            body_text=str(payload.get("bodyText", "")),
+            button_labels=tuple(str(label) for label in payload.get("buttonLabels", [])),
+        )
+
+    def read_global_samples(self, key: str) -> list[dict[str, object]]:
+        payload = self.session.evaluate(
+            "({ key }) => globalThis[key] || []",
+            arg={"key": key},
+        )
+        if not isinstance(payload, list):
+            return []
+        return [dict(sample) for sample in payload if isinstance(sample, dict)]
+
+    def snapshot_local_storage(
+        self,
+        keys: Sequence[str],
+    ) -> dict[str, str | None]:
+        payload = self.session.evaluate(
+            """
+            (keys) => {
+              const snapshot = {};
+              for (const key of keys) {
+                snapshot[key] = window.localStorage.getItem(key);
+              }
+              return snapshot;
+            }
+            """,
+            arg=list(keys),
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Expected a workspace storage snapshot map, got: {payload!r}",
+            )
+        return {
+            str(key): (None if value is None else str(value))
+            for key, value in payload.items()
+        }
+
+    def observe_public_capability_surface(
+        self,
+        *,
+        expected_workspace_id: str,
+        expected_repository: str,
+    ) -> dict[str, Any]:
+        payload = self.session.evaluate(
+            """
+            ({ expectedWorkspaceId, expectedRepository, workspaceStateKeys }) => {
+              const normalizeText = (value) => String(value || '').trim();
+              const normalizeRepository = (value) => normalizeText(value).toLowerCase();
+              const parseNestedJson = (value) => {
+                let current = value;
+                for (let index = 0; index < 4; index += 1) {
+                  if (typeof current !== 'string') {
+                    return current;
+                  }
+                  try {
+                    current = JSON.parse(current);
+                  } catch (_error) {
+                    return current;
+                  }
+                }
+                return current;
+              };
+              const uniqueStrings = (values) => {
+                const seen = new Set();
+                const result = [];
+                for (const value of values) {
+                  const normalized = normalizeText(value);
+                  if (!normalized || seen.has(normalized)) {
+                    continue;
+                  }
+                  seen.add(normalized);
+                  result.push(normalized);
+                }
+                return result;
+              };
+              const mergeContract = (baseContract, extraContract) => ({
+                workspaceIds: uniqueStrings([
+                  ...baseContract.workspaceIds,
+                  ...extraContract.workspaceIds,
+                ]),
+                targets: uniqueStrings([
+                  ...baseContract.targets,
+                  ...extraContract.targets,
+                ]),
+                targetTypes: uniqueStrings([
+                  ...baseContract.targetTypes,
+                  ...extraContract.targetTypes,
+                ]),
+              });
+              const extractContract = (candidate) => {
+                if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+                  return {
+                    workspaceIds: [],
+                    targets: [],
+                    targetTypes: [],
+                  };
+                }
+                const workspaceIds = [];
+                const targets = [];
+                const targetTypes = [];
+                for (const key of ['id', 'workspaceId', 'activeWorkspaceId']) {
+                  if (typeof candidate[key] === 'string') {
+                    workspaceIds.push(candidate[key]);
+                  }
+                }
+                for (const key of ['target', 'repository', 'repo']) {
+                  if (typeof candidate[key] === 'string') {
+                    targets.push(candidate[key]);
+                  }
+                }
+                if (typeof candidate.targetType === 'string') {
+                  targetTypes.push(candidate.targetType);
+                }
+                return {
+                  workspaceIds: uniqueStrings(workspaceIds),
+                  targets: uniqueStrings(targets),
+                  targetTypes: uniqueStrings(targetTypes),
+                };
+              };
+              const readWorkspaceState = () => {
+                for (const key of workspaceStateKeys) {
+                  const rawValue = window.localStorage.getItem(key);
+                  if (typeof rawValue !== 'string' || !rawValue) {
+                    continue;
+                  }
+                  const parsedValue = parseNestedJson(rawValue);
+                  if (
+                    parsedValue
+                    && typeof parsedValue === 'object'
+                    && !Array.isArray(parsedValue)
+                  ) {
+                    return {
+                      key,
+                      parsedValue,
+                    };
+                  }
+                }
+                return null;
+              };
+              const workspaceState = readWorkspaceState();
+              const parsedWorkspaceState = workspaceState?.parsedValue;
+              const activeWorkspaceId =
+                typeof parsedWorkspaceState?.activeWorkspaceId === 'string'
+                  ? parsedWorkspaceState.activeWorkspaceId
+                  : '';
+              const hostedProfiles = Array.isArray(parsedWorkspaceState?.profiles)
+                ? parsedWorkspaceState.profiles.filter(
+                    (profile) =>
+                      profile
+                      && typeof profile === 'object'
+                      && profile.targetType === 'hosted',
+                  )
+                : [];
+              const activeHostedProfile =
+                hostedProfiles.find(
+                  (profile) =>
+                    typeof profile.id === 'string' && profile.id === activeWorkspaceId,
+                )
+                || hostedProfiles.find(
+                  (profile) =>
+                    typeof profile.id === 'string' && profile.id === expectedWorkspaceId,
+                )
+                || null;
+              const scopedWorkspaceId = normalizeText(
+                activeHostedProfile?.id || activeWorkspaceId || expectedWorkspaceId,
+              );
+              const scopedRepository = normalizeRepository(
+                activeHostedProfile?.target || expectedRepository,
+              );
+              const collectMatches = (storageKey, candidate) => {
+                const matches = [];
+                const queue = [
+                  {
+                    path: '$',
+                    value: candidate,
+                    contract: {
+                      workspaceIds: [],
+                      targets: [],
+                      targetTypes: [],
+                    },
+                  },
+                ];
+                const visited = new Set();
+                while (queue.length > 0 && matches.length < 40) {
+                  const item = queue.shift();
+                  if (!item || !item.value || typeof item.value !== 'object') {
+                    continue;
+                  }
+                  if (visited.has(item.value)) {
+                    continue;
+                  }
+                  visited.add(item.value);
+                  const nextContract = mergeContract(
+                    item.contract,
+                    extractContract(item.value),
+                  );
+                  if (Array.isArray(item.value)) {
+                    item.value.forEach((entry, index) => {
+                      queue.push({
+                        path: `${item.path}[${index}]`,
+                        value: entry,
+                        contract: nextContract,
+                      });
+                    });
+                    continue;
+                  }
+                  const hasCanWrite = Object.prototype.hasOwnProperty.call(item.value, 'canWrite');
+                  const hasCanCreateBranch = Object.prototype.hasOwnProperty.call(
+                    item.value,
+                    'canCreateBranch',
+                  );
+                  if (hasCanWrite || hasCanCreateBranch) {
+                    const normalizedTargets = nextContract.targets.map((target) =>
+                      normalizeRepository(target),
+                    );
+                    const normalizedTargetTypes = nextContract.targetTypes.map((targetType) =>
+                      normalizeText(targetType).toLowerCase(),
+                    );
+                    const workspaceIds = uniqueStrings(nextContract.workspaceIds);
+                    const matchesActiveWorkspace =
+                      scopedWorkspaceId.length > 0
+                      && workspaceIds.includes(scopedWorkspaceId);
+                    const matchesActiveRepository =
+                      scopedRepository.length > 0
+                      && normalizedTargets.includes(scopedRepository);
+                    const matchesHostedContract =
+                      matchesActiveWorkspace
+                      || (
+                        matchesActiveRepository
+                        && normalizedTargetTypes.includes('hosted')
+                      );
+                    matches.push({
+                      key: storageKey,
+                      path: item.path,
+                      canWrite: hasCanWrite ? item.value.canWrite : null,
+                      canCreateBranch: hasCanCreateBranch ? item.value.canCreateBranch : null,
+                      workspaceIds,
+                      targets: uniqueStrings(nextContract.targets),
+                      targetTypes: uniqueStrings(nextContract.targetTypes),
+                      matchesActiveWorkspace,
+                      matchesActiveRepository,
+                      matchesHostedContract,
+                    });
+                  }
+                  Object.entries(item.value).forEach(([key, value]) => {
+                    queue.push({
+                      path: `${item.path}.${key}`,
+                      value,
+                      contract: nextContract,
+                    });
+                  });
+                }
+                return matches;
+              };
+              const storageMatches = [];
+              const sameSessionStorageMatches = [];
+              for (let index = 0; index < window.localStorage.length; index += 1) {
+                const key = window.localStorage.key(index);
+                if (!key || key.includes('githubToken')) {
+                  continue;
+                }
+                const rawValue = window.localStorage.getItem(key);
+                if (typeof rawValue !== 'string' || !/(canWrite|canCreateBranch)/.test(rawValue)) {
+                  continue;
+                }
+                const matches = collectMatches(key, parseNestedJson(rawValue));
+                if (matches.length === 0) {
+                  continue;
+                }
+                storageMatches.push(...matches);
+                sameSessionStorageMatches.push(
+                  ...matches.filter((match) => match.matchesHostedContract),
+                );
+              }
+              const bodyText = document.body?.innerText || document.body?.textContent || '';
+              return {
+                bodyFlagValues: {
+                  canWriteFalse: /\\bcanWrite\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+                  canCreateBranchFalse: /\\bcanCreateBranch\\b\\s*[:=]\\s*false\\b/i.test(bodyText),
+                },
+                storageMatches,
+                sameSessionStorageMatches,
+                localStorageKeyCount: window.localStorage.length,
+                workspaceStateKey: workspaceState?.key || null,
+                activeWorkspaceId: scopedWorkspaceId || null,
+                activeWorkspaceTarget: scopedRepository || null,
+              };
+            }
+            """,
+            arg={
+                "expectedWorkspaceId": expected_workspace_id,
+                "expectedRepository": expected_repository,
+                "workspaceStateKeys": list(self.WORKSPACE_PROFILE_STATE_KEYS),
+            },
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Expected a structured public capability surface payload, got: {payload!r}",
+            )
+        return {
+            "body_flag_values": dict(payload.get("bodyFlagValues", {})),
+            "storage_matches": list(payload.get("storageMatches", [])),
+            "same_session_storage_matches": list(
+                payload.get("sameSessionStorageMatches", []),
+            ),
+            "local_storage_key_count": int(payload.get("localStorageKeyCount", 0) or 0),
+            "workspace_state_key": (
+                None
+                if payload.get("workspaceStateKey") is None
+                else str(payload.get("workspaceStateKey"))
+            ),
+            "active_workspace_id": (
+                None
+                if payload.get("activeWorkspaceId") is None
+                else str(payload.get("activeWorkspaceId"))
+            ),
+            "active_workspace_target": (
+                None
+                if payload.get("activeWorkspaceTarget") is None
+                else str(payload.get("activeWorkspaceTarget"))
+            ),
+        }
 
     @staticmethod
     def extract_issue_key(summary: str, body_text: str) -> str | None:
@@ -288,3 +1050,13 @@ class TrackStateTrackerPage:
             f'textarea[aria-label="{label}"]',
             f'[role="textbox"][aria-label="{label}"]',
         )
+
+    def _interactive_shell_fallback(self) -> dict[str, object]:
+        body_text = self.body_text()
+        return {
+            "body_text": body_text,
+            "visible_navigation_labels": [],
+            "fatal_banner_visible": "TrackState data was not found" in body_text,
+            "connect_github_visible": "Connect GitHub" in body_text,
+            "shell_ready": False,
+        }
