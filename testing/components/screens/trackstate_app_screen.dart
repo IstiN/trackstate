@@ -1115,9 +1115,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -1133,9 +1130,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()

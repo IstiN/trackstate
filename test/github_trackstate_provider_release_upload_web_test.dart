@@ -9,7 +9,7 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 
 void main() {
   test(
-    'browser GitHub sessions keep release-backed attachment uploads disabled for writable repositories',
+    'browser GitHub sessions allow release-backed attachment uploads for writable repositories',
     () async {
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
@@ -39,7 +39,7 @@ void main() {
 
       expect(permission.canWrite, isTrue);
       expect(permission.canManageAttachments, isTrue);
-      expect(permission.supportsReleaseAttachmentWrites, isFalse);
+      expect(permission.supportsReleaseAttachmentWrites, isTrue);
     },
   );
 }

@@ -746,7 +746,6 @@ def _ensure_active_local_precondition(
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
 
-
 def _wait_for_signed_in_active_local_precondition(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -819,8 +818,6 @@ def _signed_in_active_local_precondition(
         user_login=user_login,
         repository=repository,
     )
-
-
 def _session_requires_connect(
     *,
     body_text: str,
@@ -832,8 +829,6 @@ def _session_requires_connect(
         user_login=user_login,
         repository=repository,
     )
-
-
 def _restore_unavailable_local_workspace(
     *,
     tracker_page,
@@ -1023,8 +1018,6 @@ def _row_has_visible_workspace_actions(row: WorkspaceSwitcherRowObservation) -> 
     return any(
         label != row.visible_text and label.startswith(action_prefixes) for label in labels
     )
-
-
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:

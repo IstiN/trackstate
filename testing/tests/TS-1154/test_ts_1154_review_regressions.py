@@ -230,6 +230,5 @@ class Ts1154ReviewRegressionTest(unittest.TestCase):
             ),
         )
 
-
 if __name__ == "__main__":
     unittest.main()
