@@ -191,6 +191,7 @@ def main() -> None:
         "linked_bugs": LINKED_BUGS,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(_workspace_token_profile_ids(workspace_state)),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
@@ -207,6 +208,7 @@ def main() -> None:
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
         )
         with blocker:
             result["busy_blocker_initial"] = blocker.snapshot()
@@ -669,6 +671,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
             },
         ],
     }
+
+
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
