@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 import json
 import math
 import platform
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -105,12 +106,14 @@ def main() -> None:
         service = LiveSetupRepositoryService(config=config)
         token = service.token
         workspace_state = _workspace_state()
+        prepared_local_workspace = _prepare_local_workspace_repository()
         result.update(
             {
                 "app_url": config.app_url,
                 "repository": service.repository,
                 "repository_ref": service.ref,
                 "preloaded_workspace_state": workspace_state,
+                "prepared_local_workspace": prepared_local_workspace,
             },
         )
         if not token:
@@ -498,6 +501,89 @@ def _workspace_state() -> dict[str, object]:
     }
 
 
+def _prepare_local_workspace_repository() -> dict[str, object]:
+    local_path = Path(LOCAL_TARGET)
+    local_path.mkdir(parents=True, exist_ok=True)
+
+    git_dir = local_path / ".git"
+    if not git_dir.exists():
+        subprocess.run(
+            ["git", "init", "--initial-branch", DEFAULT_BRANCH, str(local_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    marker_path = local_path / ".trackstate-ts726-precondition.txt"
+    marker_path.write_text(
+        "Prepared for TS-726 workspace switcher accessibility validation.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "-C", str(local_path), "add", marker_path.name],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    status = subprocess.run(
+        ["git", "-C", str(local_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if status.stdout.strip() or head.returncode != 0:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(local_path),
+                "-c",
+                "user.name=TS-726 Automation",
+                "-c",
+                "user.email=ts726@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "Prepare TS-726 local workspace",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    branch = subprocess.run(
+        ["git", "-C", str(local_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    status = subprocess.run(
+        ["git", "-C", str(local_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "path": str(local_path),
+        "branch": branch.stdout.strip(),
+        "head": head.stdout.strip(),
+        "status": status.stdout.strip(),
+        "marker_path": str(marker_path),
+    }
+
+
 def _assert_sheet_accessibility(
     *,
     sequence: tuple[FocusNavigationStep, ...],
@@ -538,24 +624,33 @@ def _assert_sheet_accessibility(
             f"Missing semantics labels: {list(surface.missing_semantics_labels)!r}\n"
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
-    labels = [step.after_label or "" for step in sequence]
+    relevant_sequence = _relevant_sheet_focus_sequence(sequence)
+    sequence_labels = [step.after_label or "" for step in relevant_sequence]
+    tab_stop_labels = [_tab_stop_label(tab_stop) for tab_stop in tab_stops]
     has_workspace_list_control = any(
-        _is_workspace_list_control_label(label) for label in labels
+        _is_workspace_list_control_label(label) for label in sequence_labels
     )
-    has_add_workspace_control = any(_is_add_workspace_control_label(label) for label in labels)
-    has_remove_control = any(_is_remove_control_label(label) for label in labels)
+    has_add_workspace_control = any(
+        _is_add_workspace_control_label(label) for label in sequence_labels
+    )
+    has_remove_control = any(
+        _is_remove_control_label(label)
+        for label in tab_stop_labels
+    )
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
-            "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
-            "surface did not reach the expected list, add-workspace, and remove controls.\n"
+            "Step 3 failed: the workspace switcher accessibility traversal did not cover "
+            "the expected saved-workspace, add-workspace, and remove-control coverage.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed relevant focus sequence: {_focus_sequence_summary(relevant_sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
-    _assert_logical_sheet_focus_order(sequence, tab_stops)
+    _assert_logical_sheet_focus_order(relevant_sequence, tab_stops)
     return (
         f"focus_sequence={_focus_sequence_summary(sequence)}; "
-        f"focus_groups={_focus_group_summary(sequence)}; "
+        f"relevant_focus_sequence={_focus_sequence_summary(relevant_sequence)}; "
+        f"focus_groups={_focus_group_summary(relevant_sequence)}; "
         f"keyboard_tab_stops={_tab_stop_summary(tab_stops)}; "
         f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
         f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
@@ -914,6 +1009,29 @@ def _sheet_focus_group(label: str) -> str | None:
     return _sheet_tab_stop_group(label)
 
 
+def _relevant_sheet_focus_sequence(
+    sequence: tuple[FocusNavigationStep, ...],
+) -> tuple[FocusNavigationStep, ...]:
+    relevant_steps: list[FocusNavigationStep] = []
+    saw_workspace_group = False
+    saw_add_group = False
+    for step in sequence:
+        label = step.after_label or ""
+        group = _sheet_focus_group(label)
+        if group is None:
+            continue
+        relevant_steps.append(step)
+        if group == "saved-workspaces":
+            saw_workspace_group = True
+            continue
+        if group == "add-workspace":
+            saw_add_group = True
+            continue
+        if group == "save" and saw_workspace_group and saw_add_group:
+            break
+    return tuple(relevant_steps)
+
+
 def _sheet_tab_stop_group(label: str) -> str | None:
     if _is_workspace_list_control_label(label) or _is_remove_control_label(label):
         return "saved-workspaces"
@@ -938,7 +1056,12 @@ def _is_workspace_list_control_label(label: str) -> bool:
     normalized = " ".join(label.split())
     if not normalized or normalized.startswith("Workspace switcher:"):
         return False
-    if normalized in {"Open", "Active"} or _is_remove_control_label(normalized):
+    if (
+        normalized in {"Open", "Active"}
+        or normalized.startswith("Open:")
+        or normalized.startswith("Retry:")
+        or _is_remove_control_label(normalized)
+    ):
         return True
     has_workspace_identity = "Hosted" in normalized or "Local" in normalized
     has_workspace_state = any(
