@@ -363,6 +363,97 @@ jobs:
             "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
         )
 
+    def test_validate_reports_completed_runner_available_path_as_precondition(self) -> None:
+        completed_run = GitHubActionsWorkflowRunObservation(
+            id=91,
+            event="push",
+            head_branch="main",
+            head_sha="head-sha",
+            status="completed",
+            conclusion="success",
+            html_url="https://github.com/IstiN/trackstate/actions/runs/91",
+            created_at="2026-05-14T18:37:30Z",
+            display_title="TS-706",
+        )
+        github_api_client = _FakeGitHubApiClient(
+            {
+                ("GET", "/repos/IstiN/trackstate"): [
+                    {"default_branch": "main"},
+                ],
+                (
+                    "GET",
+                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml",
+                ): [
+                    {
+                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-native.yml",
+                        "state": "active",
+                        "path": ".github/workflows/build-native.yml",
+                    }
+                ],
+                (
+                    "GET",
+                    "/repos/IstiN/trackstate/contents/.github/workflows/build-native.yml?ref=main",
+                ): [self.workflow_yaml],
+                ("GET", "/repos/IstiN/trackstate/branches/main"): [
+                    {"commit": {"sha": "head-sha"}}
+                ],
+                (
+                    "GET",
+                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml/runs?event=push&per_page=50",
+                ): [{"workflow_runs": []}],
+                ("POST", "/repos/IstiN/trackstate/git/refs"): [""],
+                ("GET", "/repos/IstiN/trackstate/actions/runs/91/jobs?per_page=20"): [
+                    {
+                        "jobs": [
+                            {
+                                "id": 101,
+                                "name": "Verify macOS runner availability",
+                                "status": "completed",
+                                "conclusion": "success",
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                            },
+                            {
+                                "id": 202,
+                                "name": "Build macOS desktop and CLI artifacts",
+                                "status": "completed",
+                                "conclusion": "success",
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
+                            },
+                        ]
+                    }
+                ],
+                ("DELETE", "/repos/IstiN/trackstate/git/refs/tags/v98.test"): [""],
+            }
+        )
+        probe = GitHubActionsPreflightGateProbeService(
+            self.config,
+            github_api_client=github_api_client,
+            workflow_run_log_reader=_UnusedWorkflowRunLogReader(),
+        )
+        probe._build_tag_name = lambda: "v98.test"  # type: ignore[method-assign]
+        probe._wait_for_new_push_run = lambda **_: completed_run  # type: ignore[method-assign]
+        probe._wait_for_completed_run = lambda _run_id: completed_run  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(
+            GitHubActionsPreflightGatePreconditionError,
+            "downstream macOS job proceeded instead of being suppressed",
+        ) as raised:
+            probe.validate()
+
+        self.assertEqual(raised.exception.partial_result.get("tag_name"), "v98.test")
+        self.assertEqual(
+            raised.exception.partial_result.get("run", {}).get("conclusion"),
+            "success",
+        )
+        self.assertEqual(
+            raised.exception.partial_result.get("preflight_job", {}).get("conclusion"),
+            "success",
+        )
+        self.assertEqual(
+            raised.exception.partial_result.get("downstream_job", {}).get("conclusion"),
+            "success",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
