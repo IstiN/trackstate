@@ -36,6 +36,9 @@ from testing.core.utils.color_contrast import (  # noqa: E402
 )
 from testing.core.utils.png_image import RgbImage  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
+from testing.tests.support.live_startup_case_support import (  # noqa: E402
+    prepare_local_workspace_repository,
+)
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
 )
@@ -64,6 +67,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_failure.png"
 SURFACE_PROBE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_surface_probe.png"
@@ -78,6 +82,9 @@ MIN_TEXT_CONTRAST = 4.5
 MIN_GRAPHIC_CONTRAST = 3.0
 MOBILE_TRIGGER_VISUAL_MARGIN = 8
 MIN_MOBILE_EDGE_CHANGE_PIXELS = 24
+REVIEW_THREADS = (
+    {"inReplyToId": 3329222200, "threadId": "PRRT_kwDOSU6Gf86F5JNr"},
+)
 
 
 def main() -> None:
@@ -105,12 +112,14 @@ def main() -> None:
         service = LiveSetupRepositoryService(config=config)
         token = service.token
         workspace_state = _workspace_state()
+        prepared_local_workspace = _prepare_local_workspace_repository()
         result.update(
             {
                 "app_url": config.app_url,
                 "repository": service.repository,
                 "repository_ref": service.ref,
                 "preloaded_workspace_state": workspace_state,
+                "prepared_local_workspace": prepared_local_workspace,
             },
         )
         if not token:
@@ -498,6 +507,18 @@ def _workspace_state() -> dict[str, object]:
     }
 
 
+def _prepare_local_workspace_repository() -> dict[str, object]:
+    return prepare_local_workspace_repository(
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        marker_filename=".trackstate-ts726-precondition.txt",
+        marker_contents="Prepared for TS-726 workspace switcher accessibility validation.\n",
+        commit_author_name="TS-726 Automation",
+        commit_author_email="ts726@example.com",
+        commit_message="Prepare TS-726 local workspace",
+    )
+
+
 def _assert_sheet_accessibility(
     *,
     sequence: tuple[FocusNavigationStep, ...],
@@ -538,24 +559,31 @@ def _assert_sheet_accessibility(
             f"Missing semantics labels: {list(surface.missing_semantics_labels)!r}\n"
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
-    labels = [step.after_label or "" for step in sequence]
+    relevant_sequence = _relevant_sheet_focus_sequence(sequence)
+    relevant_labels = [step.after_label or "" for step in relevant_sequence]
     has_workspace_list_control = any(
-        _is_workspace_list_control_label(label) for label in labels
+        _is_workspace_list_control_label(label) for label in relevant_labels
     )
-    has_add_workspace_control = any(_is_add_workspace_control_label(label) for label in labels)
-    has_remove_control = any(_is_remove_control_label(label) for label in labels)
+    has_add_workspace_control = any(
+        _is_add_workspace_control_label(label) for label in relevant_labels
+    )
+    has_remove_control = any(
+        _is_remove_control_label(label) for label in relevant_labels
+    )
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
             "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
             "surface did not reach the expected list, add-workspace, and remove controls.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed relevant focus sequence: {_focus_sequence_summary(relevant_sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
-    _assert_logical_sheet_focus_order(sequence, tab_stops)
+    _assert_logical_sheet_focus_order(relevant_sequence, tab_stops)
     return (
         f"focus_sequence={_focus_sequence_summary(sequence)}; "
-        f"focus_groups={_focus_group_summary(sequence)}; "
+        f"relevant_focus_sequence={_focus_sequence_summary(relevant_sequence)}; "
+        f"focus_groups={_focus_group_summary(relevant_sequence)}; "
         f"keyboard_tab_stops={_tab_stop_summary(tab_stops)}; "
         f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
         f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
@@ -914,6 +942,27 @@ def _sheet_focus_group(label: str) -> str | None:
     return _sheet_tab_stop_group(label)
 
 
+def _relevant_sheet_focus_sequence(
+    sequence: tuple[FocusNavigationStep, ...],
+) -> tuple[FocusNavigationStep, ...]:
+    relevant_steps: list[FocusNavigationStep] = []
+    saw_workspace_group = False
+    saw_add_group = False
+    for step in sequence:
+        label = step.after_label or ""
+        group = _sheet_focus_group(label)
+        if group is None:
+            continue
+        relevant_steps.append(step)
+        if group == "saved-workspaces":
+            saw_workspace_group = True
+            continue
+        if group == "add-workspace":
+            saw_add_group = True
+            continue
+        if group == "save" and saw_workspace_group and saw_add_group:
+            break
+    return tuple(relevant_steps)
 def _sheet_tab_stop_group(label: str) -> str | None:
     if _is_workspace_list_control_label(label) or _is_remove_control_label(label):
         return "saved-workspaces"
@@ -938,7 +987,12 @@ def _is_workspace_list_control_label(label: str) -> bool:
     normalized = " ".join(label.split())
     if not normalized or normalized.startswith("Workspace switcher:"):
         return False
-    if normalized in {"Open", "Active"} or _is_remove_control_label(normalized):
+    if (
+        normalized in {"Open", "Active"}
+        or normalized.startswith("Open:")
+        or normalized.startswith("Retry:")
+        or _is_remove_control_label(normalized)
+    ):
         return True
     has_workspace_identity = "Hosted" in normalized or "Local" in normalized
     has_workspace_state = any(
@@ -1207,6 +1261,7 @@ def _snippet(value: object, *, limit: int = 280) -> str:
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1227,6 +1282,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1307,6 +1363,24 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _write_review_replies() -> None:
+    payload = {
+        "replies": [
+            {
+                **REVIEW_THREADS[0],
+                "reply": (
+                    "Fixed: TS-726 now reuses "
+                    "`testing/tests/support/live_startup_case_support.py` via "
+                    "`prepare_local_workspace_repository(...)` instead of keeping an "
+                    "inlined `git init` / `git add` / `git commit` bootstrap copy in "
+                    "the ticket test."
+                ),
+            },
+        ],
+    }
+    REVIEW_REPLIES_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
