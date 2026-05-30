@@ -625,22 +625,20 @@ def _assert_sheet_accessibility(
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
     relevant_sequence = _relevant_sheet_focus_sequence(sequence)
-    sequence_labels = [step.after_label or "" for step in relevant_sequence]
-    tab_stop_labels = [_tab_stop_label(tab_stop) for tab_stop in tab_stops]
+    relevant_labels = [step.after_label or "" for step in relevant_sequence]
     has_workspace_list_control = any(
-        _is_workspace_list_control_label(label) for label in sequence_labels
+        _is_workspace_list_control_label(label) for label in relevant_labels
     )
     has_add_workspace_control = any(
-        _is_add_workspace_control_label(label) for label in sequence_labels
+        _is_add_workspace_control_label(label) for label in relevant_labels
     )
     has_remove_control = any(
-        _is_remove_control_label(label)
-        for label in tab_stop_labels
+        _is_remove_control_label(label) for label in relevant_labels
     )
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
-            "Step 3 failed: the workspace switcher accessibility traversal did not cover "
-            "the expected saved-workspace, add-workspace, and remove-control coverage.\n"
+            "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
+            "surface did not reach the expected list, add-workspace, and remove controls.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed relevant focus sequence: {_focus_sequence_summary(relevant_sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
@@ -1030,8 +1028,6 @@ def _relevant_sheet_focus_sequence(
         if group == "save" and saw_workspace_group and saw_add_group:
             break
     return tuple(relevant_steps)
-
-
 def _sheet_tab_stop_group(label: str) -> str | None:
     if _is_workspace_list_control_label(label) or _is_remove_control_label(label):
         return "saved-workspaces"

@@ -8,4 +8,5 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored signed-in GitHub token.
   - Preloads an active local workspace plus one hosted workspace in browser storage.
+  - Preloads workspace-scoped GitHub auth for the saved profiles so the local active row reflects the signed-in state.
   - Verifies the active local workspace row in Workspace switcher keeps Connect GitHub hidden while signed in.
