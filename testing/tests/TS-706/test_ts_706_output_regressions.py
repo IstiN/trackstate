@@ -255,6 +255,5 @@ class TS706OutputRegressionTest(unittest.TestCase):
         self.assertIn("proves the ticket precondition was not met", result["steps"][-1]["observed"])
         self.assertNotIn("ambiguous", result["steps"][-1]["observed"])
 
-
 if __name__ == "__main__":
     unittest.main()

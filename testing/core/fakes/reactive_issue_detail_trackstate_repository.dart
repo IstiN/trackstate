@@ -22,6 +22,8 @@ class ReactiveIssueDetailTrackStateRepository
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    Map<String, RepositoryPermission> tokenPermissions =
+        const <String, RepositoryPermission>{},
     bool includeDefaultBinaryFixtures = true,
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
@@ -30,6 +32,7 @@ class ReactiveIssueDetailTrackStateRepository
       failingTextPaths: failingTextPaths,
       textFixtures: textFixtures,
       binaryFixtures: binaryFixtures,
+      tokenPermissions: tokenPermissions,
       includeDefaultBinaryFixtures: includeDefaultBinaryFixtures,
     ),
   );
@@ -125,13 +128,18 @@ class MutableIssueDetailTrackStateProvider
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    Map<String, RepositoryPermission> tokenPermissions =
+        const <String, RepositoryPermission>{},
     bool includeDefaultBinaryFixtures = true,
   }) : _permission = permission,
-       _lfsTrackedPaths = lfsTrackedPaths,
-       _failingTextPaths = failingTextPaths,
-       _textFiles = Map<String, String>.from(_textFixtures)
-         ..addAll(textFixtures),
-       _binaryFiles = <String, Uint8List>{
+        _lfsTrackedPaths = lfsTrackedPaths,
+        _failingTextPaths = failingTextPaths,
+        _tokenPermissions = Map<String, RepositoryPermission>.from(
+          tokenPermissions,
+        ),
+        _textFiles = Map<String, String>.from(_textFixtures)
+          ..addAll(textFixtures),
+        _binaryFiles = <String, Uint8List>{
          for (final entry
              in (includeDefaultBinaryFixtures
                  ? _binaryFixtures.entries
@@ -146,6 +154,7 @@ class MutableIssueDetailTrackStateProvider
       ProviderConnectionState.disconnected;
   final Set<String> _lfsTrackedPaths;
   final Set<String> _failingTextPaths;
+  final Map<String, RepositoryPermission> _tokenPermissions;
 
   static const String _revision = 'reactive-read-only-test-revision';
 
@@ -355,6 +364,10 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    final scopedPermission = _tokenPermissions[connection.token.trim()];
+    if (scopedPermission != null) {
+      _permission = scopedPermission;
+    }
     _connectionState = ProviderConnectionState.connected;
     return const RepositoryUser(
       login: 'write-enabled-user',

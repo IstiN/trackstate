@@ -43,6 +43,14 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
             "command against the disposable Local Git repository.\n"
             f"Requested command: {observation.requested_command_text}",
         )
+        self.assertEqual(
+            observation.second_requested_command,
+            observation.requested_command,
+            "Precondition failed: TS-462 should repeat the exact same ticket comment "
+            "command on step 2.\n"
+            f"Step 1 command: {' '.join(observation.requested_command)}\n"
+            f"Step 2 command: {' '.join(observation.second_requested_command)}",
+        )
         first_payload = self._assert_successful_envelope(
             result=observation.first_result,
             failure_prefix="Step 1 failed",

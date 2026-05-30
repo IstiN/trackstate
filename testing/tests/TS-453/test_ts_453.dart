@@ -124,6 +124,17 @@ void main() {
             'Idle background: ${_rgbHex(connectGitHubIdleBackground)}. Hovered background: ${_rgbHex(connectGitHubHoverBackground)}.',
           );
         }
+        final connectGitHubFocusBackground = screen
+            .resolveTopBarButtonBackground(
+              'Connect GitHub',
+              const <WidgetState>{WidgetState.focused},
+            );
+        if (connectGitHubFocusBackground == connectGitHubIdleBackground) {
+          failures.add(
+            'Step 2 failed: the Connect GitHub shell button did not expose a distinct focused state. '
+            'Idle background: ${_rgbHex(connectGitHubIdleBackground)}. Focused background: ${_rgbHex(connectGitHubFocusBackground)}.',
+          );
+        }
 
         final selectedJqlNavigationBackground = screen
             .navigationBackgroundColor('JQL Search');
@@ -150,37 +161,62 @@ void main() {
             '(${_rgbHex(selectedJqlNavigationText)} on ${_rgbHex(selectedJqlNavigationBackground)}), below the required 4.5:1 threshold.',
           );
         }
+        if (selectedJqlNavigationBackground != null) {
+          final hoveredJqlNavigationBackground = screen
+              .resolveNavigationBackground('JQL Search', const <WidgetState>{
+                WidgetState.hovered,
+              });
+          if (hoveredJqlNavigationBackground ==
+              selectedJqlNavigationBackground) {
+            failures.add(
+              'Step 2 failed: the selected JQL Search navigation item did not expose a distinct hovered state. '
+              'Idle background: ${_rgbHex(selectedJqlNavigationBackground)}. Hovered background: ${_rgbHex(hoveredJqlNavigationBackground)}.',
+            );
+          }
+
+          final focusedJqlNavigationBackground = screen
+              .resolveNavigationBackground('JQL Search', const <WidgetState>{
+                WidgetState.focused,
+              });
+          if (focusedJqlNavigationBackground ==
+              selectedJqlNavigationBackground) {
+            failures.add(
+              'Step 2 failed: the selected JQL Search navigation item did not expose a distinct focused state. '
+              'Idle background: ${_rgbHex(selectedJqlNavigationBackground)}. Focused background: ${_rgbHex(focusedJqlNavigationBackground)}.',
+            );
+          }
+        }
 
         final loadingBannerContrast = contrastRatio(
           screen.loadingBannerTextColor(),
-          colors.surfaceAlt,
+          screen.loadingBannerBackgroundColor(),
         );
         if (loadingBannerContrast < 4.5) {
           failures.add(
             'Step 3 failed: the JQL Search loading banner text contrast was ${loadingBannerContrast.toStringAsFixed(2)}:1 '
-            'on ${_rgbHex(colors.surfaceAlt)}, below the required WCAG AA 4.5:1 threshold for normal text.',
+            'on ${_rgbHex(screen.loadingBannerBackgroundColor())}, below the required WCAG AA 4.5:1 threshold for normal text.',
           );
         }
 
         final loadingPillContrast = contrastRatio(
           screen.firstLoadingPillTextColor(),
-          colors.surfaceAlt,
+          screen.firstLoadingPillBackgroundColor(),
         );
         if (loadingPillContrast < 4.5) {
           failures.add(
             'Step 3 failed: the visible loading-pill text contrast was ${loadingPillContrast.toStringAsFixed(2)}:1 '
-            'on ${_rgbHex(colors.surfaceAlt)}, below the required WCAG AA 4.5:1 threshold for normal text.',
+            'on ${_rgbHex(screen.firstLoadingPillBackgroundColor())}, below the required WCAG AA 4.5:1 threshold for normal text.',
           );
         }
 
         final loadingIndicatorContrast = contrastRatio(
-          colors.primary,
-          colors.surfaceAlt,
+          screen.loadingIndicatorForegroundColor(),
+          screen.loadingIndicatorBackgroundColor(),
         );
         if (loadingIndicatorContrast < 3.0) {
           failures.add(
             'Step 3 failed: the loading indicator stroke/border contrast was ${loadingIndicatorContrast.toStringAsFixed(2)}:1 '
-            '(${_rgbHex(colors.primary)} on ${_rgbHex(colors.surfaceAlt)}), below the required WCAG AA 3.0:1 threshold for non-text icons.',
+            '(${_rgbHex(screen.loadingIndicatorForegroundColor())} on ${_rgbHex(screen.loadingIndicatorBackgroundColor())}), below the required WCAG AA 3.0:1 threshold for non-text icons.',
           );
         }
 

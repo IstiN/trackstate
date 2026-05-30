@@ -65,6 +65,11 @@ class Ts593ReleaseUnpushedBranchScenario:
         failures.extend(self._validate_repository_state(validation, result))
         failures.extend(self._validate_remote_state(validation, result))
         failures.extend(self._validate_cleanup(validation))
+        result["completed_assertion_path"] = True
+        result["validated_product_failure"] = _is_proven_ticket_defect(
+            result,
+            failures,
+        )
 
         return result, failures
 
@@ -463,9 +468,8 @@ class Ts593ReleaseUnpushedBranchScenario:
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    scenario = Ts593ReleaseUnpushedBranchScenario()
-
     try:
+        scenario = Ts593ReleaseUnpushedBranchScenario()
         result, failures = scenario.execute()
         if failures:
             raise AssertionError("\n".join(failures))
@@ -480,6 +484,7 @@ def main() -> None:
                 "ticket_summary": TICKET_SUMMARY,
                 "error": f"{type(error).__name__}: {error}",
                 "traceback": traceback.format_exc(),
+                "failures": list(failures) if isinstance(locals().get("failures"), list) else [],
             }
         )
         _write_failure_outputs(failure_result)
@@ -591,6 +596,94 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
+    if _is_validated_product_failure(result):
+        _write_validated_product_failure_outputs(result)
+        return
+    _write_generic_failure_outputs(result)
+
+
+def _is_validated_product_failure(result: dict[str, object]) -> bool:
+    return result.get("validated_product_failure") is True
+
+
+def _write_generic_failure_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error_message,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stdout = _as_text(result.get("stdout"))
+    stderr = _as_text(result.get("stderr"))
+    observed_output = _observed_command_output(stdout=stdout, stderr=stderr)
+    failure_details = _generic_failure_details(result)
+
+    jira_lines = [
+        "h3. Test Automation Result",
+        "",
+        "*Status:* ❌ FAILED",
+        f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "h4. Result",
+        "* The TS-593 automation run failed before it safely proved the ticket-specific product defect.",
+        "* No product bug artifact was written because the validated `missing_explicit_target_commitish_error` path was not established.",
+        f"* Failure: {_jira_inline(error_message)}",
+        *([f"* Details: {_jira_inline(detail)}" for detail in failure_details]),
+        "",
+        "h4. Observed command output",
+        "{code}",
+        observed_output,
+        "{code}",
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        RUN_COMMAND,
+        "{code}",
+    ]
+    markdown_lines = [
+        "## Test Automation Result",
+        "",
+        "**Status:** ❌ FAILED",
+        f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## Result",
+        "- The TS-593 automation run failed before it safely proved the ticket-specific product defect.",
+        "- No product bug artifact was written because the validated `missing_explicit_target_commitish_error` path was not established.",
+        f"- Failure: `{error_message}`",
+        *([f"- Details: {detail}" for detail in failure_details]),
+        "",
+        "## Observed command output",
+        "```text",
+        observed_output,
+        "```",
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
+    ]
+    JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+    PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+
+
+def _write_validated_product_failure_outputs(result: dict[str, object]) -> None:
     error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
     RESULT_PATH.write_text(
         json.dumps(
@@ -628,6 +721,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     observed_reason = ""
     if isinstance(observed_details, dict):
         observed_reason = _as_text(observed_details.get("reason"))
+    human_verification_summary = (
+        "Real user-style verification checked the exact terminal output a CLI user would "
+        "read, then checked the observable local repository path and remote GitHub "
+        "release/tag state. The side effects matched the expected failed-upload cleanup, "
+        "but the visible error contract did not match the expected explicit GitHub API "
+        "422 / target_commitish failure."
+    )
 
     actual_vs_expected = (
         "Actual: the CLI returned "
@@ -679,6 +779,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         final_remote_state_text,
         "{code}",
         *([f"* Product gap: {product_gap}"] if product_gap else []),
+        f"* Human-style verification: {_jira_inline(human_verification_summary)}",
         "",
         "h4. Observed command output",
         "{code}",
@@ -728,6 +829,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         final_remote_state_text,
         "```",
         *([f"- Product gap: {product_gap}"] if product_gap else []),
+        f"- Human-style verification: {human_verification_summary}",
         "",
         "## Observed command output",
         "```text",
@@ -750,27 +852,30 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"- Local active branch: `{unpushed_branch}`",
         f"- Expected release tag: `{expected_release_tag}`",
         "",
-        "## Steps to reproduce",
-        "1. ✅ Configure the project with `attachmentStorage.mode = github-releases`. Observed: the disposable fixture repository used that storage mode.",
+        "## Preconditions observed during setup",
+        "- ✅ `attachmentStorage.mode = github-releases` was configured in the disposable fixture repository.",
         (
-            f"2. ✅ Work on a new local branch `{unpushed_branch}` that does not exist in "
-            "the GitHub remote repository. Observed: the fixture repository checked out "
-            "that branch locally and the remote branch lookup was empty before the command."
+            f"- ✅ The fixture repository was on local branch `{unpushed_branch}`, and that "
+            "branch was absent from the GitHub remote before the command ran."
         ),
+        "",
+        "## Steps to reproduce",
         (
-            f"3. ❌ Execute CLI command: `{_as_text(result.get('ticket_command'))}`. "
+            f"1. ❌ Execute CLI command: `{_as_text(result.get('ticket_command'))}`. "
             f"Observed: exit code `{_as_text(result.get('exit_code'))}` with visible output "
             f"`{visible_error}`."
         ),
         (
-            "4. ❌ Inspect the command output. Observed: the caller-visible failure did "
+            "2. ❌ Inspect the command output. Observed: the caller-visible failure did "
             "not clearly surface the required explicit GitHub API branch-resolution "
-            "error for `target_commitish` / HTTP 422."
+            "error for `target_commitish` / HTTP 422. Instead it surfaced a generic "
+            f"`{observed_error_code}` / `{observed_error_category}` contract with reason "
+            f"`{observed_reason}`."
         ),
         (
-            f"5. ✅ Inspect local and remote side effects. Observed local state at "
+            f"Additional observation: ✅ Local state at "
             f"`{expected_path}` and remote state for `{expected_release_tag}` are shown "
-            "below."
+            "below; no attachment file, manifest, release, or tag was created."
         ),
         "",
         "## Expected result",
@@ -807,6 +912,51 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
+
+
+def _generic_failure_details(result: dict[str, object]) -> list[str]:
+    failures = result.get("failures")
+    if not isinstance(failures, list):
+        return []
+    details: list[str] = []
+    for failure in failures:
+        detail = _compact_text(_as_text(failure))
+        if detail:
+            details.append(detail)
+    return details
+
+
+def _is_proven_ticket_defect(
+    result: dict[str, object],
+    failures: list[str],
+) -> bool:
+    if _as_text(result.get("failure_mode")) != "missing_explicit_target_commitish_error":
+        return False
+    if result.get("completed_assertion_path") is not True or not failures:
+        return False
+    if any(not _as_text(failure).startswith("Step 1 failed:") for failure in failures):
+        return False
+    return _has_required_passed_steps(result, required_steps=(0, 2, 3))
+
+
+def _has_required_passed_steps(
+    result: dict[str, object],
+    *,
+    required_steps: tuple[int, ...],
+) -> bool:
+    steps = result.get("steps")
+    if not isinstance(steps, list):
+        return False
+    passed_steps: set[int] = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if _as_text(step.get("status")) != "passed":
+            continue
+        step_number = step.get("step")
+        if isinstance(step_number, int):
+            passed_steps.add(step_number)
+    return all(step in passed_steps for step in required_steps)
 
 
 def _record_step(

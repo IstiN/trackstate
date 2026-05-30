@@ -96,4 +96,27 @@ void main() {
       );
     },
   );
+
+  test(
+    'new hosted default reads and clears legacy repository tokens',
+    () async {
+      const store = SharedPreferencesTrackStateAuthStore();
+      await store.saveToken(
+        'legacy-token',
+        repository: 'trackstate/trackstate',
+      );
+
+      expect(
+        await store.readToken(repository: 'IstiN/trackstate-setup'),
+        'legacy-token',
+      );
+
+      await store.clearToken(repository: 'IstiN/trackstate-setup');
+
+      expect(
+        await store.readToken(repository: 'trackstate/trackstate'),
+        isNull,
+      );
+    },
+  );
 }
