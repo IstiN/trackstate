@@ -47,6 +47,10 @@ const FLUTTER_FEEDBACK = {
 };
 
 module.exports = {
+    globalCliPrompts: [
+        './agents/prompts/codegraph_tools.md'
+    ],
+
     // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
     smMaxWorkflows: 1,
 
