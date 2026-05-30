@@ -43,6 +43,7 @@ LINKED_BUGS = ["TS-995", "TS-977", "TS-958"]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 FAULT_MARKER = "TS-966 synthetic workspace switcher runtime error"
 FAULT_SELECTOR_FRAGMENT = "trackstate-workspace-switcher"
+FAULT_STACK_MARKERS = ("recordAndThrow (<anonymous>", "patchedSelectorMethod")
 NAVIGATION_TARGET_LABEL = "Settings"
 
 REQUEST_STEPS = [
@@ -85,7 +86,7 @@ class Ts966WorkspaceFaultRuntime(StoredWorkspaceProfilesRuntime):
             workspace_token_profile_ids=workspace_token_profile_ids,
         )
         self.console_events: list[dict[str, str]] = []
-        self.page_errors: list[str] = []
+        self.page_errors: list[dict[str, str]] = []
 
     def __enter__(self):
         session = super().__enter__()
@@ -105,7 +106,7 @@ class Ts966WorkspaceFaultRuntime(StoredWorkspaceProfilesRuntime):
         )
 
     def _record_page_error(self, error: object) -> None:
-        self.page_errors.append(str(error))
+        self.page_errors.append(_page_error_payload(error))
 
 
 def main() -> None:
@@ -690,19 +691,15 @@ def _assert_fault_locally_contained(
             "contained locally.",
         )
 
-    probe_console_signature_present = _has_probe_specific_console_signature(
-        post_fault_console_events,
-    )
     page_errors = [
-        str(item) for item in post_fault_page_errors if isinstance(item, str) and item.strip()
+        payload
+        for payload in (
+            _normalize_page_error_payload(item) for item in post_fault_page_errors
+        )
+        if any(payload.values())
     ]
     unexpected_page_errors = [
-        message
-        for message in page_errors
-        if _page_error_requires_failure(
-            message,
-            probe_console_signature_present=probe_console_signature_present,
-        )
+        payload for payload in page_errors if _page_error_requires_failure(payload)
     ]
     if unexpected_page_errors:
         raise AssertionError(
@@ -734,16 +731,6 @@ def _console_event_requires_failure(event: dict[str, object]) -> bool:
     return any(marker in lowered for marker in ("uncaught", "unhandled"))
 
 
-def _has_probe_specific_console_signature(post_fault_console_events: object) -> bool:
-    for event in post_fault_console_events:
-        if not isinstance(event, dict):
-            continue
-        text = str(event.get("text", "")).strip()
-        if FAULT_MARKER in text and FAULT_SELECTOR_FRAGMENT in text:
-            return True
-    return False
-
-
 def _switcher_preserved_saved_workspace_context(
     switcher_after_fault: WorkspaceSwitcherObservation,
 ) -> bool:
@@ -760,18 +747,53 @@ def _switcher_preserved_saved_workspace_context(
     return all(marker in normalized for marker in fallback_markers)
 
 
-def _page_error_requires_failure(
-    message: str,
-    *,
-    probe_console_signature_present: bool,
-) -> bool:
-    normalized = message.strip()
-    if not normalized:
+def _page_error_payload(error: object) -> dict[str, str]:
+    return {
+        "text": str(error).strip(),
+        "name": str(getattr(error, "name", "")).strip(),
+        "message": str(getattr(error, "message", "")).strip(),
+        "stack": str(getattr(error, "stack", "")).strip(),
+    }
+
+
+def _normalize_page_error_payload(error: object) -> dict[str, str]:
+    if isinstance(error, str):
+        return {
+            "text": error.strip(),
+            "name": "",
+            "message": "",
+            "stack": "",
+        }
+    if isinstance(error, dict):
+        return {
+            "text": str(error.get("text", "")).strip(),
+            "name": str(error.get("name", "")).strip(),
+            "message": str(error.get("message", "")).strip(),
+            "stack": str(error.get("stack", "")).strip(),
+        }
+    return _page_error_payload(error)
+
+
+def _page_error_payload_has_probe_signature(page_error: dict[str, str]) -> bool:
+    stack = page_error.get("stack", "")
+    if stack and all(marker in stack for marker in FAULT_STACK_MARKERS):
+        return True
+    haystack = " ".join(
+        value for value in (
+            page_error.get("text", ""),
+            page_error.get("name", ""),
+            page_error.get("message", ""),
+            page_error.get("stack", ""),
+        )
+        if value
+    ).lower()
+    return FAULT_MARKER.lower() in haystack or FAULT_SELECTOR_FRAGMENT.lower() in haystack
+
+
+def _page_error_requires_failure(page_error: dict[str, str]) -> bool:
+    if not any(page_error.values()):
         return False
-    if normalized == "Error" and probe_console_signature_present:
-        return False
-    lowered = normalized.lower()
-    return FAULT_MARKER.lower() not in lowered
+    return not _page_error_payload_has_probe_signature(page_error)
 
 
 def _record_step(
