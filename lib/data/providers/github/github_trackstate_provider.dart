@@ -245,7 +245,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/git/trees/$ref',
-              queryParameters: {'recursive': '1'},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                const {'recursive': '1'},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final tree = json['tree'];
@@ -274,7 +278,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': ref},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                {'ref': ref},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final encoded = json['content']?.toString().replaceAll('\n', '');
@@ -559,7 +567,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': ref},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                {'ref': ref},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final encoded = json['content']?.toString().replaceAll('\n', '');
@@ -1489,7 +1501,14 @@ class GitHubTrackStateProvider
     required String ref,
   }) async {
     final response = await _http.get(
-      _githubUri('/repos/$repository/contents/$path', {'ref': ref}),
+      _githubUri(
+        '/repos/$repository/contents/$path',
+        _hostedRepositoryReadQueryParameters(
+          {'ref': ref},
+          disableCache: _disableHostedSyncRequestCaching,
+          cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+        ),
+      ),
       headers: _githubHeaders(_connection?.token),
     );
     if (response.statusCode == 404) {
@@ -1794,6 +1813,20 @@ Map<String, String>? _hostedSyncRevisionQueryParameters({
     return null;
   }
   return <String, String>{'_trackstate_refresh': cacheBustTokenFactory()};
+}
+
+Map<String, String>? _hostedRepositoryReadQueryParameters(
+  Map<String, String>? queryParameters, {
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) {
+  if (!disableCache) {
+    return queryParameters;
+  }
+  return <String, String>{
+    ...?queryParameters,
+    '_trackstate_refresh': cacheBustTokenFactory(),
+  };
 }
 
 String _defaultHostedSyncCacheBustToken() =>
