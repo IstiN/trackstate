@@ -65,6 +65,20 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-browsers-${{ hashFiles('.github/workflows/ai-teammate.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-browsers-
+
+      - name: Install Playwright and Chromium
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install playwright pytest
+          python3 -m playwright install --with-deps chromium
+
       - name: Configure npm global prefix
         run: |
           npm config set prefix ~/.npm-global
