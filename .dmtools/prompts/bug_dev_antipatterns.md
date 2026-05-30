@@ -59,3 +59,40 @@ git log --oneline --all -- 'lib/ui/features/tracker/services/browser_workspace*'
 ```
 
 Check what was already tried. Don't repeat the same approach the reviewer already rejected.
+
+## 7. NEVER add unrelated changes to a bug fix PR
+
+```mermaid
+flowchart TD
+  Fix([Bug fix ready]) --> Scope{Does the diff\ntouch files OUTSIDE\nthe bug's scope?}
+  Scope -->|"Locale UI, new keys,\nother product areas"| BAD["❌ BLOCKING\nReviewer WILL reject.\nSplit into separate PR."]
+  Scope -->|Only files needed\nfor the fix| OK([✅ Ship])
+```
+
+**Rule**: If the ticket is about accessibility-gate logging, do NOT also refactor locale settings UI. One ticket = one concern. Unrelated changes get instant BLOCKING rejection.
+
+## 8. Assertions must be specific, not regex-broad
+
+```python
+# ❌ WRONG — matches ANY message with generic words
+assert re.search(r'match|directory|repository|path|workspace', message)
+
+# ✅ CORRECT — matches the SPECIFIC error from the ticket
+assert 'workspace directory mismatch' in message or \
+       'selected directory does not contain' in message
+```
+
+**Rule**: Generic word-matching passes on unrelated failures. Use exact expected error variants from the ticket description.
+
+## 9. Test seed state must match ticket precondition EXACTLY
+
+If the ticket says "workspace is Local Unavailable":
+- ❌ Seeding a healthy hosted workspace (test passes without exercising the fail path)
+- ✅ Seeding the exact broken state described in preconditions
+
+```mermaid
+flowchart TD
+  Ticket["Ticket precondition:\n'broken local workspace'"] --> Seed{What does\ntest seed?}
+  Seed -->|Healthy hosted workspace| BAD["❌ BLOCKING\nTest never exercises\nthe ticket scenario"]
+  Seed -->|Exact broken state| GOOD["✅ Test exercises\nthe real failure path"]
+```

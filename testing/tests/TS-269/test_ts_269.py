@@ -47,67 +47,81 @@ class LocalTargetDefaultsToCurrentWorkingDirectoryTest(unittest.TestCase):
             "relying on the current working directory default.\n"
             f"Executed command: {observation.executed_command_text}",
         )
-        self.assertEqual(
-            observation.result.exit_code,
-            0,
-            "Step 1 failed: executing `trackstate --target local` from a valid Local "
-            "Git repository did not proceed successfully.\n"
-            f"Requested command: {observation.requested_command_text}\n"
-            f"Executed command: {observation.executed_command_text}\n"
-            f"Fallback reason: {observation.fallback_reason}\n"
-            f"Working directory: {observation.repository_path}\n"
-            f"stdout:\n{observation.result.stdout}\n"
-            f"stderr:\n{observation.result.stderr}",
-        )
-        self.assertIsInstance(
-            observation.result.json_payload,
-            dict,
-            "Step 1 failed: the CLI did not emit a JSON object that exposed the "
-            "resolved target metadata.\n"
-            f"stdout:\n{observation.result.stdout}\n"
-            f"stderr:\n{observation.result.stderr}",
-        )
         payload = observation.result.json_payload
-        assert isinstance(payload, dict)
-        self.assertIs(
-            payload.get("ok"),
-            True,
-            "Step 1 failed: the CLI reported a failed result instead of opening the "
-            "current repository.\n"
-            f"Observed payload: {payload}",
-        )
 
-        target = payload.get("target")
-        self.assertIsInstance(
-            target,
-            dict,
-            "Step 2 failed: the JSON output did not expose target metadata as an "
-            "object.\n"
-            f"Observed payload: {payload}",
-        )
-        assert isinstance(target, dict)
-        self.assertEqual(
-            target.get("type"),
-            "local",
-            "Step 2 failed: the JSON output did not identify the resolved target as "
-            "local.\n"
-            f"Observed target: {target}",
-        )
-        self.assertEqual(
-            target.get("value"),
-            observation.repository_path,
-            "Expected result failed: the CLI did not resolve the target path to the "
-            "current working directory.\n"
-            f"Expected path: {observation.repository_path}\n"
-            f"Observed target: {target}",
-        )
-        self.assertIn(
-            f'"value": "{observation.repository_path}"',
-            observation.result.stdout,
-            "Human-style verification failed: the terminal output did not visibly "
-            "show the current working directory in the target field.\n"
-            f"stdout:\n{observation.result.stdout}",
-        )
+        with self.subTest("step-1-command-completes"):
+            self.assertEqual(
+                observation.result.exit_code,
+                0,
+                "Step 1 failed: executing `trackstate --target local` from a valid "
+                "Local Git repository did not proceed successfully.\n"
+                f"Requested command: {observation.requested_command_text}\n"
+                f"Executed command: {observation.executed_command_text}\n"
+                f"Fallback reason: {observation.fallback_reason}\n"
+                f"Working directory: {observation.repository_path}\n"
+                f"stdout:\n{observation.result.stdout}\n"
+                f"stderr:\n{observation.result.stderr}",
+            )
+            self.assertIsInstance(
+                payload,
+                dict,
+                "Step 1 failed: the CLI did not emit a JSON object that exposed the "
+                "resolved target metadata.\n"
+                f"stdout:\n{observation.result.stdout}\n"
+                f"stderr:\n{observation.result.stderr}",
+            )
+            assert isinstance(payload, dict)
+            self.assertIs(
+                payload.get("ok"),
+                True,
+                "Step 1 failed: the CLI reported a failed result instead of opening "
+                "the current repository.\n"
+                f"Observed payload: {payload}",
+            )
+
+        with self.subTest("step-2-target-metadata"):
+            self.assertIsInstance(
+                payload,
+                dict,
+                "Step 2 failed: the CLI did not return a JSON object whose `target` "
+                "field could be inspected.\n"
+                f"stdout:\n{observation.result.stdout}\n"
+                f"stderr:\n{observation.result.stderr}",
+            )
+            assert isinstance(payload, dict)
+            target = payload.get("target")
+            self.assertIsInstance(
+                target,
+                dict,
+                "Step 2 failed: the JSON output did not expose target metadata as an "
+                "object.\n"
+                f"Observed payload: {payload}",
+            )
+            assert isinstance(target, dict)
+            self.assertEqual(
+                target.get("type"),
+                "local",
+                "Step 2 failed: the JSON output did not identify the resolved target "
+                "as local.\n"
+                f"Observed target: {target}",
+            )
+            self.assertEqual(
+                target.get("value"),
+                observation.repository_path,
+                "Expected result failed: the CLI did not resolve the target path to "
+                "the current working directory.\n"
+                f"Expected path: {observation.repository_path}\n"
+                f"Observed target: {target}",
+            )
+
+        with self.subTest("human-style-verification"):
+            self.assertIn(
+                f'"value": "{observation.repository_path}"',
+                observation.result.stdout,
+                "Human-style verification failed: the terminal output did not "
+                "visibly show the current working directory in the target field.\n"
+                f"stdout:\n{observation.result.stdout}",
+            )
 
 
 if __name__ == "__main__":

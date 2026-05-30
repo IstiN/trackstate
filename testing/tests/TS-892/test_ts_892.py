@@ -288,6 +288,7 @@ def main() -> None:
                         switcher=switcher,
                         local_row=local_row,
                         selected_row=selected_row,
+                        persisted_workspace_state=result["persisted_workspace_state"],  # type: ignore[arg-type]
                     )
                 except AssertionError as error:
                     _record_step(
@@ -573,6 +574,7 @@ def _assert_permanent_error_state(
     switcher: WorkspaceSwitcherObservation,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
+    persisted_workspace_state: dict[str, object],
 ) -> None:
     if local_row is None:
         raise AssertionError(
@@ -603,6 +605,19 @@ def _assert_permanent_error_state(
             "workspace even though the saved deleted local workspace row was still "
             "present.",
         )
+    elif selected_row is None:
+        # Fallback: the switcher parser found no selected row (recovery surface was open).
+        # Assert via the persisted activeWorkspaceId from localStorage that the app did
+        # not silently switch the active workspace to the hosted workspace.
+        active_id = persisted_workspace_state.get("activeWorkspaceId")
+        if isinstance(active_id, str) and active_id.startswith("hosted:"):
+            failures.append(
+                "the persisted activeWorkspaceId in localStorage was changed to a hosted "
+                "workspace even though the deleted local workspace configuration still "
+                f"exists (activeWorkspaceId={active_id!r}). "
+                "No selected row was visible in the switcher, so this storage snapshot "
+                "is the authoritative signal that the app defaulted to the hosted workspace.",
+            )
     if trigger is not None and (
         trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted"
     ):
@@ -621,6 +636,7 @@ def _assert_permanent_error_state(
             ),
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}",
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
+            f"Observed activeWorkspaceId: {persisted_workspace_state.get('activeWorkspaceId')!r}",
         ]
         raise AssertionError("\n".join(details))
 

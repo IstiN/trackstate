@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'browser_workspace_profiles_storage_mirror.dart';
 import '../../domain/models/workspace_profile_models.dart';
 import 'browser_preferences_storage_repair.dart';
 import 'trackstate_auth_store.dart';
@@ -18,10 +19,15 @@ abstract interface class WorkspaceProfileService {
     bool select = true,
   });
   Future<WorkspaceProfilesState> selectProfile(String workspaceId);
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection();
   Future<WorkspaceProfilesState> saveHostedAccessMode(
     String workspaceId,
     HostedWorkspaceAccessMode? accessMode,
   );
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  });
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId);
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
@@ -79,6 +85,7 @@ class SharedPreferencesWorkspaceProfileService
       profiles: nextProfiles,
       activeWorkspaceId: select ? nextProfile.id : state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     await _writeState(preferences, nextState);
     return nextState.profiles.firstWhere(
@@ -136,6 +143,8 @@ class SharedPreferencesWorkspaceProfileService
       profiles: nextProfiles,
       activeWorkspaceId: nextActiveWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId, updatedProfile.id}),
     );
     await _writeState(preferences, nextState);
     if (workspaceId != updatedProfile.id) {
@@ -172,7 +181,21 @@ class SharedPreferencesWorkspaceProfileService
         ..sort(compareWorkspaceProfileRecency),
       activeWorkspaceId: workspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
+    await _writeState(preferences, nextState);
+    return nextState;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> clearActiveWorkspaceSelection() async {
+    await repairBrowserPreferencesStorage();
+    final preferences = await SharedPreferences.getInstance();
+    final state = _normalizeState(_readState(preferences));
+    if (state.activeWorkspaceId == null) {
+      return state;
+    }
+    final nextState = state.copyWith(activeWorkspaceId: null);
     await _writeState(preferences, nextState);
     return nextState;
   }
@@ -213,6 +236,42 @@ class SharedPreferencesWorkspaceProfileService
       profiles: nextProfiles,
       activeWorkspaceId: state.activeWorkspaceId,
       migrationComplete: state.migrationComplete,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
+    );
+    await _writeState(preferences, nextState);
+    return nextState;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    await repairBrowserPreferencesStorage();
+    final preferences = await SharedPreferences.getInstance();
+    final state = _normalizeState(_readState(preferences));
+    final workspace = state.profiles.where(
+      (profile) => profile.id == workspaceId,
+    );
+    if (workspace.isEmpty) {
+      throw WorkspaceProfileException(
+        'Saved workspace $workspaceId was not found.',
+      );
+    }
+    if (!workspace.first.isLocal) {
+      return state;
+    }
+    final nextUnavailableIds = <String>{...state.unavailableLocalWorkspaceIds};
+    if (isAvailable) {
+      nextUnavailableIds.remove(workspaceId);
+    } else {
+      nextUnavailableIds.add(workspaceId);
+    }
+    if (_setEquals(state.unavailableLocalWorkspaceIds, nextUnavailableIds)) {
+      return state;
+    }
+    final nextState = state.copyWith(
+      unavailableLocalWorkspaceIds: nextUnavailableIds,
     );
     await _writeState(preferences, nextState);
     return nextState;
@@ -234,6 +293,8 @@ class SharedPreferencesWorkspaceProfileService
       profiles: nextProfiles,
       activeWorkspaceId: nextActiveWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .difference({workspaceId}),
     );
     await _writeState(preferences, nextState);
     await _authStore.clearToken(workspaceId: workspaceId);
@@ -266,6 +327,7 @@ class SharedPreferencesWorkspaceProfileService
       profiles: resolveWorkspaceDisplayNames([seededProfile]),
       activeWorkspaceId: seededProfile.id,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds,
     );
     await _writeState(preferences, nextState);
     if (seededProfile.isHosted) {
@@ -297,6 +359,13 @@ class SharedPreferencesWorkspaceProfileService
       profiles: profiles,
       activeWorkspaceId: decoded['activeWorkspaceId']?.toString(),
       migrationComplete: decoded['migrationComplete'] == true,
+      unavailableLocalWorkspaceIds:
+          decoded['unavailableLocalWorkspaceIds'] is List<Object?>
+          ? (decoded['unavailableLocalWorkspaceIds'] as List<Object?>)
+                .map((value) => value?.toString() ?? '')
+                .where((value) => value.isNotEmpty)
+                .toSet()
+          : const <String>{},
     );
   }
 
@@ -332,17 +401,26 @@ class SharedPreferencesWorkspaceProfileService
             writeBranch: previousActiveWorkspace.first.writeBranch,
           );
     final activeWorkspaceId =
-        normalizedProfiles.any(
-          (profile) => profile.id == normalizedActiveWorkspaceId,
-        )
+        normalizedActiveWorkspaceId == null ||
+            normalizedActiveWorkspaceId.isEmpty
+        ? null
+        : normalizedProfiles.any(
+            (profile) => profile.id == normalizedActiveWorkspaceId,
+          )
         ? normalizedActiveWorkspaceId
         : normalizedProfiles.isEmpty
         ? null
         : normalizedProfiles.first.id;
+    final localWorkspaceIds = normalizedProfiles
+        .where((profile) => profile.isLocal)
+        .map((profile) => profile.id)
+        .toSet();
     return WorkspaceProfilesState(
       profiles: normalizedProfiles,
       activeWorkspaceId: activeWorkspaceId,
       migrationComplete: state.migrationComplete,
+      unavailableLocalWorkspaceIds: state.unavailableLocalWorkspaceIds
+          .intersection(localWorkspaceIds),
     );
   }
 
@@ -350,14 +428,15 @@ class SharedPreferencesWorkspaceProfileService
     SharedPreferences preferences,
     WorkspaceProfilesState state,
   ) async {
-    await preferences.setString(
-      _stateKey,
-      jsonEncode({
-        'activeWorkspaceId': state.activeWorkspaceId,
-        'migrationComplete': state.migrationComplete,
-        'profiles': [for (final profile in state.profiles) profile.toJson()],
-      }),
-    );
+    final rawState = jsonEncode({
+      'activeWorkspaceId': state.activeWorkspaceId,
+      'migrationComplete': state.migrationComplete,
+      'unavailableLocalWorkspaceIds':
+          state.unavailableLocalWorkspaceIds.toList()..sort(),
+      'profiles': [for (final profile in state.profiles) profile.toJson()],
+    });
+    await preferences.setString(_stateKey, rawState);
+    await mirrorLegacyBrowserWorkspaceProfilesState(rawState);
   }
 
   void _validateInput(WorkspaceProfileInput input) {
@@ -391,6 +470,10 @@ class SharedPreferencesWorkspaceProfileService
   bool _statesEqual(WorkspaceProfilesState left, WorkspaceProfilesState right) {
     if (left.activeWorkspaceId != right.activeWorkspaceId ||
         left.migrationComplete != right.migrationComplete ||
+        !_setEquals(
+          left.unavailableLocalWorkspaceIds,
+          right.unavailableLocalWorkspaceIds,
+        ) ||
         left.profiles.length != right.profiles.length) {
       return false;
     }
@@ -410,4 +493,16 @@ class SharedPreferencesWorkspaceProfileService
     }
     return true;
   }
+}
+
+bool _setEquals<T>(Set<T> left, Set<T> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final value in left) {
+    if (!right.contains(value)) {
+      return false;
+    }
+  }
+  return true;
 }

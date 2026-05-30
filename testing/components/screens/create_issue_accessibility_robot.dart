@@ -83,7 +83,6 @@ class CreateIssueAccessibilityRobot {
     of: createIssueSurface.first,
     matching: find.byType(Scrollable),
   );
-
   void expectCreateIssueSurfaceVisible() {
     if (createIssueSurface.evaluate().isEmpty) {
       throw StateError('The Create issue surface is not visible.');
@@ -256,6 +255,25 @@ class CreateIssueAccessibilityRobot {
     );
     scrollableState.position.jumpTo(0);
     await tester.pump();
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> submit() async {
+    expectCreateIssueSurfaceVisible();
+    final submitControl =
+        controlWithinCreateIssueSurface('Create').evaluate().isNotEmpty
+        ? controlWithinCreateIssueSurface('Create')
+        : controlWithinCreateIssueSurface('Save');
+    if (submitControl.evaluate().isEmpty) {
+      throw StateError(
+        'No visible "Create" or "Save" action was rendered inside the Create issue surface.',
+      );
+    }
+
+    await tester.ensureVisible(submitControl.first);
+    await tester.tap(submitControl.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
   }
 

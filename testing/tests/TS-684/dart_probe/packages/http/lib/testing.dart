@@ -32,6 +32,13 @@ class MockClient extends Client {
   }) => _sendSimple('POST', url, headers: headers, body: body);
 
   @override
+  Future<Response> patch(
+    Object? url, {
+    Map<String, String>? headers,
+    Object? body,
+  }) => _sendSimple('PATCH', url, headers: headers, body: body);
+
+  @override
   Future<Response> delete(
     Object? url, {
     Map<String, String>? headers,

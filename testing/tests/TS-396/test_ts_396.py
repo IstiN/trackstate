@@ -64,6 +64,7 @@ def main() -> None:
         "expected_priority_label": expected_priority_label,
         "steps": [],
     }
+    step_failures: list[dict[str, object]] = []
 
     try:
         with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
@@ -100,115 +101,266 @@ def main() -> None:
                 )
 
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                board_edit_text = page.open_edit_dialog_from_board_card(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action="Use the Board card Edit affordance to open the shared Edit issue surface.",
-                    observed=board_edit_text,
-                )
+                board_dialog_open = False
+                try:
+                    board_edit_text = page.open_edit_dialog_from_board_card(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    board_dialog_open = True
+                    _record_step(
+                        result,
+                        step=3,
+                        status="passed",
+                        action=(
+                            "Use the Board card Edit affordance to open the shared Edit issue "
+                            "surface."
+                        ),
+                        observed=board_edit_text,
+                    )
+                except Exception as error:
+                    _record_failure(
+                        result,
+                        step_failures,
+                        step=3,
+                        action=(
+                            "Use the Board card Edit affordance to open the shared Edit issue "
+                            "surface."
+                        ),
+                        error=error,
+                    )
 
-                desktop_board_observation = page.observe_edit_surface(
-                    viewport_width=DESKTOP_VIEWPORT["width"],
-                    viewport_height=DESKTOP_VIEWPORT["height"],
-                )
-                _assert_edit_surface_preloaded(
-                    observation=desktop_board_observation,
-                    issue_fixture=issue_fixture,
-                    expected_priority_label=expected_priority_label,
-                    step_number=4,
-                    layout_mode="desktop Board card",
-                )
-                _assert_desktop_drawer_layout(
-                    observation=desktop_board_observation,
-                    step_number=4,
-                )
-                result["desktop_board_observation"] = _observation_payload(
-                    desktop_board_observation,
-                )
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=(
-                        "Open Edit from the Board card and verify the desktop "
-                        "drawer layout plus the preloaded Summary, Description, and Priority."
-                    ),
-                    observed=_format_observation(desktop_board_observation),
-                )
-                page.close_edit_dialog()
+                if board_dialog_open:
+                    try:
+                        desktop_board_observation = page.observe_edit_surface(
+                            viewport_width=DESKTOP_VIEWPORT["width"],
+                            viewport_height=DESKTOP_VIEWPORT["height"],
+                        )
+                        result["desktop_board_observation"] = _observation_payload(
+                            desktop_board_observation,
+                        )
+                        _assert_edit_surface_preloaded(
+                            observation=desktop_board_observation,
+                            issue_fixture=issue_fixture,
+                            expected_priority_label=expected_priority_label,
+                            step_number=4,
+                            layout_mode="desktop Board card",
+                        )
+                        _assert_desktop_drawer_layout(
+                            observation=desktop_board_observation,
+                            step_number=4,
+                        )
+                        _record_step(
+                            result,
+                            step=4,
+                            status="passed",
+                            action=(
+                                "Open Edit from the Board card and verify the desktop "
+                                "drawer layout plus the preloaded Summary, Description, and "
+                                "Priority."
+                            ),
+                            observed=_format_observation(desktop_board_observation),
+                        )
+                    except Exception as error:
+                        _record_failure(
+                            result,
+                            step_failures,
+                            step=4,
+                            action=(
+                                "Open Edit from the Board card and verify the desktop "
+                                "drawer layout plus the preloaded Summary, Description, and "
+                                "Priority."
+                            ),
+                            error=error,
+                            observed=(
+                                _format_observation(desktop_board_observation)
+                                if "desktop_board_observation" in locals()
+                                else None
+                            ),
+                        )
+                    finally:
+                        try:
+                            page.close_edit_dialog()
+                        except Exception as error:
+                            _record_failure(
+                                result,
+                                step_failures,
+                                step=4,
+                                action="Close the desktop Board edit surface.",
+                                error=error,
+                            )
 
-                page.open_edit_dialog_for_issue(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
-                desktop_detail_observation = page.observe_edit_surface(
-                    viewport_width=DESKTOP_VIEWPORT["width"],
-                    viewport_height=DESKTOP_VIEWPORT["height"],
-                )
-                _assert_edit_surface_preloaded(
-                    observation=desktop_detail_observation,
-                    issue_fixture=issue_fixture,
-                    expected_priority_label=expected_priority_label,
-                    step_number=5,
-                    layout_mode="desktop issue detail",
-                )
-                result["desktop_issue_detail_observation"] = _observation_payload(
-                    desktop_detail_observation,
-                )
-                _record_step(
-                    result,
-                    step=5,
-                    status="passed",
-                    action=(
-                        "Open Edit from the issue detail pane and verify the same issue "
-                        "metadata is preloaded on desktop."
-                    ),
-                    observed=_format_observation(desktop_detail_observation),
-                )
-                page.close_edit_dialog()
+                detail_dialog_open = False
+                try:
+                    page.open_edit_dialog_for_issue(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    detail_dialog_open = True
+                except Exception as error:
+                    _record_failure(
+                        result,
+                        step_failures,
+                        step=5,
+                        action=(
+                            "Open Edit from the issue detail pane and verify the same issue "
+                            "metadata is preloaded on desktop."
+                        ),
+                        error=error,
+                    )
 
-                page.set_viewport(**COMPACT_VIEWPORT)
-                page.open_edit_dialog_for_issue(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
-                compact_observation = page.observe_edit_surface(
-                    viewport_width=COMPACT_VIEWPORT["width"],
-                    viewport_height=COMPACT_VIEWPORT["height"],
-                )
-                _assert_edit_surface_preloaded(
-                    observation=compact_observation,
-                    issue_fixture=issue_fixture,
-                    expected_priority_label=expected_priority_label,
-                    step_number=6,
-                    layout_mode="compact issue detail",
-                )
-                _assert_compact_sheet_layout(
-                    observation=compact_observation,
-                    step_number=6,
-                )
-                result["compact_observation"] = _observation_payload(compact_observation)
-                _record_step(
-                    result,
-                    step=6,
-                    status="passed",
-                    action=(
-                        "Resize to 390px, open Edit again, and verify the compact sheet stays "
-                        "nearly full-width with the same preloaded issue metadata."
-                    ),
-                    observed=_format_observation(compact_observation),
-                )
+                if detail_dialog_open:
+                    try:
+                        desktop_detail_observation = page.observe_edit_surface(
+                            viewport_width=DESKTOP_VIEWPORT["width"],
+                            viewport_height=DESKTOP_VIEWPORT["height"],
+                        )
+                        result["desktop_issue_detail_observation"] = _observation_payload(
+                            desktop_detail_observation,
+                        )
+                        _assert_edit_surface_preloaded(
+                            observation=desktop_detail_observation,
+                            issue_fixture=issue_fixture,
+                            expected_priority_label=expected_priority_label,
+                            step_number=5,
+                            layout_mode="desktop issue detail",
+                        )
+                        _assert_desktop_drawer_layout(
+                            observation=desktop_detail_observation,
+                            step_number=5,
+                        )
+                        _record_step(
+                            result,
+                            step=5,
+                            status="passed",
+                            action=(
+                                "Open Edit from the issue detail pane and verify the desktop "
+                                "drawer layout plus the same issue metadata is preloaded."
+                            ),
+                            observed=_format_observation(desktop_detail_observation),
+                        )
+                    except Exception as error:
+                        _record_failure(
+                            result,
+                            step_failures,
+                            step=5,
+                            action=(
+                                "Open Edit from the issue detail pane and verify the desktop "
+                                "drawer layout plus the same issue metadata is preloaded."
+                            ),
+                            error=error,
+                            observed=(
+                                _format_observation(desktop_detail_observation)
+                                if "desktop_detail_observation" in locals()
+                                else None
+                            ),
+                        )
+                    finally:
+                        try:
+                            page.close_edit_dialog()
+                        except Exception as error:
+                            _record_failure(
+                                result,
+                                step_failures,
+                                step=5,
+                                action="Close the desktop issue-detail edit surface.",
+                                error=error,
+                            )
+
+                compact_dialog_open = False
+                try:
+                    page.set_viewport(**COMPACT_VIEWPORT)
+                    page.open_edit_dialog_for_issue(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    compact_dialog_open = True
+                except Exception as error:
+                    _record_failure(
+                        result,
+                        step_failures,
+                        step=6,
+                        action=(
+                            "Resize to 390px, open Edit again, and verify the compact sheet "
+                            "stays nearly full-width with the same preloaded issue metadata."
+                        ),
+                        error=error,
+                    )
+
+                if compact_dialog_open:
+                    try:
+                        compact_observation = page.observe_edit_surface(
+                            viewport_width=COMPACT_VIEWPORT["width"],
+                            viewport_height=COMPACT_VIEWPORT["height"],
+                        )
+                        result["compact_observation"] = _observation_payload(compact_observation)
+                        _assert_edit_surface_preloaded(
+                            observation=compact_observation,
+                            issue_fixture=issue_fixture,
+                            expected_priority_label=expected_priority_label,
+                            step_number=6,
+                            layout_mode="compact issue detail",
+                        )
+                        _assert_compact_sheet_layout(
+                            observation=compact_observation,
+                            step_number=6,
+                        )
+                        _record_step(
+                            result,
+                            step=6,
+                            status="passed",
+                            action=(
+                                "Resize to 390px, open Edit again, and verify the compact "
+                                "sheet stays nearly full-width with the same preloaded issue "
+                                "metadata."
+                            ),
+                            observed=_format_observation(compact_observation),
+                        )
+                    except Exception as error:
+                        _record_failure(
+                            result,
+                            step_failures,
+                            step=6,
+                            action=(
+                                "Resize to 390px, open Edit again, and verify the compact sheet "
+                                "stays nearly full-width with the same preloaded issue metadata."
+                            ),
+                            error=error,
+                            observed=(
+                                _format_observation(compact_observation)
+                                if "compact_observation" in locals()
+                                else None
+                            ),
+                        )
+                    finally:
+                        try:
+                            page.close_edit_dialog()
+                        except Exception as error:
+                            _record_failure(
+                                result,
+                                step_failures,
+                                step=6,
+                                action="Close the compact edit surface.",
+                                error=error,
+                            )
+
+                if step_failures:
+                    result["step_failures"] = step_failures
+                    page.screenshot(str(SCREENSHOT_PATH))
+                    result["screenshot"] = str(SCREENSHOT_PATH)
+                    raise AssertionError(
+                        "\n\n".join(
+                            f"Step {entry['step']} failed: {entry['error']}"
+                            for entry in step_failures
+                        )
+                    )
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
-                page.screenshot(str(SCREENSHOT_PATH))
-                result["screenshot"] = str(SCREENSHOT_PATH)
+                if "screenshot" not in result:
+                    page.screenshot(str(SCREENSHOT_PATH))
+                    result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
     except AssertionError as error:
         result["error"] = str(error)
@@ -422,6 +574,35 @@ def _record_step(
             "status": status,
             "action": action,
             "observed": observed,
+        },
+    )
+
+
+def _record_failure(
+    result: dict[str, object],
+    step_failures: list[dict[str, object]],
+    *,
+    step: int,
+    action: str,
+    error: Exception,
+    observed: str | None = None,
+) -> None:
+    error_text = f"{type(error).__name__}: {error}" if not str(error).strip() else str(error)
+    observed_text = error_text if observed is None else f"{error_text}\nObserved:\n{observed}"
+    _record_step(
+        result,
+        step=step,
+        status="failed",
+        action=action,
+        observed=observed_text,
+    )
+    step_failures.append(
+        {
+            "step": step,
+            "action": action,
+            "error": error_text,
+            "observed": observed,
+            "traceback": traceback.format_exc(),
         },
     )
 
