@@ -324,7 +324,7 @@ def main() -> None:
             page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
             result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
@@ -1016,6 +1016,8 @@ def _workspace_display_name(row: WorkspaceSwitcherRowObservation) -> str:
 def _workspace_display_name_from_result(row: dict[str, object]) -> str:
     display_name = str(row.get("display_name") or "").strip()
     return display_name or HOSTED_DISPLAY_NAME
+
+
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])
