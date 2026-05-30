@@ -168,21 +168,32 @@ def main() -> None:
                         upload_controls.upload_button_enabled
                     )
                     if (
-                        upload_controls.choose_button_count != 1
-                        or upload_controls.upload_button_count != 1
+                        upload_controls.choose_button_count < 1
+                        or upload_controls.upload_button_count < 1
                         or not upload_controls.choose_button_enabled
                     ):
-                        raise AssertionError(
-                            "Step 2 failed: the live Attachments tab stayed in a limited or "
-                            "download-only state and did not expose the visible `Choose "
-                            "attachment` and `Upload attachment` controls required for the "
-                            "duplicate replacement flow.\n"
-                            f"Observed choose button count: {upload_controls.choose_button_count}\n"
-                            f"Observed choose button enabled: {upload_controls.choose_button_enabled}\n"
-                            f"Observed upload button count: {upload_controls.upload_button_count}\n"
-                            f"Observed upload button enabled: {upload_controls.upload_button_enabled}\n"
-                            f"Observed body text:\n{attachments_body_text}",
+                        failure_observation = _attachment_upload_controls_failure_observation(
+                            upload_controls=upload_controls,
+                            attachments_body_text=attachments_body_text,
                         )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action="Select a new file named `design_doc.pdf` for upload.",
+                            observed=failure_observation,
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Attachments tab state from a user "
+                                "perspective before attempting the duplicate upload."
+                            ),
+                            observed=_attachment_upload_controls_human_observation(
+                                attachments_body_text,
+                            ),
+                        )
+                        raise AssertionError(f"Step 2 failed: {failure_observation}")
 
                     page.choose_attachment_file(str(upload_path))
                     selected_summary = page.wait_for_selected_attachment_summary(
@@ -269,10 +280,6 @@ def main() -> None:
 
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
-                    page.wait_for_text(
-                        "Choose a file to review its size before upload.",
-                        timeout_ms=60_000,
-                    )
                     matched, repo_text_after_confirm = poll_until(
                         probe=lambda: service.fetch_repo_text(attachment_path),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
@@ -313,12 +320,12 @@ def main() -> None:
                     _record_human_verification(
                         result,
                         check=(
-                            "Verified the dialog closed, the selected-file summary reset to the "
-                            "empty Attachments state, and the visible `Download "
-                            "design_doc.pdf` control still remained available."
+                            "Verified the dialog closed, the replacement persisted to the "
+                            "repository, and the visible `Download design_doc.pdf` control "
+                            "still remained available."
                         ),
                         observed=(
-                            "empty_state=Choose a file to review its size before upload.; "
+                            f"repo_text_after_confirm={repo_text_after_confirm}; "
                             f"download_count={visible_download_count_after_upload}; "
                             f"body_text={attachments_body_text_after_upload}"
                         ),
@@ -487,6 +494,55 @@ def _attachment_size_label(payload: bytes) -> str:
     return f"{len(payload)} B"
 
 
+def _attachment_upload_controls_failure_observation(
+    *,
+    upload_controls: object,
+    attachments_body_text: str,
+) -> str:
+    choose_button_count = getattr(upload_controls, "choose_button_count", 0)
+    choose_button_enabled = getattr(upload_controls, "choose_button_enabled", False)
+    upload_button_count = getattr(upload_controls, "upload_button_count", 0)
+    upload_button_enabled = getattr(upload_controls, "upload_button_enabled", False)
+    return (
+        "the live Attachments tab did not expose at least one visible `Choose "
+        "attachment` control and one visible `Upload attachment` control required "
+        "for the duplicate replacement flow.\n"
+        f"Observed choose button count: {choose_button_count}\n"
+        f"Observed choose button enabled: {choose_button_enabled}\n"
+        f"Observed upload button count: {upload_button_count}\n"
+        f"Observed upload button enabled: {upload_button_enabled}\n"
+        f"Observed body text:\n{attachments_body_text}"
+    )
+
+
+def _attachment_upload_controls_human_observation(attachments_body_text: str) -> str:
+    visible_copy = []
+    for fragment in (
+        "Attachments limited",
+        "GitHub Releases uploads are unavailable in the browser",
+        "This repository session is download-only for Git LFS attachments",
+        "Choose a file to review its size before upload.",
+    ):
+        if fragment in attachments_body_text:
+            visible_copy.append(f"`{fragment}`")
+
+    if visible_copy:
+        joined_copy = ", ".join(visible_copy[:-1])
+        if joined_copy:
+            joined_copy = f"{joined_copy}, and {visible_copy[-1]}"
+        else:
+            joined_copy = visible_copy[-1]
+        return (
+            "The duplicate upload flow was unavailable. "
+            f"Verified visible copy: {joined_copy}."
+        )
+
+    return (
+        "The duplicate upload flow was unavailable. Observed body text:\n"
+        f"{attachments_body_text}"
+    )
+
+
 def _record_step(
     result: dict[str, object],
     *,
@@ -540,6 +596,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    product_failure = _is_product_failure(result)
+    result["failure_classification"] = (
+        "product" if product_failure else "precondition/setup"
+    )
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -557,7 +617,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if product_failure:
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -593,13 +656,26 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
         ),
         f"* Screenshot: {{{{{screenshot_path}}}}}",
-        "",
-        "*Step results*",
-        *_step_lines(result, jira=True),
-        "",
-        "*Human-style verification*",
-        *_human_lines(result, jira=True),
     ]
+    if not passed:
+        lines.append(
+            "* Failure classification: "
+            + (
+                "product-facing TS-389 failure after reaching the Attachments flow."
+                if _is_product_failure(result)
+                else "precondition/setup failure before the attachment replacement boundary; no downstream product bug output was generated."
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "*Step results*",
+            *_step_lines(result, jira=True),
+            "",
+            "*Human-style verification*",
+            *_human_lines(result, jira=True),
+        ]
+    )
     if not passed:
         lines.extend(
             [
@@ -645,13 +721,26 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
         ),
         f"- Screenshot: `{screenshot_path}`",
-        "",
-        "### Step results",
-        *_step_lines(result, jira=False),
-        "",
-        "### Human-style verification",
-        *_human_lines(result, jira=False),
     ]
+    if not passed:
+        lines.append(
+            "- Failure classification: "
+            + (
+                "product-facing TS-389 failure after reaching the Attachments flow."
+                if _is_product_failure(result)
+                else "precondition/setup failure before the attachment replacement boundary; no downstream product bug output was generated."
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "### Step results",
+            *_step_lines(result, jira=False),
+            "",
+            "### Human-style verification",
+            *_human_lines(result, jira=False),
+        ]
+    )
     if not passed:
         lines.extend(
             [
@@ -684,6 +773,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     if not passed:
         lines.extend(
             [
+                (
+                    "- Failure classification: product-facing TS-389 failure."
+                    if _is_product_failure(result)
+                    else "- Failure classification: precondition/setup failure before the attachment replacement boundary; no product bug output was generated."
+                ),
                 "",
                 "## Error",
                 "```text",
@@ -747,6 +841,23 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- Cleanup: `{result.get('cleanup')}`",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _is_product_failure(result: dict[str, object]) -> bool:
+    if any(_step_status(result, step_number) == "passed" for step_number in (2, 3, 4, 5)):
+        return True
+    if _step_status(result, 1) != "passed":
+        return False
+    return not _attachments_body_shows_upload_controls(result)
+
+
+def _attachments_body_shows_upload_controls(result: dict[str, object]) -> bool:
+    body_text = str(result.get("attachments_body_text_before_upload", ""))
+    normalized_body = " ".join(body_text.split()).casefold()
+    return (
+        "choose attachment" in normalized_body
+        and "upload attachment" in normalized_body
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:

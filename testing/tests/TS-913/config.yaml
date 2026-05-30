@@ -7,6 +7,7 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored signed-in GitHub token.
-  - Preloads an active local workspace plus one hosted workspace in browser storage.
-  - Establishes the Local Unavailable precondition by deleting the prepared local repository before startup and waiting for retry exhaustion.
+  - Runs at the ticket-aligned desktop viewport of 1440x900.
+  - Preloads the hosted workspace as active plus one saved local workspace in browser storage.
+  - Establishes the Local Unavailable precondition by preloading the saved local workspace ID in unavailableLocalWorkspaceIds before the refresh scenario begins.
   - Restores the same local repository on disk outside the app, refreshes the page, and verifies the workspace stays Local Unavailable until a manual action occurs.

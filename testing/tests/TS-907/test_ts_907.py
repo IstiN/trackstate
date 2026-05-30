@@ -51,7 +51,20 @@ EXPECTED_RESULT = (
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    config = SemanticLabelContextLintConfig.from_env()
+    config = SemanticLabelContextLintConfig(
+        flutter_version="3.35.3",
+        source_git_ref="origin/main",
+        target_relative_path=Path("lib/ui/features/tracker/views/trackstate_app.dart"),
+        localization_relative_path=Path("lib/l10n/app_en.arb"),
+        semantic_label_localization_key="workspaceSyncAttentionNeededSemanticLabel",
+        required_source_snippet="_workspaceSyncAttentionNeededSemanticLabel(l10n),",
+        replacement_source_snippet="_workspaceSyncAttentionNeededVisibleLabel(l10n),",
+        required_semantic_label="Sync error, attention needed",
+        generic_semantic_label="Attention needed",
+        required_issue_terms=("sync", "error", "attention"),
+        required_context_terms=("accessibility", "aria", "semantic", "label"),
+        keep_temp_project=False,
+    )
     probe = create_flutter_analyze_probe(
         REPO_ROOT,
         flutter_version=config.flutter_version,
@@ -63,8 +76,10 @@ def main() -> None:
         "title": TEST_CASE_TITLE,
         "run_command": RUN_COMMAND,
         "config_path": str(CONFIG_PATH),
+        "source_git_ref": config.source_git_ref,
         "target_path": config.target_relative_path.as_posix(),
         "localization_path": config.localization_relative_path.as_posix(),
+        "semantic_label_localization_key": config.semantic_label_localization_key,
         "expected_semantic_label": config.required_semantic_label,
         "generic_semantic_label": config.generic_semantic_label,
         "os": platform.platform(),
@@ -104,8 +119,9 @@ def _evaluate(
             "`flutter analyze`."
         ),
         observed=(
-            "The analysis command exited non-zero and surfaced an accessibility "
-            f"diagnostic for {config.target_relative_path.as_posix()}:\n"
+            f"The analysis command against {config.source_git_ref} exited non-zero "
+            f"and blocked the weakened semantic label with an analyzer diagnostic for "
+            f"{config.target_relative_path.as_posix()}:\n"
             f"{_combined_output(validation.mutated_analyze)}"
         ),
     )
@@ -149,17 +165,22 @@ def _assert_live_semantic_contract(
     failures: list[str] = []
     if config.required_source_snippet not in validation.baseline_source:
         failures.append(
-            "the live production source no longer returned the dedicated localized "
-            f"semantic label getter `{config.required_source_snippet}`"
+            "the current main snapshot no longer used the dedicated typed sync "
+            f"semantic-label wrapper access `{config.required_source_snippet}`"
+        )
+    if config.semantic_label_localization_key not in validation.localization_source:
+        failures.append(
+            "the current main localization snapshot no longer contained the required "
+            f"semantic-label key `{config.semantic_label_localization_key}`"
         )
     if config.required_semantic_label not in validation.localization_source:
         failures.append(
-            "the live English localization file no longer contained the required "
+            "the current main English localization file no longer contained the required "
             f"descriptive semantic label {config.required_semantic_label!r}"
         )
     if config.generic_semantic_label not in validation.localization_source:
         failures.append(
-            "the live English localization file no longer contained the visible "
+            "the current main English localization file no longer contained the visible "
             f"generic label {config.generic_semantic_label!r} needed for the regression mutation"
         )
     if not validation.baseline_analyze.succeeded:
@@ -170,7 +191,8 @@ def _assert_live_semantic_contract(
     if failures:
         raise AssertionError(
             "Precondition failed: TS-907 could not confirm the live production "
-            "sync-pill semantic-label contract before mutating the temp workspace.\n"
+            f"sync-pill semantic-label contract from {config.source_git_ref} before "
+            "mutating the temp workspace.\n"
             f"Problems: {'; '.join(failures)}\n"
             f"Baseline analyze output:\n{_combined_output(validation.baseline_analyze)}"
         )
@@ -180,7 +202,7 @@ def _assert_live_semantic_contract(
         status="passed",
         action=REQUEST_STEPS[0],
         observed=(
-            "Confirmed the live production source returns "
+            f"Confirmed the {config.source_git_ref} snapshot uses "
             f"`{config.required_source_snippet}` from "
             f"{config.target_relative_path.as_posix()} and the English localization "
             f"defines {config.required_semantic_label!r} for the sync error semantic label. "
@@ -205,6 +227,7 @@ def _assert_mutation_applied(
         raise AssertionError(
             "Step 2 failed: the temp workspace source did not contain the weaker "
             f"semantic-label return `{config.replacement_source_snippet}`.\n"
+            f"semantic-label value `{config.replacement_source_snippet}`.\n"
             f"Mutated file: {validation.target_path}"
         )
     _record_step(
@@ -218,7 +241,8 @@ def _assert_mutation_applied(
             f"`{config.replacement_source_snippet}` inside "
             f"{config.target_relative_path.as_posix()}, downgrading the semantic "
             f"label from {config.required_semantic_label!r} to the generic "
-            f"{config.generic_semantic_label!r}."
+            f"{config.generic_semantic_label!r} while keeping the typed semantic "
+            "wrapper intact."
         ),
     )
 
@@ -237,9 +261,18 @@ def _assert_lint_blocks_regression(
         validation.mutated_analyze,
         normalized_output=normalized_output,
     )
+    issue_markers = sorted(
+        term for term in config.required_issue_terms if term in normalized_output
+    )
+    context_markers = sorted(
+        term for term in config.required_context_terms if term in normalized_output
+    )
+    contract_markers = _blocking_contract_markers(normalized_output)
     clean_analysis = "no issues found!" in normalized_output
 
-    if diagnostic_signals and not clean_analysis:
+    if diagnostic_signals and not clean_analysis and (
+        contract_markers or (issue_markers and context_markers)
+    ):
         _record_step(
             result,
             step=3,
@@ -250,7 +283,10 @@ def _assert_lint_blocks_regression(
                 f"temp workspace. The command surfaced analyzer diagnostics instead "
                 f"of a clean `No issues found!` result. Observed exit_code="
                 f"{validation.mutated_analyze.exit_code}; "
-                f"diagnostic_signals={diagnostic_signals}; terminal output:\n{output}"
+                f"diagnostic_signals={diagnostic_signals}; "
+                f"contract_markers={sorted(contract_markers)}; "
+                f"issue_markers={issue_markers}; "
+                f"context_markers={context_markers}; terminal output:\n{output}"
             ),
         )
         return
@@ -266,6 +302,9 @@ def _assert_lint_blocks_regression(
             f"Observed exit_code={validation.mutated_analyze.exit_code}; "
             f"clean_analysis={clean_analysis}; "
             f"diagnostic_signals={diagnostic_signals}; "
+            f"contract_markers={sorted(contract_markers)}; "
+            f"issue_markers={issue_markers}; "
+            f"context_markers={context_markers}; "
             f"terminal output:\n{output}"
         ),
     )
@@ -276,21 +315,25 @@ def _assert_lint_blocks_regression(
             "`flutter analyze` against the weakened semantic-label change."
         ),
         observed=(
-            "The command still looked like a clean analysis run instead of surfacing "
-            "a real diagnostic for the weakened semantic label. Output:\n"
+            "The command did not block the weakened semantic label with either a "
+            "semantic-context diagnostic or the deployed typed-wrapper analyzer "
+            "contract. Output:\n"
             f"{output}"
         ),
     )
     raise AssertionError(
         "Step 3 failed: `flutter analyze` did not identify the weakened sync-pill "
-        "semantic label regression with any real diagnostic.\n"
-        "Expected the mutated analysis run to stop looking clean and surface an "
-        "issue, warning, hint, or non-zero analyzer result instead of "
-        "`No issues found!`.\n"
+        "semantic label regression with a blocking diagnostic.\n"
+        "Expected the mutated analysis run to stop looking clean and block the weak "
+        "semantic label with either a semantic-context diagnostic or the deployed "
+        "typed-wrapper analyzer contract.\n"
         f"Observed command: {validation.mutated_analyze.command_text}\n"
         f"Observed exit code: {validation.mutated_analyze.exit_code}\n"
         f"Observed clean analysis: {clean_analysis}\n"
         f"Observed diagnostic signals: {diagnostic_signals}\n"
+        f"Observed contract markers: {sorted(contract_markers)}\n"
+        f"Observed issue markers: {issue_markers}\n"
+        f"Observed context markers: {context_markers}\n"
         f"Observed output:\n{output}"
     )
 
@@ -320,6 +363,22 @@ def _diagnostic_signals(
         signals.append("issue-summary")
 
     return signals
+
+
+def _blocking_contract_markers(normalized_output: str) -> set[str]:
+    markers: dict[str, tuple[str, ...]] = {
+        "assignment-type-error": ("can't be assigned", "argument type"),
+        "argument-type-not-assignable": ("argument_type_not_assignable",),
+        "semantic-wrapper-type": (
+            "_workspacesyncattentionneededsemantictext",
+            "_syncpillsemanticlabel",
+        ),
+    }
+    return {
+        name
+        for name, patterns in markers.items()
+        if any(pattern in normalized_output for pattern in patterns)
+    }
 
 
 def _populate_command_metadata(
@@ -391,6 +450,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Title:* {TEST_CASE_TITLE}",
         f"*Status:* {status}",
         f"*Environment:* local repository checkout | flutter analyze | {result.get('os')}",
+        f"*Source snapshot:* {{{{{result.get('source_git_ref')}}}}}",
         f"*Config:* {{{{{result.get('config_path')}}}}}",
         "",
         "h4. Automation checks",
@@ -426,6 +486,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"**Title:** {TEST_CASE_TITLE}",
         f"**Environment:** local repository checkout | flutter analyze | {result.get('os')}",
+        f"**Source snapshot:** `{result.get('source_git_ref')}`",
         f"**Target file:** `{result.get('target_path')}`",
         f"**Status:** {'passed' if passed else 'failed'}",
         "",
@@ -485,13 +546,14 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
         "- **Actual:** After the sync-pill semantic label was downgraded to the generic "
-        "`Attention needed` value in a disposable workspace copy, `flutter analyze` "
-        "did not emit a blocking accessibility/context diagnostic that explained the "
-        "missing `Sync error` prefix.\n\n"
+        "`Attention needed` path in a disposable workspace copy, `flutter analyze` "
+        "did not emit any blocking diagnostic that prevented the weakened semantic "
+        "label from compiling or being analyzed cleanly.\n\n"
         "## Environment details\n"
         "- **URL:** local repository checkout (no deployed URL required for this lint case)\n"
         f"- **Browser:** N/A - local terminal validation\n"
         f"- **OS:** {result.get('os')}\n"
+        f"- **Source snapshot:** `{result.get('source_git_ref')}`\n"
         f"- **Run command:** `{result.get('run_command')}`\n"
         f"- **Config:** `{result.get('config_path')}`\n"
         f"- **Target file:** `{result.get('target_path')}`\n"

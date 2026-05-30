@@ -404,12 +404,46 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"package:meta matches={len(meta_matches)}, "
         f"required this. matches sampled={len(required_matches)}"
     )
+    replacement_observation = (
+        "The visible provider import block did not include `package:meta`; it only showed "
+        "the Dart/http/domain imports plus `foundation_compat.dart`."
+    )
 
     jira_lines = [
         "h3. Test Automation Result",
         "",
         "*Status:* ❌ FAILED",
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "h4. What was automated",
+        (
+            f"* Ran a repository-wide source scan across {{{search_roots}}} for the "
+            "{code}import 'package:flutter/{code} boundary."
+        ),
+        (
+            f"* Inspected {{{provider_relative_path}}} to confirm the visible import block "
+            "removed Flutter foundation and retained the compatibility shim."
+        ),
+        (
+            "* Checked the provider for the ticket's required non-Flutter replacement "
+            "evidence and compared the visible imports with the expected `package:meta` import."
+        ),
+        "",
+        "h4. Human-style verification",
+        (
+            "* Opened the provider file header and reviewed the visible imports exactly as a "
+            "reviewer would when confirming the dependency boundary manually."
+        ),
+        (
+            f"* Observed: {replacement_observation}"
+        ),
+        (
+            "* Expected match: the visible import block should also include `package:meta`; "
+            "it did not, so the human-style verification did not match the expected result."
+        ),
+        "{code:dart}",
+        provider_excerpt,
+        "{code}",
         "",
         "h4. Failure summary",
         f"* Error: {{{error_message}}}",
@@ -479,6 +513,34 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "**Status:** ❌ FAILED",
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
+        "",
+        "## What was automated",
+        (
+            f"- Ran a repository-wide source scan across `{search_roots}` for the "
+            "`import 'package:flutter/` boundary."
+        ),
+        (
+            f"- Inspected `{provider_relative_path}` to confirm the visible import block "
+            "removed Flutter foundation and retained the compatibility shim."
+        ),
+        (
+            "- Checked the provider for the ticket's required non-Flutter replacement "
+            "evidence and compared the visible imports with the expected `package:meta` import."
+        ),
+        "",
+        "## Human-style verification",
+        (
+            "- Opened the provider file header and reviewed the visible imports exactly as a "
+            "reviewer would when confirming the dependency boundary manually."
+        ),
+        f"- Observed: {replacement_observation}",
+        (
+            "- Expected match: the visible import block should also include `package:meta`; "
+            "it did not, so the human-style verification did not match the expected result."
+        ),
+        "```dart",
+        provider_excerpt,
+        "```",
         "",
         "## Failure summary",
         f"- Error: `{error_message}`",
@@ -617,17 +679,10 @@ def _write_review_replies() -> None:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3234673312,
-                        "threadId": "PRRT_kwDOSU6Gf86BxRVw",
+                        "inReplyToId": 3312749211,
+                        "threadId": "PRRT_kwDOSU6Gf86FLq7v",
                         "reply": (
-                            "Fixed: step 3 now passes only when `github_trackstate_provider.dart` contains a real `package:meta` import. Dart `required` usage is kept as diagnostic evidence only, so the rerun now correctly fails against the current repository state because `package:meta` is absent."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Fixed: added `testing/tests/TS-597/README.md` and tightened the test to the ticket's exact `package:meta` expectation. The rerun now reports the real product-visible mismatch instead of masking it with a synthetic pass."
+                            "Fixed: updated `testing/tests/TS-597/README.md` to document the PyYAML dependency and added the install command (`python3 -m pip install pyyaml`) because the test loads `config.yaml` with `yaml.safe_load(...)`."
                         ),
                     },
                 ]

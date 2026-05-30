@@ -22,6 +22,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherInteractiveTextObservation,
     WorkspaceSwitcherSemanticsObservation,
     WorkspaceSwitcherSurfaceObservation,
+    WorkspaceSwitcherTabStopObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -70,11 +71,13 @@ SURFACE_PROBE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_surface_probe.png"
 HOSTED_TARGET = "IstiN/trackstate-setup"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 DEFAULT_BRANCH = "main"
-DESKTOP_TAB_COUNT = 12
+DESKTOP_TAB_COUNT = 24
 SHEET_TAB_COUNT = 12
 MOBILE_TAB_COUNT = 24
 MIN_TEXT_CONTRAST = 4.5
 MIN_GRAPHIC_CONTRAST = 3.0
+MOBILE_TRIGGER_VISUAL_MARGIN = 8
+MIN_MOBILE_EDGE_CHANGE_PIXELS = 24
 
 
 def main() -> None:
@@ -186,6 +189,7 @@ def main() -> None:
                 errors.append(error)
 
             opened_with_keyboard = False
+            step_2_recorded = False
             if page.workspace_trigger_reached(topbar_sequence):
                 try:
                     page.press_enter_on_active_element_and_wait_for_surface()
@@ -202,15 +206,9 @@ def main() -> None:
                         "Step 2 failed: pressing Enter on the focused workspace switcher "
                         f"trigger did not open the surface.\n{observed}"
                     )
+                    step_2_recorded = True
                 else:
                     opened_with_keyboard = True
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=REQUEST_STEPS[1],
-                        observed="Pressing Enter on the focused trigger opened the visible workspace switcher surface.",
-                    )
             else:
                 _record_step(
                     result,
@@ -223,11 +221,56 @@ def main() -> None:
                         "used next only to collect diagnostic observations from the live surface."
                     ),
                 )
+                step_2_recorded = True
+            surface: WorkspaceSwitcherSurfaceObservation | None = None
+            if opened_with_keyboard:
+                try:
+                    surface = page.observe_surface(timeout_ms=30_000)
+                except AssertionError as error:
+                    observed = (
+                        "Step 2 failed: pressing Enter moved focus to the workspace switcher "
+                        "trigger, but the live surface still was not observable afterward.\n"
+                        f"{error}"
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=observed,
+                    )
+                    errors.append(observed)
+                    step_2_recorded = True
+                    opened_with_keyboard = False
+                else:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Pressing Enter on the focused trigger opened the visible "
+                            "workspace switcher surface."
+                        ),
+                    )
+                    step_2_recorded = True
 
-            if not opened_with_keyboard:
+            if surface is None:
                 page.open_surface_with_click()
+                surface = page.observe_surface(timeout_ms=30_000)
 
-            surface = page.observe_surface()
+            if not step_2_recorded:
+                _record_step(
+                    result,
+                    step=2,
+                    status="failed",
+                    action=REQUEST_STEPS[1],
+                    observed=(
+                        "The keyboard Enter step did not produce a conclusive observable "
+                        "surface result. A pointer click was used next only to collect "
+                        "diagnostic observations from the live surface."
+                    ),
+                )
             SURFACE_PROBE_SCREENSHOT_PATH.unlink(missing_ok=True)
             page.screenshot(str(SURFACE_PROBE_SCREENSHOT_PATH))
             surface = _enrich_badge_contrast(
@@ -248,9 +291,19 @@ def main() -> None:
             result["desktop_sheet_focus_sequence"] = [
                 asdict(step) for step in sheet_sequence
             ]
+            panel = page.observe_open_panel(timeout_ms=30_000)
+            result["desktop_open_panel_observation"] = asdict(panel)
+            sheet_tab_stops = page.observe_internal_tab_stops(
+                panel=panel,
+                timeout_ms=30_000,
+            )
+            result["desktop_internal_tab_stops"] = [
+                asdict(tab_stop) for tab_stop in sheet_tab_stops
+            ]
             try:
                 sheet_summary = _assert_sheet_accessibility(
                     sequence=sheet_sequence,
+                    tab_stops=sheet_tab_stops,
                     surface=surface,
                 )
             except AssertionError as error:
@@ -350,12 +403,27 @@ def main() -> None:
                 )
                 errors.append(error)
             else:
+                mobile_before_path = OUTPUTS_DIR / "ts726_mobile_focus_before.png"
+                mobile_after_path = OUTPUTS_DIR / "ts726_mobile_focus_after.png"
+                mobile_before_path.unlink(missing_ok=True)
+                mobile_after_path.unlink(missing_ok=True)
+                page.screenshot(str(mobile_before_path))
                 mobile_focus = page.observe_mobile_trigger_focus(
                     tab_count=MOBILE_TAB_COUNT,
                 )
+                page.screenshot(str(mobile_after_path))
+                mobile_visual_diff = _observe_mobile_focus_visual_diff(
+                    before_path=mobile_before_path,
+                    after_path=mobile_after_path,
+                    observation=mobile_focus,
+                )
                 result["mobile_trigger_focus_observation"] = asdict(mobile_focus)
+                result["mobile_trigger_focus_visual_diff"] = mobile_visual_diff
                 try:
-                    mobile_summary = _assert_mobile_focus_ring(mobile_focus)
+                    mobile_summary = _assert_mobile_focus_ring(
+                        mobile_focus,
+                        visual_diff=mobile_visual_diff,
+                    )
                 except AssertionError as error:
                     observed = str(error)
                     _record_step(
@@ -366,8 +434,7 @@ def main() -> None:
                         observed=observed,
                     )
                     errors.append(observed)
-                    if "screenshot" not in result:
-                        _capture_screenshot(page, FAILURE_SCREENSHOT_PATH, result)
+                    _capture_screenshot(page, FAILURE_SCREENSHOT_PATH, result)
                 else:
                     _record_step(
                         result,
@@ -382,8 +449,13 @@ def main() -> None:
                         "Viewed the condensed mobile trigger state after attempting to "
                         "focus it like a keyboard user."
                     ),
-                    observed=_mobile_focus_summary(mobile_focus),
+                    observed=(
+                        f"{_mobile_focus_summary(mobile_focus)}; "
+                        f"{_mobile_focus_visual_summary(mobile_visual_diff)}"
+                    ),
                 )
+                mobile_before_path.unlink(missing_ok=True)
+                mobile_after_path.unlink(missing_ok=True)
 
         if errors:
             raise AssertionError("\n\n".join(errors))
@@ -429,6 +501,7 @@ def _workspace_state() -> dict[str, object]:
 def _assert_sheet_accessibility(
     *,
     sequence: tuple[FocusNavigationStep, ...],
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
     surface: WorkspaceSwitcherSurfaceObservation,
 ) -> str:
     if surface.heading_text != "Workspace switcher":
@@ -466,23 +539,24 @@ def _assert_sheet_accessibility(
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
     labels = [step.after_label or "" for step in sequence]
-    has_workspace_list_control = any(label in {"Open", "Delete", "Active"} for label in labels)
-    has_add_workspace_control = any(
-        label in {"Hosted", "Local", "Repository", "Branch", "Save and switch"}
-        for label in labels
+    has_workspace_list_control = any(
+        _is_workspace_list_control_label(label) for label in labels
     )
-    has_remove_control = any(label == "Delete" for label in labels)
+    has_add_workspace_control = any(_is_add_workspace_control_label(label) for label in labels)
+    has_remove_control = any(_is_remove_control_label(label) for label in labels)
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
-            "Step 3 failed: tabbing through the workspace switcher surface did not reach "
-            "the expected list, add-workspace, and remove controls.\n"
+            "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
+            "surface did not reach the expected list, add-workspace, and remove controls.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
-    _assert_logical_sheet_focus_order(sequence)
+    _assert_logical_sheet_focus_order(sequence, tab_stops)
     return (
         f"focus_sequence={_focus_sequence_summary(sequence)}; "
         f"focus_groups={_focus_group_summary(sequence)}; "
+        f"keyboard_tab_stops={_tab_stop_summary(tab_stops)}; "
         f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
         f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
     )
@@ -743,6 +817,8 @@ def _sample_foreground(
 
 def _assert_mobile_focus_ring(
     observation: MobileTriggerFocusObservation,
+    *,
+    visual_diff: dict[str, object],
 ) -> str:
     if observation.active_label_after_focus is None or not observation.active_label_after_focus.startswith(
         "Workspace switcher:"
@@ -756,14 +832,19 @@ def _assert_mobile_focus_ring(
         "none" not in observation.after_outline.lower()
         or "rgba(0, 0, 0, 0)" not in observation.after_outline_color.lower()
         or observation.after_box_shadow.lower() != "none"
+        or int(visual_diff.get("edge_changed_pixels", 0)) >= MIN_MOBILE_EDGE_CHANGE_PIXELS
     )
     if not ring_visible:
         raise AssertionError(
             "Step 5 failed: the condensed mobile workspace switcher trigger did not "
             "show a visible focus ring after focus landed on it.\n"
-            f"{_mobile_focus_summary(observation)}",
+            f"{_mobile_focus_summary(observation)}; "
+            f"{_mobile_focus_visual_summary(visual_diff)}",
         )
-    return _mobile_focus_summary(observation)
+    return (
+        f"{_mobile_focus_summary(observation)}; "
+        f"{_mobile_focus_visual_summary(visual_diff)}"
+    )
 
 
 def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
@@ -775,6 +856,7 @@ def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
 
 def _assert_logical_sheet_focus_order(
     sequence: tuple[FocusNavigationStep, ...],
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
 ) -> None:
     ranked_groups: list[tuple[int, str, str]] = []
     last_rank = -1
@@ -787,17 +869,20 @@ def _assert_logical_sheet_focus_order(
         ranked_groups.append((step.step, label, group))
         if rank < last_rank:
             raise AssertionError(
-                "Step 3 failed: tabbing through the workspace switcher surface did not keep "
-                "a logical focus order across the major control groups.\n"
+                "Step 3 failed: keyboard Tab navigation inside the workspace switcher did "
+                "not keep a logical focus order across the major control groups.\n"
                 f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
-                f"Observed focus groups: {_focus_group_summary(sequence)}"
+                f"Observed focus groups: {_focus_group_summary(sequence)}\n"
+                f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
+                f"Observed focus groups: {_tab_stop_group_summary(tab_stops)}"
             )
         last_rank = rank
     if not ranked_groups:
         raise AssertionError(
             "Step 3 failed: the workspace switcher surface did not expose enough labeled "
-            "focus targets to verify logical group order.\n"
-            f"Observed focus sequence: {_focus_sequence_summary(sequence)}"
+            "keyboard focus targets to verify logical group order.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+            f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}"
         )
 
 
@@ -813,10 +898,26 @@ def _focus_group_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
     return " -> ".join(grouped_steps)
 
 
+def _tab_stop_group_summary(tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...]) -> str:
+    grouped_steps = []
+    for tab_stop in tab_stops:
+        label = _tab_stop_label(tab_stop) or "<none>"
+        group = _sheet_tab_stop_group(label)
+        if group is None:
+            grouped_steps.append(f"{tab_stop.dom_index}:{label}[other]")
+            continue
+        grouped_steps.append(f"{tab_stop.dom_index}:{label}[{group}]")
+    return " -> ".join(grouped_steps)
+
+
 def _sheet_focus_group(label: str) -> str | None:
-    if label in {"Open", "Delete", "Active"}:
-        return "workspace-list"
-    if label in {"Hosted", "Local", "Repository", "Branch"}:
+    return _sheet_tab_stop_group(label)
+
+
+def _sheet_tab_stop_group(label: str) -> str | None:
+    if _is_workspace_list_control_label(label) or _is_remove_control_label(label):
+        return "saved-workspaces"
+    if _is_add_workspace_control_label(label):
         return "add-workspace"
     if label == "Save and switch":
         return "save"
@@ -824,13 +925,44 @@ def _sheet_focus_group(label: str) -> str | None:
 
 
 def _sheet_focus_group_rank(group: str) -> int:
-    if group == "workspace-list":
+    if group == "saved-workspaces":
         return 0
     if group == "add-workspace":
         return 1
     if group == "save":
         return 2
     raise ValueError(f"Unknown sheet focus group: {group}")
+
+
+def _is_workspace_list_control_label(label: str) -> bool:
+    normalized = " ".join(label.split())
+    if not normalized or normalized.startswith("Workspace switcher:"):
+        return False
+    if normalized in {"Open", "Active"} or _is_remove_control_label(normalized):
+        return True
+    has_workspace_identity = "Hosted" in normalized or "Local" in normalized
+    has_workspace_state = any(
+        token in normalized
+        for token in (
+            "Active",
+            "Open",
+            "Unavailable",
+            "Needs sign-in",
+            "Attachments limited",
+            "Read-only",
+            "Connected",
+            "Branch:",
+        )
+    )
+    return has_workspace_identity and has_workspace_state
+
+
+def _is_add_workspace_control_label(label: str) -> bool:
+    return label in {"Hosted", "Local", "Repository", "Branch"}
+
+
+def _is_remove_control_label(label: str) -> bool:
+    return label == "Delete" or label.startswith("Delete:")
 
 
 def _badge_summary(badges: tuple[WorkspaceSwitcherBadgeObservation, ...]) -> str:
@@ -905,6 +1037,99 @@ def _mobile_focus_summary(observation: MobileTriggerFocusObservation) -> str:
         f"after_outline={observation.after_outline!r}; "
         f"after_outline_color={observation.after_outline_color!r}; "
         f"after_box_shadow={observation.after_box_shadow!r}"
+    )
+
+
+def _tab_stop_label(tab_stop: WorkspaceSwitcherTabStopObservation) -> str:
+    return tab_stop.label or tab_stop.visible_text
+
+
+def _tab_stop_summary(tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...]) -> str:
+    return " -> ".join(
+        f"{tab_stop.dom_index}:{_tab_stop_label(tab_stop) or '<none>'}"
+        for tab_stop in tab_stops
+    )
+
+
+def _observe_mobile_focus_visual_diff(
+    *,
+    before_path: Path,
+    after_path: Path,
+    observation: MobileTriggerFocusObservation,
+) -> dict[str, object]:
+    before = RgbImage.open(before_path)
+    after = RgbImage.open(after_path)
+    overlap_width = min(before.width, after.width)
+    overlap_height = min(before.height, after.height)
+    comparison_image = (
+        before
+        if before.width == overlap_width and before.height == overlap_height
+        else before.crop((0, 0, overlap_width, overlap_height))
+    )
+    comparison_after = (
+        after
+        if after.width == overlap_width and after.height == overlap_height
+        else after.crop((0, 0, overlap_width, overlap_height))
+    )
+    box = _box(
+        image=comparison_image,
+        left=observation.trigger_x - MOBILE_TRIGGER_VISUAL_MARGIN,
+        top=observation.trigger_y - MOBILE_TRIGGER_VISUAL_MARGIN,
+        width=observation.trigger_width + (MOBILE_TRIGGER_VISUAL_MARGIN * 2),
+        height=observation.trigger_height + (MOBILE_TRIGGER_VISUAL_MARGIN * 2),
+    )
+    if box is None:
+        return {
+            "crop_box": None,
+            "changed_pixels": 0,
+            "edge_changed_pixels": 0,
+            "before_size": [before.width, before.height],
+            "after_size": [after.width, after.height],
+            "comparison_size": [overlap_width, overlap_height],
+        }
+    before_crop = comparison_image.crop(box)
+    after_crop = comparison_after.crop(box)
+    changed_pixels = sum(
+        1
+        for before_pixel, after_pixel in zip(
+            before_crop.getdata(),
+            after_crop.getdata(),
+        )
+        if before_pixel != after_pixel
+    )
+    inner_left = MOBILE_TRIGGER_VISUAL_MARGIN
+    inner_top = MOBILE_TRIGGER_VISUAL_MARGIN
+    inner_right = max(before_crop.width - MOBILE_TRIGGER_VISUAL_MARGIN, inner_left)
+    inner_bottom = max(before_crop.height - MOBILE_TRIGGER_VISUAL_MARGIN, inner_top)
+    edge_changed_pixels = 0
+    for index, (before_pixel, after_pixel) in enumerate(
+        zip(before_crop.getdata(), after_crop.getdata()),
+    ):
+        if before_pixel == after_pixel:
+            continue
+        x = index % before_crop.width
+        y = index // before_crop.width
+        if inner_left <= x < inner_right and inner_top <= y < inner_bottom:
+            continue
+        edge_changed_pixels += 1
+    return {
+        "crop_box": box,
+        "changed_pixels": changed_pixels,
+        "edge_changed_pixels": edge_changed_pixels,
+        "before_size": [before.width, before.height],
+        "after_size": [after.width, after.height],
+        "comparison_size": [overlap_width, overlap_height],
+    }
+
+
+def _mobile_focus_visual_summary(visual_diff: dict[str, object]) -> str:
+    return (
+        f"focus_visual_before_size={visual_diff.get('before_size')}; "
+        f"focus_visual_after_size={visual_diff.get('after_size')}; "
+        f"focus_visual_comparison_size={visual_diff.get('comparison_size')}; "
+        f"focus_visual_crop={visual_diff.get('crop_box')}; "
+        f"focus_visual_changed_pixels={visual_diff.get('changed_pixels')}; "
+        f"focus_visual_edge_changed_pixels={visual_diff.get('edge_changed_pixels')}"
     )
 
 

@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -162,10 +161,12 @@ class _Ts286MoveValidationFailureRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) => _delegate.uploadIssueAttachment(
     issue: issue,
     name: name,
     bytes: bytes,
+    sourceName: sourceName,
   );
 }
 

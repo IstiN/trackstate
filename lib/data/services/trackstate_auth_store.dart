@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'browser_preferences_storage_repair.dart';
+import '../providers/github/github_trackstate_provider.dart';
 
 abstract interface class TrackStateAuthStore {
   Future<String?> readToken({String? repository, String? workspaceId});
@@ -19,6 +20,11 @@ abstract interface class TrackStateAuthStore {
 class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
   const SharedPreferencesTrackStateAuthStore();
 
+  static const List<String> _defaultRepositoryAliases = <String>[
+    GitHubTrackStateProvider.defaultRepositoryName,
+    'trackstate/trackstate',
+  ];
+
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     await repairBrowserPreferencesStorage();
@@ -30,8 +36,13 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
         return workspaceToken;
       }
     }
-    final repositoryKey = _legacyRepositoryTokenKey(repository);
-    return repositoryKey == null ? null : preferences.getString(repositoryKey);
+    for (final repositoryKey in _legacyRepositoryTokenKeys(repository)) {
+      final token = preferences.getString(repositoryKey);
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+    return null;
   }
 
   @override
@@ -49,7 +60,20 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
   Future<void> clearToken({String? repository, String? workspaceId}) async {
     await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_requiredScopeKey(repository, workspaceId));
+    final workspaceKey = _workspaceTokenKey(workspaceId);
+    if (workspaceKey != null) {
+      await preferences.remove(workspaceKey);
+      return;
+    }
+    final repositoryKeys = _legacyRepositoryTokenKeys(repository);
+    if (repositoryKeys.isEmpty) {
+      throw ArgumentError(
+        'A workspaceId or repository is required to resolve the auth token scope.',
+      );
+    }
+    for (final repositoryKey in repositoryKeys) {
+      await preferences.remove(repositoryKey);
+    }
   }
 
   @override
@@ -59,16 +83,24 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
   }) async {
     await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
-    final legacyKey = _legacyRepositoryTokenKey(repository);
-    if (legacyKey == null) {
+    if (_legacyRepositoryTokenKeys(repository).isEmpty) {
       return null;
     }
-    final token = preferences.getString(legacyKey);
+    String? token;
+    for (final candidateKey in _legacyRepositoryTokenKeys(repository)) {
+      final candidateToken = preferences.getString(candidateKey);
+      if (candidateToken != null && candidateToken.isNotEmpty) {
+        token = candidateToken;
+        break;
+      }
+    }
     if (token == null || token.isEmpty) {
       return null;
     }
     await preferences.setString(_requiredScopeKey(null, workspaceId), token);
-    await preferences.remove(legacyKey);
+    for (final candidateKey in _legacyRepositoryTokenKeys(repository)) {
+      await preferences.remove(candidateKey);
+    }
     return token;
   }
 
@@ -124,5 +156,20 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
       return null;
     }
     return 'trackstate.githubToken.${normalizedRepository.replaceAll('/', '.')}';
+  }
+
+  List<String> _legacyRepositoryTokenKeys(String? repository) {
+    final normalizedRepository = repository?.trim();
+    if (normalizedRepository == null || normalizedRepository.isEmpty) {
+      return const <String>[];
+    }
+    final repositories =
+        _defaultRepositoryAliases.contains(normalizedRepository)
+        ? _defaultRepositoryAliases
+        : <String>[normalizedRepository];
+    return repositories
+        .map(_legacyRepositoryTokenKey)
+        .whereType<String>()
+        .toList(growable: false);
   }
 }
