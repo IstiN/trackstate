@@ -13569,8 +13569,13 @@ class _SettingsTextField extends StatelessWidget {
     this.focusNode,
     this.autofocus = false,
     this.helperText,
+    this.hintText,
+    this.errorText,
     this.onChanged,
     this.enabled = true,
+    this.minLines = 1,
+    this.maxLines = 1,
+    this.alignLabelWithHint = false,
   });
 
   final Key? fieldKey;
@@ -13580,8 +13585,13 @@ class _SettingsTextField extends StatelessWidget {
   final FocusNode? focusNode;
   final bool autofocus;
   final String? helperText;
+  final String? hintText;
+  final String? errorText;
   final ValueChanged<String>? onChanged;
   final bool enabled;
+  final int? minLines;
+  final int? maxLines;
+  final bool alignLabelWithHint;
 
   @override
   Widget build(BuildContext context) {
@@ -13635,12 +13645,17 @@ class _SettingsTextField extends StatelessWidget {
                 autofocus: autofocus,
                 enabled: enabled,
                 onChanged: onChanged,
+                minLines: minLines,
+                maxLines: maxLines,
                 style: helperBaseStyle.copyWith(
                   color: enabled ? colors.text : colors.muted,
                 ),
                 decoration: InputDecoration(
                   labelText: label,
                   helperText: helperText,
+                  hintText: hintText,
+                  errorText: errorText,
+                  alignLabelWithHint: alignLabelWithHint,
                   labelStyle: labelStyle,
                   floatingLabelStyle: labelStyle,
                   helperStyle: helperStyle,
@@ -13660,12 +13675,17 @@ class _SettingsTextField extends StatelessWidget {
       autofocus: autofocus,
       enabled: enabled,
       onChanged: onChanged,
+      minLines: minLines,
+      maxLines: maxLines,
       style: helperBaseStyle.copyWith(
         color: enabled ? colors.text : colors.muted,
       ),
       decoration: InputDecoration(
         labelText: label,
         helperText: helperText,
+        hintText: hintText,
+        errorText: errorText,
+        alignLabelWithHint: alignLabelWithHint,
         labelStyle: labelStyle,
         floatingLabelStyle: labelStyle,
         helperStyle: helperStyle,
@@ -15878,47 +15898,34 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 const SizedBox(height: 20),
                                 _OrderedFocusAction(
                                   order: 3,
-                                  child: Semantics(
-                                    key: _summaryFieldKey,
+                                  child: _SettingsTextField(
+                                    fieldKey: _summaryFieldKey,
                                     label: summaryLabel,
-                                    textField: true,
+                                    controller: _summaryController,
+                                    focusNode: _summaryFocusNode,
                                     enabled: canEditFields,
-                                    value: _summaryController.text,
-                                    child: TextField(
-                                      controller: _summaryController,
-                                      focusNode: _summaryFocusNode,
-                                      enabled: canEditFields,
-                                      decoration: InputDecoration(
-                                        labelText: summaryLabel,
-                                        errorText:
-                                            _didAttemptSubmit &&
-                                                _summaryController.text
-                                                    .trim()
-                                                    .isEmpty
-                                            ? l10n.summaryRequired
-                                            : null,
-                                      ),
-                                    ),
+                                    errorText:
+                                        _didAttemptSubmit &&
+                                            _summaryController.text.trim().isEmpty
+                                        ? l10n.summaryRequired
+                                        : null,
+                                    onChanged: (_) {
+                                      if (_didAttemptSubmit) {
+                                        setState(() {});
+                                      }
+                                    },
                                   ),
                                 ),
                                 const SizedBox(height: 12),
                                 _OrderedFocusAction(
                                   order: 4,
-                                  child: Semantics(
+                                  child: _SettingsTextField(
                                     label: l10n.description,
-                                    textField: true,
+                                    controller: _descriptionController,
                                     enabled: canEditFields,
-                                    value: _descriptionController.text,
-                                    child: TextField(
-                                      controller: _descriptionController,
-                                      minLines: 4,
-                                      maxLines: null,
-                                      enabled: canEditFields,
-                                      decoration: InputDecoration(
-                                        labelText: l10n.description,
-                                        alignLabelWithHint: true,
-                                      ),
-                                    ),
+                                    minLines: 4,
+                                    maxLines: null,
+                                    alignLabelWithHint: true,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
@@ -15954,19 +15961,11 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 const SizedBox(height: 12),
                                 _OrderedFocusAction(
                                   order: 6,
-                                  child: Semantics(
+                                  child: _SettingsTextField(
                                     label: assigneeLabel,
-                                    textField: true,
+                                    controller: _assigneeController,
                                     enabled: canEditFields,
-                                    value: _assigneeController.text,
-                                    child: TextField(
-                                      controller: _assigneeController,
-                                      enabled: canEditFields,
-                                      decoration: InputDecoration(
-                                        labelText: assigneeLabel,
-                                        hintText: l10n.unassigned,
-                                      ),
-                                    ),
+                                    hintText: l10n.unassigned,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
