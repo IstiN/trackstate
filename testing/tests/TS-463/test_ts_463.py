@@ -75,9 +75,9 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_success.png"
 DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 REWORK_SUMMARY = (
-    "Updated TS-463 reporting to build failure summaries from the recorded failed step, "
-    "narrowed product-bug classification to explicit TS-463 product-visible failures, "
-    "and now emit review-thread replies to `outputs/review_replies.json`."
+    "Updated the live Settings catalogs save helper to click the visible Save settings "
+    "control and wait for the hosted save cycle to start and settle before asserting "
+    "repository persistence."
 )
 PRODUCT_FAILURE_SIGNATURES: dict[int, tuple[str, ...]] = {
     2: (
