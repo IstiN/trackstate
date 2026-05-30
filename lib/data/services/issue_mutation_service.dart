@@ -164,6 +164,7 @@ class IssueMutationService {
           assignee: normalizedAssignee,
           labels: _stringListValue(fields['labels']),
           updatedLabel: timestamp,
+          links: const [],
         ),
       ];
       final indexPath = '$projectRoot/.trackstate/index/issues.json';
@@ -813,6 +814,9 @@ class IssueMutationService {
             updatedLabel:
                 frontmatter['updated']?.toString() ??
                 snapshotIssue.updatedLabel,
+            links: snapshotIssue.links
+                .where((link) => link.direction == 'outward')
+                .toList(growable: false),
             resolutionId: snapshotIssue.resolutionId,
           );
         } else if (_isAttachmentMetadataPath(path)) {
@@ -987,10 +991,14 @@ class IssueMutationService {
         resolution.issue!,
         body,
       );
+      final revision = await _currentRepositoryRevision(
+        providerRepository.providerAdapter,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
         value: updatedIssue,
+        revision: revision,
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
@@ -1065,6 +1073,12 @@ class IssueMutationService {
       final writeBranch = await provider.resolveWriteBranch();
       final targetIssue = target.first;
       final storesCanonicalOutwardLink = normalizedLink.direction == 'inward';
+      final canonicalSourceIssue = storesCanonicalOutwardLink
+          ? targetIssue
+          : issue;
+      final canonicalTargetKey = storesCanonicalOutwardLink
+          ? issue.key
+          : targetKey;
       final issueRoot = _issueRoot(
         storesCanonicalOutwardLink
             ? targetIssue.storagePath
@@ -1072,53 +1086,70 @@ class IssueMutationService {
       );
       final linksPath = '$issueRoot/links.json';
       final blobPaths = await _blobPaths(provider, writeBranch);
-      final existingRevision = await _existingTextRevision(
-        provider,
-        path: linksPath,
-        ref: writeBranch,
-        blobPaths: blobPaths,
-      );
-      final existingLinks = blobPaths.contains(linksPath)
-          ? _parseLinksJson(
-              (await provider.readTextFile(
-                linksPath,
-                ref: writeBranch,
-              )).content,
-            )
-          : <IssueLink>[];
+      final existingLinks = [
+        for (final link in canonicalSourceIssue.links)
+          if (link.direction == 'outward') link,
+      ];
       final duplicate = existingLinks.any(
         (entry) =>
             entry.type == normalizedLink.type &&
-            entry.targetKey ==
-                (storesCanonicalOutwardLink ? issueKey : targetKey) &&
+            entry.targetKey == canonicalTargetKey &&
             entry.direction == 'outward',
       );
       if (!duplicate) {
         existingLinks.add(
           IssueLink(
             type: normalizedLink.type,
-            targetKey: storesCanonicalOutwardLink ? issueKey : targetKey,
+            targetKey: canonicalTargetKey,
             direction: 'outward',
           ),
         );
       }
+      final indexPath = '${snapshot.project.key}/.trackstate/index/issues.json';
+      final updatedIndexStates = [
+        for (final candidate in snapshot.issues)
+          if (candidate.key == canonicalSourceIssue.key)
+            _IssueIndexState.fromIssue(candidate.copyWith(links: existingLinks))
+          else
+            _IssueIndexState.fromIssue(candidate),
+      ];
       final message = 'Link $issueKey to $targetKey';
       final commitResult = await _applyChanges(
         provider: provider,
         branch: writeBranch,
         message: message,
         changes: [
+          if (blobPaths.contains(linksPath))
+            RepositoryDeleteFileChange(
+              path: linksPath,
+              expectedRevision: await _existingRevisionForDelete(
+                provider,
+                path: linksPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
           RepositoryTextFileChange(
-            path: linksPath,
-            content: '${jsonEncode(_linksJson(existingLinks))}\n',
-            expectedRevision: existingRevision,
+            path: indexPath,
+            content:
+                '${jsonEncode(_repositoryIndexJson(updatedIndexStates))}\n',
+            expectedRevision: await _existingTextRevision(
+              provider,
+              path: indexPath,
+              ref: writeBranch,
+              blobPaths: blobPaths,
+            ),
           ),
-          await _repositoryRootLinksJsonChange(
-            provider: provider,
-            ref: writeBranch,
-            blobPaths: blobPaths,
-            updatedLinksPath: linksPath,
-            updatedLinks: existingLinks,
+          RepositoryTextFileChange(
+            path: 'links.json',
+            content:
+                '${jsonEncode(_linksJson(_repositoryRootLinks(snapshot.issues, updatedIssueKey: canonicalSourceIssue.key, updatedLinks: existingLinks)))}\n',
+            expectedRevision: await _existingTextRevision(
+              provider,
+              path: 'links.json',
+              ref: writeBranch,
+              blobPaths: blobPaths,
+            ),
           ),
         ],
       );
@@ -1220,6 +1251,27 @@ class IssueMutationService {
         _ => null,
       };
 
+  Future<String?> _currentRepositoryRevision(
+    TrackStateProviderAdapter provider,
+  ) async {
+    final mutator = switch (provider) {
+      final RepositoryFileMutator supported => supported,
+      _ => null,
+    };
+    if (mutator == null) {
+      return null;
+    }
+    final branch = await provider.resolveWriteBranch();
+    final result = await mutator.applyFileChanges(
+      RepositoryFileChangeRequest(
+        branch: branch,
+        message: 'Read current repository revision',
+        changes: const [],
+      ),
+    );
+    return result.revision;
+  }
+
   IssueMutationResult<T> _unsupported<T>({
     required String operation,
     required String issueKey,
@@ -1273,6 +1325,9 @@ class IssueMutationService {
     required Object error,
   }) {
     if (error is IssueMutationResult<T>) return error;
+    final providerDetails = error is TrackStateProviderException
+        ? error.details
+        : const <String, Object?>{};
     final normalized = error is TrackStateProviderException
         ? error.message
         : '$error';
@@ -1302,6 +1357,7 @@ class IssueMutationService {
       issueKey: issueKey,
       category: category,
       message: normalized,
+      details: providerDetails,
     );
   }
 }
@@ -1396,6 +1452,7 @@ class _IssueIndexState {
     required this.assignee,
     required this.labels,
     required this.updatedLabel,
+    required this.links,
     this.resolutionId,
   });
 
@@ -1412,6 +1469,9 @@ class _IssueIndexState {
     assignee: issue.assignee,
     labels: issue.labels,
     updatedLabel: issue.updatedLabel,
+    links: issue.links
+        .where((link) => link.direction == 'outward')
+        .toList(growable: false),
     resolutionId: issue.resolutionId,
   );
 
@@ -1427,6 +1487,7 @@ class _IssueIndexState {
   final String assignee;
   final List<String> labels;
   final String updatedLabel;
+  final List<IssueLink> links;
   final String? resolutionId;
 }
 
@@ -1539,6 +1600,9 @@ RepositoryIndex _deriveRepositoryIndex(
         assignee: _normalizeNullableString(issue.assignee),
         labels: issue.labels,
         updatedLabel: issue.updatedLabel,
+        links: issue.links
+            .where((link) => link.direction == 'outward')
+            .toList(growable: false),
         progress: issue.progress,
         resolutionId: issue.resolutionId,
         revision: null,
@@ -2141,78 +2205,26 @@ _NormalizedLink? _normalizeLinkType(String value) {
   };
 }
 
-List<IssueLink> _parseLinksJson(String content) {
-  final json = jsonDecode(content);
-  if (json is! List) {
-    return const [];
-  }
-  return json
-      .whereType<Map>()
-      .map(
-        (entry) => IssueLink(
-          type: entry['type']?.toString() ?? 'relates-to',
-          targetKey:
-              entry['target']?.toString() ??
-              entry['targetKey']?.toString() ??
-              '',
-          direction: entry['direction']?.toString() ?? 'outward',
-        ),
-      )
-      .where((entry) => entry.targetKey.isNotEmpty)
-      .toList();
-}
-
 List<Map<String, Object?>> _linksJson(List<IssueLink> links) => [
   for (final link in links)
     {'type': link.type, 'target': link.targetKey, 'direction': link.direction},
 ];
 
-Future<RepositoryTextFileChange> _repositoryRootLinksJsonChange({
-  required TrackStateProviderAdapter provider,
-  required String ref,
-  required Set<String> blobPaths,
-  required String updatedLinksPath,
+List<IssueLink> _repositoryRootLinks(
+  List<TrackStateIssue> issues, {
+  required String updatedIssueKey,
   required List<IssueLink> updatedLinks,
-}) async {
-  final aggregateLinks = await _aggregateRepositoryRootLinks(
-    provider: provider,
-    ref: ref,
-    blobPaths: blobPaths,
-    updatedLinksPath: updatedLinksPath,
-    updatedLinks: updatedLinks,
-  );
-  return RepositoryTextFileChange(
-    path: 'links.json',
-    content: '${jsonEncode(_linksJson(aggregateLinks))}\n',
-    expectedRevision: await _existingTextRevision(
-      provider,
-      path: 'links.json',
-      ref: ref,
-      blobPaths: blobPaths,
-    ),
-  );
-}
-
-Future<List<IssueLink>> _aggregateRepositoryRootLinks({
-  required TrackStateProviderAdapter provider,
-  required String ref,
-  required Set<String> blobPaths,
-  required String updatedLinksPath,
-  required List<IssueLink> updatedLinks,
-}) async {
+}) {
   final aggregateLinks = <IssueLink>[];
-  final linksPaths = <String>{
-    ...blobPaths.where((path) => path.endsWith('/links.json')),
-    updatedLinksPath,
-  }.toList()..sort();
-
-  for (final path in linksPaths) {
-    if (path == updatedLinksPath) {
+  final sortedIssues = [...issues]
+    ..sort((left, right) => left.key.compareTo(right.key));
+  for (final issue in sortedIssues) {
+    if (issue.key == updatedIssueKey) {
       aggregateLinks.addAll(updatedLinks);
       continue;
     }
     aggregateLinks.addAll(
-      _parseLinksJson((await provider.readTextFile(path, ref: ref)).content),
+      issue.links.where((link) => link.direction == 'outward'),
     );
   }
   return aggregateLinks;
@@ -2682,6 +2694,9 @@ _IssueIndexState _issueIndexStateFromFrontmatter({
         _normalizeNullableString(frontmatter['assignee']) ?? issue.assignee,
     labels: _stringListValue(frontmatter['labels']),
     updatedLabel: frontmatter['updated']?.toString() ?? issue.updatedLabel,
+    links: issue.links
+        .where((link) => link.direction == 'outward')
+        .toList(growable: false),
     resolutionId: resolutionId,
   );
 }
@@ -2718,6 +2733,7 @@ List<Map<String, Object?>> _repositoryIndexJson(List<_IssueIndexState> issues) {
         'assignee': issue.assignee,
         'labels': issue.labels,
         'updated': issue.updatedLabel,
+        if (issue.links.isNotEmpty) 'links': _linksJson(issue.links),
         'resolution': issue.resolutionId,
         'children': [...(childrenByKey[issue.key] ?? const <String>[])]..sort(),
         'archived': issue.isArchived,

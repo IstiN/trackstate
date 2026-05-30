@@ -5,6 +5,7 @@ import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 
+const _createEntryPointLabels = <String>['Create issue', 'Create'];
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -85,25 +86,30 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   required _SectionExpectation section,
   required List<String> failures,
 }) async {
-  final createIssueVisible =
-      await screen.isSemanticsLabelVisible('Create issue') ||
-      await screen.isTextVisible('Create issue');
+  final createEntryPoint = await _findVisibleCreateEntryPoint(screen);
+  final createIssueVisible = createEntryPoint != null;
 
   if (!createIssueVisible) {
     failures.add(
       'Step ${section.visibilityStep} failed in ${section.label}: no visible '
       '"Create issue" entry point was rendered after opening ${section.label}. '
+      'Checked labels: ${_createEntryPointLabels.join(', ')}. '
+      'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
     return;
   }
 
-  final openedCreateFlow = await screen.tapVisibleControl('Create issue');
+  final openedCreateFlow = createEntryPoint.inTopBar
+      ? await screen.tapTopBarControl(createEntryPoint.label)
+      : await screen.tapVisibleControl(createEntryPoint.label);
   if (!openedCreateFlow) {
     failures.add(
       'Step ${section.reachabilityStep} failed in ${section.label}: '
-      'the visible "Create issue" entry point could not be activated. '
+      'the visible "${createEntryPoint.label}" entry point could not be '
+      'activated. Top bar texts: '
+      '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
       'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
       'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
@@ -125,7 +131,8 @@ Future<void> _verifyCreateIssueEntryPointForSection(
       !cancelVisible) {
     failures.add(
       'Step ${section.reachabilityStep} failed in ${section.label}: '
-      'opening "Create issue" did not render the expected user-facing create '
+      'opening "${createEntryPoint.label}" did not render the expected '
+      'user-facing create '
       'controls. Expected Summary=${summaryVisible ? 'visible' : 'missing'}, '
       'Description=${descriptionVisible ? 'visible' : 'missing'}, '
       'Save=${saveVisible ? 'visible' : 'missing'}, '
@@ -160,6 +167,27 @@ Future<void> _verifyCreateIssueEntryPointForSection(
   }
 }
 
+Future<_CreateEntryPoint?> _findVisibleCreateEntryPoint(
+  TrackStateAppComponent screen,
+) async {
+  for (final label in _createEntryPointLabels) {
+    final topBarVisible =
+        await screen.isTopBarSemanticsLabelVisible(label) ||
+        await screen.isTopBarTextVisible(label);
+    if (topBarVisible) {
+      return _CreateEntryPoint(label: label, inTopBar: true);
+    }
+
+    final globalVisible =
+        await screen.isSemanticsLabelVisible(label) ||
+        await screen.isTextVisible(label);
+    if (globalVisible) {
+      return _CreateEntryPoint(label: label, inTopBar: false);
+    }
+  }
+  return null;
+}
+
 class _SectionExpectation {
   const _SectionExpectation({
     required this.label,
@@ -170,6 +198,13 @@ class _SectionExpectation {
   final String label;
   final int visibilityStep;
   final int reachabilityStep;
+}
+
+class _CreateEntryPoint {
+  const _CreateEntryPoint({required this.label, required this.inTopBar});
+
+  final String label;
+  final bool inTopBar;
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {

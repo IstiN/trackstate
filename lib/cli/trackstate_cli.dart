@@ -58,77 +58,91 @@ class TrackStateCli {
         );
       }
 
-      final normalizedArguments = _normalizeCommandArguments(arguments);
+      final normalizedArguments = _normalizeCommandArguments(
+        _normalizeRootCommandArguments(arguments),
+      );
       return switch (normalizedArguments.first) {
-        'session' => await _runSession(arguments.skip(1).toList()),
+        'session' => await _runSession(normalizedArguments.skip(1).toList()),
         'search' => await _runSearch(normalizedArguments.skip(1).toList()),
         'read' => await _runRead(normalizedArguments.skip(1).toList()),
-        'create' => await _runCreate(arguments.skip(1).toList()),
+        'create' => await _runCreate(normalizedArguments.skip(1).toList()),
         'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
         'archive' => await _runTicketArchive(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
           defaultTargetType: TrackStateCliTargetType.local,
         ),
-        'attachment' => await _runAttachment(arguments.skip(1).toList()),
+        'attachment' => await _runAttachment(
+          normalizedArguments.skip(1).toList(),
+        ),
         'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_create_ticket_with_json' => await _runJiraCreateTicketWithJson(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_create_ticket_with_parent' =>
-          await _runJiraCreateTicketWithParent(arguments.skip(1).toList()),
+          await _runJiraCreateTicketWithParent(
+            normalizedArguments.skip(1).toList(),
+          ),
         'jira_update_ticket' => await _runJiraUpdateTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_description' => await _runJiraUpdateDescription(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_field' => await _runJiraUpdateField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_all_fields_with_name' => await _runJiraUpdateField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_clear_field' => await _runJiraClearField(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_update_ticket_parent' => await _runJiraUpdateTicketParent(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_move_to_status' => await _runJiraMoveToStatus(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_move_to_status_with_resolution' =>
-          await _runJiraMoveToStatusWithResolution(arguments.skip(1).toList()),
+          await _runJiraMoveToStatusWithResolution(
+            normalizedArguments.skip(1).toList(),
+          ),
         'jira_set_priority' => await _runJiraSetPriority(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_assign_ticket_to' => await _runJiraAssignTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
-        'jira_add_label' => await _runJiraAddLabel(arguments.skip(1).toList()),
+        'jira_add_label' => await _runJiraAddLabel(
+          normalizedArguments.skip(1).toList(),
+        ),
         'jira_remove_label' => await _runJiraRemoveLabel(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_post_comment' => await _runJiraPostComment(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
           defaultTargetType: TrackStateCliTargetType.local,
         ),
         'jira_attach_file_to_ticket' => await _runAttachmentUpload(
-          _normalizeAttachmentUploadArguments(arguments.skip(1).toList()),
+          _normalizeAttachmentUploadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
         ),
         'jira_download_attachment' => await _runAttachmentDownload(
-          _normalizeAttachmentDownloadArguments(arguments.skip(1).toList()),
+          _normalizeAttachmentDownloadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
         ),
         'jira_execute_request' => await _runExecuteRequest(
-          arguments.skip(1).toList(),
+          normalizedArguments.skip(1).toList(),
         ),
         _ => _error(
           _TrackStateCliException(
@@ -170,6 +184,24 @@ class TrackStateCli {
     }
   }
 
+  List<String> _normalizeRootCommandArguments(List<String> arguments) {
+    if (arguments.isEmpty || _isHelpInvocation(arguments)) {
+      return arguments;
+    }
+
+    final firstArgument = arguments.first;
+    if (!firstArgument.startsWith('-')) {
+      return arguments;
+    }
+
+    final firstOption = firstArgument.split('=').first;
+    if (!_rootSessionOptionNames.contains(firstOption)) {
+      return arguments;
+    }
+
+    return <String>['session', ...arguments];
+  }
+
   List<String> _normalizeCommandArguments(List<String> arguments) {
     if (arguments.isEmpty) {
       return arguments;
@@ -207,6 +239,16 @@ class TrackStateCli {
     }
     return ['read', rewrittenResource, ...arguments.skip(2)];
   }
+
+  static const Set<String> _rootSessionOptionNames = <String>{
+    '--target',
+    '--provider',
+    '--repository',
+    '--path',
+    '--branch',
+    '--token',
+    '--output',
+  };
 
   Future<TrackStateCliExecution> _runSession(List<String> arguments) async {
     final parser = ArgParser(allowTrailingOptions: false)
@@ -1059,6 +1101,7 @@ class TrackStateCli {
         'field',
         help:
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       );
     return _runMutationCommand(
       arguments: arguments,
@@ -1112,6 +1155,7 @@ class TrackStateCli {
         'field',
         help:
             'Field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+        splitCommas: false,
       )
       ..addMultiOption(
         'clear-field',
@@ -3489,6 +3533,7 @@ class TrackStateCli {
         branch: branch,
         credential: credential,
         repository: repository,
+        attachmentStorage: snapshot.project.attachmentStorage,
         issue: issue,
         attachmentName: attachmentName,
       );
@@ -3525,9 +3570,13 @@ class TrackStateCli {
     required String branch,
     required TrackStateCliCredential credential,
     required TrackStateRepository repository,
+    required ProjectAttachmentStorageSettings attachmentStorage,
     required TrackStateIssue issue,
     required String attachmentName,
   }) async {
+    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
+      return;
+    }
     final attachmentPath = repository.resolveIssueAttachmentPath(
       issue,
       attachmentName,
@@ -6810,6 +6859,11 @@ class TrackStateCli {
     '  attachment Upload or download one attachment.',
     '  jira_execute_request',
     '             Execute a narrow Jira-compatible raw request.',
+    '',
+    'Shared target selection options:',
+    '    --target        Target type: local or hosted.',
+    '    --provider      Provider name. Supported values: local-git, github.',
+    '    --repository    Hosted repository in owner/name form.',
     '',
     'Examples:',
     '  trackstate session --target local',

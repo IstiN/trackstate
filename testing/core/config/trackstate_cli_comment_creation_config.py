@@ -9,12 +9,16 @@ class TrackStateCliCommentCreationConfig:
     project_key: str
     project_name: str
     issue_key: str
-    comment_body: str
+    comment_bodies: tuple[str, str]
     requested_command_prefix: tuple[str, ...]
     fallback_command_prefix: tuple[str, ...]
     required_top_level_keys: tuple[str, ...]
     required_data_keys: tuple[str, ...]
     expected_comment_ids: tuple[str, ...]
+
+    @property
+    def comment_body(self) -> str:
+        return self.comment_bodies[0]
 
     @classmethod
     def from_env(cls) -> "TrackStateCliCommentCreationConfig":
@@ -23,7 +27,7 @@ class TrackStateCliCommentCreationConfig:
             project_key="TS",
             project_name="TS-462 Local Comment Test Project",
             issue_key="TS-1",
-            comment_body="Test Comment",
+            comment_bodies=("Test Comment", "Test Comment"),
             requested_command_prefix=(
                 "trackstate",
                 "ticket",

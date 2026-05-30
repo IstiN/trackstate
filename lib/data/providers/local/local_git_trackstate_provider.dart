@@ -78,6 +78,7 @@ class LocalGitTrackStateProvider
       return RepositoryTreeEntry(
         path: metadata.length > 1 ? metadata[1] : '',
         type: header.length > 1 ? header[1] : 'blob',
+        revision: header.length > 2 ? header[2] : null,
       );
     }).toList();
   }
@@ -226,6 +227,7 @@ class LocalGitTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: revision?.stdout.trim(),
+        createdCommit: false,
       );
     }
     await _runGit(['commit', '-m', request.message, '--', ...paths]);
@@ -706,6 +708,11 @@ class LocalGitTrackStateProvider
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 

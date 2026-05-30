@@ -10,15 +10,28 @@ The automation:
    `Status`, `Summary`, `Description`, `Priority`, `Assignee`, `Labels`,
    `Components`, `Fix versions`, `Epic`, `Save`, and `Cancel`
 4. clears `Summary`, submits the form, and requires either focus to return to
-   `Summary` or semantics-based evidence that the validation error was exposed
+    `Summary` or semantics-based evidence that the validation error was exposed
 5. measures the empty `Summary` placeholder contrast against the WCAG AA
    placeholder threshold
+
+## Install dependencies
+
+```bash
+flutter pub get
+```
 
 ## Run this test
 
 ```bash
 flutter test testing/tests/TS-402/test_ts_402.dart
 ```
+
+## Environment / configuration
+
+- No extra environment variables are required.
+- The test runs in the local Flutter widget-test environment on Linux.
+- The scenario uses the Local Git fixture repository created by the shared
+  `issue_edit_accessibility_screen_fixture.dart` harness.
 
 ## Expected result
 
