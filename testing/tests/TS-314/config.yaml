@@ -1,0 +1,8 @@
+test_id: TS-314
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the production-visible JQL Search flow accepts IS EMPTY and IS NOT EMPTY only for nullable assignee, parent, and epic fields.
+  - Confirms unsupported empty checks such as status IS EMPTY surface an explicit parsing error instead of returning misleading results.

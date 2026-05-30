@@ -1,0 +1,11 @@
+test_id: TS-270
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes `trackstate session --target local` from a temporary directory that is not a Git repository.
+  - Verifies the CLI exits with code 4 and returns `ok: false` with `error.code: "REPOSITORY_OPEN_FAILED"`.
+  - Always compiles a temporary executable from this checkout before invoking the CLI from the non-repository directory, so the probe never depends on any `trackstate` binary already installed on PATH.

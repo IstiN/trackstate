@@ -21,6 +21,7 @@ class ThemeTokenPolicyDirectoryCheckTest(unittest.TestCase):
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
         self.config = ThemeTokenPolicyDirectoryConfig.from_env()
+        self.target_directory = self.repository_root / self.config.target_path
         self.probe = create_flutter_analyze_probe(
             self.repository_root,
             flutter_version=self.config.flutter_version,
@@ -40,6 +41,13 @@ class ThemeTokenPolicyDirectoryCheckTest(unittest.TestCase):
             f"Exit code: {result.flutter_version.exit_code}\n"
             f"stdout:\n{result.flutter_version.stdout}\n"
             f"stderr:\n{result.flutter_version.stderr}",
+        )
+        self.assertTrue(
+            self.target_directory.is_dir(),
+            "Precondition failed: the production UI directory required by TS-132 "
+            "does not exist at the repository root.\n"
+            f"Repository root: {self.repository_root}\n"
+            f"Expected directory: {self.target_directory}",
         )
         self.assertEqual(
             result.theme_token_check.command_text,

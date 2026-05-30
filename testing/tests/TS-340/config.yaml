@@ -1,0 +1,11 @@
+test_id: TS-340
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact ticket command `trackstate search --jql "project = TRACK" --startAt 4 --maxResults 1` from a seeded temporary TrackState repository.
+  - Seeds five TRACK issues so the last record is addressed by zero-based offset 4.
+  - Runs a supported local-search control command against the same seeded repository to confirm the fixture itself is valid.

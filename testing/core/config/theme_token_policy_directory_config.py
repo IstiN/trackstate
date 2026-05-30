@@ -12,16 +12,29 @@ class ThemeTokenPolicyDirectoryConfig:
     diagnostic_markers: tuple[str, ...]
 
     @classmethod
-    def from_env(cls) -> "ThemeTokenPolicyDirectoryConfig":
+    def from_env(
+        cls,
+        *,
+        env_prefixes: tuple[str, ...] = ("TS132", "TRACKSTATE"),
+        default_flutter_version: str = "3.35.3",
+        default_target_path: str = "lib/",
+        default_success_message: str = "No theme token policy violations found.",
+    ) -> "ThemeTokenPolicyDirectoryConfig":
         return cls(
-            flutter_version=os.environ.get(
-                "TS132_FLUTTER_VERSION",
-                os.environ.get("TRACKSTATE_FLUTTER_VERSION", "3.35.3"),
+            flutter_version=_read_env(
+                "FLUTTER_VERSION",
+                env_prefixes=env_prefixes,
+                default=default_flutter_version,
             ),
-            target_path=os.environ.get("TS132_TARGET_PATH", "lib/"),
-            success_message=os.environ.get(
-                "TS132_SUCCESS_MESSAGE",
-                "No theme token policy violations found.",
+            target_path=_read_env(
+                "TARGET_PATH",
+                env_prefixes=env_prefixes,
+                default=default_target_path,
+            ),
+            success_message=_read_env(
+                "SUCCESS_MESSAGE",
+                env_prefixes=env_prefixes,
+                default=default_success_message,
             ),
             diagnostic_markers=(
                 "warning •",
@@ -32,3 +45,16 @@ class ThemeTokenPolicyDirectoryConfig:
                 " info - ",
             ),
         )
+
+
+def _read_env(
+    suffix: str,
+    *,
+    env_prefixes: tuple[str, ...],
+    default: str,
+) -> str:
+    for prefix in env_prefixes:
+        value = os.environ.get(f"{prefix}_{suffix}")
+        if value is not None:
+            return value
+    return default

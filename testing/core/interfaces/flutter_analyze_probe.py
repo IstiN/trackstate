@@ -13,8 +13,22 @@ class FlutterAnalyzeProbe(Protocol):
 
     def analyze(self, project_root: Path, target: Path | str) -> CliCommandResult: ...
 
+    def test(
+        self,
+        project_root: Path,
+        target: Path | str,
+        *,
+        reporter: str | None = None,
+    ) -> CliCommandResult: ...
+
     def theme_token_check(
         self,
         project_root: Path,
         target: Path | str,
+    ) -> CliCommandResult: ...
+
+    def theme_token_check_many(
+        self,
+        project_root: Path,
+        targets: tuple[Path | str, ...],
     ) -> CliCommandResult: ...
