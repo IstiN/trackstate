@@ -40,9 +40,84 @@ class Ts966ReviewRegressionTest(unittest.TestCase):
 
         self.module._assert_fault_locally_contained(  # type: ignore[attr-defined]
             switcher_after_fault=switcher,
-            post_fault_console_events=[],
+            post_fault_console_events=[
+                {
+                    "level": "log",
+                    "text": (
+                        "Error: TS-966 synthetic workspace switcher runtime error "
+                        "(selector=[flt-semantics-identifier^=\"trackstate-workspace-switcher-row-\"])"
+                    ),
+                },
+            ],
             post_fault_page_errors=["Error", "Error"],
         )
+
+    def test_accepts_fault_marker_page_error_without_probe_console_signature(self) -> None:
+        switcher = WorkspaceSwitcherObservation(
+            body_text="Workspace switcher",
+            switcher_text=(
+                "Workspace switcher Hosted main workspace · Hosted · Attachments limited "
+                "Saved workspaces Open: Hosted fallback workspace Add workspace"
+            ),
+            row_count=0,
+            rows=(),
+        )
+
+        self.module._assert_fault_locally_contained(  # type: ignore[attr-defined]
+            switcher_after_fault=switcher,
+            post_fault_console_events=[],
+            post_fault_page_errors=[
+                "Error: TS-966 synthetic workspace switcher runtime error (selector=[flt-semantics-identifier^=\"trackstate-workspace-switcher-row-\"])",
+            ],
+        )
+
+    def test_rejects_generic_page_error_without_probe_signature(self) -> None:
+        switcher = WorkspaceSwitcherObservation(
+            body_text="Workspace switcher",
+            switcher_text=(
+                "Workspace switcher Hosted main workspace · Hosted · Attachments limited "
+                "Saved workspaces Open: Hosted fallback workspace Add workspace"
+            ),
+            row_count=0,
+            rows=(),
+        )
+
+        with self.assertRaises(AssertionError) as error:
+            self.module._assert_fault_locally_contained(  # type: ignore[attr-defined]
+                switcher_after_fault=switcher,
+                post_fault_console_events=[],
+                post_fault_page_errors=["Error"],
+            )
+
+        self.assertIn("global page error", str(error.exception))
+
+    def test_rejects_specific_page_errors(self) -> None:
+        switcher = WorkspaceSwitcherObservation(
+            body_text="Workspace switcher",
+            switcher_text=(
+                "Workspace switcher Hosted main workspace · Hosted · Attachments limited "
+                "Saved workspaces Open: Hosted fallback workspace Add workspace"
+            ),
+            row_count=0,
+            rows=(),
+        )
+
+        with self.assertRaises(AssertionError) as error:
+            self.module._assert_fault_locally_contained(  # type: ignore[attr-defined]
+                switcher_after_fault=switcher,
+                post_fault_console_events=[
+                    {
+                        "level": "log",
+                        "text": (
+                            "Error: TS-966 synthetic workspace switcher runtime error "
+                            "(selector=[flt-semantics-identifier^=\"trackstate-workspace-switcher-row-\"])"
+                        ),
+                    },
+                ],
+                post_fault_page_errors=["ReferenceError: shell crash"],
+            )
+
+        self.assertIn("global page error", str(error.exception))
 
     def test_rejects_missing_saved_workspace_context(self) -> None:
         switcher = WorkspaceSwitcherObservation(
@@ -61,7 +136,7 @@ class Ts966ReviewRegressionTest(unittest.TestCase):
 
         self.assertIn("saved-workspace context", str(error.exception))
 
-    def test_rejects_specific_page_errors(self) -> None:
+    def test_rejects_probe_console_error_level_even_with_fault_marker(self) -> None:
         switcher = WorkspaceSwitcherObservation(
             body_text="Workspace switcher",
             switcher_text=(
@@ -75,11 +150,19 @@ class Ts966ReviewRegressionTest(unittest.TestCase):
         with self.assertRaises(AssertionError) as error:
             self.module._assert_fault_locally_contained(  # type: ignore[attr-defined]
                 switcher_after_fault=switcher,
-                post_fault_console_events=[],
-                post_fault_page_errors=["ReferenceError: shell crash"],
+                post_fault_console_events=[
+                    {
+                        "level": "error",
+                        "text": (
+                            "Error: TS-966 synthetic workspace switcher runtime error "
+                            "(selector=[flt-semantics-identifier^=\"trackstate-workspace-switcher-row-\"])"
+                        ),
+                    },
+                ],
+                post_fault_page_errors=["Error"],
             )
 
-        self.assertIn("global page error", str(error.exception))
+        self.assertIn("global console error", str(error.exception))
 
 
 if __name__ == "__main__":
