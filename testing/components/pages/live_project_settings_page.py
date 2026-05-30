@@ -246,9 +246,27 @@ class LiveProjectSettingsPage:
             connected_banners=connected_banners,
         ):
             return current_body
+        try:
+            return self._wait_for_write_capable_connection(
+                connected_banners=connected_banners,
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError:
+            current_body = self.body_text()
+            if self._body_has_write_capable_connection(
+                current_body,
+                connected_banners=connected_banners,
+            ):
+                return current_body
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
+                current_body = self.body_text()
+                if self._body_has_write_capable_connection(
+                    current_body,
+                    connected_banners=connected_banners,
+                ):
+                    return current_body
                 self._open_connect_dialog()
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
             self._scroll_into_view(self._token_input_selector)
@@ -307,9 +325,13 @@ class LiveProjectSettingsPage:
         if any(" ".join(banner.split()).casefold() in normalized_body for banner in connected_banners):
             return True
         return (
-            "connected as " in normalized_body
-            and " to " in normalized_body
-            and "workspace switcher" in normalized_body
+            "workspace switcher" in normalized_body
+            and (
+                ("connected as " in normalized_body and " to " in normalized_body)
+                or "manage github access" in normalized_body
+                or "synced with git" in normalized_body
+                or "create issue" in normalized_body
+            )
         )
 
     def _wait_for_write_capable_connection(
@@ -329,7 +351,15 @@ class LiveProjectSettingsPage:
               }
               if (
                 connectedBanners.some(contains)
-                || (contains('connected as ') && contains(' to ') && contains('workspace switcher'))
+                || (
+                  contains('workspace switcher')
+                  && (
+                    (contains('connected as ') && contains(' to '))
+                    || contains('manage github access')
+                    || contains('synced with git')
+                    || contains('create issue')
+                  )
+                )
               ) {
                 return bodyText;
               }
@@ -707,6 +737,15 @@ class LiveProjectSettingsPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
+              const normalizedVisibleText = (element) =>
+                String(
+                  element?.getAttribute?.('aria-label')
+                  ?? element?.innerText
+                  ?? element?.textContent
+                  ?? '',
+                )
+                  .replace(/\s+/g, ' ')
+                  .trim();
               const bodyText = document.body?.innerText ?? '';
               const button = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
@@ -716,9 +755,29 @@ class LiveProjectSettingsPage:
                 return isVisible(candidate)
                   && (text === saveSettingsLabel || aria === saveSettingsLabel);
               });
-              const saveFailureMatch = bodyText.match(/Save failed:[^\n]*/);
+              const visibleTextCorpus = Array.from(document.querySelectorAll('*'))
+                .filter((candidate) => isVisible(candidate))
+                .flatMap((candidate) => {
+                  const values = [];
+                  const ariaText = String(candidate.getAttribute('aria-label') ?? '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                  const innerText = String(candidate.innerText ?? candidate.textContent ?? '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                  if (ariaText.length > 0) {
+                    values.push(ariaText);
+                  }
+                  if (innerText.length > 0 && innerText !== ariaText) {
+                    values.push(innerText);
+                  }
+                  return values;
+                });
+              const combinedVisibleText = [bodyText, ...visibleTextCorpus].join('\n');
+              const saveFailureMatch = combinedVisibleText.match(/Save failed:[^\n]*/i);
               return {
                 bodyText,
+                combinedVisibleText,
                 saveButtonEnabled: !!button && button.getAttribute('aria-disabled') !== 'true',
                 saveFailureText: saveFailureMatch ? saveFailureMatch[0].trim() : null,
               };
