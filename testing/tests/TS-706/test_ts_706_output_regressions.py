@@ -172,6 +172,89 @@ class TS706OutputRegressionTest(unittest.TestCase):
         finally:
             ts_706._open_actions_page = original_open_actions_page
 
+    def test_completed_runner_available_path_is_reported_as_precondition_not_product_bug(
+        self,
+    ) -> None:
+        config = ts_706.GitHubActionsPreflightGateConfig(
+            repository="IstiN/trackstate",
+            default_branch="main",
+            workflow_name="Apple Release Builds",
+            workflow_file="build-native.yml",
+            workflow_path=".github/workflows/build-native.yml",
+            preflight_job_name="Verify macOS runner availability",
+            downstream_job_name="Build macOS desktop and CLI artifacts",
+            expected_preflight_runner="ubuntu-latest",
+            expected_runner_labels=[
+                "self-hosted",
+                "macOS",
+                "trackstate-release",
+                "ARM64",
+            ],
+            expected_failure_markers=["No runner registered for", "none are online"],
+            recent_runs_limit=20,
+            poll_interval_seconds=5,
+            run_timeout_seconds=240,
+            ui_timeout_seconds=60,
+        )
+        original_open_actions_page = ts_706._open_actions_page
+        observations = iter(
+            [
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91",
+                    matched_text="Verify macOS runner availability",
+                    body_text="Verify macOS runner availability Build macOS desktop and CLI artifacts",
+                    screenshot_path="/tmp/run.png",
+                ),
+                ts_706.GitHubActionsPageObservation(
+                    url="https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                    matched_text="success",
+                    body_text="Verify macOS runner availability completed successfully",
+                    screenshot_path="/tmp/job.png",
+                ),
+            ]
+        )
+        result = {
+            "repository": "IstiN/trackstate",
+            "default_branch": "main",
+            "workflow_name": "Apple Release Builds",
+            "tag_name": "v98.test",
+            "head_sha": "head-sha",
+            "error": "Precondition failed: downstream job proceeded",
+            "precondition_failure": True,
+            "product_failure": False,
+            "steps": [],
+            "human_verification": [],
+            "run": {
+                "id": 91,
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            "preflight_job": {
+                "name": "Verify macOS runner availability",
+                "status": "completed",
+                "conclusion": "success",
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+            },
+            "downstream_job": {
+                "name": "Build macOS desktop and CLI artifacts",
+                "status": "completed",
+                "conclusion": "success",
+                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
+            },
+        }
+        try:
+            ts_706._open_actions_page = lambda **_: next(observations)
+            ts_706._collect_precondition_run_evidence(result, config)
+        finally:
+            ts_706._open_actions_page = original_open_actions_page
+
+        self.assertTrue(result["precondition_failure"])
+        self.assertFalse(result["product_failure"])
+        self.assertEqual(result["steps"][-1]["status"], "blocked")
+        self.assertIn("proves the ticket precondition was not met", result["steps"][-1]["observed"])
+        self.assertNotIn("ambiguous", result["steps"][-1]["observed"])
+
 
 if __name__ == "__main__":
     unittest.main()
