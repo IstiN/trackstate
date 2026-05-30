@@ -157,20 +157,64 @@ class LiveMultiViewRefreshPage:
             issue_key=issue_key,
             issue_summary=issue_summary,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._click_edit_button()
         return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
 
-    def open_edit_dialog_for_issue_key(self, *, issue_key: str) -> str:
-        self.navigate_to_section("JQL Search")
-        label = self.visible_issue_open_label(issue_key=issue_key)
-        self._session.click(
-            f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+    def open_edit_dialog_for_issue_key(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str | None = None,
+    ) -> str:
+        for attempt in range(2):
+            try:
+                self.navigate_to_section("JQL Search")
+                break
+            except AssertionError:
+                current_body = self.current_body_text()
+                summary_fragment = issue_summary or ""
+                if attempt == 0 and (
+                    "Project Settings" in current_body
+                    or "GitHub startup limit reached" in current_body
+                    or self._session.count('flt-semantics[aria-label="Close"]') > 0
+                ):
+                    continue
+                if (
+                    "JQL Search" not in current_body
+                    and issue_key not in current_body
+                    and summary_fragment not in current_body
+                ):
+                    raise
+
+        current_body = self.current_body_text()
+        if issue_key not in current_body or "Edit" not in current_body:
+            try:
+                self._session.wait_for_function(
+                    """
+                    ({ issueKey }) => {
+                      const bodyText = document.body?.innerText ?? '';
+                      return bodyText.includes(issueKey) && bodyText.includes('Edit');
+                    }
+                    """,
+                    arg={"issueKey": issue_key},
+                    timeout_ms=15_000,
+                )
+                current_body = self.current_body_text()
+            except WebAppTimeoutError:
+                current_body = self.current_body_text()
+        if issue_key not in current_body or "Edit" not in current_body:
+            if issue_summary is None or not issue_summary.strip():
+                label = self.visible_issue_open_label(issue_key=issue_key)
+                self._session.click(
+                    f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
+                    timeout_ms=30_000,
+                )
+            else:
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
     def open_edit_dialog_from_board_card(
         self,
@@ -218,12 +262,23 @@ class LiveMultiViewRefreshPage:
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._click_edit_button()
         return self._wait_for_edit_dialog(
             issue_key=issue_key,
             origin_label="current issue detail",
         )
+
+    def _click_edit_button(self) -> None:
+        if self._session.count(self._edit_button_selector) > 0:
+            self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
+            self._session.click(self._edit_button_selector, timeout_ms=30_000)
+            return
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(self._button_selector, has_text="Edit", timeout_ms=30_000)
 
     def close_edit_dialog(self) -> None:
         self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
@@ -395,10 +450,13 @@ class LiveMultiViewRefreshPage:
         *,
         message_fragment: str,
     ) -> SummaryRequiredValidationObservation:
-        self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
-            timeout_ms=30_000,
-        )
+        if self._session.count('flt-semantics[role="button"][aria-label="Save"]') > 0:
+            self._session.click(
+                'flt-semantics[role="button"][aria-label="Save"]',
+                timeout_ms=30_000,
+            )
+        else:
+            self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
         try:
             payload = self._session.wait_for_function(
                 """
@@ -1368,7 +1426,13 @@ class LiveMultiViewRefreshPage:
             """,
             arg=issue_key,
         )
-        label = str(payload).strip()
+        if not isinstance(payload, str):
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        label = payload.strip()
         if not label:
             raise AssertionError(
                 f"Step failed: the hosted tracker did not expose a visible JQL Search row "

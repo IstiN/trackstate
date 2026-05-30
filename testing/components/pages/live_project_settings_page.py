@@ -216,12 +216,13 @@ class LiveProjectSettingsPage:
         user_login: str,
         timeout_seconds: int = 240,
     ) -> str:
-        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
-            user_login=user_login,
+        connected_markers = self._connected_session_markers(
             repository=repository,
+            user_login=user_login,
         )
+        connected_banner = connected_markers[0]
         current_body = self.body_text()
-        if connected_banner in current_body:
+        if any(marker in current_body for marker in connected_markers):
             return current_body
 
         connect_via_aria = self._session.count(self._connect_selector) > 0
@@ -266,12 +267,14 @@ class LiveProjectSettingsPage:
 
             try:
                 self._session.wait_for_text(
-                    connected_banner,
+                    connected_markers[1],
                     timeout_ms=timeout_seconds * 1_000,
                 )
                 return self.body_text()
             except WebAppTimeoutError:
                 current_body = self.body_text()
+                if any(marker in current_body for marker in connected_markers):
+                    return current_body
                 if "GitHub connection failed:" in current_body:
                     raise AssertionError(
                         "Step 2 failed: submitting the fine-grained token did not "
@@ -295,6 +298,24 @@ class LiveProjectSettingsPage:
         if self._session.count(self._close_selector) == 0:
             return
         self._session.click(self._close_selector, timeout_ms=30_000)
+
+    def _connected_session_markers(
+        self,
+        *,
+        repository: str,
+        user_login: str,
+    ) -> tuple[str, ...]:
+        full_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+            user_login=user_login,
+            repository=repository,
+        )
+        short_banner = f"Connected as {user_login} to {repository}."
+        return (
+            full_banner,
+            short_banner,
+            "Attachments limited",
+            "Manage GitHub access",
+        )
 
     def dismiss_if_open(self, *, timeout_ms: int = 30_000) -> None:
         current_body = self.body_text()

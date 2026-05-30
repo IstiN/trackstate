@@ -96,6 +96,7 @@ def main() -> None:
                         "tracker shell before the edit-validation scenario began.\n"
                         f"Observed body text:\n{runtime.body_text}",
                     )
+                edit_page.set_viewport(width=1440, height=900)
 
                 connected_text = settings_page.ensure_write_capable_connection(
                     token=token,
@@ -103,10 +104,10 @@ def main() -> None:
                     user_login=user.login,
                 )
                 result["connected_body_text"] = connected_text
-                settings_page.dismiss_connection_banner()
 
                 edit_dialog_text = edit_page.open_edit_dialog_for_issue_key(
                     issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
                 )
                 result["edit_dialog_text"] = edit_dialog_text
                 _record_human_verification(
@@ -701,7 +702,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         "* Opened the deployed hosted TrackState app.",
-        "* Connected the live session with the configured GitHub token until the write-capable connected banner appeared.",
+        "* Connected the live session with the configured GitHub token until the hosted repository-access state showed the session could edit issues.",
         "* Opened the live Edit issue surface for DEMO-2.",
         "* Attempted the required user flow: clear Summary, click Save, inspect the Summary-required feedback, check contrast, and verify the accessibility announcement path.",
         "",
@@ -751,7 +752,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         "- Opened the deployed hosted TrackState app.",
-        "- Connected the live session with the configured GitHub token until the connected banner appeared.",
+        "- Connected the live session with the configured GitHub token until the hosted repository-access state showed issue edits were available.",
         "- Opened the live `Edit issue` surface for `DEMO-2`.",
         "- Exercised the ticket flow: cleared `Summary`, clicked `Save`, inspected the `Summary is required` feedback, checked contrast, and checked the accessibility announcement path.",
         "",
@@ -789,29 +790,29 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     lines = [
-        f"h3. {TICKET_KEY} rework {status}",
+        f"## {TICKET_KEY} {status}",
         "",
-        "*Fixes applied*",
-        "* Relaxed visible-message discovery to the ticket fragment {{Summary is required}} so compliant shorter copy is still measured.",
-        "* Tightened Step 5 so the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
-        "* Added an assertion that the visible validation text uses the TrackState error theme token colors (`#c25742` / `#e8a085`) rather than any arbitrary high-contrast color.",
-        "* Added pass-path artifact writing plus stale bug cleanup and review replies.",
+        "### What changed",
+        "- Matched visible-message discovery to the ticket fragment `Summary is required` so compliant shorter copy is still measured.",
+        "- Kept Step 5 strict: the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
+        "- Required the visible validation text to use the TrackState error theme token colors (`#c25742` / `#e8a085`).",
+        "- Kept pass/fail artifact writing aligned with the pipeline outputs.",
         "",
-        "*New test result*",
+        "### Result",
         (
-            "* PASSED — the hosted Edit issue validation flow now meets the ticket requirements end to end."
+            "- PASSED — the hosted Edit issue validation flow now meets the ticket requirements end to end."
             if passed
-            else f"* FAILED — {_failure_summary(result)}"
+            else f"- FAILED — {_failure_summary(result)}"
         ),
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "*Exact error*",
-                "{code}",
+                "### Exact error",
+                "```text",
                 str(result.get("traceback", result.get("error", ""))),
-                "{code}",
+                "```",
             ]
         )
     return "\n".join(lines) + "\n"
