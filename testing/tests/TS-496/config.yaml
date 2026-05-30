@@ -1,0 +1,8 @@
+test_id: TS-496
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production hosted Settings repository-access area with a remembered-token session whose repository contents write access remains enabled while GitHub Releases upload capability is explicitly unavailable.
+  - Verifies the Settings status control stays in the attachment-restricted state, the repository-access callouts use release-specific warning copy, and the warning treatment stays semantic, amber, and keyboard-accessible.

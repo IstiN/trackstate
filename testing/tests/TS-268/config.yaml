@@ -1,0 +1,10 @@
+test_id: TS-268
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN, or bootstrapped by the shared Dart probe runtime
+notes:
+  - Verifies the exact root CLI command `trackstate --target hosted --provider github --repository owner/repo --branch main`.
+  - Uses a Dart probe to execute the real CLI parser with a mocked hosted provider and gh token lookup so the test isolates target selection instead of live network access.

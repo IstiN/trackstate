@@ -1,0 +1,10 @@
+test_id: TS-458
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the live `trackstate ticket update-field --target local --key TS-1 --field ... --value ...` command three times against a seeded disposable repository.
+  - Verifies exact canonical ids resolve directly, display names resolve to the intended configured field, and ambiguous normalized display names fail with a machine-readable `AMBIGUOUS_FIELD` error.

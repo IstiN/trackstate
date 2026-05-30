@@ -1,0 +1,11 @@
+test_id: TS-1287
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Seeds a disposable Local Git repository with issue TS-1.
+  - Executes `trackstate ticket comment --target local --path <temp-repo> --key TS-1 --body "Regression test comment 1"` and verifies the JSON `revision` equals `git rev-parse HEAD`.
+  - Executes the command again with body `Regression test comment 2` and verifies the updated JSON `revision` equals the new `git rev-parse HEAD`.

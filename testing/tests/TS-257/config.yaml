@@ -1,0 +1,25 @@
+test_id: TS-257
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs and GitHub pull request metadata
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  target_workflow_name: Release on main
+  target_workflow_path: .github/workflows/release-on-main.yml
+  branch_prefix: ts257-actionlint-required-pr
+  commit_message: "TS-257 probe: invalid workflow PR should be blocked by required actionlint"
+  mutation_search_text: "    branches: [main]"
+  mutation_replacement_text: "    branches: [main"
+  pull_request_title: "TS-257 disposable probe: verify required actionlint PR gate"
+  pull_request_body: "Disposable PR created by TS-257 automation to verify that invalid workflow changes are blocked by a required actionlint status check before merge."
+  expected_actionlint_marker: actionlint
+  poll_interval_seconds: 5
+  run_timeout_seconds: 120
+  pull_request_timeout_seconds: 120
+notes:
+  - Creates a disposable pull request in IstiN/trackstate-setup with an invalid release workflow.
+  - Expects the PR checks surface to show a failed actionlint check that is required and blocks merge.

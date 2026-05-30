@@ -5,8 +5,8 @@ re-initializes the Dashboard top bar and the Settings repository-access surface
 without a manual refresh.
 
 The automation:
-1. starts the real app in hosted mode and confirms the top bar exposes
-   `Connect GitHub`
+1. starts the real app in hosted mode and confirms the top bar exposes a
+   hosted repository-access state
 2. switches the app into a valid `Local Git` state using a temporary repository
    fixture and the `main` write branch
 3. confirms the Local Git values are retained in `Settings`
@@ -15,11 +15,8 @@ The automation:
    hosted mode
 6. verifies the Dashboard top bar returns to hosted mode and removes the
    `Local Git` indicator
-7. verifies `Settings` shows the hosted repository-access status (`Connect GitHub`
-   or `Connected`) together with the hosted token field instead of the Local Git
-   repository fields
-8. opens the hosted `Connect GitHub` dialog from the top bar and confirms the
-   visible user-facing controls
+7. verifies `Settings` shows the hosted repository-access status together with
+   the hosted token field instead of the Local Git repository fields
 
 The ticket uses the shared `TrackStateAppComponent` abstraction and keeps all
 logic under `testing/`.
