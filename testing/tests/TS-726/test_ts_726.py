@@ -5,7 +5,6 @@ from dataclasses import asdict, replace
 import json
 import math
 import platform
-import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -37,6 +36,9 @@ from testing.core.utils.color_contrast import (  # noqa: E402
 )
 from testing.core.utils.png_image import RgbImage  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
+from testing.tests.support.live_startup_case_support import (  # noqa: E402
+    prepare_local_workspace_repository,
+)
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
 )
@@ -65,6 +67,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_failure.png"
 SURFACE_PROBE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts726_surface_probe.png"
@@ -79,6 +82,9 @@ MIN_TEXT_CONTRAST = 4.5
 MIN_GRAPHIC_CONTRAST = 3.0
 MOBILE_TRIGGER_VISUAL_MARGIN = 8
 MIN_MOBILE_EDGE_CHANGE_PIXELS = 24
+REVIEW_THREADS = (
+    {"inReplyToId": 3329222200, "threadId": "PRRT_kwDOSU6Gf86F5JNr"},
+)
 
 
 def main() -> None:
@@ -502,86 +508,15 @@ def _workspace_state() -> dict[str, object]:
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
-    local_path = Path(LOCAL_TARGET)
-    local_path.mkdir(parents=True, exist_ok=True)
-
-    git_dir = local_path / ".git"
-    if not git_dir.exists():
-        subprocess.run(
-            ["git", "init", "--initial-branch", DEFAULT_BRANCH, str(local_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    marker_path = local_path / ".trackstate-ts726-precondition.txt"
-    marker_path.write_text(
-        "Prepared for TS-726 workspace switcher accessibility validation.\n",
-        encoding="utf-8",
+    return prepare_local_workspace_repository(
+        local_target=LOCAL_TARGET,
+        default_branch=DEFAULT_BRANCH,
+        marker_filename=".trackstate-ts726-precondition.txt",
+        marker_contents="Prepared for TS-726 workspace switcher accessibility validation.\n",
+        commit_author_name="TS-726 Automation",
+        commit_author_email="ts726@example.com",
+        commit_message="Prepare TS-726 local workspace",
     )
-    subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "-C", str(local_path), "status", "--short"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    head = subprocess.run(
-        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if status.stdout.strip() or head.returncode != 0:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(local_path),
-                "-c",
-                "user.name=TS-726 Automation",
-                "-c",
-                "user.email=ts726@example.com",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "Prepare TS-726 local workspace",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    branch = subprocess.run(
-        ["git", "-C", str(local_path), "branch", "--show-current"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    head = subprocess.run(
-        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "-C", str(local_path), "status", "--short"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return {
-        "path": str(local_path),
-        "branch": branch.stdout.strip(),
-        "head": head.stdout.strip(),
-        "status": status.stdout.strip(),
-        "marker_path": str(marker_path),
-    }
 
 
 def _assert_sheet_accessibility(
@@ -1326,6 +1261,7 @@ def _snippet(value: object, *, limit: int = 280) -> str:
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1346,6 +1282,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -1426,6 +1363,24 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _write_review_replies() -> None:
+    payload = {
+        "replies": [
+            {
+                **REVIEW_THREADS[0],
+                "reply": (
+                    "Fixed: TS-726 now reuses "
+                    "`testing/tests/support/live_startup_case_support.py` via "
+                    "`prepare_local_workspace_repository(...)` instead of keeping an "
+                    "inlined `git init` / `git add` / `git commit` bootstrap copy in "
+                    "the ticket test."
+                ),
+            },
+        ],
+    }
+    REVIEW_REPLIES_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
