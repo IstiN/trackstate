@@ -11,6 +11,7 @@ const TRACKSTATE_TEST_AUTOMATION_RULES = './.dmtools/instructions/agents/test_au
 const TRACKSTATE_TEST_REVIEW_CHECKLIST = './.dmtools/instructions/agents/test_automation_review_checklist.md';
 const TRACKSTATE_FLUTTER_RULES = './.dmtools/instructions/agents/flutter_development_rules.md';
 const TRACKSTATE_WEB_FOCUS_RULES = './.dmtools/instructions/agents/flutter_web_focus_keyboard_rules.md';
+const TRACKSTATE_FAILED_TC_BUG_TRIAGE = './.dmtools/instructions/agents/failed_test_case_bug_triage.md';
 const BUG_DEV_ANTIPATTERNS = './.dmtools/prompts/bug_dev_antipatterns.md';
 const TEST_AUTOMATION_ANTIPATTERNS = './.dmtools/prompts/test_automation_antipatterns.md';
 const TRACKSTATE_SETUP_SUBMODULES = [
@@ -204,7 +205,13 @@ module.exports = {
         ],
         bug_creation: [
             GOAL_INSTRUCTIONS,
-            './.dmtools/instructions/product/trackstate_domain_knowledge.md'
+            './.dmtools/instructions/product/trackstate_domain_knowledge.md',
+            TRACKSTATE_FAILED_TC_BUG_TRIAGE
+        ],
+        bulk_bugs_creation: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/product/trackstate_domain_knowledge.md',
+            TRACKSTATE_FAILED_TC_BUG_TRIAGE
         ],
         df_manager: [
             './.dmtools/instructions/agents/df_manager_watchlist.md'
