@@ -23,7 +23,8 @@ void main() {
       workflow,
       contains(r'release_ref="v${major}.${minor}.$((patch + 1))"'),
     );
-    expect(workflow, contains(r'-f target_commitish="$release_checkout_ref"'));
+    expect(workflow, contains(r'release_target_commit="$(git rev-parse HEAD)"'));
+    expect(workflow, contains(r'-f target_commitish="$release_target_commit"'));
     expect(workflow, isNot(contains('branches: [main]')));
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));

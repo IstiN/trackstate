@@ -59,22 +59,41 @@ void _expectReadableCollaborationMetadataStyle(
 ) {
   final style = _textStyle(tester, finder);
   final context = tester.element(finder);
-  final theme = Theme.of(context);
   final colors = context.ts;
-  final expectedStyle = theme.textTheme.labelSmall?.copyWith(
+  final expectedStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
     color: colors.text,
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    height: 1.2,
-    letterSpacing: .24,
+    fontSize: 14,
+    fontWeight: FontWeight.w700,
+    height: 1.25,
+    letterSpacing: 0,
   );
 
   expect(expectedStyle, isNotNull);
   expect(
-    _matchesTextStyleToken(style, expectedStyle!),
-    isTrue,
+    style.fontSize,
+    expectedStyle!.fontSize,
+    reason: 'Collaboration metadata should use the larger readable metadata size.',
+  );
+  expect(
+    style.fontWeight,
+    expectedStyle.fontWeight,
+    reason: 'Collaboration metadata should use the heavier readable metadata weight.',
+  );
+  expect(
+    style.height,
+    expectedStyle.height,
+    reason: 'Collaboration metadata should keep the shared readable line height.',
+  );
+  expect(
+    style.letterSpacing,
+    expectedStyle.letterSpacing,
+    reason: 'Collaboration metadata should keep the shared readable letter spacing.',
+  );
+  expect(
+    style.color,
+    colors.text,
     reason:
-        'Collaboration metadata must use the readable 12px label token instead of the smaller muted labelSmall style.',
+        'Collaboration metadata must keep the high-contrast foreground token on the issue-detail alternate surface.',
   );
   expect(
     contrastRatio(style.color!, colors.surfaceAlt),
@@ -93,13 +112,4 @@ TextStyle _textStyle(WidgetTester tester, Finder finder) {
     return widget.text.style!;
   }
   throw StateError('Expected Text or RichText for $finder, got ${widget.runtimeType}.');
-}
-
-bool _matchesTextStyleToken(TextStyle actual, TextStyle expected) {
-  return actual.fontSize == expected.fontSize &&
-      actual.fontWeight == expected.fontWeight &&
-      actual.height == expected.height &&
-      actual.letterSpacing == expected.letterSpacing &&
-      actual.fontFamily == expected.fontFamily &&
-      actual.color == expected.color;
 }

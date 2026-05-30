@@ -201,8 +201,104 @@ def main() -> None:
                 auth_released_before_open = (
                     runtime.auth_probe_released_at_monotonic is not None
                 )
-                observed_auth_probe_start = auth_started_before_open or runtime.wait_for_auth_probe_start(
-                    timeout_seconds=5,
+                if auth_released_before_open:
+                    result["pending_trigger_observation"] = _trigger_payload(trigger)
+                    result["pending_switcher_observation"] = _switcher_payload(
+                        pending_switcher,
+                    )
+                    result["pending_local_row"] = (
+                        _row_payload(pending_local_row)
+                        if pending_local_row is not None
+                        else None
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Workspace switcher opened only after the delayed GitHub "
+                            "`/user` auth probe had already finished.\n"
+                            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                            f"Observed switcher text:\n{pending_switcher.switcher_text}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher as soon as the startup shell exposed "
+                            "the header trigger and checked whether the delayed auth phase "
+                            "was still in progress."
+                        ),
+                        observed=(
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_observed_after_start_seconds={result['trigger_observed_after_start_seconds']!r}; "
+                            f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
+                            f"auth_probe_released_after_start_seconds={result['auth_probe_released_after_start_seconds']!r}; "
+                            f"switcher_text={pending_switcher.switcher_text!r}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=3)
+                    raise AssertionError(
+                        "Step 2 failed: Workspace switcher opened only after the delayed "
+                        "GitHub `/user` auth probe had already finished.\n"
+                        f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                        f"Observed switcher text:\n{pending_switcher.switcher_text}",
+                    )
+                if not auth_started_before_open and not runtime.wait_for_auth_probe_start(
+                    timeout_seconds=30,
+                ):
+                    result["pending_trigger_observation"] = (
+                        _trigger_payload(trigger) if trigger is not None else None
+                    )
+                    result["pending_switcher_observation"] = _switcher_payload(
+                        pending_switcher,
+                    )
+                    result["pending_local_row"] = (
+                        _row_payload(pending_local_row)
+                        if pending_local_row is not None
+                        else None
+                    )
+                    body_text = page.current_body_text()
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Workspace switcher opened during startup, but the delayed "
+                            "GitHub `/user` verification request never started, so the "
+                            "high-latency auth scenario could not be exercised.\n"
+                            f"Observed body text:\n{body_text}\n"
+                            f"Observed switcher text:\n{pending_switcher.switcher_text}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher as soon as the startup shell exposed "
+                            "the header trigger and checked whether the delayed auth phase "
+                            "was still in progress."
+                        ),
+                        observed=(
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_observed_after_start_seconds={result['trigger_observed_after_start_seconds']!r}; "
+                            f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
+                            f"auth_probe_released_after_start_seconds={result['auth_probe_released_after_start_seconds']!r}; "
+                            f"switcher_text={pending_switcher.switcher_text!r}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=3)
+                    raise AssertionError(
+                        "Step 2 failed: Workspace switcher opened during startup, but the "
+                        "delayed GitHub `/user` verification request never started, so the "
+                        "high-latency auth scenario could not be exercised.\n"
+                        f"Observed body text:\n{body_text}\n"
+                        f"Observed switcher text:\n{pending_switcher.switcher_text}",
+                    )
+                observed_auth_probe_start = (
+                    auth_started_before_open
+                    or runtime.auth_probe_started_at_monotonic is not None
                 )
 
                 result["github_request_urls"] = list(runtime.github_request_urls)
@@ -225,6 +321,8 @@ def main() -> None:
                         runtime.auth_probe_released_at_monotonic,
                     )
                 )
+                pending_switcher = page.observe_open_switcher(timeout_ms=10_000)
+                pending_local_row = _find_named_local_row(pending_switcher)
                 result["pending_trigger_observation"] = (
                     _trigger_payload(trigger) if trigger is not None else None
                 )
@@ -234,6 +332,81 @@ def main() -> None:
                 result["pending_local_row"] = (
                     _row_payload(pending_local_row) if pending_local_row is not None else None
                 )
+                result["auth_probe_pending_after_open"] = runtime.auth_probe_pending
+                if not result["auth_probe_pending_after_open"]:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Workspace switcher opened from startup, but the delayed "
+                            "GitHub `/user` auth verification was not still pending "
+                            "during the inspection window.\n"
+                            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                            f"Observed switcher text:\n{pending_switcher.switcher_text}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher as soon as the startup shell exposed "
+                            "the header trigger and checked whether the delayed auth phase "
+                            "was still in progress."
+                        ),
+                        observed=(
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_observed_after_start_seconds={result['trigger_observed_after_start_seconds']!r}; "
+                            f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
+                            f"auth_probe_released_after_start_seconds={result['auth_probe_released_after_start_seconds']!r}; "
+                            f"auth_probe_observed_during_startup={observed_auth_probe_start!r}; "
+                            f"auth_probe_pending_after_open={result['auth_probe_pending_after_open']!r}; "
+                            f"switcher_text={pending_switcher.switcher_text!r}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=3)
+                    raise AssertionError(
+                        "Step 2 failed: Workspace switcher opened from startup, but the "
+                        "delayed GitHub `/user` auth verification was not still pending "
+                        "during the inspection window.\n"
+                        f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                        f"Observed switcher text:\n{pending_switcher.switcher_text}",
+                    )
+                if runtime.auth_probe_released_at_monotonic is not None:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=(
+                            "Workspace switcher opened only after the delayed GitHub "
+                            "`/user` auth probe had already finished.\n"
+                            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                            f"Observed switcher text:\n{pending_switcher.switcher_text}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened Workspace switcher as soon as the startup shell exposed "
+                            "the header trigger and checked whether the delayed auth phase "
+                            "was still in progress."
+                        ),
+                        observed=(
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_observed_after_start_seconds={result['trigger_observed_after_start_seconds']!r}; "
+                            f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
+                            f"auth_probe_released_after_start_seconds={result['auth_probe_released_after_start_seconds']!r}; "
+                            f"switcher_text={pending_switcher.switcher_text!r}"
+                        ),
+                    )
+                    _record_not_reached_steps(result, starting_step=3)
+                    raise AssertionError(
+                        "Step 2 failed: Workspace switcher opened only after the delayed "
+                        "GitHub `/user` auth probe had already finished.\n"
+                        f"Observed trigger label: {_trigger_label(trigger)!r}\n"
+                        f"Observed switcher text:\n{pending_switcher.switcher_text}",
+                    )
                 _record_step(
                     result,
                     step=2,
@@ -262,6 +435,7 @@ def main() -> None:
                         f"auth_probe_started_after_start_seconds={result['auth_probe_started_after_start_seconds']!r}; "
                         f"auth_probe_released_after_start_seconds={result['auth_probe_released_after_start_seconds']!r}; "
                         f"auth_probe_observed_during_startup={observed_auth_probe_start!r}; "
+                        f"auth_probe_pending_after_open={result['auth_probe_pending_after_open']!r}; "
                         f"switcher_text={pending_switcher.switcher_text!r}"
                     ),
                 )
@@ -307,32 +481,49 @@ def main() -> None:
                     )
                 )
                 if auth_released:
-                    step_4_observed = (
-                        "Waited through the delayed auth window and observed the GitHub "
-                        "`/user` auth verification request complete after "
-                        f"{_observed_auth_delay_seconds(runtime):.2f} seconds."
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action=REQUEST_STEPS[3],
+                        observed=(
+                            "The delayed GitHub `/user` auth verification request completed "
+                            f"after {_observed_auth_delay_seconds(runtime):.2f} seconds."
+                        ),
                     )
                 else:
-                    step_4_observed = (
-                        "Waited through the full delayed-auth observation window "
-                        f"({AUTH_DELAY_SECONDS + 2} seconds) before re-checking the UI. "
-                        "This live run did not surface a distinct delayed `/user` "
-                        "completion signal, so the final assertion relies on the visible "
-                        "workspace state after the wait.\n"
-                        f"Observed delayed requests: {runtime.delayed_request_urls!r}"
+                    if runtime.auth_probe_started_at_monotonic is None:
+                        step_4_observed = (
+                            "The delayed GitHub `/user` auth verification request never "
+                            "started, so no auth-ready signal was emitted within the "
+                            "expected wait window.\n"
+                            f"Observed delayed requests: {runtime.delayed_request_urls!r}"
+                        )
+                    else:
+                        step_4_observed = (
+                            "The delayed GitHub `/user` auth probe did not finish within "
+                            "the expected wait window.\n"
+                            f"Observed delayed requests: {runtime.delayed_request_urls!r}"
+                        )
+                    _record_step(
+                        result,
+                        step=4,
+                        status="failed",
+                        action=REQUEST_STEPS[3],
+                        observed=step_4_observed,
                     )
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=step_4_observed,
-                )
+                    step_failures.append(
+                        "Step 4 failed: " + step_4_observed.split("\n", 1)[0],
+                    )
 
-                final_trigger = _try_observe_trigger(page)
-                restored = (
-                    final_trigger is not None
-                    and _trigger_matches_expected_restore(final_trigger)
+                restored, final_trigger = poll_until(
+                    probe=lambda: _try_observe_trigger(page),
+                    is_satisfied=lambda candidate: (
+                        candidate is not None
+                        and _trigger_matches_expected_restore(candidate)
+                    ),
+                    timeout_seconds=STARTUP_RESTORE_WAIT_SECONDS,
+                    interval_seconds=5,
                 )
                 final_switcher = _open_or_observe_switcher(page, timeout_ms=20_000)
                 final_local_row = _find_named_local_row(final_switcher)
@@ -366,6 +557,8 @@ def main() -> None:
                 )
                 try:
                     _assert_ready_transition(
+                        pending_trigger=trigger,
+                        pending_local_row=pending_local_row,
                         restored=restored,
                         final_trigger=final_trigger,
                         final_switcher=final_switcher,
@@ -388,9 +581,9 @@ def main() -> None:
                         status="passed",
                         action=REQUEST_STEPS[4],
                         observed=(
-                            "After waiting through the delayed-auth observation window, "
-                            "the saved local workspace was still the selected `Local Git` "
-                            "row and kept `Connect GitHub` hidden.\n"
+                            "After the delayed auth-ready signal, the saved local workspace "
+                            "was restored as the selected `Local Git` row and kept "
+                            "`Connect GitHub` hidden.\n"
                             f"selected_row={json.dumps(_row_payload(selected_row), indent=2)}"
                         ),
                     )
@@ -783,6 +976,8 @@ def _assert_pending_local_not_unavailable(
 
 def _assert_ready_transition(
     *,
+    pending_trigger: WorkspaceSwitcherTriggerObservation | None,
+    pending_local_row: WorkspaceSwitcherRowObservation | None,
     restored: bool,
     final_trigger: WorkspaceSwitcherTriggerObservation | None,
     final_switcher: WorkspaceSwitcherObservation,
@@ -809,6 +1004,18 @@ def _assert_ready_transition(
             "Step 5 failed: after the delayed auth-ready signal, the saved local "
             "workspace row did not reach the `Local Git` state.\n"
             f"Observed local row: {json.dumps(_row_payload(final_local_row), indent=2)}",
+        )
+    if _pending_state_already_restored(
+        pending_trigger=pending_trigger,
+        pending_local_row=pending_local_row,
+    ):
+        raise AssertionError(
+            "Step 5 failed: the pre-ready inspection already showed the active local "
+            "workspace as restored to the final `Local Git` state, so the delayed "
+            "ready-signal transition was not actually observed.\n"
+            f"Observed pending trigger label: {_trigger_label(pending_trigger)!r}\n"
+            f"Observed pending local row: {json.dumps(_row_payload(pending_local_row), indent=2)}\n"
+            f"Observed final local row: {json.dumps(_row_payload(final_local_row), indent=2)}",
         )
     if selected_row is None:
         raise AssertionError(
@@ -849,7 +1056,7 @@ def _assert_ready_transition(
             "functional without manual intervention.\n"
             f"Observed switcher body text:\n{final_switcher.body_text}",
         )
-    if not restored and final_trigger is not None:
+    if not restored:
         raise AssertionError(
             "Step 5 failed: the saved local workspace never transitioned to the active "
             "`Local Git` state within the allowed wait after auth became ready.\n"
@@ -858,6 +1065,22 @@ def _assert_ready_transition(
             f"Observed local row: {json.dumps(_row_payload(final_local_row), indent=2)}\n"
             f"Observed switcher text:\n{final_switcher.switcher_text}",
         )
+
+
+def _pending_state_already_restored(
+    *,
+    pending_trigger: WorkspaceSwitcherTriggerObservation | None,
+    pending_local_row: WorkspaceSwitcherRowObservation | None,
+) -> bool:
+    if pending_trigger is None or not _trigger_matches_expected_restore(pending_trigger):
+        return False
+    if pending_local_row is None:
+        return False
+    return (
+        pending_local_row.target_type_label == "Local"
+        and pending_local_row.state_label == "Local Git"
+        and pending_local_row.selected
+    )
 
 
 def _record_step(
@@ -1207,10 +1430,10 @@ def _review_reply_text(
         )
     if path.endswith("test_ts_891.py"):
         return (
-            "Fixed: when step 2 cannot observe a real delayed-auth pending window, "
-            "steps 3-5 are now recorded as `not_reached` instead of extra product "
-            "assertion failures, so the failure evidence stays scoped to the actual "
-            "step-2 blocker. "
+            "Fixed: step 2 now fails unless the delayed GitHub `/user` probe is "
+            "actually observed pending during startup, and step 5 again requires "
+            "the delayed auth-ready signal plus the later `Local Git` restoration "
+            "check before the scenario can pass. "
             + rerun_summary
         )
     return "Fixed and re-ran the requested TS-891 coverage. " + rerun_summary

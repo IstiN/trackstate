@@ -18,6 +18,7 @@ void main() {
       final TrackStateAppComponent screen = defaultTestingDependencies
           .createTrackStateAppScreen(tester);
       LocalTrackStateFixture? fixture;
+      final failures = <String>[];
 
       try {
         fixture = await tester.runAsync(LocalTrackStateFixture.create);
@@ -31,7 +32,7 @@ void main() {
 
         final hostedRuntimeVisible = await _isHostedTopBarStateVisible(screen);
         if (!hostedRuntimeVisible) {
-          fail(
+          failures.add(
             'Step 1 failed: the app did not expose a hosted repository-access '
             'state in the top bar before the storage switch. Top bar texts: '
             '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
@@ -40,11 +41,15 @@ void main() {
           );
         }
 
-        await _verifyTopBarCreateIssueVisibility(
-          screen,
-          step: 2,
-          stateDescription: 'hosted Dashboard',
-        );
+        final hostedCreateIssueFailure =
+            await _verifyTopBarCreateIssueVisibility(
+              screen,
+              step: 2,
+              stateDescription: 'hosted Dashboard',
+            );
+        if (hostedCreateIssueFailure != null) {
+          failures.add(hostedCreateIssueFailure);
+        }
 
         await screen.switchToLocalGitInSettings(
           repositoryPath: fixture.repositoryPath,
@@ -58,7 +63,7 @@ void main() {
         );
         if (repositoryPathValue != fixture.repositoryPath ||
             writeBranchValue != 'main') {
-          fail(
+          failures.add(
             'Step 3 failed: the Local Git settings form did not retain the '
             'values the user entered before returning to Dashboard. Expected '
             'Repository Path="${fixture.repositoryPath}" but saw '
@@ -70,14 +75,18 @@ void main() {
           );
         }
         await screen.openSection('Dashboard');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+        await _waitForTopBarLabelVisible(
+          screen,
+          'Local Git',
+          timeout: const Duration(seconds: 5),
+        );
 
         final localGitVisible = await _isTopBarLabelVisible(
           screen,
           'Local Git',
         );
         if (!localGitVisible) {
-          fail(
+          failures.add(
             'Step 3 failed: selecting Local Git in Settings and providing the '
             'repository path did not switch the top bar to the Local Git mode '
             'without a manual refresh. Top bar texts: '
@@ -87,11 +96,11 @@ void main() {
           );
         }
 
-        final hostedLabelStillVisible = await _isHostedTopBarStateVisible(
+        final hostedLabelsHidden = await _waitForHostedTopBarStateHidden(
           screen,
         );
-        if (hostedLabelStillVisible) {
-          fail(
+        if (!hostedLabelsHidden) {
+          failures.add(
             'Step 3 failed: the hosted repository-access label remained visible '
             'in the top bar after switching to Local Git. Top bar texts: '
             '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
@@ -100,11 +109,19 @@ void main() {
           );
         }
 
-        await _verifyTopBarCreateIssueVisibility(
-          screen,
-          step: 5,
-          stateDescription: 'Local Git Dashboard after the settings switch',
-        );
+        final localGitCreateIssueFailure =
+            await _verifyTopBarCreateIssueVisibility(
+              screen,
+              step: 5,
+              stateDescription: 'Local Git Dashboard after the settings switch',
+            );
+        if (localGitCreateIssueFailure != null) {
+          failures.add(localGitCreateIssueFailure);
+        }
+
+        if (failures.isNotEmpty) {
+          fail(failures.join('\n\n'));
+        }
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
@@ -119,34 +136,37 @@ void main() {
   );
 }
 
-Future<void> _verifyTopBarCreateIssueVisibility(
+Future<String?> _verifyTopBarCreateIssueVisibility(
   TrackStateAppComponent screen, {
   required int step,
   required String stateDescription,
 }) async {
+  final failures = <String>[];
   final createIssueVisible = await _isTopBarLabelVisible(
     screen,
     'Create issue',
   );
   if (!createIssueVisible) {
-    fail(
+    failures.add(
       'Step $step failed: no visible "Create issue" control was rendered in the '
       'top bar while the user was on $stateDescription. Top bar texts: '
       '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
+    return failures.join('\n\n');
   }
 
   final openedCreateFlow = await screen.tapVisibleControl('Create issue');
   if (!openedCreateFlow) {
-    fail(
+    failures.add(
       'Step $step failed: the visible top-bar "Create issue" control on '
       '$stateDescription could not be activated. Top bar texts: '
       '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
       '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
+    return failures.join('\n\n');
   }
 
   final summaryVisible = await screen.isTextFieldVisible('Summary');
@@ -157,7 +177,7 @@ Future<void> _verifyTopBarCreateIssueVisibility(
       !descriptionVisible ||
       !saveVisible ||
       !cancelVisible) {
-    fail(
+    failures.add(
       'Step $step failed: opening the top-bar "Create issue" control on '
       '$stateDescription did not render the expected user-facing create form. '
       'Expected Summary=${summaryVisible ? 'visible' : 'missing'}, '
@@ -170,27 +190,36 @@ Future<void> _verifyTopBarCreateIssueVisibility(
     );
   }
 
-  final cancelled = await screen.tapVisibleControl('Cancel');
-  if (!cancelled) {
-    fail(
-      'Step $step failed: the create flow opened from the top bar on '
-      '$stateDescription, but the visible "Cancel" action was not reachable. '
-      'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
-      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-      'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
+  if (cancelVisible) {
+    final cancelled = await screen.tapVisibleControl('Cancel');
+    if (!cancelled) {
+      failures.add(
+        'Step $step failed: the create flow opened from the top bar on '
+        '$stateDescription, but the visible "Cancel" action was not reachable. '
+        'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
+        'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+        'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
   }
 
-  final summaryStillVisible = await screen.isTextFieldVisible('Summary');
-  if (summaryStillVisible) {
-    fail(
-      'Step $step failed: tapping "Cancel" after opening "Create issue" on '
-      '$stateDescription left the create form open with the Summary field still '
-      'visible. Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
-      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-      'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
+  if (cancelVisible) {
+    final summaryStillVisible = await screen.isTextFieldVisible('Summary');
+    if (summaryStillVisible) {
+      failures.add(
+        'Step $step failed: tapping "Cancel" after opening "Create issue" on '
+        '$stateDescription left the create form open with the Summary field still '
+        'visible. Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
+        'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+        'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
   }
+
+  if (failures.isEmpty) {
+    return null;
+  }
+  return failures.join('\n\n');
 }
 
 Future<bool> _isTopBarLabelVisible(
@@ -213,11 +242,41 @@ Future<bool> _isAnyTopBarLabelVisible(
   return false;
 }
 
+Future<void> _waitForTopBarLabelVisible(
+  TrackStateAppComponent screen,
+  String label, {
+  Duration timeout = const Duration(seconds: 2),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (await _isTopBarLabelVisible(screen, label)) {
+      return;
+    }
+    await screen.waitWithoutInteraction(step);
+  }
+}
+
+Future<bool> _waitForHostedTopBarStateHidden(
+  TrackStateAppComponent screen, {
+  Duration timeout = const Duration(seconds: 2),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (!await _isHostedTopBarStateVisible(screen)) {
+      return true;
+    }
+    await screen.waitWithoutInteraction(step);
+  }
+  return !await _isHostedTopBarStateVisible(screen);
+}
+
 Future<bool> _isHostedTopBarStateVisible(TrackStateAppComponent screen) async {
-  return await _isAnyTopBarLabelVisible(
-        screen,
-        const ['Connect GitHub', 'Connected'],
-      ) ||
+  return await _isAnyTopBarLabelVisible(screen, const [
+        'Connect GitHub',
+        'Connected',
+      ]) ||
       await screen.isTopBarTextVisible('Hosted') ||
       await screen.isTopBarTextVisible('Needs sign-in');
 }
