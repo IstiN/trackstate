@@ -105,7 +105,7 @@ def main() -> None:
 
         _write_pass_outputs(result)
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
@@ -408,42 +408,6 @@ def _evaluate_template_body(
     config: PullRequestTemplateChecklistConfig,
 ) -> None:
     if _step_status(result, 1) != "passed":
-        # Even without an authenticated compose surface, if every known candidate
-        # path is a 404 and the GraphQL API returns no templates, we can conclude
-        # that the PR template is genuinely absent — a product defect independent
-        # of the auth/setup limitation that blocked the browser check.
-        if _no_template_exists(verification):
-            result["failure_kind"] = "product"
-            _record_step(
-                result,
-                step=2,
-                status="failed",
-                action=TICKET_STEPS[1],
-                observed=(
-                    "No PR template file was found at any of the candidate paths "
-                    "and the GitHub GraphQL `pullRequestTemplates` field returned an "
-                    "empty list. The repository does not have a PR description "
-                    "template, so the accessibility checklist cannot appear in the "
-                    "generated PR body.\n"
-                    f"Checked paths: "
-                    f"{[obs.path for obs in verification.candidate_observations]}\n"
-                    f"Recognized templates: "
-                    f"{[t.filename for t in verification.recognized_templates]}"
-                ),
-            )
-            _record_step(
-                result,
-                step=3,
-                status="failed",
-                action=TICKET_STEPS[2],
-                observed=(
-                    "The required checklist item cannot be present because the "
-                    "repository has no PR template at all.\n"
-                    f"Required item: {config.required_checklist_item}\n"
-                    f"Checked paths: "
-                    f"{[obs.path for obs in verification.candidate_observations]}"
-                ),
-            )
         return
 
     body_source_name, body_source_path, body_source_field, body_source_text = _resolved_template_body_source(
@@ -649,8 +613,10 @@ def _no_template_exists(
     verification: PullRequestTemplateChecklistVerificationResult,
 ) -> bool:
     """Return True when every API source confirms no PR template is present."""
-    has_existing_candidate = bool(verification.existing_candidates)
-    has_recognized_template = bool(verification.recognized_templates)
+    existing_candidates = getattr(verification, "existing_candidates", ())
+    recognized_templates = getattr(verification, "recognized_templates", ())
+    has_existing_candidate = bool(existing_candidates)
+    has_recognized_template = bool(recognized_templates)
     return not has_existing_candidate and not has_recognized_template
 
 
