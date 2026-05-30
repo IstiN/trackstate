@@ -11,7 +11,12 @@ the ticket:
 
 ## Install dependencies
 
-No Python packages are required beyond the standard library.
+Install PyYAML before running the test because `config.yaml` is loaded with
+`yaml.safe_load(...)`.
+
+```bash
+python3 -m pip install pyyaml
+```
 
 ## Run this test
 

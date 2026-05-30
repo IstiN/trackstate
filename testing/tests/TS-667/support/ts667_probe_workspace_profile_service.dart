@@ -29,6 +29,8 @@ class Ts667ProbeWorkspaceProfileService implements WorkspaceProfileService {
                 ?.id
           : _state.activeWorkspaceId,
       migrationComplete: true,
+      unavailableLocalWorkspaceIds: _state.unavailableLocalWorkspaceIds
+          .difference({workspaceId}),
     );
     return _state;
   }
@@ -48,6 +50,20 @@ class Ts667ProbeWorkspaceProfileService implements WorkspaceProfileService {
       ],
       activeWorkspaceId: _state.activeWorkspaceId,
       migrationComplete: _state.migrationComplete,
+      unavailableLocalWorkspaceIds: _state.unavailableLocalWorkspaceIds,
+    );
+    return _state;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveLocalWorkspaceAvailability(
+    String workspaceId, {
+    required bool isAvailable,
+  }) async {
+    _state = _state.copyWith(
+      unavailableLocalWorkspaceIds: isAvailable
+          ? _state.unavailableLocalWorkspaceIds.difference({workspaceId})
+          : <String>{..._state.unavailableLocalWorkspaceIds, workspaceId},
     );
     return _state;
   }

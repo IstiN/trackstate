@@ -8,6 +8,11 @@ import 'package:web/web.dart' as web;
 import 'browser_workspace_switcher_focus_matcher.dart';
 import 'browser_workspace_switcher_scroll_logic.dart';
 import 'browser_workspace_switcher_tab_handoff.dart';
+import 'browser_workspace_switcher_tab_intent_web.dart';
+
+const Duration _workspaceSwitcherPointerInteractionGrace = Duration(
+  milliseconds: 150,
+);
 
 class BrowserViewportScrollSnapshot {
   const BrowserViewportScrollSnapshot(this._targets);
@@ -107,17 +112,28 @@ BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
   required VoidCallback onBrowserFocusOutside,
+  VoidCallback? onBrowserEscape,
   required void Function(String key) onBrowserBoundaryKey,
 }) {
+  final pointerdownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
+  final mousedownListener = ((web.Event event) {
+    _recordBrowserWorkspaceSwitcherPointerInteraction(event);
+  }).toJS;
   final keydownListener = ((web.Event event) {
     final keyboardEvent = event as web.KeyboardEvent;
-    final ancestors = _activeBrowserFocusAncestors();
     if (keyboardEvent.key == 'Tab') {
+      clearRecentBrowserWorkspaceSwitcherTabIntent();
+      _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
       final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocus(
         backwards: keyboardEvent.shiftKey,
       );
       if (tabMoveResult != _BrowserWorkspaceSwitcherTabMoveResult.none) {
         keyboardEvent.preventDefault();
+        // Stop propagation so Flutter's semantics layer cannot also act on the
+        // same Tab event and asynchronously reassign focus.
+        keyboardEvent.stopImmediatePropagation();
       }
       if (tabMoveResult ==
           _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
@@ -127,6 +143,17 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       return;
     }
 
+    if (keyboardEvent.key == 'Escape') {
+      if (!isBrowserFocusWithinWorkspaceSwitcher()) {
+        return;
+      }
+      keyboardEvent.preventDefault();
+      keyboardEvent.stopImmediatePropagation();
+      onBrowserEscape?.call();
+      return;
+    }
+
+    final ancestors = _activeBrowserFocusAncestors();
     if (!browserWorkspaceSwitcherShouldPreventDefaultKey(
       key: keyboardEvent.key,
       ancestors: ancestors,
@@ -147,21 +174,71 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     }
     onBrowserFocusOutside();
   }).toJS;
+  final focusoutListener = ((web.Event event) {
+    final blurredElement = event.target as web.Element?;
+    if (blurredElement == null) {
+      return;
+    }
+    _scheduleBrowserWorkspaceSwitcherNativeTabRescue(
+      blurredElement: blurredElement,
+      onBrowserFocusOutside: onBrowserFocusOutside,
+    );
+  }).toJS;
 
+  web.window.addEventListener('pointerdown', pointerdownListener, true.toJS);
+  web.window.addEventListener('mousedown', mousedownListener, true.toJS);
   web.window.addEventListener('keydown', keydownListener, true.toJS);
   web.window.addEventListener('focusin', focusinListener, true.toJS);
-  return BrowserWorkspaceSwitcherFocusMonitorSubscription(
-    () {
-      web.window.removeEventListener('keydown', keydownListener, true.toJS);
-      web.window.removeEventListener('focusin', focusinListener, true.toJS);
-    },
-  );
+  web.window.addEventListener('focusout', focusoutListener, true.toJS);
+  return BrowserWorkspaceSwitcherFocusMonitorSubscription(() {
+    web.window.removeEventListener(
+      'pointerdown',
+      pointerdownListener,
+      true.toJS,
+    );
+    web.window.removeEventListener('mousedown', mousedownListener, true.toJS);
+    web.window.removeEventListener('keydown', keydownListener, true.toJS);
+    web.window.removeEventListener('focusin', focusinListener, true.toJS);
+    web.window.removeEventListener('focusout', focusoutListener, true.toJS);
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    clearRecentBrowserWorkspaceSwitcherTabIntent();
+  });
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
-  return browserFocusWithinWorkspaceSwitcher(
+  if (browserFocusWithinWorkspaceSwitcher(
     ancestors: _activeBrowserFocusAncestors(),
-  );
+  )) {
+    return true;
+  }
+  // The trigger button lives in a separate DOM subtree from the panel, so
+  // the ancestor walk above won't find the panel identifier. Check the
+  // panelId attribute directly — the trigger sets
+  // data-trackstate-browser-focus-panel-id to the workspace-switcher id.
+  if (_activeBrowserFocusHasWorkspaceSwitcherPanelId()) {
+    return true;
+  }
+  final ancestors = _recentBrowserWorkspaceSwitcherPointerAncestors;
+  if (ancestors == null) {
+    return false;
+  }
+  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
+}
+
+bool _activeBrowserFocusHasWorkspaceSwitcherPanelId() {
+  final activeElement = web.document.activeElement;
+  if (activeElement is! web.Element) {
+    return false;
+  }
+  web.Element? current = activeElement;
+  while (current != null) {
+    final panelId = current.getAttribute(_browserFocusPanelIdAttribute);
+    if (panelId?.trim() == browserWorkspaceSwitcherSemanticsIdentifier) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
 }
 
 BrowserViewportScrollSnapshot captureBrowserViewportScrollSnapshot() {
@@ -383,21 +460,44 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     targets: focusTargets,
     activeElement: activeElement,
   );
-  if (currentIndex == null) {
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
-  }
-
-  final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
-    focusStops: [
-      for (final target in focusTargets)
-        BrowserWorkspaceSwitcherTabStopSnapshot(
+  final selectedRowIndex = focusTargets.indexWhere(
+    (target) => target.isSelectedWorkspaceRow,
+  );
+  final focusStops = [
+    for (final target in focusTargets)
+      () {
+        final rect = target.element.getBoundingClientRect();
+        return BrowserWorkspaceSwitcherTabStopSnapshot(
           isFocusable: true,
           isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
           isWithinWorkspaceRow: target.isWithinWorkspaceRow,
           isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
           isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
-        ),
-    ],
+          visualTop: rect.top,
+          visualLeft: rect.left,
+        );
+      }(),
+  ];
+  final fallbackTargetIndex = _workspaceSwitcherFallbackTargetIndex(
+    backwards: backwards,
+    activeElement: activeElement,
+    focusTargets: focusTargets,
+    focusStops: focusStops,
+    currentIndex: currentIndex,
+    selectedRowIndex: selectedRowIndex,
+  );
+  if (fallbackTargetIndex != null) {
+    return _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+      focusTargets: focusTargets,
+      targetIndex: fallbackTargetIndex,
+    );
+  }
+  if (currentIndex == null) {
+    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  }
+
+  final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
+    focusStops: focusStops,
     currentIndex: currentIndex,
     backwards: backwards,
   );
@@ -405,12 +505,158 @@ _BrowserWorkspaceSwitcherTabMoveResult _moveBrowserWorkspaceSwitcherTabFocus({
     return _BrowserWorkspaceSwitcherTabMoveResult.none;
   }
 
-  if (!_focusElement(focusTargets[targetIndex].element)) {
-    return _BrowserWorkspaceSwitcherTabMoveResult.none;
+  return _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+    focusTargets: focusTargets,
+    targetIndex: targetIndex,
+  );
+}
+
+int? _workspaceSwitcherFallbackTargetIndex({
+  required bool backwards,
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required List<BrowserWorkspaceSwitcherTabStopSnapshot> focusStops,
+  required int? currentIndex,
+  required int selectedRowIndex,
+}) {
+  if (selectedRowIndex == -1) {
+    return null;
   }
+  final isFallbackFocus = backwards
+      ? _isBrowserWorkspaceSwitcherReverseFallbackFocus(
+          activeElement: activeElement,
+          focusTargets: focusTargets,
+          currentIndex: currentIndex,
+        )
+      : _isBrowserWorkspaceSwitcherTriggerFallbackFocus(
+              activeElement: activeElement,
+              focusTargets: focusTargets,
+              currentIndex: currentIndex,
+            ) ||
+            _isBrowserWorkspaceSwitcherFallbackFocus(
+              activeElement: activeElement,
+              focusTargets: focusTargets,
+              currentIndex: currentIndex,
+            );
+  if (!isFallbackFocus) {
+    return null;
+  }
+  if (!backwards) {
+    return selectedRowIndex;
+  }
+  return browserWorkspaceSwitcherTabHandoffIndex(
+    focusStops: focusStops,
+    currentIndex: selectedRowIndex,
+    backwards: true,
+  );
+}
+
+_BrowserWorkspaceSwitcherTabMoveResult
+_moveBrowserWorkspaceSwitcherTabFocusToTarget({
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int targetIndex,
+}) {
+  final targetElement = focusTargets[targetIndex].element;
+  // Attempt focus immediately; the result tells us whether the browser already
+  // accepted the focus change. For BrowserFocusableControl PlatformView
+  // buttons the attempt may not succeed synchronously (the flt-platform-view
+  // container may need a frame to accept focus), so we always install the
+  // guard timer and always report the result based on WHERE we are trying to
+  // move focus — not on whether the first attempt succeeded. The guard will
+  // retry for ~96 ms and correct any async reassignment by Flutter's semantics
+  // layer.
+  _focusElement(targetElement);
+  _guardTabHandoffFocus(targetElement);
   return focusTargets[targetIndex].isWithinWorkspaceSwitcher
       ? _BrowserWorkspaceSwitcherTabMoveResult.withinWorkspaceSwitcher
       : _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher;
+}
+
+/// Keeps [target] focused for up to [_tabHandoffGuardFrames] animation frames
+/// (~96 ms) in case Flutter's semantics bridge asynchronously moves focus
+/// away from the element we just focused during Tab navigation.
+void _guardTabHandoffFocus(web.Element target) {
+  // 12 attempts × 16 ms ≈ 192 ms. PlatformView (HtmlElementView) buttons may
+  // need multiple frames before the flt-platform-view container accepts focus.
+  const maxAttempts = 12;
+  var attempts = 0;
+  Timer? timer;
+  timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+    attempts++;
+    final active = web.document.activeElement;
+    if (active == null || active == target || target.contains(active)) {
+      timer?.cancel();
+      return;
+    }
+    (target as web.HTMLElement).focus(web.FocusOptions(preventScroll: true));
+    if (attempts >= maxAttempts) {
+      timer?.cancel();
+    }
+  });
+}
+
+bool _isBrowserWorkspaceSwitcherTriggerFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (_workspaceSwitcherTriggerElementFor(activeElement) == null) {
+    return false;
+  }
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _isBrowserWorkspaceSwitcherFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher ||
+        currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+
+  final tagName = activeElement.tagName.toLowerCase();
+  if (tagName == 'flt-glass-pane' ||
+      tagName == 'flt-scene-host' ||
+      tagName == 'flt-semantics-host') {
+    return true;
+  }
+
+  return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
+      'flutter-view';
+}
+
+bool _isBrowserWorkspaceSwitcherReverseFallbackFocus({
+  required web.Element activeElement,
+  required List<_WorkspaceSwitcherFocusTarget> focusTargets,
+  required int? currentIndex,
+}) {
+  if (currentIndex case final index?) {
+    final currentTarget = focusTargets[index];
+    if (currentTarget.isWithinWorkspaceSwitcher &&
+        !currentTarget.isWorkspaceSwitcherTrigger) {
+      return false;
+    }
+  }
+  if (_workspaceSwitcherTriggerElementFor(activeElement) != null) {
+    return true;
+  }
+  return _isBrowserWorkspaceSwitcherFallbackFocus(
+    activeElement: activeElement,
+    focusTargets: focusTargets,
+    currentIndex: currentIndex,
+  );
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
@@ -422,7 +668,8 @@ BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
 
   void tryFocus() {
     attemptCount += 1;
-    if (_focusSemanticsElement(semanticsIdentifier)) {
+    if (_focusBrowserFocusableControl(semanticsIdentifier) ||
+        _focusSemanticsElement(semanticsIdentifier)) {
       consecutiveFocusedFrames += 1;
     } else {
       consecutiveFocusedFrames = 0;
@@ -512,20 +759,162 @@ bool _focusSemanticsElement(String semanticsIdentifier) {
   return false;
 }
 
+bool _focusBrowserFocusableControl(String focusTargetId) {
+  final element = _firstVisibleFocusableBridgeElement(
+    focusTargetId: focusTargetId,
+    assignedElements: const <web.Element>[],
+  );
+  if (element == null) {
+    return false;
+  }
+  return _focusElement(element);
+}
+
 List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>
 _activeBrowserFocusAncestors() {
+  final activeElement = web.document.activeElement;
+  if (activeElement is! web.Element) {
+    return const <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
+  }
+  return _browserFocusAncestorsFor(activeElement);
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot> _browserFocusAncestorsFor(
+  web.Element element,
+) {
   final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
-  web.Element? element = web.document.activeElement;
-  while (element != null) {
+  web.Element? current = element;
+  while (current != null) {
     ancestors.add(
       BrowserWorkspaceSwitcherFocusAncestorSnapshot(
-        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
-        textContent: element.textContent,
+        semanticsIdentifier:
+            current.getAttribute(_browserFocusIdAttribute) ??
+            current.getAttribute(_browserFocusPanelIdAttribute) ??
+            current.getAttribute(_browserFocusRowIdAttribute) ??
+            current.getAttribute('flt-semantics-identifier'),
+        textContent: current.textContent,
       ),
     );
-    element = element.parentElement;
+    current = current.parentElement;
   }
   return ancestors;
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>?
+_recentBrowserWorkspaceSwitcherPointerAncestors;
+Timer? _recentBrowserWorkspaceSwitcherPointerResetTimer;
+
+void _recordBrowserWorkspaceSwitcherPointerInteraction(web.Event event) {
+  final target = event.target as web.Element?;
+  if (target == null) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  final ancestors = _browserFocusAncestorsFor(target);
+  if (!browserFocusWithinWorkspaceSwitcher(ancestors: ancestors)) {
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction();
+    return;
+  }
+  _recentBrowserWorkspaceSwitcherPointerAncestors = ancestors;
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = Timer(
+    _workspaceSwitcherPointerInteractionGrace,
+    _clearRecentBrowserWorkspaceSwitcherPointerInteraction,
+  );
+}
+
+void _clearRecentBrowserWorkspaceSwitcherPointerInteraction() {
+  _recentBrowserWorkspaceSwitcherPointerResetTimer?.cancel();
+  _recentBrowserWorkspaceSwitcherPointerResetTimer = null;
+  _recentBrowserWorkspaceSwitcherPointerAncestors = null;
+}
+
+void _scheduleBrowserWorkspaceSwitcherNativeTabRescue({
+  required web.Element blurredElement,
+  required VoidCallback onBrowserFocusOutside,
+}) {
+  final tabIntent = consumeRecentBrowserWorkspaceSwitcherTabIntentForElement(
+    blurredElement,
+  );
+  if (tabIntent == null) {
+    return;
+  }
+  Timer.run(() {
+    final activeElement = web.document.activeElement;
+    if (!_browserWorkspaceSwitcherNeedsTabRescue(
+      blurredElement: blurredElement,
+      activeElement: activeElement,
+    )) {
+      return;
+    }
+    final focusTargets = _visibleDocumentFocusTargets();
+    final currentIndex = _focusTargetIndexForActiveElement(
+      targets: focusTargets,
+      activeElement: blurredElement,
+    );
+    if (currentIndex == null) {
+      return;
+    }
+    final focusStops = [
+      for (final target in focusTargets)
+        () {
+          final rect = target.element.getBoundingClientRect();
+          return BrowserWorkspaceSwitcherTabStopSnapshot(
+            isFocusable: true,
+            isWithinWorkspaceSwitcher: target.isWithinWorkspaceSwitcher,
+            isWithinWorkspaceRow: target.isWithinWorkspaceRow,
+            isSelectedWorkspaceRow: target.isSelectedWorkspaceRow,
+            isWorkspaceSwitcherTrigger: target.isWorkspaceSwitcherTrigger,
+            visualTop: rect.top,
+            visualLeft: rect.left,
+          );
+        }(),
+    ];
+    final targetIndex = browserWorkspaceSwitcherTabHandoffIndex(
+      focusStops: focusStops,
+      currentIndex: currentIndex,
+      backwards: tabIntent.backwards,
+      respectNativeDomOrder: false,
+    );
+    if (targetIndex == null) {
+      return;
+    }
+    final tabMoveResult = _moveBrowserWorkspaceSwitcherTabFocusToTarget(
+      focusTargets: focusTargets,
+      targetIndex: targetIndex,
+    );
+    if (tabMoveResult ==
+        _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
+      onBrowserFocusOutside();
+    }
+  });
+}
+
+bool _browserWorkspaceSwitcherNeedsTabRescue({
+  required web.Element blurredElement,
+  required web.Element? activeElement,
+}) {
+  if (activeElement == null) {
+    return true;
+  }
+  if (activeElement == blurredElement ||
+      blurredElement.contains(activeElement)) {
+    return false;
+  }
+  if (_workspaceSwitcherElementFor(activeElement) != null ||
+      _workspaceSwitcherTriggerElementFor(activeElement) != null) {
+    return false;
+  }
+  final tagName = activeElement.tagName.toLowerCase();
+  if (tagName == 'body' ||
+      tagName == 'html' ||
+      tagName == 'flt-glass-pane' ||
+      tagName == 'flt-scene-host' ||
+      tagName == 'flt-semantics-host') {
+    return true;
+  }
+  return _normalizeLabel(_elementAccessibleLabel(activeElement)) ==
+      'flutter-view';
 }
 
 void syncBrowserWorkspaceSwitcherRowTabIndices({
@@ -536,7 +925,8 @@ void syncBrowserWorkspaceSwitcherRowTabIndices({
     activeWorkspaceId,
   );
   final elements = web.document.querySelectorAll(
-    '[flt-semantics-identifier^="$prefix"]',
+    '[flt-semantics-identifier^="$prefix"], '
+    '[$_browserFocusRowIdAttribute]',
   );
   for (var index = 0; index < elements.length; index++) {
     final node = elements.item(index);
@@ -544,7 +934,9 @@ void syncBrowserWorkspaceSwitcherRowTabIndices({
       continue;
     }
     final element = node as web.HTMLElement;
-    final identifier = element.getAttribute('flt-semantics-identifier');
+    final identifier =
+        element.getAttribute(_browserFocusRowIdAttribute) ??
+        element.getAttribute('flt-semantics-identifier');
     if (identifier == activeIdentifier) {
       element.tabIndex = 0;
     } else {
@@ -598,7 +990,18 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     if (seen.contains(element)) {
       continue;
     }
-    if (!_isVisible(element) || !_isFocusable(element)) {
+    // Explicitly-registered controls (BrowserFocusableControl widgets that set
+    // our custom data attributes) may have zero visual rect because their
+    // visual representation is rendered on Flutter's canvas while the DOM
+    // element is just a focus/semantic receptor. Skip the rect-based visibility
+    // check for those, but still require them to be focusable and meaningful.
+    final hasExplicitRegistration =
+        element.getAttribute(_browserFocusIdAttribute) != null ||
+        element.getAttribute(_browserFocusPanelIdAttribute) != null ||
+        element.getAttribute(_browserFocusRowIdAttribute) != null;
+    if ((!hasExplicitRegistration && !_isVisible(element)) ||
+        !_isFocusable(element) ||
+        !_isMeaningfullyInteractiveFocusTarget(element)) {
       continue;
     }
     seen.add(element);
@@ -616,6 +1019,45 @@ List<_WorkspaceSwitcherFocusTarget> _visibleDocumentFocusTargets() {
     );
   }
   return targets;
+}
+
+bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
+  final tagName = element.tagName.toLowerCase();
+  if (tagName == 'button' ||
+      tagName == 'input' ||
+      tagName == 'textarea' ||
+      tagName == 'select') {
+    return true;
+  }
+
+  if (element.getAttribute(_browserFocusIdAttribute) case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusPanelIdAttribute)
+      case final String _?) {
+    return true;
+  }
+  if (element.getAttribute(_browserFocusRowIdAttribute) case final String _?) {
+    return true;
+  }
+
+  final role = element.getAttribute('role')?.trim().toLowerCase();
+  switch (role) {
+    case 'button':
+    case 'checkbox':
+    case 'combobox':
+    case 'link':
+    case 'menuitem':
+    case 'option':
+    case 'radio':
+    case 'searchbox':
+    case 'switch':
+    case 'tab':
+    case 'textbox':
+      return true;
+  }
+
+  return false;
 }
 
 int? _focusTargetIndexForActiveElement({
@@ -671,11 +1113,37 @@ int? _activeDesktopPrimaryNavigationTargetIndex({
   }
   for (var index = 0; index < navigationTargets.length; index += 1) {
     final candidate = navigationTargets[index];
-    if (candidate == activeElement || candidate.contains(activeElement)) {
+    if (_matchesDesktopPrimaryNavigationTarget(
+      candidate: candidate,
+      activeElement: activeElement,
+    )) {
       return index;
     }
   }
   return null;
+}
+
+bool _matchesDesktopPrimaryNavigationTarget({
+  required web.HTMLElement candidate,
+  required web.Element activeElement,
+}) {
+  if (candidate == activeElement || candidate.contains(activeElement)) {
+    return true;
+  }
+
+  final semanticsIdentifier = candidate.getAttribute(
+    'flt-semantics-identifier',
+  );
+  if (semanticsIdentifier != browserDesktopSearchInputSemanticsIdentifier) {
+    return false;
+  }
+
+  final candidateLabel = _normalizeLabel(_elementAccessibleLabel(candidate));
+  if (candidateLabel.isEmpty) {
+    return false;
+  }
+  return candidateLabel ==
+      _normalizeLabel(_elementAccessibleLabel(activeElement));
 }
 
 bool _focusElement(web.Element element) {
@@ -700,6 +1168,15 @@ bool _isFocusable(web.Element element) {
 }
 
 web.Element? _workspaceRowElementFor(web.Element element) {
+  final browserControlAncestor = _ancestorWithAttribute(
+    element,
+    attributeName: _browserFocusRowIdAttribute,
+    matches: (value) =>
+        value.startsWith(browserWorkspaceSwitcherRowSemanticsIdentifierPrefix),
+  );
+  if (browserControlAncestor != null) {
+    return browserControlAncestor;
+  }
   return _ancestorWithSemanticsIdentifier(
     element,
     (identifier) => identifier.startsWith(
@@ -709,13 +1186,34 @@ web.Element? _workspaceRowElementFor(web.Element element) {
 }
 
 web.Element? _workspaceSwitcherElementFor(web.Element element) {
-  return _ancestorWithSemanticsIdentifier(
+  final browserControlAncestor = _ancestorWithAttribute(
+    element,
+    attributeName: _browserFocusPanelIdAttribute,
+    matches: (value) => value == browserWorkspaceSwitcherSemanticsIdentifier,
+  );
+  if (browserControlAncestor != null) {
+    return browserControlAncestor;
+  }
+  final semanticsAncestor = _ancestorWithSemanticsIdentifier(
     element,
     (identifier) => identifier == browserWorkspaceSwitcherSemanticsIdentifier,
   );
+  if (semanticsAncestor != null) {
+    return semanticsAncestor;
+  }
+  return _overlappingWorkspaceSwitcherPanel(element);
 }
 
 web.Element? _workspaceSwitcherTriggerElementFor(web.Element element) {
+  final browserControlAncestor = _ancestorWithAttribute(
+    element,
+    attributeName: _browserFocusIdAttribute,
+    matches: (value) =>
+        value == browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+  );
+  if (browserControlAncestor != null) {
+    return browserControlAncestor;
+  }
   return _ancestorWithSemanticsIdentifier(
     element,
     (identifier) =>
@@ -738,6 +1236,67 @@ web.Element? _ancestorWithSemanticsIdentifier(
     current = current.parentElement;
   }
   return null;
+}
+
+web.Element? _ancestorWithAttribute(
+  web.Element element, {
+  required String attributeName,
+  required bool Function(String value) matches,
+}) {
+  web.Element? current = element;
+  while (current != null) {
+    final attributeValue = current.getAttribute(attributeName);
+    if (attributeValue case final value? when matches(value)) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+web.Element? _overlappingWorkspaceSwitcherPanel(web.Element element) {
+  final htmlElement = element as web.HTMLElement;
+  if (!_isWorkspaceSwitcherPanelOverlapCandidate(htmlElement)) {
+    return null;
+  }
+  final elementRect = htmlElement.getBoundingClientRect();
+  if (elementRect.width <= 0 || elementRect.height <= 0) {
+    return null;
+  }
+  final panelElements = web.document.querySelectorAll(
+    '[flt-semantics-identifier="$browserWorkspaceSwitcherSemanticsIdentifier"]',
+  );
+  for (var index = 0; index < panelElements.length; index += 1) {
+    final panelNode = panelElements.item(index);
+    if (panelNode == null) {
+      continue;
+    }
+    final panelElement = panelNode as web.Element;
+    if (!_isVisible(panelElement)) {
+      continue;
+    }
+    final panelRect = panelElement.getBoundingClientRect();
+    if (_rectanglesOverlap(a: elementRect, b: panelRect)) {
+      return panelElement;
+    }
+  }
+  return null;
+}
+
+bool _isWorkspaceSwitcherPanelOverlapCandidate(web.HTMLElement element) {
+  final tagName = element.tagName.toLowerCase();
+  if (tagName == 'input' || tagName == 'textarea' || tagName == 'select') {
+    return true;
+  }
+  final role = element.getAttribute('role')?.trim().toLowerCase();
+  return role == 'textbox' || role == 'combobox';
+}
+
+bool _rectanglesOverlap({required web.DOMRect a, required web.DOMRect b}) {
+  return a.left < b.right &&
+      a.right > b.left &&
+      a.top < b.bottom &&
+      a.bottom > b.top;
 }
 
 web.HTMLElement? _resolveDesktopPrimaryNavigationTarget({
@@ -773,6 +1332,13 @@ web.HTMLElement? _firstVisibleFocusableSemanticsElement({
   required String semanticsIdentifier,
   required List<web.Element> assignedElements,
 }) {
+  final bridgeElement = _firstVisibleFocusableBridgeElement(
+    focusTargetId: semanticsIdentifier,
+    assignedElements: assignedElements,
+  );
+  if (bridgeElement != null) {
+    return bridgeElement;
+  }
   final candidates = web.document.querySelectorAll(
     '[flt-semantics-identifier="$semanticsIdentifier"]',
   );
@@ -797,16 +1363,42 @@ web.HTMLElement? _firstVisibleFocusableSemanticsElement({
   return null;
 }
 
+web.HTMLElement? _firstVisibleFocusableBridgeElement({
+  required String focusTargetId,
+  required List<web.Element> assignedElements,
+}) {
+  final candidates = web.document.querySelectorAll(
+    '[$_browserFocusIdAttribute="$focusTargetId"]',
+  );
+  for (var index = 0; index < candidates.length; index += 1) {
+    final candidateNode = candidates.item(index);
+    if (candidateNode == null) {
+      continue;
+    }
+    final candidate = candidateNode as web.HTMLElement;
+    if (!_isVisible(candidate) || assignedElements.contains(candidate)) {
+      continue;
+    }
+    if (candidate.tabIndex < 0 || candidate.getAttribute('disabled') != null) {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
 bool _isSelectedWorkspaceRowElement(web.Element element) {
-  final semanticsIdentifier = element.getAttribute('flt-semantics-identifier');
+  if (element.getAttribute('aria-current') == 'true') {
+    return true;
+  }
+  final semanticsIdentifier =
+      element.getAttribute(_browserFocusRowIdAttribute) ??
+      element.getAttribute('flt-semantics-identifier');
   if (semanticsIdentifier?.startsWith(
         browserWorkspaceSwitcherRowSemanticsIdentifierPrefix,
       ) !=
       true) {
     return false;
-  }
-  if (element.getAttribute('aria-current') == 'true') {
-    return true;
   }
   final htmlElement = element as web.HTMLElement;
   return htmlElement.tabIndex == 0;
@@ -845,7 +1437,7 @@ web.HTMLElement? _firstVisibleFocusableElementWithAccessibleLabel({
 }) {
   final normalizedAccessibleLabel = _normalizeLabel(accessibleLabel);
   final candidates = web.document.querySelectorAll(
-    'flt-semantics[role="button"], [role="button"], input[aria-label], textarea[aria-label]',
+    'button, flt-semantics[role="button"], [role="button"], input[aria-label], textarea[aria-label]',
   );
   for (var index = 0; index < candidates.length; index += 1) {
     final candidateNode = candidates.item(index);
@@ -1014,4 +1606,9 @@ const String _originalTabIndexAttribute =
 const String _originalRoleAttribute = 'data-trackstate-managed-original-role';
 const String _originalAriaLabelAttribute =
     'data-trackstate-managed-original-aria-label';
+const String _browserFocusIdAttribute = 'data-trackstate-browser-focus-id';
+const String _browserFocusPanelIdAttribute =
+    'data-trackstate-browser-focus-panel-id';
+const String _browserFocusRowIdAttribute =
+    'data-trackstate-browser-focus-row-id';
 const String _missingTabIndexSentinel = '__trackstate_missing_tabindex__';

@@ -151,7 +151,7 @@ void main() {
             (focusedLabel ?? '').startsWith('Summary ');
         if (!focusReturnedToSummary && !validationAnnounced) {
           failures.add(
-            'Step 4 failed: after the summary-required validation error, focus did not return to Summary and no summary-required message was exposed in visible semantics. '
+            'Step 4 failed: after the summary-required validation error, focus did not return to Summary and no summary-required accessibility feedback was exposed. '
             'Focused semantics label: ${focusedLabel ?? '<none>'}. '
             'Visible semantics labels: ${_formatSnapshot(validationSemantics)}. '
             'Accessibility feedback text: ${_formatSnapshot(accessibilityFeedback)}.',

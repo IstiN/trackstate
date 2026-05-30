@@ -4,49 +4,31 @@ import 'dart:io';
 Future<Map<String, Object?>> runThemeTokenPolicyCheck(
   List<String> targets,
 ) async {
-  final root = Directory.current;
-  final config = _PolicyConfig.load(
-    File(
-      '${root.path}${Platform.pathSeparator}.dmtools${Platform.pathSeparator}policies${Platform.pathSeparator}theme_tokens.json',
-    ),
+  final command = 'dart tool/check_theme_tokens.dart ${targets.join(' ')}';
+  final result = await Process.run(
+    _dartExecutable(),
+    <String>['tool/check_theme_tokens.dart', ...targets],
+    workingDirectory: Directory.current.path,
   );
-
-  final violations = <_Violation>[];
-  for (final target in targets) {
-    final file = File(target);
-    if (!file.existsSync()) {
-      return <String, Object?>{
-        'command': 'dart run tool/check_theme_tokens.dart ${targets.join(' ')}',
-        'exit_code': 2,
-        'output': 'Theme token policy target does not exist: $target',
-      };
-    }
-    final relativePath = _relativePath(root, file);
-    if (!config.shouldCheck(relativePath)) {
-      continue;
-    }
-    violations.addAll(_scanFile(file, relativePath, config));
-  }
-
-  if (violations.isEmpty) {
-    return <String, Object?>{
-      'command': 'dart run tool/check_theme_tokens.dart ${targets.join(' ')}',
-      'exit_code': 0,
-      'output': 'No theme token policy violations found.',
-    };
-  }
-
+  final stdout = '${result.stdout}'.trimRight();
+  final stderr = '${result.stderr}'.trimRight();
+  final output = [
+    if (stdout.isNotEmpty) stdout,
+    if (stderr.isNotEmpty) stderr,
+  ].join(stdout.isNotEmpty && stderr.isNotEmpty ? '\n' : '');
   return <String, Object?>{
-    'command': 'dart run tool/check_theme_tokens.dart ${targets.join(' ')}',
-    'exit_code': 1,
-    'output': violations
-        .map(
-          (violation) =>
-              'warning • ${config.message} ${violation.expression} • '
-              '${violation.path}:${violation.line}:${violation.column} • ${config.code}',
-        )
-        .join('\n'),
+    'command': command,
+    'exit_code': result.exitCode,
+    'output': output,
   };
+}
+
+String _dartExecutable() {
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (flutterRoot != null && flutterRoot.isNotEmpty) {
+    return '$flutterRoot/bin/dart';
+  }
+  return 'dart';
 }
 
 List<_Violation> _scanFile(

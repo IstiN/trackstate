@@ -821,42 +821,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _write_review_replies() -> None:
     REVIEW_REPLIES_PATH.write_text(
         json.dumps(
-            {
-                "replies": [
-                    {
-                        "inReplyToId": 3282755133,
-                        "threadId": "PRRT_kwDOSU6Gf86D3eir",
-                        "reply": (
-                            "Fixed: Step 4 now asserts the visible Summary validation text uses "
-                            "the TrackState error theme token, normalizing the computed CSS "
-                            "foreground color and requiring the expected error values "
-                            "(`#c25742` in light mode or `#e8a085` in dark mode`) before the "
-                            "contrast check can pass."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703459,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VGB",
-                        "reply": (
-                            "Fixed: the Summary validation probe now discovers the visible message using the ticket fragment `Summary is required` instead of the stricter full sentence, so compliant shorter copy is still captured for the contrast and accessibility checks."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703608,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VH4",
-                        "reply": (
-                            "Fixed: Step 5 no longer treats `aria-invalid` plus focus on the Summary field as sufficient. It now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703774,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VJz",
-                        "reply": (
-                            "Fixed: TS-887 now writes the standard pass artifacts on success (`test_automation_result.json`, `response.md`, `pr_body.md`, review replies), and it removes any stale `bug_description.md` when the scenario passes."
-                        ),
-                    },
-                ]
-            },
+            {"replies": []},
         )
         + "\n",
         encoding="utf-8",

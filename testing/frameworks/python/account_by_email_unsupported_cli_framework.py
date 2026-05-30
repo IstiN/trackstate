@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
-import shutil
-import subprocess
+import tempfile
 
 from testing.core.config.account_by_email_unsupported_cli_config import (
     AccountByEmailUnsupportedCliConfig,
@@ -12,63 +9,80 @@ from testing.core.config.account_by_email_unsupported_cli_config import (
 from testing.core.models.account_by_email_unsupported_cli_result import (
     AccountByEmailUnsupportedCliObservation,
 )
-from testing.core.models.cli_command_result import CliCommandResult
+from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
+    PythonTrackStateCliCompiledLocalFramework,
+)
 
 
-class PythonAccountByEmailUnsupportedCliFramework:
-    def __init__(self, repository_root: Path) -> None:
-        self._repository_root = Path(repository_root)
-
+class PythonAccountByEmailUnsupportedCliFramework(
+    PythonTrackStateCliCompiledLocalFramework
+):
     def account_by_email_unsupported(
         self,
         *,
         config: AccountByEmailUnsupportedCliConfig,
     ) -> AccountByEmailUnsupportedCliObservation:
-        preferred_binary = shutil.which(config.requested_command[0])
-        if preferred_binary:
-            executed_command = (preferred_binary, *config.requested_command[1:])
-            return AccountByEmailUnsupportedCliObservation(
-                requested_command=config.requested_command,
-                executed_command=executed_command,
-                fallback_reason=None,
-                result=self._run(executed_command),
-            )
+        with tempfile.TemporaryDirectory(prefix="trackstate-ts-378-bin-") as bin_dir:
+            executable_path = Path(bin_dir) / "trackstate"
+            self._compile_executable(executable_path)
+            with tempfile.TemporaryDirectory(prefix="trackstate-ts-378-repo-") as temp_dir:
+                repository_path = Path(temp_dir)
+                self._seed_local_repository(repository_path)
+                executed_command = (str(executable_path), *config.requested_command[1:])
+                return AccountByEmailUnsupportedCliObservation(
+                    requested_command=config.requested_command,
+                    executed_command=executed_command,
+                    fallback_reason=(
+                        "Pinned execution to a temporary executable compiled from this "
+                        "checkout so the exact ticket command runs from a seeded Local "
+                        "Git repository instead of the detached-HEAD checkout root."
+                    ),
+                    repository_path=str(repository_path),
+                    result=self._run(executed_command, cwd=repository_path),
+                )
 
-        return AccountByEmailUnsupportedCliObservation(
-            requested_command=config.requested_command,
-            executed_command=config.fallback_command,
-            fallback_reason=(
-                f'"{config.requested_command[0]}" was not available on PATH, so the '
-                "test used the package executable via `dart run trackstate`."
-            ),
-            result=self._run(config.fallback_command),
+    def _seed_local_repository(self, repository_path: Path) -> None:
+        repository_path.mkdir(parents=True, exist_ok=True)
+        self._write_file(
+            repository_path / ".gitattributes",
+            "*.png filter=lfs diff=lfs merge=lfs -text\n",
         )
+        self._write_file(
+            repository_path / "DEMO/project.json",
+            '{"key":"DEMO","name":"Local Demo"}\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/statuses.json",
+            '[{"id":"todo","name":"To Do"},{"id":"done","name":"Done"}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/issue-types.json",
+            '[{"id":"story","name":"Story"}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/fields.json",
+            '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/DEMO-1/main.md",
+            """---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: "TS-378 local account-by-email fixture"
+assignee: ts378-user
+reporter: ts378-user
+updated: 2026-05-10T00:00:00Z
+---
 
-    def _run(self, command: tuple[str, ...]) -> CliCommandResult:
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        completed = subprocess.run(
-            command,
-            cwd=self._repository_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return CliCommandResult(
-            command=command,
-            exit_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            json_payload=self._parse_json(completed.stdout),
-        )
+# Description
 
-    def _parse_json(self, stdout: str) -> object | None:
-        payload = stdout.strip()
-        if not payload:
-            return None
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError:
-            return None
+Local repository used to verify the unsupported account-by-email CLI contract.
+""",
+        )
+        self._git(repository_path, "init", "-b", "main")
+        self._git(repository_path, "config", "--local", "user.name", "TS-378 Tester")
+        self._git(repository_path, "config", "--local", "user.email", "ts378@example.com")
+        self._git(repository_path, "add", ".")
+        self._git(repository_path, "commit", "-m", "Seed TS-378 local fixture")

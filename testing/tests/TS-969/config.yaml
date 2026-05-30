@@ -1,0 +1,46 @@
+test_id: TS-969
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: testing/accessibility/ts969_wrapper_contract_failure.node.test.js
+  probe_render_host_path: package.json
+  branch_prefix: ts969-wrapper-failure-propagation
+  commit_message: "TS-969 probe: verify CI wrapper propagates contract-validation failure"
+  pull_request_title: "TS-969 disposable probe: verify CI wrapper returns exit code 1"
+  pull_request_body: "Disposable PR created by TS-969 automation to redirect `npm run test:a11y` to an intentionally failing contract-validation node test and verify that the live CI wrapper captures the error and returns exit code 1."
+  expected_accessibility_markers:
+    - Accessibility checks
+    - accessibility
+    - Flutter Required Checks
+    - Run axe-core accessibility checks
+  contrast_evidence_markers:
+    - TS-969 simulated contract validation failure
+    - standardized wrapper must propagate exit code 1
+    - AssertionError
+    - process completed with exit code 1
+  semantic_evidence_markers:
+    - npm run test:a11y
+    - node --test
+    - package.json
+    - test:a11y
+  accessibility_job_markers:
+    - Accessibility checks
+    - accessibility
+  downstream_job_markers:
+    - Deploy preview
+    - deploy-preview
+    - publish
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only package.json and a ticket-specific failing node test under testing/accessibility.
+  - Expects the live `Run axe-core accessibility checks` wrapper to capture the failing test output and finish with exit code 1.

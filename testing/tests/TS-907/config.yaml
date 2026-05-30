@@ -5,6 +5,6 @@ platform: flutter-analyze
 dependencies:
   - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or via TS907_FLUTTER_BIN / TRACKSTATE_FLUTTER_BIN
 notes:
-  - Copies the repository to a disposable temp workspace so the production checkout stays unchanged.
-  - Replaces the sync-pill semantic label return with the weaker generic `Attention needed` label in the temp copy.
-  - Runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` and only passes when the local analysis command surfaces a real diagnostic instead of a clean `No issues found!` result.
+  - Exports the current `origin/main` snapshot to a disposable temp workspace so the production checkout and stale automation branches stay unchanged.
+  - Replaces `_workspaceSyncAttentionNeededSemanticLabel(l10n)` with `_workspaceSyncAttentionNeededVisibleLabel(l10n)` at the live sync-pill semantic-label call site in the temp copy.
+  - Runs `flutter analyze lib/ui/features/tracker/views/trackstate_app.dart` and only passes when the local analysis command blocks the weakened semantic label instead of returning a clean `No issues found!` result.
