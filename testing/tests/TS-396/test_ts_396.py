@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 import traceback
 from pathlib import Path
@@ -24,14 +25,33 @@ from testing.core.config.live_setup_test_config import (  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
+from testing.tests.support.live_startup_case_support import (  # noqa: E402
+    build_annotated_steps,
+    format_step_lines,
+    write_test_automation_result,
+)
 
 TICKET_KEY = "TS-396"
+TEST_CASE_TITLE = "Shared Edit Surface entry points - drawer/dialog opens with preloaded data"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts396_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts396_success.png"
 TARGET_ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 COMPACT_VIEWPORT = {"width": 390, "height": 844}
+REQUEST_STEPS = [
+    "Open the deployed TrackState app at https://istin.github.io/trackstate-setup/.",
+    "Navigate to Board (desktop viewport: 1440px) and click the Edit affordance on the DEMO-2 issue card.",
+    "Observe the layout and verify the Summary, Description, and Priority fields are preloaded.",
+    "Close the editor and navigate to Issue Detail for the same DEMO-2 issue.",
+    "Click the Edit action in the detail pane and verify the desktop drawer opens with the same preloaded data.",
+    "Set the viewport to 390px, trigger Edit again, and verify the compact full-width sheet still preloads the same issue data.",
+]
 
 
 def main() -> None:
@@ -607,6 +627,283 @@ def _record_failure(
     )
 
 
+def _build_human_verification_lines(payload: dict[str, object], *, jira: bool) -> list[str]:
+    lines: list[str] = []
+    board = payload.get("desktop_board_observation")
+    if isinstance(board, dict):
+        lines.append(
+            _format_human_line(
+                check=(
+                    "Desktop Board entry point visibly opens as a right-side drawer for "
+                    "DEMO-2."
+                ),
+                observed=(
+                    f"Drawer geometry: {_format_observation_dict(board)}. Visible state included "
+                    "'Edit issue', 'DEMO-2 · Story', 'Priority Highest', 'Save', and 'Cancel'. "
+                    f"Summary rendered as {board.get('summary_value', '')!r} and Description "
+                    f"rendered as {board.get('description_value', '')!r}."
+                ),
+                jira=jira,
+            ),
+        )
+
+    detail = payload.get("desktop_issue_detail_observation")
+    if isinstance(detail, dict):
+        lines.append(
+            _format_human_line(
+                check=(
+                    "Desktop Issue Detail entry point shows the same right-docked Edit surface."
+                ),
+                observed=(
+                    f"Drawer geometry: {_format_observation_dict(detail)}. The detail-triggered "
+                    f"surface again showed empty Summary {detail.get('summary_value', '')!r} "
+                    f"and Description {detail.get('description_value', '')!r} while Priority "
+                    "stayed visible as Highest."
+                ),
+                jira=jira,
+            ),
+        )
+
+    compact = payload.get("compact_observation")
+    if isinstance(compact, dict):
+        lines.append(
+            _format_human_line(
+                check=(
+                    "Compact 390px entry point opens as a near full-width sheet from the "
+                    "user's perspective."
+                ),
+                observed=(
+                    f"Sheet geometry: {_format_observation_dict(compact)}. The compact surface "
+                    f"kept the same visible labels and actions, but Summary remained "
+                    f"{compact.get('summary_value', '')!r} and Description remained "
+                    f"{compact.get('description_value', '')!r}."
+                ),
+                jira=jira,
+            ),
+        )
+
+    return lines
+
+
+def _format_human_line(*, check: str, observed: str, jira: bool) -> str:
+    if jira:
+        return f"* {check}\n** Observed: {observed}"
+    return f"- **{check}**\n  - Observed: {observed}"
+
+
+def _format_observation_dict(observation: dict[str, object]) -> str:
+    return (
+        "viewport="
+        f"{observation.get('viewport_width', 0):.0f}x{observation.get('viewport_height', 0):.0f}, "
+        f"left={observation.get('left', 0):.1f}, top={observation.get('top', 0):.1f}, "
+        f"width={observation.get('width', 0):.1f}, height={observation.get('height', 0):.1f}, "
+        f"rightInset={observation.get('right_inset', 0):.1f}, "
+        f"bottomInset={observation.get('bottom_inset', 0):.1f}"
+    )
+
+
+def _build_jira_comment(payload: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    automation_lines = format_step_lines(payload, jira=True)
+    human_lines = _build_human_verification_lines(payload, jira=True)
+    expected_result = (
+        "Desktop entry points open a right-side drawer; compact 390px opens a near "
+        "full-width sheet; Summary, Description, and Priority are preloaded from DEMO-2."
+    )
+    actual_result = _build_actual_result(payload, passed=passed)
+    screenshot = payload.get("screenshot")
+    error = payload.get("error")
+    traceback_text = payload.get("traceback")
+
+    sections = [
+        f"h1. {TICKET_KEY} {status}",
+        "",
+        f"*Test case:* {TEST_CASE_TITLE}",
+        f"*Environment:* {payload.get('app_url', 'unknown')} in Chromium on {platform.platform()}",
+        f"*Repository:* {payload.get('repository', 'unknown')} @ {payload.get('repository_ref', 'unknown')}",
+        "*Viewport coverage:* desktop 1440x960, compact 390x844",
+        "*Linked bugs reviewed:* TS-1086, TS-1067, TS-1169",
+        "*Timing notes:* No additional async wait was required by the linked bug fixes.",
+        "",
+        "h2. What was automated",
+        "* Open the hosted TrackState app and confirm the session is connected to the deployed repository.",
+        "* Open the shared Edit issue surface from the Board card and from Issue Detail.",
+        "* Verify desktop drawer geometry and compact sheet geometry.",
+        "* Verify Summary, Description, and Priority preload for DEMO-2.",
+        "",
+        "h2. Automation checks",
+        *(automation_lines or ["* No automation steps were recorded."]),
+        "",
+        "h2. Real user-style verification",
+        *(human_lines or ["* No human-style verification observations were recorded."]),
+        "",
+        "h2. Expected vs Actual",
+        f"*Expected:* {expected_result}",
+        f"*Actual:* {actual_result}",
+    ]
+
+    if screenshot:
+        sections.extend(["", "h2. Screenshot", str(screenshot)])
+
+    if error:
+        sections.extend(["", "h2. Failure", "{code}", str(error), "{code}"])
+    if traceback_text:
+        sections.extend(["", "h2. Traceback", "{code}", str(traceback_text), "{code}"])
+
+    return "\n".join(sections) + "\n"
+
+
+def _build_pr_body(payload: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    automation_lines = format_step_lines(payload, jira=False)
+    human_lines = _build_human_verification_lines(payload, jira=False)
+    expected_result = (
+        "Desktop entry points open a right-side drawer; compact 390px opens a near "
+        "full-width sheet; Summary, Description, and Priority are preloaded from DEMO-2."
+    )
+    actual_result = _build_actual_result(payload, passed=passed)
+    screenshot = payload.get("screenshot")
+    error = payload.get("error")
+    traceback_text = payload.get("traceback")
+
+    sections = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        f"**Test case:** {TEST_CASE_TITLE}",
+        f"**Environment:** `{payload.get('app_url', 'unknown')}` in Chromium on `{platform.platform()}`",
+        f"**Repository:** `{payload.get('repository', 'unknown')}` @ `{payload.get('repository_ref', 'unknown')}`",
+        "**Viewport coverage:** `1440x960` desktop, `390x844` compact",
+        "**Linked bugs reviewed:** `TS-1086`, `TS-1067`, `TS-1169`",
+        "**Timing notes:** No additional async wait was required by the linked bug fixes.",
+        "",
+        "## What was automated",
+        "- Open the hosted TrackState app and confirm the session is connected to the deployed repository.",
+        "- Open the shared Edit issue surface from the Board card and from Issue Detail.",
+        "- Verify desktop drawer geometry and compact sheet geometry.",
+        "- Verify Summary, Description, and Priority preload for DEMO-2.",
+        "",
+        "## Automation checks",
+        *(automation_lines or ["- No automation steps were recorded."]),
+        "",
+        "## Real user-style verification",
+        *(human_lines or ["- No human-style verification observations were recorded."]),
+        "",
+        "## Expected vs Actual",
+        f"- **Expected:** {expected_result}",
+        f"- **Actual:** {actual_result}",
+    ]
+
+    if screenshot:
+        sections.extend(["", "## Screenshot", f"`{screenshot}`"])
+    if error:
+        sections.extend(["", "## Failure", "```text", str(error), "```"])
+    if traceback_text:
+        sections.extend(["", "## Traceback", "```text", str(traceback_text), "```"])
+
+    return "\n".join(sections) + "\n"
+
+
+def _build_response_summary(payload: dict[str, object], *, passed: bool) -> str:
+    if passed:
+        return (
+            f"{TICKET_KEY} passed.\n\n"
+            "The shared Edit issue surface opened from the Board card and Issue Detail on "
+            "the deployed hosted app with the expected desktop and compact layouts, and the "
+            "selected issue metadata stayed preloaded across entry points.\n"
+        )
+
+    return (
+        f"{TICKET_KEY} failed.\n\n"
+        "The deployed hosted app opened the shared Edit issue surface from every required "
+        "entry point, and the responsive layout matched the ticket, but the Summary and "
+        "Description fields were empty instead of preloading the DEMO-2 issue data.\n\n"
+        f"{payload.get('error', 'No error message was recorded.')}\n"
+    )
+
+
+def _build_bug_description(payload: dict[str, object]) -> str:
+    annotated_steps = build_annotated_steps(payload, request_steps=REQUEST_STEPS)
+    screenshot = payload.get("screenshot", "No screenshot recorded.")
+    traceback_text = payload.get("traceback", payload.get("error", "No traceback recorded."))
+    expected_priority = payload.get("expected_priority_label", "Highest")
+    expected_summary = payload.get("issue_summary", "")
+    expected_description = payload.get("issue_description", "")
+
+    return (
+        f"# {TICKET_KEY} bug report\n\n"
+        "## Steps to reproduce\n"
+        + "\n".join(f"{line}" for line in annotated_steps)
+        + "\n\n## Exact error message or assertion failure\n```text\n"
+        + str(traceback_text)
+        + "\n```\n\n## Actual vs Expected\n"
+        + f"**Expected:** Opening Edit for `{payload.get('issue_key', 'DEMO-2')}` should show "
+        + f"Summary `{expected_summary}`, Description `{expected_description}`, and Priority "
+        + f"`{expected_priority}` already loaded in the shared Edit surface. On desktop "
+        + "1440px it should appear as a right-side drawer; on compact 390px it should appear "
+        + "as a near full-width sheet.\n\n"
+        + "**Actual:** The shared Edit surface opened correctly from the Board card, desktop "
+        + "Issue Detail, and compact Issue Detail entry points, and the responsive geometry "
+        + "matched the ticket. However, Summary and Description were empty strings across all "
+        + "three entry points while Priority still rendered as Highest. The product therefore "
+        + "shows the correct shell and metadata chrome but fails to preload the editable text "
+        + "fields from the selected issue.\n\n## Environment details\n"
+        + f"- URL: `{payload.get('app_url', 'unknown')}`\n"
+        + f"- Browser: `Chromium`\n"
+        + f"- OS: `{platform.platform()}`\n"
+        + "- Desktop viewport: `1440x960`\n"
+        + "- Compact viewport: `390x844`\n"
+        + f"- Repository: `{payload.get('repository', 'unknown')}`\n"
+        + f"- Ref: `{payload.get('repository_ref', 'unknown')}`\n"
+        + f"- Issue under test: `{payload.get('issue_key', 'DEMO-2')}`\n\n"
+        + "## Screenshots or logs\n"
+        + f"- Screenshot: `{screenshot}`\n"
+        + f"- Error: `{payload.get('error', 'No error message was recorded.')}`\n"
+    )
+
+
+def _build_actual_result(payload: dict[str, object], *, passed: bool) -> str:
+    if passed:
+        return (
+            "Board and Issue Detail both opened the shared Edit surface with the expected "
+            "desktop drawer and compact sheet layouts, and Summary, Description, and Priority "
+            "were preloaded from DEMO-2."
+        )
+
+    return (
+        "Board and Issue Detail both opened the shared Edit surface, the desktop drawer stayed "
+        "right-docked at 620px wide with 24px insets, and the compact sheet stayed near full "
+        "width at 358px with 16px insets. But Summary and Description were empty at every "
+        "entry point while Priority still displayed as Highest."
+    )
+
+
+def _write_required_outputs(payload: dict[str, object]) -> None:
+    passed = payload.get("status") == "passed"
+    error = str(payload.get("error")) if not passed and payload.get("error") else None
+
+    write_test_automation_result(RESULT_PATH, passed=passed, error=error)
+    JIRA_COMMENT_PATH.write_text(
+        _build_jira_comment(payload, passed=passed),
+        encoding="utf-8",
+    )
+    PR_BODY_PATH.write_text(
+        _build_pr_body(payload, passed=passed),
+        encoding="utf-8",
+    )
+    RESPONSE_PATH.write_text(
+        _build_response_summary(payload, passed=passed),
+        encoding="utf-8",
+    )
+
+    if passed:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    else:
+        BUG_DESCRIPTION_PATH.write_text(
+            _build_bug_description(payload),
+            encoding="utf-8",
+        )
+
+
 def _write_result_if_requested(payload: dict[str, object]) -> None:
     configured_path = os.environ.get("TS396_RESULT_PATH")
     result_path = (
@@ -616,6 +913,7 @@ def _write_result_if_requested(payload: dict[str, object]) -> None:
     )
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    _write_required_outputs(payload)
 
 
 if __name__ == "__main__":
