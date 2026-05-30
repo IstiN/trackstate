@@ -23,6 +23,9 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
 )
+from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
+    TrackStateTrackerPage,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
@@ -98,6 +101,9 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(
+            _workspace_token_profile_ids(workspace_state),
+        ),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "steps": [],
@@ -111,6 +117,7 @@ def main() -> None:
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
         )
         with create_live_tracker_app(
             config,
@@ -346,6 +353,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
     }
 
 
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
+
+
 def _prepare_local_workspace_repository() -> dict[str, object]:
     local_path = Path(LOCAL_TARGET)
     local_path.mkdir(parents=True, exist_ok=True)
@@ -556,7 +576,11 @@ def _ensure_active_local_precondition(
 ) -> WorkspaceSwitcherTriggerObservation:
     trigger = initial_trigger
     current_body_text = page.current_body_text()
-    if "Connect GitHub" in current_body_text:
+    if _session_requires_connect(
+        body_text=current_body_text,
+        user_login=user_login,
+        repository=repository,
+    ):
         connection_body_text = settings_page.ensure_connected(
             token=token,
             repository=repository,
@@ -661,6 +685,19 @@ def _ensure_active_local_precondition(
         f"Observed trigger label after wait: {trigger.semantic_label!r}\n"
         f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
+    )
+
+
+def _session_requires_connect(
+    *,
+    body_text: str,
+    user_login: str,
+    repository: str,
+) -> bool:
+    return not TrackStateTrackerPage.body_has_authenticated_session(
+        body_text,
+        user_login=user_login,
+        repository=repository,
     )
 
 
