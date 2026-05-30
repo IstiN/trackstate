@@ -1,0 +1,21 @@
+test_id: TS-252
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with write/admin access to IstiN/trackstate-setup
+  - network access to GitHub REST API and GitHub web pages
+  - permission to create and delete disposable branches in IstiN/trackstate-setup
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  default_branch: main
+  probe_file_path: README.md
+  branch_prefix: ts252-nondefault-release-probe
+  pull_request_title: "TS-252 disposable probe: verify non-default branch merge does not create release or tag"
+  pull_request_body: "Disposable PR created by TS-252 automation to verify that merging into a non-default branch does not produce a GitHub release or semantic version tag."
+  semver_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  poll_interval_seconds: 10
+  pull_request_timeout_seconds: 180
+  quiet_period_seconds: 900
+  releases_lookup_limit: 30
+  tags_lookup_limit: 50

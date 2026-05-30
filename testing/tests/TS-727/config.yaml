@@ -1,0 +1,10 @@
+test_id: TS-727
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with one invalid local saved workspace and one invalid hosted saved workspace preloaded in browser storage.
+  - Verifies startup restoration does not leave the user stranded on the splash screen and instead routes to the Settings startup-recovery shell.

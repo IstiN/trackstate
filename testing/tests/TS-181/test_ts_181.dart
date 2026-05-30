@@ -30,10 +30,7 @@ void main() {
         await screen.openSection('Dashboard');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        final hostedRuntimeVisible = await _isAnyTopBarLabelVisible(
-          screen,
-          const ['Connect GitHub', 'Connected'],
-        );
+        final hostedRuntimeVisible = await _isHostedTopBarStateVisible(screen);
         if (!hostedRuntimeVisible) {
           failures.add(
             'Step 1 failed: the app did not expose a hosted repository-access '
@@ -99,9 +96,8 @@ void main() {
           );
         }
 
-        final hostedLabelsHidden = await _waitForAnyTopBarLabelHidden(
+        final hostedLabelsHidden = await _waitForHostedTopBarStateHidden(
           screen,
-          const ['Connect GitHub', 'Connected'],
         );
         if (!hostedLabelsHidden) {
           failures.add(
@@ -261,20 +257,28 @@ Future<void> _waitForTopBarLabelVisible(
   }
 }
 
-Future<bool> _waitForAnyTopBarLabelHidden(
-  TrackStateAppComponent screen,
-  List<String> labels, {
+Future<bool> _waitForHostedTopBarStateHidden(
+  TrackStateAppComponent screen, {
   Duration timeout = const Duration(seconds: 2),
   Duration step = const Duration(milliseconds: 100),
 }) async {
   final end = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(end)) {
-    if (!await _isAnyTopBarLabelVisible(screen, labels)) {
+    if (!await _isHostedTopBarStateVisible(screen)) {
       return true;
     }
     await screen.waitWithoutInteraction(step);
   }
-  return !await _isAnyTopBarLabelVisible(screen, labels);
+  return !await _isHostedTopBarStateVisible(screen);
+}
+
+Future<bool> _isHostedTopBarStateVisible(TrackStateAppComponent screen) async {
+  return await _isAnyTopBarLabelVisible(screen, const [
+        'Connect GitHub',
+        'Connected',
+      ]) ||
+      await screen.isTopBarTextVisible('Hosted') ||
+      await screen.isTopBarTextVisible('Needs sign-in');
 }
 
 Future<bool> _isAnyLabelVisible(

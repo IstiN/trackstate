@@ -106,6 +106,9 @@ void main() {
       if (afterArchival == null) {
         throw StateError('TS-174 post-archive observation did not complete.');
       }
+      final indexedIssuePath = afterArchival.snapshot.repositoryIndex.pathForKey(
+        Ts174ExistingIssueArchiveFixture.issueKey,
+      );
 
       expect(
         afterArchival.archivedIssue?.key,
@@ -123,12 +126,14 @@ void main() {
         afterArchival.issueFileExists,
         isFalse,
         reason:
-            'Step 3 failed: TS-174 requires TRACK-122 to leave active storage after archiving, but ${afterArchival.issuePath} still exists in ${afterArchival.repositoryPath}.',
+            'Step 3 failed: TS-174 requires TRACK-122 to leave active storage after archiving, but ${afterArchival.issuePath} still exists in ${afterArchival.repositoryPath}. '
+            'Observed repository index path: $indexedIssuePath. '
+            'Observed reloaded storagePath: ${afterArchival.currentIssue.storagePath}. '
+            'Observed archived flags: returned=${afterArchival.archivedIssue?.isArchived}, reloaded=${afterArchival.currentIssue.isArchived}. '
+            'Observed HEAD file still readable: ${afterArchival.headIssueMarkdown != null}.',
       );
       expect(
-        afterArchival.snapshot.repositoryIndex.pathForKey(
-          Ts174ExistingIssueArchiveFixture.issueKey,
-        ),
+        indexedIssuePath,
         isNot(Ts174ExistingIssueArchiveFixture.issuePath),
         reason:
             'Step 3 failed: the repository index should no longer resolve TRACK-122 to the active storage path after archiving.',
