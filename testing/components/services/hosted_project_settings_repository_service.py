@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any
 import urllib.error
+from urllib.parse import quote
 import urllib.request
 
 from testing.core.utils.polling import poll_until
@@ -68,8 +69,8 @@ class HostedProjectSettingsRepositoryService:
         self,
         previous_sha: str,
         *,
-        attempts: int = 20,
-        interval_seconds: float = 3.0,
+        attempts: int = 18,
+        interval_seconds: float = 5.0,
     ) -> str:
         matched, current_sha = poll_until(
             probe=self.branch_head_sha,
@@ -103,6 +104,25 @@ class HostedProjectSettingsRepositoryService:
             message=str(((response.get("commit") or {}).get("message") or "")).strip(),
             parent_shas=parents,
             changed_files=files,
+        )
+
+    def compare_commits(self, *, base_sha: str, head_sha: str) -> tuple[str, ...]:
+        if not base_sha or not head_sha or base_sha == head_sha:
+            return ()
+        response = self._request_json(
+            "GET",
+            f"/repos/{self.repository}/compare/{quote(base_sha, safe='')}...{quote(head_sha, safe='')}",
+        )
+        commits = response.get("commits", [])
+        if not isinstance(commits, list):
+            raise RuntimeError(
+                "GitHub compare response did not include a commit list for "
+                f"{base_sha}...{head_sha}.",
+            )
+        return tuple(
+            str(commit.get("sha", "")).strip()
+            for commit in commits
+            if isinstance(commit, dict) and str(commit.get("sha", "")).strip()
         )
 
     def restore_settings(

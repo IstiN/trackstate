@@ -7,6 +7,7 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and three preloaded saved hosted workspaces.
-  - Opens the desktop workspace switcher from Dashboard and confirms the selected first saved workspace row plus the visible Save and switch footer control are present.
-  - Focuses the selected first saved workspace row and proves from the open panel's internal tab order that this row is the first keyboard target.
-  - Verifies reverse wrap returns to Save and switch instead of escaping to the app shell.
+  - Opens the desktop workspace switcher from a focused trigger and confirms the live visible controls plus the last internal keyboard target are present.
+  - Establishes the ticket precondition by focusing the live first internal keyboard target directly through the page object before the reverse-wrap assertion.
+  - Records forward-Tab sampling as supporting context only; that sampling must not block the ticketed Shift+Tab assertion.
+  - Verifies reverse wrap returns to the observed last internal control instead of escaping to the app shell.

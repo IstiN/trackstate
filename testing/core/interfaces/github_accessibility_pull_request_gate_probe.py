@@ -1,7 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
+
+from testing.core.interfaces.github_actions_preflight_gate_probe import (
+    GitHubActionsWorkflowJobObservation,
+)
+
+
+@dataclass(frozen=True)
+class GitHubAccessibilityWorkflowContractObservation:
+    declares_pull_request_trigger: bool
+    job_names: list[str]
+    step_names: list[str]
+    accessibility_job_names: list[str]
+    downstream_job_names: list[str]
+    downstream_job_depends_on_accessibility: bool
 
 
 @dataclass(frozen=True)
@@ -15,6 +29,10 @@ class GitHubAccessibilityPullRequestGateObservation:
     target_workflow_declares_pull_request_trigger: bool
     target_workflow_job_names: list[str]
     target_workflow_step_names: list[str]
+    target_workflow_accessibility_job_names: list[str]
+    target_workflow_downstream_job_names: list[str]
+    target_workflow_downstream_job_depends_on_accessibility: bool
+    target_workflow: GitHubAccessibilityWorkflowContractObservation
     pull_request_number: int
     pull_request_url: str
     pull_request_checks_url: str
@@ -36,6 +54,7 @@ class GitHubAccessibilityPullRequestGateObservation:
     observed_branch_run_urls: list[str]
     observed_branch_run_statuses: list[str]
     observed_branch_run_conclusions: list[str]
+    observed_run_jobs: list[GitHubActionsWorkflowJobObservation]
     observed_job_names: list[str]
     observed_step_names: list[str]
     observed_status_check_names: list[str]
@@ -58,12 +77,22 @@ class GitHubAccessibilityPullRequestGateObservation:
     run_log_mentions_semantic_issue: bool
     run_log_excerpt: str
     run_log_error: str | None
+    runtime_accessibility_surface_present: bool
+    runtime_accessibility_surface_summary: str
     probe_contains_low_contrast_indicator: bool
     probe_contains_semantic_label_indicator: bool
     probe_semantic_label: str
     probe_contrast_technique: str
     cleanup_closed_pull_request: bool
     cleanup_deleted_branch: bool
+    default_branch_probe_host_present: bool = False
+    default_branch_probe_host_summary: str = ""
+    flutter_engine_initialization_log_entries: list[str] = field(default_factory=list)
+    flutter_engine_initialization_summary: str = ""
+    semantics_tree_discovery_log_entries: list[str] = field(default_factory=list)
+    semantics_tree_discovery_summary: str = ""
+    runtime_accessibility_sample_labels: list[str] = field(default_factory=list)
+    probe_visible_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

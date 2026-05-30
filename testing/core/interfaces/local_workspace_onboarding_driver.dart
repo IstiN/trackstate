@@ -23,7 +23,6 @@ abstract interface class LocalWorkspaceOnboardingDriver {
   Future<void> enterWriteBranch(String value);
 
   Future<void> submit();
-
   LocalWorkspaceOnboardingState captureState();
 
   void resetView();

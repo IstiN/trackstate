@@ -128,9 +128,10 @@ class SettingsScreenRobot {
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
     Widget Function(Widget child)? appWrapper,
+    Size viewportSize = const Size(1440, 960),
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
-    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.physicalSize = viewportSize;
     tester.view.devicePixelRatio = 1;
     final app = TrackStateApp(key: UniqueKey(), repository: repository);
     await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
@@ -530,7 +531,6 @@ class SettingsScreenRobot {
 
   bool showsAttachmentStorageModeSetting() =>
       isVisibleText('Attachment storage mode');
-
   bool statusSummaryVisible({
     required String name,
     required String id,
@@ -708,26 +708,32 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
-    final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
-      describeMatch: (_) => 'focused semantics node',
-    );
-    if (focusedSemantics.evaluate().isEmpty) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) {
       return null;
     }
+
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
-        final ownsFocusedNode = find.semantics.descendant(
-          of: candidateSemantics,
-          matching: focusedSemantics,
-          matchRoot: true,
-        );
-        if (ownsFocusedNode.evaluate().isNotEmpty) {
+        final candidate = entry.value.at(index);
+        final targetElements = candidate.evaluate().toSet();
+        if (targetElements.contains(focusContext)) {
+          return entry.key;
+        }
+
+        var found = false;
+        focusContext.visitAncestorElements((element) {
+          if (targetElements.contains(element)) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
           return entry.key;
         }
       }
@@ -964,14 +970,6 @@ class SettingsScreenRobot {
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
 
-  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
-    final semanticsId = tester.getSemantics(finder).id;
-    return find.semantics.byPredicate(
-      (node) => node.id == semanticsId,
-      describeMatch: (_) => 'semantics node for $finder',
-    );
-  }
-
   Finder _filledSettingsProviderButton(String label) {
     return _lowestButton(find.widgetWithText(FilledButton, label));
   }
@@ -998,7 +996,7 @@ class SettingsScreenRobot {
   Finder _labeledDropdownField(String label) =>
       find.byWidgetPredicate((widget) {
         if (widget is DropdownButtonFormField) {
-          return widget.decoration?.labelText == label;
+          return widget.decoration.labelText == label;
         }
         return false;
       }, description: 'dropdown field labeled $label');
@@ -1120,6 +1118,7 @@ class SettingsScreenRobot {
   }
 
   List<String> visibleSemanticsLabelsSnapshot() {
+    // ignore: deprecated_member_use
     final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
     if (root == null) {
       return <String>[];

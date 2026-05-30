@@ -22,6 +22,8 @@ No additional dependencies are required beyond the repository Flutter toolchain.
 flutter test testing/tests/TS-716/test_ts_716.dart --reporter expanded
 ```
 
+The test runs at the default desktop verification viewport of `1440x900`.
+
 ## Expected behavior
 
 The test should exercise the real production-visible error state and either:

@@ -29,7 +29,7 @@ class LocalGitTrackStateProvider
   }) : _processRunner = processRunner ?? const IoGitProcessRunner(),
        _writeBranch = writeBranch?.trim(),
        _hostedProviderFactory =
-            hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
+           hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
 
   final String repositoryPath;
   final GitProcessRunner _processRunner;
@@ -78,6 +78,7 @@ class LocalGitTrackStateProvider
       return RepositoryTreeEntry(
         path: metadata.length > 1 ? metadata[1] : '',
         type: header.length > 1 ? header[1] : 'blob',
+        revision: header.length > 2 ? header[2] : null,
       );
     }).toList();
   }
@@ -226,6 +227,7 @@ class LocalGitTrackStateProvider
         branch: request.branch,
         message: request.message,
         revision: revision?.stdout.trim(),
+        createdCommit: false,
       );
     }
     await _runGit(['commit', '-m', request.message, '--', ...paths]);
@@ -263,7 +265,7 @@ class LocalGitTrackStateProvider
       supportsReleaseAttachmentWrites:
           releaseAttachmentCapability.supportsReleaseAttachmentWrites,
       releaseAttachmentWriteFailureReason:
-        releaseAttachmentCapability.failureReason,
+          releaseAttachmentCapability.failureReason,
     );
   }
 
@@ -454,7 +456,10 @@ class LocalGitTrackStateProvider
     );
   }
 
-  Future<Set<String>> _changedPathsBetween(String previous, String current) async {
+  Future<Set<String>> _changedPathsBetween(
+    String previous,
+    String current,
+  ) async {
     if (previous.trim().isEmpty ||
         current.trim().isEmpty ||
         previous.trim() == current.trim()) {
@@ -467,10 +472,9 @@ class LocalGitTrackStateProvider
       previous,
       current,
     ]);
-    return LineSplitter.split(result.stdout)
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toSet();
+    return LineSplitter.split(
+      result.stdout,
+    ).map((line) => line.trim()).where((line) => line.isNotEmpty).toSet();
   }
 
   Future<Set<String>> _worktreeChangedPaths() async {
@@ -704,6 +708,11 @@ class LocalGitTrackStateProvider
       'Cannot save $path because it changed in the current branch. '
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
+      details: {
+        'path': path,
+        'expectedRevision': expectedRevision,
+        'currentRevision': currentRevision,
+      },
     );
   }
 
@@ -711,13 +720,14 @@ class LocalGitTrackStateProvider
     required String path,
     required String content,
   }) async {
-    final file = File(_absolutePath(path));
     await _withFileSystemErrorMapping(
       path: path,
       operation: 'write text file',
       action: () async {
-        await file.parent.create(recursive: true);
-        await file.writeAsString(content);
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsString(content, flush: true),
+        );
       },
     );
   }
@@ -726,15 +736,68 @@ class LocalGitTrackStateProvider
     required String path,
     required List<int> bytes,
   }) async {
-    final file = File(_absolutePath(path));
     await _withFileSystemErrorMapping(
       path: path,
       operation: 'write binary file',
       action: () async {
-        await file.parent.create(recursive: true);
-        await file.writeAsBytes(bytes);
+        await _replaceWorktreeFileAtomically(
+          path: path,
+          writeTempFile: (file) => file.writeAsBytes(bytes, flush: true),
+        );
       },
     );
+  }
+
+  Future<void> _replaceWorktreeFileAtomically({
+    required String path,
+    required Future<void> Function(File file) writeTempFile,
+  }) async {
+    final file = File(_absolutePath(path));
+    await file.parent.create(recursive: true);
+    final tempFile = File(
+      '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    final backupFile = File(
+      '${file.path}.bak-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await writeTempFile(tempFile);
+    try {
+      await _replaceFile(
+        tempFile: tempFile,
+        targetFile: file,
+        backupFile: backupFile,
+      );
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+      if (await backupFile.exists()) {
+        await backupFile.delete();
+      }
+    }
+  }
+
+  Future<void> _replaceFile({
+    required File tempFile,
+    required File targetFile,
+    required File backupFile,
+  }) async {
+    try {
+      await tempFile.rename(targetFile.path);
+      return;
+    } on FileSystemException {
+      if (await targetFile.exists()) {
+        await targetFile.rename(backupFile.path);
+      }
+      try {
+        await tempFile.rename(targetFile.path);
+      } on Object {
+        if (await backupFile.exists()) {
+          await backupFile.rename(targetFile.path);
+        }
+        rethrow;
+      }
+    }
   }
 
   Future<void> _deleteWorktreeFileIfExists(String path) async {

@@ -28,9 +28,11 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         repository: str,
         token: str,
         workspace_state: dict[str, object],
+        viewport: dict[str, int] | None = None,
     ) -> None:
         super().__init__(repository=repository, token=token)
         self._workspace_state = workspace_state
+        self._viewport = viewport or {"width": 1440, "height": 900}
         self._active_local_handle_name = _active_local_handle_name(workspace_state)
         self.console_events: list[WorkspaceRestoreConsoleEvent] = []
         self.page_errors: list[str] = []
@@ -38,7 +40,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 900})
+        self._context = self._browser.new_context(viewport=self._viewport)
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         self._context.add_init_script(script=self._build_preload_script())
         self._page = self._context.new_page()

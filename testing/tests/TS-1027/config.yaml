@@ -1,0 +1,10 @@
+test_id: TS-1027
+type: service
+framework: unittest
+platform: python
+dependencies: []
+notes:
+  - Exercises the Python support runtimes that preload saved workspace profiles for live startup restoration tests.
+  - Verifies preload-script injection for both browser context and already-open page targets.
+  - Preserves the legacy default that seeds workspace-scoped GitHub token keys for every saved workspace profile when callers omit explicit ids.
+  - Covers the delayed-auth polling helper used by startup auth-latency regression tests.

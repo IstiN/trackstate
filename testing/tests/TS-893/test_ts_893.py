@@ -249,7 +249,6 @@ def main() -> None:
                             f"Observed startup surface={runtime_observation.surface!r}."
                         ),
                     )
-
                     pre_release_trigger = _observe_trigger_state(
                         page,
                         timeout_ms=int(PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS * 1000),
@@ -1480,8 +1479,6 @@ def _observe_trigger_state(
     except (AssertionError, WebAppTimeoutError):
         switcher = _observe_switcher_surface(page, timeout_ms=timeout_ms)
         return _synthesized_trigger_from_switcher(switcher)
-
-
 def _collect_pre_release_overlap_state(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -1807,8 +1804,6 @@ def _workspace_switcher_surface_visible(body_text: str) -> bool:
         and "Saved workspaces" in normalized
         and ("Save and switch" in normalized or "Add workspace" in normalized)
     )
-
-
 def _pre_release_public_overlap_reason(
     *,
     trigger: WorkspaceSwitcherTriggerObservation,

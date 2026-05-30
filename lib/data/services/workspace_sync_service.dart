@@ -58,9 +58,10 @@ class WorkspaceSyncService {
   Timer? _timer;
   bool _disposed = false;
   bool _inFlight = false;
-  bool _pendingFollowUp = false;
+  WorkspaceSyncTrigger? _queuedFollowUpTrigger;
   int _hostedBackoffIndex = 0;
   DateTime? _lastCompletedAt;
+  DateTime? _scheduledHostedRetryAt;
   TrackerSnapshot? _baselineSnapshot;
   RepositorySyncState? _previousSyncState;
 
@@ -92,18 +93,23 @@ class WorkspaceSyncService {
       return;
     }
     if (_inFlight) {
-      _pendingFollowUp = true;
+      _queuedFollowUpTrigger = trigger;
       return;
     }
     final completedAt = _lastCompletedAt;
     final now = _now();
-    if (!force &&
+    final queuedFollowUpTrigger = _queuedFollowUpTrigger;
+    final enforceMinimumInterval = !force || queuedFollowUpTrigger != null;
+    if (enforceMinimumInterval &&
         completedAt != null &&
         now.difference(completedAt) < _minimumInterval) {
+      _queuedFollowUpTrigger = trigger;
       _scheduleNext(_minimumInterval - now.difference(completedAt));
       return;
     }
 
+    final effectiveTrigger = _queuedFollowUpTrigger ?? trigger;
+    _queuedFollowUpTrigger = null;
     _timer?.cancel();
     _inFlight = true;
     _publishStatus(
@@ -119,9 +125,13 @@ class WorkspaceSyncService {
         previousState: _previousSyncState,
       );
       _previousSyncState = syncCheck.state;
-      final result = await _buildResult(trigger: trigger, syncCheck: syncCheck);
+      final result = await _buildResult(
+        trigger: effectiveTrigger,
+        syncCheck: syncCheck,
+      );
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
+      _scheduledHostedRetryAt = null;
       _publishStatus(
         _status.copyWith(
           health: WorkspaceSyncHealth.synced,
@@ -138,7 +148,7 @@ class WorkspaceSyncService {
       final nextRetryAt = _computeNextRetryAt();
       _publishStatus(
         _status.copyWith(
-          health: WorkspaceSyncHealth.attentionNeeded,
+          health: _healthForError(error),
           lastCheckAt: _lastCompletedAt,
           latestError: '$error',
           nextRetryAt: nextRetryAt,
@@ -147,9 +157,8 @@ class WorkspaceSyncService {
       _scheduleNext(nextRetryAt.difference(_lastCompletedAt!));
     } finally {
       _inFlight = false;
-      if (_pendingFollowUp && !_disposed) {
-        _pendingFollowUp = false;
-        unawaited(checkNow(trigger: trigger, force: true));
+      if (_queuedFollowUpTrigger case final pendingTrigger? when !_disposed) {
+        unawaited(checkNow(trigger: pendingTrigger));
       }
     }
   }
@@ -277,14 +286,39 @@ class WorkspaceSyncService {
     if (_repository.usesLocalPersistence || _hostedBackoffSteps.isEmpty) {
       return now.add(_cadence);
     }
+    final scheduledHostedRetryAt = _scheduledHostedRetryAt;
+    if (scheduledHostedRetryAt != null && scheduledHostedRetryAt.isAfter(now)) {
+      return scheduledHostedRetryAt;
+    }
     final index = _hostedBackoffIndex < _hostedBackoffSteps.length
         ? _hostedBackoffIndex
         : _hostedBackoffSteps.length - 1;
     final nextRetryAt = now.add(_hostedBackoffSteps[index]);
+    _scheduledHostedRetryAt = nextRetryAt;
     if (_hostedBackoffIndex < _hostedBackoffSteps.length - 1) {
       _hostedBackoffIndex += 1;
     }
     return nextRetryAt;
+  }
+
+  WorkspaceSyncHealth _healthForError(Object error) {
+    if (_isHostedAuthenticationFailure(error)) {
+      return WorkspaceSyncHealth.unavailable;
+    }
+    return WorkspaceSyncHealth.attentionNeeded;
+  }
+
+  bool _isHostedAuthenticationFailure(Object error) {
+    if (_repository.usesLocalPersistence || error is GitHubRateLimitException) {
+      return false;
+    }
+    final message = '$error'.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains(' 401') ||
+        message.contains('bad credentials') ||
+        message.contains('authentication failed') ||
+        message.contains('requires github authentication') ||
+        message.contains('connect a github token');
   }
 
   void _scheduleNext(Duration duration) {
@@ -371,6 +405,7 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(
         ),
       );
     } else if (path.endsWith('/acceptance_criteria.md') ||
+        path == 'links.json' ||
         path.endsWith('/links.json')) {
       changes.add(
         WorkspaceSyncDomainChange(
