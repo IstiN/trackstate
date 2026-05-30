@@ -172,16 +172,28 @@ def main() -> None:
                         or upload_controls.upload_button_count < 1
                         or not upload_controls.choose_button_enabled
                     ):
-                        raise AssertionError(
-                            "Step 2 failed: the live Attachments tab did not expose at least "
-                            "one visible `Choose attachment` control and one visible `Upload "
-                            "attachment` control required for the duplicate replacement flow.\n"
-                            f"Observed choose button count: {upload_controls.choose_button_count}\n"
-                            f"Observed choose button enabled: {upload_controls.choose_button_enabled}\n"
-                            f"Observed upload button count: {upload_controls.upload_button_count}\n"
-                            f"Observed upload button enabled: {upload_controls.upload_button_enabled}\n"
-                            f"Observed body text:\n{attachments_body_text}",
+                        failure_observation = _attachment_upload_controls_failure_observation(
+                            upload_controls=upload_controls,
+                            attachments_body_text=attachments_body_text,
                         )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action="Select a new file named `design_doc.pdf` for upload.",
+                            observed=failure_observation,
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Attachments tab state from a user "
+                                "perspective before attempting the duplicate upload."
+                            ),
+                            observed=_attachment_upload_controls_human_observation(
+                                attachments_body_text,
+                            ),
+                        )
+                        raise AssertionError(f"Step 2 failed: {failure_observation}")
 
                     page.choose_attachment_file(str(upload_path))
                     selected_summary = page.wait_for_selected_attachment_summary(
@@ -480,6 +492,55 @@ def _restore_attachment(
 
 def _attachment_size_label(payload: bytes) -> str:
     return f"{len(payload)} B"
+
+
+def _attachment_upload_controls_failure_observation(
+    *,
+    upload_controls: object,
+    attachments_body_text: str,
+) -> str:
+    choose_button_count = getattr(upload_controls, "choose_button_count", 0)
+    choose_button_enabled = getattr(upload_controls, "choose_button_enabled", False)
+    upload_button_count = getattr(upload_controls, "upload_button_count", 0)
+    upload_button_enabled = getattr(upload_controls, "upload_button_enabled", False)
+    return (
+        "the live Attachments tab did not expose at least one visible `Choose "
+        "attachment` control and one visible `Upload attachment` control required "
+        "for the duplicate replacement flow.\n"
+        f"Observed choose button count: {choose_button_count}\n"
+        f"Observed choose button enabled: {choose_button_enabled}\n"
+        f"Observed upload button count: {upload_button_count}\n"
+        f"Observed upload button enabled: {upload_button_enabled}\n"
+        f"Observed body text:\n{attachments_body_text}"
+    )
+
+
+def _attachment_upload_controls_human_observation(attachments_body_text: str) -> str:
+    visible_copy = []
+    for fragment in (
+        "Attachments limited",
+        "GitHub Releases uploads are unavailable in the browser",
+        "This repository session is download-only for Git LFS attachments",
+        "Choose a file to review its size before upload.",
+    ):
+        if fragment in attachments_body_text:
+            visible_copy.append(f"`{fragment}`")
+
+    if visible_copy:
+        joined_copy = ", ".join(visible_copy[:-1])
+        if joined_copy:
+            joined_copy = f"{joined_copy}, and {visible_copy[-1]}"
+        else:
+            joined_copy = visible_copy[-1]
+        return (
+            "The duplicate upload flow was unavailable. "
+            f"Verified visible copy: {joined_copy}."
+        )
+
+    return (
+        "The duplicate upload flow was unavailable. Observed body text:\n"
+        f"{attachments_body_text}"
+    )
 
 
 def _record_step(

@@ -13,8 +13,8 @@ class CommentFileObservation:
 
 @dataclass(frozen=True)
 class TrackStateCliCommentCreationObservation:
-    requested_command: tuple[str, ...]
-    executed_command: tuple[str, ...]
+    requested_commands: tuple[tuple[str, ...], tuple[str, ...]]
+    executed_commands: tuple[tuple[str, ...], tuple[str, ...]]
     fallback_reason: str | None
     repository_path: str
     initial_head_revision: str
@@ -24,6 +24,22 @@ class TrackStateCliCommentCreationObservation:
     first_result: CliCommandResult
     second_result: CliCommandResult
     comment_files: tuple[CommentFileObservation, ...]
+
+    @property
+    def requested_command(self) -> tuple[str, ...]:
+        return self.requested_commands[0]
+
+    @property
+    def second_requested_command(self) -> tuple[str, ...]:
+        return self.requested_commands[1]
+
+    @property
+    def executed_command(self) -> tuple[str, ...]:
+        return self.executed_commands[0]
+
+    @property
+    def second_executed_command(self) -> tuple[str, ...]:
+        return self.executed_commands[1]
 
     @property
     def requested_command_text(self) -> str:

@@ -415,7 +415,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
+  /// **'This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
   /// No description provided for @attachmentsLimitedUploadMessage.
@@ -1638,6 +1638,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.'**
   String get startupRateLimitRecoveryShellMessage;
+
+  /// No description provided for @startupHostedBootstrapIndexRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted issue index needs regeneration'**
+  String get startupHostedBootstrapIndexRecoveryTitle;
+
+  /// No description provided for @startupHostedBootstrapIndexRecoveryMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup requires a valid .trackstate/index/issues.json summary index. Regenerate the tracker indexes and retry.'**
+  String get startupHostedBootstrapIndexRecoveryMessage;
 
   /// No description provided for @repositoryPath.
   ///

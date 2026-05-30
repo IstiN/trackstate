@@ -17,6 +17,9 @@ from testing.components.pages.live_create_issue_gate_page import (  # noqa: E402
 from testing.components.pages.live_issue_detail_collaboration_page import (  # noqa: E402
     LiveIssueDetailCollaborationPage,
 )
+from testing.components.pages.live_project_settings_page import (  # noqa: E402
+    RepositoryAccessControlsObservation,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedRepositoryMetadata,
     LiveSetupRepositoryService,
@@ -145,6 +148,8 @@ def main() -> None:
                     observed=(
                         f'gate_panel_text="{gate.gate_panel_text}"; '
                         f"summary_field_count={gate.summary_field_count}; "
+                        f"create_button_count={gate.create_button_count}; "
+                        f"save_button_count={gate.save_button_count}; "
                         f"open_settings_button_count={gate.open_settings_button_count}; "
                         f"gate_open_settings_button_count={gate.gate_open_settings_button_count}"
                     ),
@@ -181,9 +186,18 @@ def main() -> None:
                 create_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
 
-                settings_body = create_page.open_settings_from_gate(gate)
-                result["settings_body_text"] = settings_body
-                _assert_settings_redirect(settings_body)
+                settings_controls = create_page.open_settings_from_gate(gate)
+                result["settings_body_text"] = settings_controls.body_text
+                result["settings_controls"] = {
+                    "project_settings_visible": settings_controls.project_settings_visible,
+                    "repository_access_visible": settings_controls.repository_access_visible,
+                    "fine_grained_token_visible": settings_controls.fine_grained_token_visible,
+                    "remember_on_this_browser_visible": (
+                        settings_controls.remember_on_this_browser_visible
+                    ),
+                    "connect_token_visible": settings_controls.connect_token_visible,
+                }
+                _assert_settings_redirect(settings_controls)
                 _record_step(
                     result,
                     step=5,
@@ -194,7 +208,12 @@ def main() -> None:
                     ),
                     observed=(
                         f'clicked_cta="{EXPECTED_CTA}"; '
-                        'settings_heading_visible=True; repository_access_visible=True'
+                        "settings_heading_visible="
+                        f"{settings_controls.project_settings_visible}; "
+                        "repository_access_visible="
+                        f"{settings_controls.repository_access_visible}; "
+                        "visible_controls="
+                        f"{_settings_controls_summary(settings_controls)}"
                     ),
                 )
                 _record_human_verification(
@@ -204,8 +223,12 @@ def main() -> None:
                         "to Project Settings with the Repository access section."
                     ),
                     observed=(
-                        f'project_settings_visible={"Project Settings" in settings_body}; '
-                        f'repository_access_visible={"Repository access" in settings_body}'
+                        "project_settings_visible="
+                        f"{settings_controls.project_settings_visible}; "
+                        "repository_access_visible="
+                        f"{settings_controls.repository_access_visible}; "
+                        "visible_controls="
+                        f"{_settings_controls_summary(settings_controls)}"
                     ),
                 )
 
@@ -255,6 +278,16 @@ def _assert_gate_surface(gate: CreateIssueGateObservation) -> None:
             f"Observed gate text: {gate.gate_panel_text}\n"
             f"Observed body text:\n{gate.body_text}",
         )
+    if gate.summary_field_count > 0 or gate.save_button_count > 0:
+        raise AssertionError(
+            "Step 3 failed: the read-only Create issue path still exposed editable form "
+            "controls instead of blocking creation behind the guided gate.\n"
+            f"Observed summary_field_count={gate.summary_field_count}; "
+            f"save_button_count={gate.save_button_count}; "
+            f"create_button_count={gate.create_button_count}\n"
+            f"Observed gate text:\n{gate.gate_panel_text}\n\n"
+            f"Observed body text:\n{gate.body_text}",
+        )
 
 
 def _assert_gate_guidance(gate: CreateIssueGateObservation) -> None:
@@ -273,15 +306,34 @@ def _assert_gate_guidance(gate: CreateIssueGateObservation) -> None:
         )
 
 
-def _assert_settings_redirect(settings_body: str) -> None:
-    for fragment in ("Project Settings", "Repository access"):
-        if fragment not in settings_body:
-            raise AssertionError(
-                "Step 5 failed: clicking the Create issue gate CTA did not route the user "
-                "to the expected settings/authentication surface.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Observed body text:\n{settings_body}",
-            )
+def _assert_settings_redirect(settings_controls: RepositoryAccessControlsObservation) -> None:
+    if (
+        settings_controls.project_settings_visible
+        and settings_controls.repository_access_visible
+        and settings_controls.fine_grained_token_visible
+        and settings_controls.remember_on_this_browser_visible
+        and settings_controls.connect_token_visible
+    ):
+        return
+    raise AssertionError(
+        "Step 5 failed: clicking the Create issue gate CTA did not route the user to the "
+        "visible Project Settings / Repository access recovery surface.\n"
+        f"Observed controls: {settings_controls}\n"
+        f"Observed body text:\n{settings_controls.body_text}",
+    )
+
+
+def _settings_controls_summary(
+    settings_controls: RepositoryAccessControlsObservation,
+) -> str:
+    visible_controls: list[str] = []
+    if settings_controls.fine_grained_token_visible:
+        visible_controls.append("Fine-grained token")
+    if settings_controls.remember_on_this_browser_visible:
+        visible_controls.append("Remember on this browser")
+    if settings_controls.connect_token_visible:
+        visible_controls.append("Connect token")
+    return ", ".join(visible_controls) or "none"
 
 
 def _normalize_whitespace(value: str) -> str:

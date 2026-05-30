@@ -78,6 +78,7 @@ class LocalGitTrackStateProvider
       return RepositoryTreeEntry(
         path: metadata.length > 1 ? metadata[1] : '',
         type: header.length > 1 ? header[1] : 'blob',
+        revision: header.length > 2 ? header[2] : null,
       );
     }).toList();
   }

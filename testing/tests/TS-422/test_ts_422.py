@@ -308,8 +308,8 @@ def _failure_surface_error(observation: HostedIndexRecoveryObservation) -> str |
     issues: list[str] = []
     if not observation.tracker_data_not_found_visible:
         issues.append(
-            "the failure surface did not explain that TrackState data could not be "
-            "loaded."
+            "the failure surface did not explicitly explain that the hosted issue "
+            "index needed regeneration."
         )
     if not observation.regenerate_guidance_visible:
         issues.append(
@@ -455,10 +455,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else (
-                "* Did not match the expected result. Step 3 failed because the visible "
-                "failure surface showed only {{Close}} and never rendered {{Retry}}."
-            )
+            else f"* Did not match the expected result. {_failure_summary(result)}"
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -514,10 +511,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         (
             "- Matched the expected result."
             if passed
-            else (
-                "- Did not match the expected result: the failure surface rendered only "
-                "`Close` and did not expose the required `Retry` action."
-            )
+            else f"- Did not match the expected result: {_failure_summary(result)}"
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -628,12 +622,7 @@ def _bug_description(result: dict[str, object]) -> str:
         ),
         "",
         "h4. Actual Result",
-        (
-            "The app did fail explicitly and did not silently hydrate issue {{main.md}} "
-            "files or replay recursive tree scans, but the visible recovery surface only "
-            "showed {{Close}}. The required {{Retry}} action was missing, so the user could "
-            "not retry from the failure state."
-        ),
+        _bug_actual_result(result),
         "",
         "h4. Logs / Error Output",
         "{code}",
@@ -748,5 +737,24 @@ def _status_icon(status: str) -> str:
     return "✅" if status == "passed" else "❌"
 
 
+def _failure_summary(result: dict[str, object]) -> str:
+    step_observation = _step_observation(result, 3).strip()
+    if step_observation:
+        return step_observation.splitlines()[0]
+    return str(result.get("error", "The test failed without a recorded step observation."))
+
+
+def _bug_actual_result(result: dict[str, object]) -> str:
+    failure_surface = result.get("failure_surface")
+    if not isinstance(failure_surface, dict):
+        return _failure_summary(result)
+
+    body_text = str(failure_surface.get("body_text", "")).strip()
+    visible_buttons = tuple(failure_surface.get("visible_button_labels", ()))
+    return (
+        "Observed the hosted missing-index recovery surface with body text "
+        f"{{{{{body_text}}}}} and visible buttons {{{{{visible_buttons}}}}}. "
+        f"{_failure_summary(result)}"
+    )
 if __name__ == "__main__":
     main()
