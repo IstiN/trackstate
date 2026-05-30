@@ -159,6 +159,27 @@ jobs:
       - name: Install and init CodeGraph
         run: bash agents/setup/codegraph.sh
 
+      - name: Install CodeGraph usage guard
+        run: |
+          real_codegraph="$(command -v codegraph)"
+          guard_dir="${GITHUB_WORKSPACE}/.agent-bin"
+          mkdir -p "${guard_dir}" "${GITHUB_WORKSPACE}/.dmtools"
+          cat > "${guard_dir}/codegraph" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          log="\${CODEGRAPH_USAGE_LOG:-${GITHUB_WORKSPACE}/.dmtools/codegraph-usage.log}"
+          mkdir -p "\$(dirname "\${log}")"
+          printf '%s\tcodegraph' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "\${log}"
+          for arg in "\$@"; do
+            printf ' %q' "\${arg}" >> "\${log}"
+          done
+          printf '\n' >> "\${log}"
+          exec "${real_codegraph}" "\$@"
+          EOF
+          chmod +x "${guard_dir}/codegraph"
+          echo "${guard_dir}" >> "${GITHUB_PATH}"
+          echo "CODEGRAPH_USAGE_LOG=${GITHUB_WORKSPACE}/.dmtools/codegraph-usage.log" >> "${GITHUB_ENV}"
+
       - name: Configure Git author
         run: |
           git config --global user.name "trackstate-ai"
@@ -207,6 +228,7 @@ jobs:
           NODE
 
       - name: Run AI Teammate
+        id: run_ai
         env:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
@@ -259,3 +281,25 @@ jobs:
           else
             dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
           fi
+
+      - name: Verify CodeGraph usage
+        if: ${{ always() && steps.run_ai.outcome == 'success' }}
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+        run: |
+          case "${CONFIG_FILE}" in
+            agents/bug_development.json|agents/story_development.json|agents/pr_rework.json|agents/pr_review.json|agents/pr_test_automation_review.json|agents/pr_test_automation_rework.json|agents/test_case_automation.json)
+              ;;
+            *)
+              echo "CodeGraph usage is not required for ${CONFIG_FILE}"
+              exit 0
+              ;;
+          esac
+
+          if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
+            echo "::error::${CONFIG_FILE} completed without invoking codegraph. Source-code agents must use CodeGraph for code navigation."
+            exit 1
+          fi
+
+          echo "CodeGraph usage recorded:"
+          cat "${CODEGRAPH_USAGE_LOG}"
