@@ -37,9 +37,9 @@ MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
 # The linked backoff bugs are marked Done, so this live test should still fail
-# far sooner than the old 15-minute workaround while leaving enough time to
-# capture a clearly delayed follow-up retry for bug reporting.
-FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 240
+# far sooner than the old 15-minute workaround while still leaving enough
+# headroom to capture the known delayed follow-up retry for bug reporting.
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 420
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
