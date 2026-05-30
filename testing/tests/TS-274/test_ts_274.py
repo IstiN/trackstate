@@ -47,31 +47,27 @@ class TrackStateCliHelpDiscoverabilityTest(unittest.TestCase):
             f"stderr:\n{result.session_help.result.stderr}",
         )
 
-        for example in self.config.required_root_examples:
-            self.assertIn(
-                example,
-                result.root_help.result.stdout,
-                "Step 3 failed: the root help text did not show the documented "
-                "usage examples for both local and hosted targets.\n"
-                f"Missing example: {example}\n"
-                f"Observed root help:\n{result.root_help.result.stdout}",
-            )
+        self.assertFalse(
+            result.missing_root_examples,
+            "Step 3 failed: the root help text did not show the documented "
+            "usage examples for both local and hosted targets.\n"
+            f"Missing examples: {list(result.missing_root_examples)}\n"
+            f"Observed root help:\n{result.root_help.result.stdout}",
+        )
 
-        for fragment in self.config.required_root_option_fragments:
-            self.assertIn(
-                fragment,
-                result.root_help.result.stdout,
-                "Step 2 failed: the root help text did not include the stable "
-                "target-selection documentation requested by TS-274.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Requested command: {result.root_help.requested_command_text}\n"
-                f"Executed command: {result.root_help.executed_command_text}\n"
-                f"Fallback reason: {result.root_help.fallback_reason}\n"
-                f"Observed root help:\n{result.root_help.result.stdout}\n"
-                "\n"
-                "Session help for comparison:\n"
-                f"{result.session_help.result.stdout}",
-            )
+        self.assertFalse(
+            result.missing_root_option_fragments,
+            "Step 2 failed: the root help text did not include the stable "
+            "target-selection documentation requested by TS-274.\n"
+            f"Missing fragments: {list(result.missing_root_option_fragments)}\n"
+            f"Requested command: {result.root_help.requested_command_text}\n"
+            f"Executed command: {result.root_help.executed_command_text}\n"
+            f"Fallback reason: {result.root_help.fallback_reason}\n"
+            f"Observed root help:\n{result.root_help.result.stdout}\n"
+            "\n"
+            "Session help for comparison:\n"
+            f"{result.session_help.result.stdout}",
+        )
 
 
 if __name__ == "__main__":
