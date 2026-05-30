@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +25,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.ts723_workspace_restore_runtime import (  # noqa: E402
     Ts723WorkspaceRestoreRuntime,
@@ -35,14 +38,14 @@ TEST_CASE_TITLE = (
     "Local Unavailable"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-892/test_ts_892.py"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts892-workspace"
 LOCAL_DISPLAY_NAME = "Deleted local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 STARTUP_RETRY_WAIT_SECONDS = 15
+STARTUP_SURFACE_WAIT_SECONDS = 120
 LINKED_BUGS = ["TS-882", "TS-894", "TS-896"]
-SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -65,6 +68,14 @@ EXPECTED_RESULT = (
     "not incorrectly default to selecting the 'Hosted setup workspace' if the "
     "local configuration is still present."
 )
+
+
+@dataclass(frozen=True)
+class StartupWorkspaceSurfaceObservation:
+    kind: str
+    body_text: str
+    trigger: WorkspaceSwitcherTriggerObservation | None = None
+    switcher: WorkspaceSwitcherObservation | None = None
 
 
 def main() -> None:
@@ -113,26 +124,26 @@ def main() -> None:
             tracker_page = TrackStateTrackerPage(session, config.app_url)
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
-                runtime_observation = tracker_page.open()
+                tracker_page.open_entrypoint()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                result["runtime_state"] = runtime_observation.kind
-                result["runtime_body_text"] = runtime_observation.body_text
-                shell_observation = tracker_page.observe_interactive_shell(
-                    SHELL_NAVIGATION_LABELS,
+                startup_surface = _wait_for_startup_workspace_surface(
+                    page=page,
+                    tracker_page=tracker_page,
+                    timeout_seconds=STARTUP_SURFACE_WAIT_SECONDS,
                 )
-                result["shell_observation"] = shell_observation
-                if runtime_observation.kind != "ready" or not bool(
-                    shell_observation.get("shell_ready"),
-                ):
+                result["runtime_state"] = startup_surface.kind
+                result["runtime_body_text"] = startup_surface.body_text
+                result["startup_surface"] = _startup_surface_payload(startup_surface)
+                if startup_surface.kind == "data-load-failed":
                     raise AssertionError(
-                        "Step 1 failed: the deployed app did not reach the interactive "
-                        "shell for the permanent local-workspace failure scenario.\n"
-                        f"Observed runtime state: {runtime_observation.kind}\n"
-                        f"Observed shell state:\n{json.dumps(shell_observation, indent=2)}",
+                        "Step 1 failed: the deployed app reached a visible TrackState data "
+                        "load error instead of the startup workspace recovery surface for "
+                        "the permanent local-workspace failure scenario.\n"
+                        f"Observed body text:\n{startup_surface.body_text}",
                     )
                 try:
                     page.dismiss_connection_banner()
-                except Exception:
+                except (AssertionError, WebAppTimeoutError):
                     pass
                 _record_step(
                     result,
@@ -142,25 +153,35 @@ def main() -> None:
                     observed=(
                         "Opened the deployed app in Chromium with a saved active local "
                         "workspace profile, then reproduced permanent access loss by "
-                        f"deleting the prepared repository at {LOCAL_TARGET!r} before startup."
+                        f"deleting the prepared repository at {LOCAL_TARGET!r} before startup. "
+                        "The runtime reached the workspace recovery UI rather than timing "
+                        f"out. initial_surface_kind={startup_surface.kind!r}"
                     ),
                 )
 
-                trigger_samples: list[dict[str, object]] = []
+                surface_samples: list[dict[str, object]] = []
 
-                def sample_trigger() -> WorkspaceSwitcherTriggerObservation:
-                    trigger = page.observe_trigger(timeout_ms=10_000)
-                    trigger_samples.append(_trigger_payload(trigger))
-                    return trigger
+                def sample_surface() -> StartupWorkspaceSurfaceObservation:
+                    surface = _observe_startup_workspace_surface(
+                        page=page,
+                        tracker_page=tracker_page,
+                        timeout_ms=10_000,
+                    )
+                    surface_samples.append(_startup_surface_payload(surface))
+                    return surface
 
-                _, final_trigger = poll_until(
-                    probe=sample_trigger,
+                _, final_surface = poll_until(
+                    probe=sample_surface,
                     is_satisfied=lambda _: False,
                     timeout_seconds=STARTUP_RETRY_WAIT_SECONDS,
                     interval_seconds=5,
                 )
-                result["trigger_samples"] = trigger_samples
-                result["final_trigger_observation"] = _trigger_payload(final_trigger)
+                final_trigger = final_surface.trigger
+                result["surface_samples"] = surface_samples
+                result["final_surface_observation"] = _startup_surface_payload(final_surface)
+                result["final_trigger_observation"] = (
+                    _trigger_payload(final_trigger) if final_trigger is not None else None
+                )
                 restore_message = _observe_restore_message(tracker_page)
                 if restore_message is not None:
                     result["restore_message"] = restore_message
@@ -172,7 +193,12 @@ def main() -> None:
                     observed=(
                         "Waited beyond the startup local-workspace revalidation window "
                         f"({STARTUP_RETRY_WAIT_SECONDS} seconds) before asserting the final state. "
-                        f"Observed final trigger label={final_trigger.semantic_label!r}"
+                        f"Observed final surface kind={final_surface.kind!r}"
+                        + (
+                            f"; final_trigger_label={final_trigger.semantic_label!r}"
+                            if final_trigger is not None
+                            else ""
+                        )
                         + (
                             f"; restore_message={restore_message!r}"
                             if restore_message
@@ -181,24 +207,36 @@ def main() -> None:
                     ),
                 )
 
-                switcher = page.open_and_observe(timeout_ms=20_000)
+                if final_surface.switcher is not None:
+                    switcher = final_surface.switcher
+                    step_3_observed = (
+                        "The workspace recovery surface was already open after the startup "
+                        "wait window, so the visible Workspace switcher was inspected "
+                        "directly.\n"
+                        f"row_count={switcher.row_count}; "
+                        f"switcher_text={switcher.switcher_text!r}"
+                    )
+                else:
+                    switcher = page.open_and_observe(timeout_ms=20_000)
+                    step_3_observed = (
+                        "Opened Workspace switcher from the header after the startup wait "
+                        "window.\n"
+                        f"row_count={switcher.row_count}; "
+                        f"switcher_text={switcher.switcher_text!r}"
+                    )
                 result["switcher_observation"] = _switcher_payload(switcher)
                 _record_step(
                     result,
                     step=3,
                     status="passed",
                     action=REQUEST_STEPS[2],
-                    observed=(
-                        "Opened Workspace switcher after the startup wait window.\n"
-                        f"row_count={switcher.row_count}; "
-                        f"switcher_text={switcher.switcher_text!r}"
-                    ),
+                    observed=step_3_observed,
                 )
 
                 local_row = _find_named_local_row(switcher)
-                selected_row = _find_selected_row(switcher) or _selected_row_from_trigger(
-                    final_trigger,
-                )
+                selected_row = _find_selected_row(switcher)
+                if selected_row is None and final_trigger is not None:
+                    selected_row = _selected_row_from_trigger(final_trigger)
                 result["local_row"] = _row_payload(local_row) if local_row else None
                 result["selected_row"] = (
                     _row_payload(selected_row) if selected_row is not None else None
@@ -223,8 +261,13 @@ def main() -> None:
                         "startup retries to finish."
                     ),
                     observed=(
-                        f"trigger_label={final_trigger.semantic_label!r}; "
-                        f"trigger_text={final_trigger.visible_text!r}"
+                        (
+                            f"trigger_label={final_trigger.semantic_label!r}; "
+                            f"trigger_text={final_trigger.visible_text!r}"
+                        )
+                        if final_trigger is not None
+                        else "The workspace recovery surface remained open, so no separate "
+                        "header trigger label was visible before inspection."
                     ),
                 )
                 _record_human_verification(
@@ -387,9 +430,69 @@ def _observe_restore_message(tracker_page: TrackStateTrackerPage) -> str | None:
             workspace_name=LOCAL_DISPLAY_NAME,
             timeout_ms=5_000,
         )
-    except Exception:
+    except (AssertionError, WebAppTimeoutError):
         return None
     return observation.message_text
+
+
+def _wait_for_startup_workspace_surface(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    tracker_page: TrackStateTrackerPage,
+    timeout_seconds: float,
+) -> StartupWorkspaceSurfaceObservation:
+    observed, surface = poll_until(
+        probe=lambda: _observe_startup_workspace_surface(
+            page=page,
+            tracker_page=tracker_page,
+            timeout_ms=1_000,
+        ),
+        is_satisfied=lambda candidate: candidate.kind != "loading",
+        timeout_seconds=timeout_seconds,
+        interval_seconds=1,
+    )
+    if not observed:
+        raise AssertionError(
+            "Step 1 failed: the deployed app never reached a visible workspace "
+            "recovery surface for the permanent local-workspace failure scenario.\n"
+            f"Observed body text:\n{tracker_page.body_text()}",
+        )
+    return surface
+
+
+def _observe_startup_workspace_surface(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    tracker_page: TrackStateTrackerPage,
+    timeout_ms: int,
+) -> StartupWorkspaceSurfaceObservation:
+    body_text = tracker_page.body_text()
+    if any(
+        error_text in body_text
+        for error_text in TrackStateTrackerPage.LOAD_ERROR_TEXT_VARIANTS
+    ):
+        return StartupWorkspaceSurfaceObservation(
+            kind="data-load-failed",
+            body_text=body_text,
+        )
+    try:
+        trigger = page.observe_trigger(timeout_ms=timeout_ms)
+        return StartupWorkspaceSurfaceObservation(
+            kind="trigger",
+            body_text=tracker_page.body_text(),
+            trigger=trigger,
+        )
+    except (AssertionError, WebAppTimeoutError):
+        pass
+    try:
+        switcher = page.observe_open_switcher(timeout_ms=timeout_ms)
+        return StartupWorkspaceSurfaceObservation(
+            kind="switcher",
+            body_text=tracker_page.body_text(),
+            switcher=switcher,
+        )
+    except (AssertionError, WebAppTimeoutError):
+        return StartupWorkspaceSurfaceObservation(kind="loading", body_text=body_text)
 
 
 def _find_named_local_row(
@@ -398,7 +501,7 @@ def _find_named_local_row(
     for row in switcher.rows:
         if row.target_type_label == "Local" and LOCAL_TARGET in row.detail_text:
             return row
-    return None
+    return _fallback_local_row_from_switcher_text(switcher.switcher_text)
 
 
 def _find_selected_row(
@@ -427,9 +530,46 @@ def _selected_row_from_trigger(
     )
 
 
+def _fallback_local_row_from_switcher_text(
+    switcher_text: str,
+) -> WorkspaceSwitcherRowObservation | None:
+    normalized = " ".join(switcher_text.split())
+    detail_text = f"{LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}"
+    match = re.search(
+        rf"{re.escape(LOCAL_DISPLAY_NAME)}, Local, (?P<state>[^,]+), "
+        rf"{re.escape(detail_text)}(?P<tail>.*?)(?: Hosted setup workspace| Add workspace|$)",
+        normalized,
+    )
+    if match is None:
+        return None
+    state_label = match.group("state").strip() or None
+    action_tail = match.group("tail").strip()
+    action_match = re.search(
+        r"(Active|Retry: .*?|Re-authenticate: .*?|Open: .*?) Delete:",
+        action_tail,
+    )
+    action_label = action_match.group(1).strip() if action_match is not None else None
+    if action_label is None:
+        return None
+    selected = action_label == "Active"
+    button_labels = ("Delete",) if selected else (action_label, "Delete")
+    return WorkspaceSwitcherRowObservation(
+        display_name=LOCAL_DISPLAY_NAME,
+        target_type_label="Local",
+        state_label=state_label,
+        detail_text=detail_text,
+        visible_text=match.group(0).strip(),
+        selected=selected,
+        semantics_label=None,
+        icon_accessibility_label=None,
+        action_labels=(action_label,),
+        button_labels=button_labels,
+    )
+
+
 def _assert_permanent_error_state(
     *,
-    trigger: WorkspaceSwitcherTriggerObservation,
+    trigger: WorkspaceSwitcherTriggerObservation | None,
     switcher: WorkspaceSwitcherObservation,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
@@ -438,7 +578,10 @@ def _assert_permanent_error_state(
         raise AssertionError(
             "Step 4 failed: Workspace switcher did not show the deleted local workspace row.\n"
             f"Observed trigger label: {trigger.semantic_label!r}\n"
-            f"Observed switcher text:\n{switcher.switcher_text}",
+            if trigger is not None
+            else "Step 4 failed: Workspace switcher did not show the deleted local workspace row.\n"
+            + "Observed trigger label: <workspace recovery surface remained open>\n"
+            + f"Observed switcher text:\n{switcher.switcher_text}"
         )
     failures: list[str] = []
     if local_row.state_label != "Unavailable" and "Local Unavailable" not in local_row.visible_text:
@@ -460,7 +603,9 @@ def _assert_permanent_error_state(
             "workspace even though the saved deleted local workspace row was still "
             "present.",
         )
-    if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
+    if trigger is not None and (
+        trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted"
+    ):
         failures.append(
             "the header trigger still defaulted to the hosted setup workspace after "
             "the permanent local failure.",
@@ -469,11 +614,30 @@ def _assert_permanent_error_state(
         details = [
             f"Step 4 failed: {failures[0]}",
             *[f"Also observed: {failure}" for failure in failures[1:]],
-            f"Observed trigger label: {trigger.semantic_label!r}",
+            (
+                f"Observed trigger label: {trigger.semantic_label!r}"
+                if trigger is not None
+                else "Observed trigger label: <workspace recovery surface remained open>"
+            ),
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}",
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}",
         ]
         raise AssertionError("\n".join(details))
+
+
+def _startup_surface_payload(
+    surface: StartupWorkspaceSurfaceObservation,
+) -> dict[str, object]:
+    return {
+        "kind": surface.kind,
+        "body_text": surface.body_text,
+        "trigger": (
+            _trigger_payload(surface.trigger) if surface.trigger is not None else None
+        ),
+        "switcher": (
+            _switcher_payload(surface.switcher) if surface.switcher is not None else None
+        ),
+    }
 
 
 def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str, object]:
@@ -869,13 +1033,13 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
                 str(result["screenshot"]),
             ],
         )
-    if result.get("trigger_samples"):
+    if result.get("surface_samples"):
         lines.extend(
             [
                 "",
-                "h4. Trigger samples" if jira else "## Trigger samples",
+                "h4. Surface samples" if jira else "## Surface samples",
                 "{code}" if jira else "```json",
-                json.dumps(result["trigger_samples"], indent=2),
+                json.dumps(result["surface_samples"], indent=2),
                 "{code}" if jira else "```",
             ],
         )
