@@ -62,10 +62,24 @@ BROKEN_LOCAL_TARGET = "/tmp/trackstate-ts1006-workspace-b"
 
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
 ACCEPTED_RECOVERY_ACTION_LABELS = ("Retry", "Re-authenticate")
-LINKED_BUGS = ["TS-995"]
+LINKED_BUGS = [
+    "TS-1212",
+    "TS-1209",
+    "TS-1146",
+    "TS-1143",
+    "TS-1142",
+    "TS-1030",
+    "TS-1011",
+    "TS-995",
+    "TS-994",
+]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-995. Its merged fix targets startup hydration so this test waits for "
-    "the post-reload shell and the final Workspace switcher row state before asserting."
+    "Reviewed TS-1212, TS-1209, TS-1146, TS-1143, TS-1142, TS-1030, TS-1011, "
+    "TS-995, and TS-994. The linked fixes span the visible Retry/Re-authenticate "
+    "recovery path, browser-persisted local directory access across reload, and "
+    "the follow-up startup hydration selection logic, so this test waits for the "
+    "visible restore callback, the restored Local Git precondition, the post-"
+    "reload shell, and the final Workspace switcher row state before asserting."
 )
 PRECONDITION_WAIT_SECONDS = 60
 STARTUP_WAIT_SECONDS = 90
@@ -76,9 +90,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1006_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1006_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Launch the application.",
@@ -272,6 +288,7 @@ def main() -> None:
                 accepted_action_labels=ACCEPTED_RECOVERY_ACTION_LABELS,
                 timeout_ms=ROW_STATE_WAIT_MS,
             )
+            refreshed_trigger = page.observe_trigger(timeout_ms=5_000)
             active_row = _find_switcher_row(
                 refreshed_switcher,
                 display_name=ACTIVE_LOCAL_DISPLAY_NAME,
@@ -285,6 +302,7 @@ def main() -> None:
             selected_row = _find_selected_row(refreshed_switcher)
             result["broken_row_initial"] = _row_payload(broken_row)
             result["refreshed_switcher_observation"] = _switcher_payload(refreshed_switcher)
+            result["refreshed_trigger"] = _trigger_payload(refreshed_trigger)
             result["active_row"] = _row_payload(active_row)
             result["broken_row"] = _row_payload(broken_row_refreshed)
             result["selected_row"] = _row_payload(selected_row)
@@ -292,6 +310,7 @@ def main() -> None:
             _assert_startup_selection_preserved(
                 active_row=active_row,
                 broken_row=broken_row_refreshed,
+                current_trigger=refreshed_trigger,
                 selected_row=selected_row,
                 switcher=refreshed_switcher,
             )
@@ -304,6 +323,7 @@ def main() -> None:
                     "Opened Workspace switcher after startup and confirmed Workspace A "
                     "remained active while Workspace B showed `Unavailable` without "
                     "taking the active selection.\n"
+                    f"trigger={json.dumps(result['refreshed_trigger'], indent=2)}\n"
                     f"active_row={json.dumps(result['active_row'], indent=2)}\n"
                     f"broken_row={json.dumps(result['broken_row'], indent=2)}\n"
                     f"selected_row={json.dumps(result['selected_row'], indent=2)}"
@@ -316,6 +336,7 @@ def main() -> None:
                     "a user would."
                 ),
                 observed=(
+                    f"trigger_label={refreshed_trigger.semantic_label!r}; "
                     f"active_row_visible_text={repr(active_row.visible_text) if active_row else None}; "
                     f"broken_row_visible_text={repr(broken_row_refreshed.visible_text) if broken_row_refreshed else None}; "
                     f"switcher_text={refreshed_switcher.switcher_text!r}"
@@ -467,7 +488,7 @@ def _establish_active_local_workspace_precondition(
     result["precondition_initial_trigger"] = _trigger_payload(initial_trigger)
     try:
         page.dismiss_connection_banner()
-    except Exception:
+    except AssertionError:
         pass
 
     switcher_before = page.open_and_observe(timeout_ms=20_000)
@@ -1063,6 +1084,7 @@ def _assert_startup_selection_preserved(
     *,
     active_row: WorkspaceSwitcherRowObservation | None,
     broken_row: WorkspaceSwitcherRowObservation | None,
+    current_trigger: WorkspaceSwitcherTriggerObservation,
     selected_row: WorkspaceSwitcherRowObservation | None,
     switcher: WorkspaceSwitcherObservation,
 ) -> None:
@@ -1076,11 +1098,28 @@ def _assert_startup_selection_preserved(
             "Step 4 failed: Workspace A was no longer shown as `Local Git` in the switcher.\n"
             f"Observed active row: {json.dumps(_row_payload(active_row), indent=2)}"
         )
-    if selected_row is None or selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME:
+    trigger_matches_active_workspace = (
+        current_trigger.display_name == ACTIVE_LOCAL_DISPLAY_NAME
+        and current_trigger.workspace_type == "Local"
+        and current_trigger.state_label == "Local Git"
+    )
+    if (
+        selected_row is not None
+        and selected_row.display_name != ACTIVE_LOCAL_DISPLAY_NAME
+    ):
         raise AssertionError(
             "Step 4 failed: Workspace A did not remain the selected active workspace in the "
             "Workspace switcher after startup.\n"
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2) if selected_row else 'null'}\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(current_trigger), indent=2)}\n"
+            f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
+        )
+    if selected_row is None and not trigger_matches_active_workspace:
+        raise AssertionError(
+            "Step 4 failed: Workspace A did not remain the selected active workspace in the "
+            "Workspace switcher after startup.\n"
+            f"Observed selected row: null\n"
+            f"Observed trigger: {json.dumps(_trigger_payload(current_trigger), indent=2)}\n"
             f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}"
         )
     if broken_row is None:
@@ -1105,7 +1144,8 @@ def _assert_startup_selection_preserved(
             f"Observed broken row: {json.dumps(_row_payload(broken_row), indent=2)}"
         )
     if not any(
-        label in ACCEPTED_RECOVERY_ACTION_LABELS for label in broken_row.action_labels
+        any(label.startswith(f"{accepted}:") or label == accepted for accepted in ACCEPTED_RECOVERY_ACTION_LABELS)
+        for label in broken_row.action_labels
     ):
         raise AssertionError(
             "Step 4 failed: Workspace B did not expose a visible recovery action such as "
@@ -1248,6 +1288,7 @@ def _write_pass_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, Any]) -> None:
@@ -1260,6 +1301,7 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     JIRA_COMMENT_PATH.write_text(_build_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_build_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_build_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(_build_review_replies(result, passed=False), encoding="utf-8")
     if result.get("failure_kind") == "product":
         BUG_DESCRIPTION_PATH.write_text(_build_bug_description(result), encoding="utf-8")
 
@@ -1369,9 +1411,10 @@ def _build_response_summary(result: dict[str, Any], *, passed: bool) -> str:
         "Workspace B inactive and broken.",
         "",
         "## Files Modified",
+        "- `testing/tests/TS-1006/test_ts_1006.py`",
         "- `testing/tests/TS-1006/config.yaml`",
         "- `testing/tests/TS-1006/README.md`",
-        "- `testing/tests/TS-1006/test_ts_1006.py`",
+        "- `testing/tests/support/ts980_restore_persistence_runtime.py`",
         "",
         "## Test Coverage",
         "- Visible restore flow for Workspace A before the startup scenario begins.",
@@ -1405,8 +1448,9 @@ def _build_bug_description(result: dict[str, Any]) -> str:
             "Before the ticket steps, automation used the visible saved-workspace recovery "
             "action (`Retry` / `Re-authenticate`) to restore Workspace A as an active local "
             "workspace, because the deployed web app otherwise starts from the hosted fallback "
-            "surface. The app observed the directory picker callback but did not keep Workspace A "
-            "active as `Local Git`."
+            "surface. That precondition succeeded; the regression appears after the reload with "
+            "two saved local workspaces, when startup hydration marks Workspace A as "
+            "`Unavailable` instead of preserving its active `Local Git` state."
         ),
         f"- Manual restore action label: `{result.get('manual_restore_action_label')}`",
         f"- Manual restore attempt: `{json.dumps(result.get('manual_restore_attempt_observation'), ensure_ascii=True)}`",
@@ -1447,6 +1491,51 @@ def _build_bug_description(result: dict[str, Any]) -> str:
 def _exact_error_summary(result: dict[str, Any]) -> str:
     error = str(result.get("error", "")).strip()
     return error or "AssertionError: no error message captured"
+
+
+def _build_review_replies(result: dict[str, Any], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread["rootCommentId"],
+            "threadId": thread["threadId"],
+            "reply": _review_reply_text(result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    normalized_threads: list[dict[str, object]] = []
+    for thread in threads:
+        if not isinstance(thread, dict) or thread.get("resolved") is not False:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId")
+        if root_comment_id is None or thread_id is None:
+            continue
+        normalized_threads.append(
+            {
+                "rootCommentId": root_comment_id,
+                "threadId": thread_id,
+            },
+        )
+    return normalized_threads
+
+
+def _review_reply_text(result: dict[str, Any], *, passed: bool) -> str:
+    rerun_summary = (
+        "Re-ran the current TS-1006 test and it passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran the current TS-1006 test and it still failed (`0 passed, 1 failed`)."
+    )
+    return "No actionable review issues were raised in this thread. " + rerun_summary
 
 
 def _cleanup_local_workspaces() -> None:

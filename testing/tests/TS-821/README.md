@@ -12,6 +12,8 @@ The automation:
 5. records the focused target, visible panel text, and screenshot for failure
    triage if the switcher remains open
 
+The live run uses the default desktop viewport of `1440x900`.
+
 ## Install dependencies
 
 ```bash

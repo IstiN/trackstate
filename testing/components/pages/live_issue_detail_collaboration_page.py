@@ -34,6 +34,10 @@ class CommentCardObservation:
     body_fragment: str
     visible_text: str
     accessible_label: str
+    left: float
+    top: float
+    width: float
+    height: float
 
 
 @dataclass(frozen=True)
@@ -67,14 +71,19 @@ class LiveIssueDetailCollaborationPage:
     _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
+    _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
+    _connect_button_label = "Connect GitHub"
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
-        'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[aria-label*="Choose attachment"] flt-semantics[flt-tappable], '
+        'flt-semantics[role="button"][aria-label*="Choose attachment"], '
+        '[role="button"][aria-label*="Choose attachment"]'
     )
     _upload_attachment_button_selector = (
-        'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[aria-label*="Upload attachment"] flt-semantics[flt-tappable], '
+        'flt-semantics[role="button"][aria-label*="Upload attachment"], '
+        '[role="button"][aria-label*="Upload attachment"]'
     )
     _replace_attachment_button_selector = (
         'flt-semantics[role="button"][flt-tappable]:text-is("Replace attachment")'
@@ -83,6 +92,10 @@ class LiveIssueDetailCollaborationPage:
         'flt-semantics[role="button"][flt-tappable]:text-is("Keep current attachment")'
     )
     _selected_button_selector = _active_tab_button_selector
+    _disconnected_markers = (
+        "Needs sign-in",
+        "GitHub write access is not connected",
+    )
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -95,63 +108,33 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
+        connected_banners = TrackStateTrackerPage.connected_banner_variants(
+            repository=repository,
+            user_login=user_login,
+        )
+        if not self._is_connected(user_login=user_login, repository=repository):
+            try:
+                self._session.wait_for_any_text(
+                    [*connected_banners, "Attachments limited", "Manage GitHub access"],
+                    timeout_ms=10_000,
+                )
+            except WebAppTimeoutError:
+                pass
         if self._is_connected(user_login=user_login, repository=repository):
             return
-        connect_via_aria = self._session.count(self._connect_button_selector) > 0
-        connect_via_text = self._session.count(
-            self._visible_button_selector,
-            has_text="Connect GitHub",
-        ) > 0
-        if not connect_via_aria and not connect_via_text:
-            current_body = self.current_body_text()
-            if TrackStateTrackerPage.body_has_connected_banner(
-                current_body,
-                user_login=user_login,
-                repository=repository,
-            ):
-                return
+        if self._connect_button_count() == 0:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-311.\n"
-                f"Observed body text:\n{current_body}",
+                "precondition for TS-396.\n"
+                f"Observed body text:\n{self.current_body_text()}",
             )
 
-        if connect_via_aria:
-            self._session.click(self._connect_button_selector, timeout_ms=30_000)
-        else:
-            self._session.click(
-                self._visible_button_selector,
-                has_text="Connect GitHub",
-                timeout_ms=30_000,
-            )
-        self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
-        self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
-        self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
-        self._session.click(
-            self._visible_button_selector,
-            has_text="Connect token",
-            timeout_ms=30_000,
+        self._tracker_page.connect_with_token(
+            token=token,
+            repository=repository,
+            user_login=user_login,
         )
-        connected_markers = [
-            *TrackStateTrackerPage.connected_banners(
-                user_login=user_login,
-                repository=repository,
-            ),
-            "GitHub connection failed:",
-            "Manage GitHub access",
-            user_login,
-        ]
-        wait_match = self._session.wait_for_any_text(
-            connected_markers,
-            timeout_ms=120_000,
-        )
-        if wait_match.matched_text == "GitHub connection failed:":
-            raise AssertionError(
-                "Step 1 failed: the hosted GitHub connection flow did not reach the "
-                "connected state required for TS-311.\n"
-                f"Observed body text:\n{wait_match.body_text}",
-            )
 
     def open_jql_search(self) -> None:
         self._session.click(self._button_selector, has_text="JQL Search", timeout_ms=30_000)
@@ -162,8 +145,23 @@ class LiveIssueDetailCollaborationPage:
 
     def open_issue(self, *, issue_key: str, issue_summary: str) -> None:
         self.open_jql_search()
+        selector = self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary)
+        if self._session.count(selector) == 0:
+            try:
+                self.search_and_select_issue(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                    query=issue_key,
+                )
+                return
+            except (AssertionError, WebAppTimeoutError):
+                self._open_issue_from_board_card(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+                return
         self._session.click(
-            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            selector,
             timeout_ms=30_000,
         )
         self._session.wait_for_selector(
@@ -315,6 +313,7 @@ class LiveIssueDetailCollaborationPage:
             rect.left + (rect.width / 2),
             rect.top + (rect.height / 2),
         )
+
     def wait_for_text_fragment(
         self,
         fragment: str,
@@ -348,6 +347,77 @@ class LiveIssueDetailCollaborationPage:
         if labeled_button_count > 0:
             return labeled_button_count
         return self._session.count(self._button_selector, has_text=fragment)
+
+    def visible_button_label_fragment_count(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            (fragment) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .filter((element) => {
+                const label = element.getAttribute("aria-label") ?? "";
+                const text = (element.innerText ?? element.textContent ?? "").trim();
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                const isVisible = rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== "hidden" &&
+                  style.display !== "none";
+                return isVisible && (label.includes(fragment) || text.includes(fragment));
+              }).length
+            """,
+            arg=fragment,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid visible "
+                f"button count for {fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def button_label_fragment_disabled_count(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            (fragment) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .filter((element) => {
+                const label = element.getAttribute("aria-label") ?? "";
+                const text = (element.innerText ?? element.textContent ?? "").trim();
+                const isVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
+                return isVisible &&
+                  (label.includes(fragment) || text.includes(fragment)) &&
+                  element.getAttribute("aria-disabled") === "true";
+              }).length
+            """,
+            arg=fragment,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid disabled "
+                f"button count for {fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def visible_file_input_count(self) -> int:
+        payload = self._session.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('input[type="file"]'))
+              .filter((element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== "hidden" &&
+                  style.display !== "none";
+              }).length
+            """,
+        )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not return a valid visible "
+                "file-input count.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
 
     def theme_toggle_label(self) -> str:
         for label in ("Dark theme", "Light theme"):
@@ -537,6 +607,8 @@ class LiveIssueDetailCollaborationPage:
                   label,
                   text,
                   combined: [text, label].filter((value) => value.length > 0).join("\\n"),
+                  left: rect.left,
+                  top: rect.top,
                   width: rect.width,
                   height: rect.height,
                   area: rect.width * rect.height,
@@ -620,8 +692,11 @@ class LiveIssueDetailCollaborationPage:
             body_fragment=body_fragment,
             visible_text=visible_text,
             accessible_label=accessible_label,
+            left=float(payload.get("left", 0.0)),
+            top=float(payload.get("top", 0.0)),
+            width=float(payload.get("width", 0.0)),
+            height=float(payload.get("height", 0.0)),
         )
-
     def issue_detail_accessible_label(
         self,
         issue_key: str,
@@ -636,8 +711,11 @@ class LiveIssueDetailCollaborationPage:
                 """
                 ({ selector, expectedFragment }) => {
                   return Array.from(document.querySelectorAll(selector))
-                    .map((element) => element.getAttribute('aria-label') ?? '')
-                    .some((label) => label.includes(expectedFragment));
+                    .some((element) => {
+                      const label = element.getAttribute('aria-label') ?? '';
+                      const text = element.innerText ?? '';
+                      return label.includes(expectedFragment) || text.includes(expectedFragment);
+                    });
                 }
                 """,
                 arg={
@@ -650,8 +728,12 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ selector }) => {
               return Array.from(document.querySelectorAll(selector))
-                .map((element) => element.getAttribute('aria-label') ?? '')
-                .filter((label) => label.length > 0)
+                .map((element) => {
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = element.innerText ?? '';
+                  return `${label} ${text}`.trim();
+                })
+                .filter((value) => value.length > 0)
                 .sort((left, right) => right.length - left.length)[0] ?? '';
             }
             """,
@@ -716,6 +798,23 @@ class LiveIssueDetailCollaborationPage:
             expected_fragment=expected_fragment,
         )
         self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        if expected_fragment is not None:
+            self._session.wait_for_function(
+                """
+                ({ selector, expectedFragment }) => {
+                  return Array.from(document.querySelectorAll(selector)).some((element) => {
+                    const label = element?.getAttribute('aria-label') ?? '';
+                    const text = element?.innerText ?? '';
+                    return label.includes(expectedFragment) || text.includes(expectedFragment);
+                  });
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedFragment": expected_fragment,
+                },
+                timeout_ms=timeout_ms,
+            )
         return self.deferred_error_label(
             section_label,
             expected_fragment=expected_fragment,
@@ -868,7 +967,6 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=timeout_ms,
         )
         return str(payload).strip()
-
     def wait_for_deferred_error_to_clear(
         self,
         section_label: str,
@@ -901,7 +999,9 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ selector }) => {
               const element = document.querySelector(selector);
-              return element?.getAttribute('aria-label') ?? '';
+              const label = element?.getAttribute('aria-label') ?? '';
+              const text = element?.innerText ?? '';
+              return `${label} ${text}`.trim();
             }
             """,
             arg={"selector": selector},
@@ -921,11 +1021,20 @@ class LiveIssueDetailCollaborationPage:
         *,
         timeout_ms: int = 30_000,
     ) -> None:
-        selector = (
-            self._deferred_error_selector(section_label, expected_fragment="Retry")
-            + ' flt-semantics[role="button"]'
+        group_selector = (
+            'flt-semantics[role="group"]'
+            f'[aria-label*="{self._escape(section_label)} error"] '
+            'flt-semantics[role="button"]'
         )
-        self._session.click(selector, timeout_ms=timeout_ms)
+        root_button_selector = (
+            'flt-semantics[role="button"]'
+            f'[aria-label*="{self._escape(section_label)} error"]'
+            '[aria-label*="Retry"]'
+        )
+        if self._session.count(group_selector) > 0:
+            self._session.click(group_selector, timeout_ms=timeout_ms)
+            return
+        self._session.click(root_button_selector, timeout_ms=timeout_ms)
 
     def focus_collaboration_tab(self, label: str) -> None:
         if self._session.count(self._tab_button_selector, has_text=label) > 0:
@@ -943,6 +1052,17 @@ class LiveIssueDetailCollaborationPage:
 
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
+
+    def wait_for_active_element_change(
+        self,
+        previous: FocusedElementObservation,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        return self._session.wait_for_active_element_change(
+            previous.outer_html,
+            timeout_ms=timeout_ms,
+        )
 
     def press_key(self, key: str) -> None:
         self._session.press_key(key, timeout_ms=30_000)
@@ -1046,6 +1166,27 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def _is_connected(self, *, user_login: str, repository: str) -> bool:
+        body_text = self.current_body_text()
+        return (
+            self._session.count(self._connected_button_selector) > 0
+            or TrackStateTrackerPage.body_has_authenticated_session(
+                body_text,
+                user_login=user_login,
+                repository=repository,
+            )
+            or (
+                "Connected as " in body_text
+                and not any(marker in body_text for marker in self._disconnected_markers)
+            )
+        )
+
+    def _connect_button_count(self) -> int:
+        return max(
+            self._session.count(self._connect_button_selector),
+            self._session.count(self._button_selector, has_text="Connect GitHub"),
+        )
+
     def activate_focused_control_in_new_page(
         self,
         *,
@@ -1079,14 +1220,19 @@ class LiveIssueDetailCollaborationPage:
                 const style = window.getComputedStyle(element);
                 return style.visibility !== 'hidden' && style.display !== 'none';
               };
-              const controlRoots = (label) => Array.from(
-                document.querySelectorAll(`flt-semantics[aria-label="${label}"]`)
-              ).filter((element) =>
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const collectLabel = (element) => normalize(
+                [
+                  element?.getAttribute?.('aria-label') ?? '',
+                  element?.innerText ?? '',
+                  element?.textContent ?? '',
+                ].join(' ')
+              );
+              const hasVisibleSurface = (element) =>
                 isVisible(element)
                 || Array.from(
-                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
-                ).some(isVisible)
-              );
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label], *')
+                ).some(isVisible);
               const controlTrigger = (element) => [
                 element?.querySelector('flt-semantics[flt-tappable]'),
                 element?.querySelector('[flt-tappable]'),
@@ -1099,6 +1245,15 @@ class LiveIssueDetailCollaborationPage:
                   ? element
                   : null,
               ].find((candidate) => !!candidate && isVisible(candidate)) ?? null;
+              const controlRoots = (label) => Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label], [role="button"]')
+              ).filter((element) =>
+                collectLabel(element).includes(label)
+                && (
+                  hasVisibleSurface(element)
+                  || !!controlTrigger(element)
+                )
+              );
               const isEnabled = (element) => {
                 const trigger = controlTrigger(element);
                 return (
@@ -1136,17 +1291,32 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def choose_attachment_file(self, file_path: str) -> None:
-        self._session.click_and_set_files(
-            self._choose_attachment_button_selector,
-            [file_path],
-            timeout_ms=30_000,
-        )
+        try:
+            self._session.click_and_set_files(
+                self._choose_attachment_button_selector,
+                [file_path],
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click_and_set_files(
+                self._button_selector,
+                has_text="Choose attachment",
+                files=[file_path],
+                timeout_ms=30_000,
+            )
 
     def click_upload_attachment(self) -> None:
-        self._session.click(
-            self._upload_attachment_button_selector,
-            timeout_ms=30_000,
-        )
+        try:
+            self._session.click(
+                self._upload_attachment_button_selector,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click(
+                self._button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
 
     def wait_for_selected_attachment_summary(
         self,
@@ -1557,24 +1727,155 @@ class LiveIssueDetailCollaborationPage:
         )
         return int(payload)
 
-    def _is_connected(self, *, user_login: str, repository: str) -> bool:
-        return (
-            self._session.count(self._connected_button_selector) > 0
-            or TrackStateTrackerPage.body_has_connected_banner(
-                self.current_body_text(),
-                user_login=user_login,
-                repository=repository,
-            )
+    def _open_issue_from_board_card(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        timeout_ms: int = 60_000,
+    ) -> None:
+        self._tracker_page.open_board()
+        bounds = self._board_issue_card_bounds(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
         )
+        self._session.mouse_click(
+            bounds["x"] + (bounds["width"] / 2),
+            bounds["y"] + (bounds["height"] / 2),
+        )
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=timeout_ms,
+        )
+
+    def _board_issue_card_bounds(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> dict[str, float]:
+        payload = self._session.evaluate(
+            """
+            ({ issueKey, issueSummary }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== 'hidden' &&
+                  style.display !== 'none'
+                );
+              };
+              const normalizedSummary = (issueSummary || '').trim();
+              const unquotedSummary = normalizedSummary.replace(/^['"]|['"]$/g, '').trim();
+              const summaryMatches = (candidate) => {
+                if (!normalizedSummary && !unquotedSummary) {
+                  return true;
+                }
+                return [
+                  normalizedSummary,
+                  unquotedSummary,
+                ]
+                  .filter((value) => value.length > 0)
+                  .some((value) => candidate.label.includes(value) || candidate.text.includes(value));
+              };
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    label,
+                    text,
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  (candidate.label.includes(issueKey) || candidate.text.includes(issueKey)) &&
+                  summaryMatches(candidate),
+                )
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+            """,
+            arg={"issueKey": issue_key, "issueSummary": issue_summary},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step 3 failed: the live app did not expose a visible issue surface for "
+                f"{issue_key} in either JQL Search or Board.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
+    @staticmethod
+    def _connected_message(*, user_login: str, repository: str) -> str:
+        return f"Connected as {user_login} to {repository}."
 
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
         escaped_key = LiveIssueDetailCollaborationPage._escape(issue_key)
-        escaped_summary = LiveIssueDetailCollaborationPage._escape(issue_summary)
-        return (
+        selectors = [
             'flt-semantics[role="button"]'
-            f'[aria-label*="Open {escaped_key} {escaped_summary}"]'
-        )
+            f'[aria-label*="Open {escaped_key}"]',
+        ]
+        normalized_summary = issue_summary.strip()
+        if normalized_summary:
+            selectors.insert(
+                0,
+                'flt-semantics[role="button"]'
+                f'[aria-label*="Open {escaped_key} '
+                f'{LiveIssueDetailCollaborationPage._escape(normalized_summary)}"]',
+            )
+            unquoted_summary = normalized_summary.strip('"').strip("'").strip()
+            if unquoted_summary and unquoted_summary != normalized_summary:
+                selectors.insert(
+                    1,
+                    'flt-semantics[role="button"]'
+                    f'[aria-label*="Open {escaped_key} '
+                    f'{LiveIssueDetailCollaborationPage._escape(unquoted_summary)}"]',
+                )
+        return ", ".join(selectors)
+
+    @staticmethod
+    def _candidate_open_issue_selectors(
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> tuple[str, ...]:
+        normalized_summary = issue_summary.strip().strip('"')
+        selectors = [
+            LiveIssueDetailCollaborationPage._open_issue_selector(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            ),
+            (
+                'flt-semantics[role="button"]'
+                f'[aria-label*="Open {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+            ),
+        ]
+        if normalized_summary and normalized_summary != issue_summary:
+            selectors.insert(
+                1,
+                LiveIssueDetailCollaborationPage._open_issue_selector(
+                    issue_key=issue_key,
+                    issue_summary=normalized_summary,
+                ),
+            )
+        return tuple(dict.fromkeys(selectors))
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
@@ -1603,15 +1904,11 @@ class LiveIssueDetailCollaborationPage:
         *,
         expected_fragment: str | None = None,
     ) -> str:
-        selector = (
-            'flt-semantics[role="button"]'
-            f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
+        _ = expected_fragment
+        return (
+            '[aria-label*="'
+            f'{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
         )
-        if expected_fragment:
-            selector += (
-                f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
-            )
-        return selector
 
     @staticmethod
     def _deferred_loading_selector(section_label: str) -> str:

@@ -7,6 +7,8 @@ import 'package:web/web.dart' as web;
 
 import 'browser_focusable_control_listener_binding.dart';
 import 'browser_focusable_control_logic.dart';
+import 'browser_workspace_switcher_tab_intent_web.dart';
+import 'browser_workspace_switcher_focus_matcher.dart';
 
 class BrowserFocusableControl extends StatefulWidget {
   const BrowserFocusableControl({
@@ -14,6 +16,7 @@ class BrowserFocusableControl extends StatefulWidget {
     required this.child,
     required this.label,
     required this.onPressed,
+    this.focusNode,
     this.focusTargetId,
     this.panelId,
     this.rowId,
@@ -27,6 +30,7 @@ class BrowserFocusableControl extends StatefulWidget {
   final Widget child;
   final String label;
   final VoidCallback? onPressed;
+  final FocusNode? focusNode;
   final String? focusTargetId;
   final String? panelId;
   final String? rowId;
@@ -50,6 +54,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
   _BrowserFocusableButtonElementAdapter? _elementAdapter;
   JSFunction? _focusListener;
   JSFunction? _blurListener;
+  JSFunction? _keydownListener;
   JSFunction? _windowKeydownListener;
   JSFunction? _windowFocusinListener;
   late final BrowserFocusableControlListenerBinding<JSFunction> _clickBinding =
@@ -123,6 +128,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
     element.disabled = false;
     element.tabIndex = domConfig.tabIndex;
     element.textContent = widget.label;
+    element.setAttribute('role', 'button');
     element.setAttribute('aria-label', widget.label);
     _setOptionalAttribute(
       element,
@@ -200,9 +206,7 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
           descendantsAreTraversable: false,
           child: ExcludeSemantics(child: widget.child),
         ),
-        Positioned.fill(
-          child: HtmlElementView(viewType: _viewType),
-        ),
+        Positioned.fill(child: HtmlElementView(viewType: _viewType)),
       ],
     );
   }
@@ -210,13 +214,40 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
   void _attachFocusListeners(web.HTMLButtonElement element) {
     _detachFocusListeners();
     _focusListener = ((web.Event _) {
+      widget.focusNode?.requestFocus();
       _applyFocusedStyles(element);
     }).toJS;
     _blurListener = ((web.Event _) {
+      if (widget.focusNode case final focusNode? when focusNode.hasFocus) {
+        focusNode.unfocus();
+      }
       _clearFocusedStyles(element);
+    }).toJS;
+    _keydownListener = ((web.Event event) {
+      final keyboardEvent = event as web.KeyboardEvent;
+      if (widget.onPressed != null &&
+          (keyboardEvent.key == 'Enter' ||
+              keyboardEvent.key == ' ' ||
+              keyboardEvent.key == 'Spacebar')) {
+        event.preventDefault();
+        event.stopPropagation();
+        widget.onPressed!.call();
+        return;
+      }
+      if (keyboardEvent.key != 'Tab' ||
+          widget.panelId != browserWorkspaceSwitcherSemanticsIdentifier) {
+        return;
+      }
+      recordBrowserWorkspaceSwitcherTabIntent(
+        backwards: keyboardEvent.shiftKey,
+        panelId: widget.panelId,
+        focusTargetId: widget.focusTargetId,
+        rowId: widget.rowId,
+      );
     }).toJS;
     element.addEventListener('focus', _focusListener);
     element.addEventListener('blur', _blurListener);
+    element.addEventListener('keydown', _keydownListener);
   }
 
   void _detachFocusListeners() {
@@ -228,9 +259,13 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       if (_blurListener != null) {
         element.removeEventListener('blur', _blurListener);
       }
+      if (_keydownListener != null) {
+        element.removeEventListener('keydown', _keydownListener);
+      }
     }
     _focusListener = null;
     _blurListener = null;
+    _keydownListener = null;
   }
 
   void _syncFocusStyle(web.HTMLButtonElement element) {
@@ -255,34 +290,74 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
 
   void _syncSuppressedSemanticsElements() {
     _restoreSuppressedSemanticsElements();
+    final suppressedElements = <web.Element>{};
     final focusTargetId = widget.focusTargetId;
-    if (focusTargetId == null || focusTargetId.isEmpty) {
-      return;
-    }
-    final semanticsNodes = web.document.querySelectorAll(
-      '[flt-semantics-identifier="$focusTargetId"]',
-    );
-    for (var index = 0; index < semanticsNodes.length; index += 1) {
-      final node = semanticsNodes.item(index);
-      if (node == null) {
-        continue;
+    if (focusTargetId != null && focusTargetId.isNotEmpty) {
+      final semanticsNodes = web.document.querySelectorAll(
+        '[flt-semantics-identifier="$focusTargetId"]',
+      );
+      for (var index = 0; index < semanticsNodes.length; index += 1) {
+        final node = semanticsNodes.item(index);
+        if (node == null) {
+          continue;
+        }
+        suppressedElements.add(node as web.Element);
       }
-      final element = node as web.Element;
+    }
+    final platformViewId = _platformViewContainerId();
+    if (platformViewId != null) {
+      final ownedNodes = web.document.querySelectorAll(
+        'flt-semantics[aria-owns~="$platformViewId"]',
+      );
+      for (var index = 0; index < ownedNodes.length; index += 1) {
+        final node = ownedNodes.item(index);
+        if (node == null) {
+          continue;
+        }
+        suppressedElements.add(node as web.Element);
+      }
+    }
+    for (final element in suppressedElements) {
+      element.setAttribute('role', 'button');
+      element.setAttribute('flt-tappable', '');
       element.setAttribute(
         _browserFocusOriginalTabIndexAttribute,
-        element.getAttribute('tabindex') ?? _browserFocusMissingTabIndexSentinel,
+        element.getAttribute('tabindex') ??
+            _browserFocusMissingTabIndexSentinel,
       );
       element.setAttribute('tabindex', '-1');
       _suppressedSemanticsElements.add(element);
     }
   }
 
+  String? _platformViewContainerId() {
+    final element = _element;
+    if (element == null) {
+      return null;
+    }
+    web.Element? current = element;
+    while (current != null) {
+      final id = current.id;
+      if (id.isNotEmpty && id.startsWith('flt-pv-')) {
+        return id;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
   void _attachGlobalSuppressedSemanticsSyncListeners() {
     _detachGlobalSuppressedSemanticsSyncListeners();
-    _windowKeydownListener = ((web.Event _) {
+    _windowKeydownListener = ((web.Event event) {
+      if (_activateOwnedSemanticsControlOnKeyboardEvent(
+        event as web.KeyboardEvent,
+      )) {
+        return;
+      }
       _syncSuppressedSemanticsElements();
     }).toJS;
     _windowFocusinListener = ((web.Event _) {
+      _focusOwnedSemanticsControl();
       _syncSuppressedSemanticsElements();
     }).toJS;
     web.window.addEventListener('keydown', _windowKeydownListener, true.toJS);
@@ -315,6 +390,52 @@ class _BrowserFocusableControlState extends State<BrowserFocusableControl> {
       }
       _syncSuppressedSemanticsElements();
     });
+  }
+
+  bool _activateOwnedSemanticsControlOnKeyboardEvent(web.KeyboardEvent event) {
+    if (widget.onPressed == null) {
+      return false;
+    }
+    final key = event.key;
+    if (key != 'Enter' && key != ' ' && key != 'Spacebar') {
+      return false;
+    }
+    final platformViewId = _platformViewContainerId();
+    final activeElement = web.document.activeElement;
+    if (platformViewId == null || activeElement is! web.Element) {
+      return false;
+    }
+    final ownedIds = (activeElement.getAttribute('aria-owns') ?? '')
+        .split(' ')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty);
+    if (!ownedIds.contains(platformViewId)) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    _element?.click();
+    return true;
+  }
+
+  void _focusOwnedSemanticsControl() {
+    final platformViewId = _platformViewContainerId();
+    final element = _element;
+    final activeElement = web.document.activeElement;
+    if (platformViewId == null ||
+        element == null ||
+        activeElement is! web.Element ||
+        identical(activeElement, element)) {
+      return;
+    }
+    final ownedIds = (activeElement.getAttribute('aria-owns') ?? '')
+        .split(' ')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty);
+    if (!ownedIds.contains(platformViewId)) {
+      return;
+    }
+    element.focus();
   }
 
   void _restoreSuppressedSemanticsElements() {

@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime, timezone
 import json
-from typing import Sequence
+from typing import Any, Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Request,
+        Response,
+        Route,
+        sync_playwright,
+    )
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Request = Response = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
 
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
@@ -21,6 +39,10 @@ from testing.core.interfaces.web_app_session import (
 class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
+        self._network_recorders: dict[str, dict[str, Any]] = {}
+        self._page.on("request", self._handle_page_request)
+        self._page.on("requestfinished", self._handle_page_request_finished)
+        self._page.on("requestfailed", self._handle_page_request_failed)
 
     def set_viewport_size(self, *, width: int, height: int) -> None:
         self._page.set_viewport_size({"width": width, "height": height})
@@ -351,7 +373,6 @@ class PlaywrightWebAppSession(WebAppSession):
         timeout_ms: int = 60_000,
     ) -> str:
         return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
-
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -406,7 +427,6 @@ class PlaywrightWebAppSession(WebAppSession):
                 "Timed out waiting for the page to satisfy a function condition.",
             ) from error
         return wait_handle.json_value()
-
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """
@@ -438,8 +458,7 @@ class PlaywrightWebAppSession(WebAppSession):
                             return value;
                         }
                     }
-                    const text = normalize(element.textContent);
-                    return text || null;
+                    return null;
                 };
                 const derivedOwnedLabelFor = (element) => {
                     if (!(element instanceof Element)) {
@@ -514,6 +533,23 @@ class PlaywrightWebAppSession(WebAppSession):
             tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
             outer_html=str(payload["outerHtml"]),
         )
+
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
 
     def wait_for_download_after_keypress(
         self,
@@ -747,6 +783,24 @@ class PlaywrightWebAppSession(WebAppSession):
     def mouse_move(self, x: float, y: float) -> None:
         self._page.mouse.move(x, y)
 
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        self._network_recorders[name] = {
+            "url_fragment": url_fragment.lower(),
+            "next_id": 1,
+            "entries": [],
+            "request_ids": {},
+        }
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        recorder = self._network_recorders.get(name)
+        if recorder is None:
+            return []
+        return [
+            dict(entry)
+            for entry in recorder.get("entries", [])
+            if isinstance(entry, dict)
+        ]
+
     def _locator(
         self,
         selector: str,
@@ -757,18 +811,146 @@ class PlaywrightWebAppSession(WebAppSession):
         locator = self._page.locator(selector, has_text=has_text)
         return locator.nth(index)
 
+    def _handle_page_request(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        request_body = self._request_post_data(request)
+        for name, recorder in self._matching_network_recorders(request_url):
+            request_id = f"{name}-{recorder['next_id']}"
+            recorder["next_id"] += 1
+            recorder["request_ids"][id(request)] = request_id
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "request",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "bodyText": request_body,
+                },
+            )
+
+    def _handle_page_request_finished(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            response = request.response()
+            response_status = None if response is None else int(response.status)
+            response_text = self._response_text(response)
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "response",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "status": response_status,
+                    "responseText": response_text,
+                },
+            )
+
+    def _handle_page_request_failed(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "error",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "errorText": self._request_failure_text(request),
+                },
+            )
+
+    def _matching_network_recorders(
+        self,
+        request_url: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        lowered_url = request_url.lower()
+        return [
+            (name, recorder)
+            for name, recorder in self._network_recorders.items()
+            if str(recorder.get("url_fragment", "")) in lowered_url
+        ]
+
+    def _append_network_entry(
+        self,
+        recorder: dict[str, Any],
+        entry: dict[str, object],
+    ) -> None:
+        entries = recorder.setdefault("entries", [])
+        assert isinstance(entries, list)
+        entries.append(
+            {
+                **entry,
+                "order": len(entries) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _request_post_data(self, request: Request) -> str:
+        post_data = getattr(request, "post_data", None)
+        try:
+            payload = post_data() if callable(post_data) else post_data
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request body: {error}]]"
+        if payload is None:
+            return ""
+        return str(payload)
+
+    def _response_text(self, response: Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return response.text()
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable response body: {error}]]"
+
+    def _request_failure_text(self, request: Request) -> str | None:
+        failure = getattr(request, "failure", None)
+        try:
+            payload = failure() if callable(failure) else failure
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request failure: {error}]]"
+        if payload is None:
+            return None
+        return str(payload)
+
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
 
@@ -785,31 +967,54 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
 class PlaywrightStoredTokenWebAppRuntime(
     AbstractContextManager[PlaywrightWebAppSession],
 ):
-    def __init__(self, *, repository: str, token: str) -> None:
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._repository = repository
         self._token = token
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_key = self._repository.replace("/", ".")
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
+        )
         self._context.add_init_script(
             script=(
                 "(() => {"
-                f"const repositoryStorageKey = {json.dumps(storage_key)};"
+                f"const repositoryStorageKeys = {json.dumps(storage_keys)};"
                 f"const token = {json.dumps(self._token)};"
-                "const keys = ["
-                "  `trackstate.githubToken.${repositoryStorageKey}`,"
-                "  `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
-                "];"
-                "for (const key of keys) {"
-                "  window.localStorage.setItem(key, token);"
+                "for (const repositoryStorageKey of repositoryStorageKeys) {"
+                "  const keys = ["
+                "    `trackstate.githubToken.${repositoryStorageKey}`,"
+                "    `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "  ];"
+                "  for (const key of keys) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
                 "}"
                 "})()"
             ),

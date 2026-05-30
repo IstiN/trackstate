@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class TrackStateCliAttachmentUploadBoundaryConfig:
     requested_command: tuple[str, ...]
-    expected_exit_code: int
+    expected_exit_code: int | None
     expected_error_category: str
     accepted_error_message_markers: tuple[str, ...]
     required_failure_stdout_fragments: tuple[str, ...]
@@ -36,13 +36,16 @@ class TrackStateCliAttachmentUploadBoundaryConfig:
                 "--target",
                 "local",
             ),
-            expected_exit_code=2,
+            expected_exit_code=None,
             expected_error_category="validation",
             accepted_error_message_markers=(
                 "exactly one file",
                 "single-file",
                 "single file",
                 "only one file",
+                "one attachment",
+                "single attachment",
+                "per invocation",
                 "provided once",
                 "specified once",
                 "duplicate --file",

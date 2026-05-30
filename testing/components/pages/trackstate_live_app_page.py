@@ -69,8 +69,85 @@ class TrackStateLiveAppPage:
         return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        self.session.click('flt-semantics[aria-label="Connect GitHub"]')
-        self.session.wait_for_selector(self.TOKEN_INPUT_SELECTOR, timeout_ms=30_000)
+        errors: list[str] = []
+        for selector, has_text in (
+            ('flt-semantics[role="button"][aria-label*="Connect GitHub"]', None),
+            (self.VISIBLE_CONNECT_BUTTON_SELECTOR, self.CONNECT_READY_TEXT),
+            (self.CONNECT_BUTTON_SELECTOR, "Connect GitHub"),
+            ('flt-semantics[aria-label="Connect GitHub"]', None),
+            ('[aria-label="Connect GitHub"]', None),
+        ):
+            if self.session.count(selector, has_text=has_text) == 0:
+                continue
+            try:
+                self.session.click(
+                    selector,
+                    has_text=has_text,
+                    timeout_ms=30_000,
+                )
+                self.session.wait_for_selector(
+                    self.TOKEN_INPUT_SELECTOR,
+                    timeout_ms=30_000,
+                )
+                return
+            except WebAppTimeoutError as error:
+                errors.append(str(error))
+
+        payload = self.session.evaluate(
+            """
+            (expectedText) => {
+              const isVisible = (candidate) => {
+                const rect = candidate.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              const match = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  const text = (candidate.innerText ?? '').trim();
+                  const ariaLabel = (candidate.getAttribute('aria-label') ?? '').trim();
+                  const role = (candidate.getAttribute('role') ?? '').trim();
+                  return role === 'button'
+                    && isVisible(candidate)
+                    && (text === expectedText || ariaLabel === expectedText);
+                })
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+                })[0];
+              if (!match) {
+                return null;
+              }
+              const rect = match.getBoundingClientRect();
+              return {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+              };
+            }
+            """,
+            arg=self.CONNECT_READY_TEXT,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 2 failed: the hosted app did not expose a working Connect GitHub "
+                f"action.\nVisible body text: {self.body_text()}\nSelector attempts: {errors}",
+            )
+        self.session.mouse_click(
+            float(payload["x"]) + (float(payload["width"]) / 2),
+            float(payload["y"]) + (float(payload["height"]) / 2),
+        )
+        try:
+            self.session.wait_for_selector(
+                self.TOKEN_INPUT_SELECTOR,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
+            errors.append(str(error))
+            raise AssertionError(
+                "Step 2 failed: the hosted app did not expose a working Connect GitHub "
+                f"action.\nVisible body text: {self.body_text()}\nSelector attempts: {errors}",
+            ) from error
 
     def read_connect_dialog_state(self) -> ConnectDialogState:
         return ConnectDialogState(

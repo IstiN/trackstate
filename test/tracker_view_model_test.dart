@@ -144,10 +144,58 @@ void main() {
   );
 
   test(
+    'view model maps missing hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const missingIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [missingIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, missingIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
+    'view model maps inconsistent hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const inconsistentIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [inconsistentIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, inconsistentIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
     'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
     () async {
       final authStore = _TokenTrackingAuthStore(
-        repository: 'trackstate/trackstate',
+        repository: SetupTrackStateRepository.repositoryName,
         token: 'github-token',
       );
       final viewModel = TrackerViewModel(
@@ -164,7 +212,10 @@ void main() {
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
       expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 
@@ -188,21 +239,24 @@ void main() {
     expect(viewModel.hasMoreSearchResults, isFalse);
   });
 
-  test('empty JQL query shows all issues instead of the first page only', () async {
-    final viewModel = TrackerViewModel(
-      repository: DemoTrackStateRepository(
-        snapshot: _searchPaginationSnapshot(),
-      ),
-    );
+  test(
+    'empty JQL query shows all issues instead of the first page only',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: DemoTrackStateRepository(
+          snapshot: _searchPaginationSnapshot(),
+        ),
+      );
 
-    await viewModel.load();
-    await viewModel.updateQuery('');
+      await viewModel.load();
+      await viewModel.updateQuery('');
 
-    expect(viewModel.totalSearchResults, 8);
-    expect(viewModel.searchResults.length, 8);
-    expect(viewModel.searchResults.last.key, 'TRACK-8');
-    expect(viewModel.hasMoreSearchResults, isFalse);
-  });
+      expect(viewModel.totalSearchResults, 8);
+      expect(viewModel.searchResults.length, 8);
+      expect(viewModel.searchResults.last.key, 'TRACK-8');
+      expect(viewModel.hasMoreSearchResults, isFalse);
+    },
+  );
 
   test(
     'view model restores the last valid query after a search failure',
@@ -393,10 +447,16 @@ void main() {
       expect(viewModel.isConnected, isTrue);
       expect(viewModel.connectedUser?.login, 'demo-user');
       expect(authStore.readScopes, [
-        (repository: 'trackstate/trackstate', workspaceId: workspaceId),
+        (
+          repository: SetupTrackStateRepository.repositoryName,
+          workspaceId: workspaceId,
+        ),
       ]);
       expect(repository.connectCount, 2);
-      expect(repository.lastConnection?.repository, 'trackstate/trackstate');
+      expect(
+        repository.lastConnection?.repository,
+        SetupTrackStateRepository.repositoryName,
+      );
       expect(repository.lastConnection?.token, 'legacy-token');
     },
   );
@@ -528,9 +588,7 @@ void main() {
       final provider = _CommentRetryTrackingProvider(
         failingCommentPaths: {'DEMO/DEMO-1/comments/0001.md'},
       );
-      final repository = ProviderBackedTrackStateRepository(
-        provider: provider,
-      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
       final viewModel = TrackerViewModel(repository: repository);
 
       await viewModel.load();
@@ -559,14 +617,14 @@ void main() {
       );
       expect(
         viewModel.selectedIssue?.comments.map((comment) => comment.storagePath),
-        [
-          'DEMO/DEMO-1/comments/0001.md',
-          'DEMO/DEMO-1/comments/0002.md',
-        ],
+        ['DEMO/DEMO-1/comments/0001.md', 'DEMO/DEMO-1/comments/0002.md'],
       );
       expect(viewModel.selectedIssue?.hasCommentsLoaded, isTrue);
       expect(
-        viewModel.hasIssueDeferredError(issue.key, IssueDeferredSection.comments),
+        viewModel.hasIssueDeferredError(
+          issue.key,
+          IssueDeferredSection.comments,
+        ),
         isFalse,
       );
     },
@@ -734,6 +792,100 @@ void main() {
       expect(success, isTrue);
       expect(repository.loadSnapshotCount, 1);
       expect(viewModel.selectedIssue?.statusId, 'in-review');
+    },
+  );
+
+  test(
+    'view model reports hosted persistence feedback after a successful edit transition',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'in-review',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.message?.kind, TrackerMessageKind.githubMoveCommitted);
+      expect(viewModel.message?.issueKey, 'TRACK-12');
+      expect(viewModel.message?.statusLabel, 'In Review');
+    },
+  );
+
+  test(
+    'hosted edit saves refresh issue detail, board data, hierarchy data, and search state',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository(
+        textFixtures: _ts1088HostedEditFixtures(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'done',
+          resolutionId: 'done',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.priorityId, 'highest');
+      expect(viewModel.selectedIssue?.resolutionId, 'done');
+      expect(
+        viewModel.issues.firstWhere((candidate) => candidate.key == 'TRACK-12'),
+        isA<TrackStateIssue>()
+            .having((issue) => issue.statusId, 'statusId', 'done')
+            .having((issue) => issue.priorityId, 'priorityId', 'highest'),
+      );
+      expect(
+        viewModel.searchResults.any((candidate) => candidate.key == 'TRACK-12'),
+        isFalse,
+      );
+
+      await viewModel.updateQuery('key = TRACK-12');
+
+      expect(viewModel.searchResults, hasLength(1));
+      expect(viewModel.searchResults.single.statusId, 'done');
+      expect(viewModel.searchResults.single.priorityId, 'highest');
     },
   );
 
@@ -951,7 +1103,7 @@ void main() {
   );
 
   test(
-    'view model keeps release-backed hosted sessions upload-attempt ready while release writes remain restricted',
+    'view model keeps release-backed hosted sessions download-only while release writes remain restricted',
     () async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -980,7 +1132,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
-      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.canUploadIssueAttachments, isFalse);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
   );
@@ -1406,6 +1558,24 @@ void main() {
         repository.savedSettings?.statusDefinitions.map((status) => status.id),
         contains('blocked'),
       );
+    },
+  );
+
+  test(
+    'view model surfaces the no-commit guard when project settings save produces no git commit',
+    () async {
+      final repository = _NoCommitSettingsRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+
+      final success = await viewModel.saveProjectSettings(
+        viewModel.settingsCatalog!,
+      );
+
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(viewModel.message?.error, projectSettingsNoCommitProducedMessage);
     },
   );
 
@@ -1919,7 +2089,11 @@ class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     readScopes.add((repository: repository, workspaceId: workspaceId));
-    if (repository == this.repository && workspaceId == this.workspaceId) {
+    final usesDefaultHostedRepository =
+        repository == SetupTrackStateRepository.repositoryName &&
+        this.repository == 'trackstate/trackstate';
+    if ((repository == this.repository || usesDefaultHostedRepository) &&
+        workspaceId == this.workspaceId) {
       return token;
     }
     return null;
@@ -2091,6 +2265,15 @@ class _EditableSettingsRepository extends _LocalRuntimeRepository
     _snapshot = Future<TrackerSnapshot>.value(updated);
     return updated;
   }
+}
+
+class _NoCommitSettingsRepository extends _EditableSettingsRepository {
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async => throw const TrackStateRepositoryException(
+    projectSettingsNoCommitProducedMessage,
+  );
 }
 
 class _RecordingIssueMutationService extends IssueMutationService {
@@ -2506,6 +2689,76 @@ Map<String, Uint8List> _hostedHierarchyBinaryFixtures() => {
     2,
     3,
   ]),
+};
+
+Map<String, String> _ts1088HostedEditFixtures() => {
+  '.trackstate/index/issues.json':
+      '${jsonEncode([
+        {
+          'key': 'TRACK-11',
+          'path': 'TRACK-11/main.md',
+          'parent': null,
+          'epic': null,
+          'parentPath': null,
+          'epicPath': null,
+          'summary': 'Stabilize dashboard polling',
+          'issueType': 'story',
+          'status': 'todo',
+          'priority': 'highest',
+          'assignee': 'Denis',
+          'labels': ['dashboard'],
+          'updated': '2 minutes ago',
+          'children': [],
+          'archived': false,
+        },
+        {
+          'key': 'TRACK-12',
+          'path': 'TRACK-12/main.md',
+          'parent': null,
+          'epic': null,
+          'parentPath': null,
+          'epicPath': null,
+          'summary': 'Implement Git sync service',
+          'issueType': 'story',
+          'status': 'in-review',
+          'priority': 'high',
+          'assignee': 'Denis',
+          'labels': ['sync'],
+          'updated': '5 minutes ago',
+          'children': [],
+          'archived': false,
+        },
+      ])}\n',
+  'TRACK-12/main.md': '''
+---
+key: TRACK-12
+project: TRACK
+issueType: Story
+status: In Review
+priority: High
+summary: Implement Git sync service
+assignee: Denis
+reporter: Ana
+labels:
+  - sync
+components:
+  - storage
+updated: 5 minutes ago
+---
+
+# Description
+Read and write tracker files through GitHub Contents API.
+''',
+  'config/resolutions.json': '''
+[
+  {"id": "done", "name": "Done"}
+]
+''',
+  'TRACK/config/resolutions.json': '''
+[
+  {"id": "done", "name": "Done"}
+]
+''',
 };
 
 class _RecordingEditIssueMutationService extends IssueMutationService {
@@ -3242,7 +3495,8 @@ Healthy comment path.
 
   @override
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async => [
-    for (final path in _files.keys) RepositoryTreeEntry(path: path, type: 'blob'),
+    for (final path in _files.keys)
+      RepositoryTreeEntry(path: path, type: 'blob'),
   ];
 
   @override

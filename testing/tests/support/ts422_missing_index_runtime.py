@@ -48,7 +48,7 @@ class Ts422MissingIndexRuntime(AbstractContextManager[PlaywrightWebAppSession]):
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(viewport={"width": 1440, "height": 900})
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
