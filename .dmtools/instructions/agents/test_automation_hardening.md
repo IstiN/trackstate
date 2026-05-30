@@ -2,6 +2,38 @@
 
 Injected via `.dmtools/config.js → additionalInstructions`. The shared `agents/` submodule stays project-independent.
 
+## First action — CodeGraph guard
+
+For test automation tasks that require source-code or test-harness navigation,
+the first code-navigation command must be CodeGraph. Do this before `glob`,
+`find`, `grep`, `ls`, `cat`, `sed`, opening `testing/**`, or reading ticket
+fixture files.
+
+```mermaid
+flowchart TD
+  A([Start test automation task]) --> B{Need source or harness context?}
+  B -- Yes --> C[Run codegraph context with the ticket key and behavior]
+  C --> D[Use returned files and symbols for targeted reads]
+  B -- No --> E[State why CodeGraph is not needed]
+  D --> F[Continue implementation]
+  E --> F
+```
+
+Required pattern:
+
+```bash
+codegraph context "TS-893 test automation: startup retry restores Local Git after transient busy file system handle"
+```
+
+Rules:
+
+- Running `glob` or reading `testing/**` before CodeGraph fails the CI
+  CodeGraph usage gate.
+- If CodeGraph returns no context, still record that first call, then continue
+  with normal file discovery.
+- If Copilot rate-limits before CodeGraph is invoked, stop without edits; do
+  not let the run appear completed without CodeGraph usage.
+
 ## Architecture — required layer order
 
 ```mermaid
