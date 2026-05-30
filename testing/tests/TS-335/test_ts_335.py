@@ -87,7 +87,7 @@ def main() -> None:
                 result["connected_body_text"] = connection.body_text
                 _record_step(
                     result,
-                    step=0,
+                    step=1,
                     status="passed",
                     action="Connect GitHub so the hosted Create issue action becomes writable.",
                     observed=connection.body_text,

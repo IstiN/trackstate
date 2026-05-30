@@ -1,14 +1,34 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime, timezone
 import json
-from typing import Sequence
+from typing import Any, Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Request,
+        Response,
+        Route,
+        sync_playwright,
+    )
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Request = Response = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
 
 from testing.core.interfaces.web_app_session import (
+    ElementBoundingBox,
     FocusedElementObservation,
+    NewPageObservation,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -19,6 +39,13 @@ from testing.core.interfaces.web_app_session import (
 class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
+        self._network_recorders: dict[str, dict[str, Any]] = {}
+        self._page.on("request", self._handle_page_request)
+        self._page.on("requestfinished", self._handle_page_request_finished)
+        self._page.on("requestfailed", self._handle_page_request_failed)
+
+    def set_viewport_size(self, *, width: int, height: int) -> None:
+        self._page.set_viewport_size({"width": width, "height": height})
 
     def goto(
         self,
@@ -92,6 +119,27 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out filling selector "{selector}".',
             ) from error
 
+    def type_text(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+        delay_ms: int = 50,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.click(timeout=timeout_ms)
+            self._page.wait_for_timeout(250)
+            self._page.keyboard.type(value, delay=delay_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out typing into selector "{selector}".',
+            ) from error
+
     def press(
         self,
         selector: str,
@@ -124,17 +172,10 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out pressing page key "{key}".',
             ) from error
 
-    def count(
+    def click_and_set_files(
         self,
         selector: str,
-        *,
-        has_text: str | None = None,
-    ) -> int:
-        return self._locator(selector, has_text=has_text).count()
-
-    def focus(
-        self,
-        selector: str,
+        files: Sequence[str],
         *,
         has_text: str | None = None,
         index: int = 0,
@@ -143,11 +184,21 @@ class PlaywrightWebAppSession(WebAppSession):
         try:
             locator = self._locator(selector, has_text=has_text, index=index)
             locator.wait_for(state="visible", timeout=timeout_ms)
-            locator.evaluate("element => element.focus()")
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(files))
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
-                f'Timed out focusing selector "{selector}".',
+                f'Timed out setting files via selector "{selector}".',
             ) from error
+
+    def count(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+    ) -> int:
+        return self._page.locator(selector, has_text=has_text).count()
 
     def wait_for_count(
         self,
@@ -189,6 +240,43 @@ class PlaywrightWebAppSession(WebAppSession):
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
                 f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(file_paths))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out choosing files for selector "{selector}".',
+            ) from error
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.evaluate("element => element.focus()")
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out focusing selector "{selector}".',
             ) from error
 
     def read_text(
@@ -260,6 +348,31 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return self.body_text()
 
+    def wait_for_text_absence(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                "(expectedText) => !(document.body?.innerText ?? '').includes(expectedText)",
+                arg=text,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for text "{text}" to disappear.',
+            ) from error
+        return self.body_text()
+
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -296,10 +409,91 @@ class PlaywrightWebAppSession(WebAppSession):
     ) -> object:
         return self._page.evaluate(expression, arg)
 
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        try:
+            wait_handle = self._page.wait_for_function(
+                expression,
+                arg=arg,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for the page to satisfy a function condition.",
+            ) from error
+        return wait_handle.json_value()
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """
             () => {
+                const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+                const labelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const ariaLabel = normalize(element.getAttribute("aria-label"));
+                    if (ariaLabel) {
+                        return ariaLabel;
+                    }
+                    const placeholder = normalize(element.getAttribute("placeholder"));
+                    if (placeholder) {
+                        return placeholder;
+                    }
+                    const title = normalize(element.getAttribute("title"));
+                    if (title) {
+                        return title;
+                    }
+                    if (
+                        element instanceof HTMLInputElement
+                        || element instanceof HTMLTextAreaElement
+                        || element instanceof HTMLSelectElement
+                    ) {
+                        const value = normalize(element.value);
+                        if (value) {
+                            return value;
+                        }
+                    }
+                    return null;
+                };
+                const derivedOwnedLabelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const visited = new Set();
+                    const queue = [element];
+                    while (queue.length > 0) {
+                        const candidate = queue.shift();
+                        if (!(candidate instanceof Element) || visited.has(candidate)) {
+                            continue;
+                        }
+                        visited.add(candidate);
+                        const candidateLabel = labelFor(candidate);
+                        if (candidateLabel && candidate !== element) {
+                            return candidateLabel;
+                        }
+                        const ownedIds = normalize(candidate.getAttribute("aria-owns"))
+                            .split(" ")
+                            .map((value) => value.trim())
+                            .filter(Boolean);
+                        for (const ownedId of ownedIds) {
+                            const ownedElement = document.getElementById(ownedId);
+                            if (ownedElement instanceof Element) {
+                                queue.push(ownedElement);
+                            }
+                        }
+                        for (const descendant of candidate.querySelectorAll("*")) {
+                            if (descendant instanceof Element) {
+                                queue.push(descendant);
+                            }
+                        }
+                    }
+                    return null;
+                };
                 const active = document.activeElement;
                 if (!active) {
                     return {
@@ -311,12 +505,15 @@ class PlaywrightWebAppSession(WebAppSession):
                         outerHtml: "",
                     };
                 }
-                const text = (active.textContent || "").trim();
-                const ariaLabel = active.getAttribute("aria-label");
+                const text = normalize(active.textContent);
+                const accessibleName =
+                    labelFor(active)
+                    || derivedOwnedLabelFor(active)
+                    || null;
                 return {
                     tagName: active.tagName,
                     role: active.getAttribute("role"),
-                    accessibleName: ariaLabel || text || null,
+                    accessibleName,
                     text,
                     tabindex: active.getAttribute("tabindex"),
                     outerHtml: active.outerHTML.slice(0, 400),
@@ -337,6 +534,23 @@ class PlaywrightWebAppSession(WebAppSession):
             outer_html=str(payload["outerHtml"]),
         )
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
+
     def wait_for_download_after_keypress(
         self,
         key: str,
@@ -353,8 +567,239 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return download.suggested_filename
 
-    def screenshot(self, path: str) -> None:
-        self._page.screenshot(path=path, full_page=True)
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after clicking selector "{selector}".',
+            ) from error
+        return download.suggested_filename
+
+    def wait_for_new_page_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.keyboard.press(key)
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a new page after pressing "{key}".',
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
+
+    def wait_for_new_page_after_active_element_click(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            payload = self._page.evaluate(
+                """
+                () => {
+                    const isVisible = (element) => {
+                        if (!element) {
+                            return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return (
+                            rect.width > 0
+                            && rect.height > 0
+                            && style.visibility !== 'hidden'
+                            && style.display !== 'none'
+                        );
+                    };
+                    const active = document.activeElement;
+                    if (!active) {
+                        return null;
+                    }
+                    const candidates = [
+                        active,
+                        ...Array.from(active.querySelectorAll('*')),
+                    ];
+                    const target = candidates.find((element) => isVisible(element)) ?? null;
+                    if (!target) {
+                        return null;
+                    }
+                    const rect = target.getBoundingClientRect();
+                    return {
+                        x: rect.left + (rect.width / 2),
+                        y: rect.top + (rect.height / 2),
+                    };
+                }
+                """,
+            )
+            if not isinstance(payload, dict):
+                raise WebAppTimeoutError("No visible focused element was available to click.")
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.mouse.click(float(payload["x"]), float(payload["y"]))
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for a new page after clicking the focused element.",
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
+
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(trigger_selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as file_chooser_info:
+                locator.click(timeout=timeout_ms)
+            file_chooser = file_chooser_info.value
+            file_chooser.set_files(list(files), timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out selecting files after clicking selector "{trigger_selector}".',
+            ) from error
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._page.screenshot(path=path, full_page=full_page)
+
+    def bounding_box(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> ElementBoundingBox:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    return matches.length > index;
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+                timeout=timeout_ms,
+            )
+            payload = self._page.evaluate(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    const rect = matches[index].getBoundingClientRect();
+                    return {
+                      x: rect.x,
+                      y: rect.y,
+                      width: rect.width,
+                      height: rect.height,
+                    };
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out locating bounding box for selector "{selector}".',
+            ) from error
+        return ElementBoundingBox(
+            x=float(payload["x"]),
+            y=float(payload["y"]),
+            width=float(payload["width"]),
+            height=float(payload["height"]),
+        )
+
+    def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None:
+        self._page.mouse.click(x, y, delay=delay_ms)
+
+    def mouse_move(self, x: float, y: float) -> None:
+        self._page.mouse.move(x, y)
+
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        self._network_recorders[name] = {
+            "url_fragment": url_fragment.lower(),
+            "next_id": 1,
+            "entries": [],
+            "request_ids": {},
+        }
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        recorder = self._network_recorders.get(name)
+        if recorder is None:
+            return []
+        return [
+            dict(entry)
+            for entry in recorder.get("entries", [])
+            if isinstance(entry, dict)
+        ]
 
     def _locator(
         self,
@@ -365,6 +810,122 @@ class PlaywrightWebAppSession(WebAppSession):
     ):
         locator = self._page.locator(selector, has_text=has_text)
         return locator.nth(index)
+
+    def _handle_page_request(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        request_body = self._request_post_data(request)
+        for name, recorder in self._matching_network_recorders(request_url):
+            request_id = f"{name}-{recorder['next_id']}"
+            recorder["next_id"] += 1
+            recorder["request_ids"][id(request)] = request_id
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "request",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "bodyText": request_body,
+                },
+            )
+
+    def _handle_page_request_finished(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            response = request.response()
+            response_status = None if response is None else int(response.status)
+            response_text = self._response_text(response)
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "response",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "status": response_status,
+                    "responseText": response_text,
+                },
+            )
+
+    def _handle_page_request_failed(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "error",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "errorText": self._request_failure_text(request),
+                },
+            )
+
+    def _matching_network_recorders(
+        self,
+        request_url: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        lowered_url = request_url.lower()
+        return [
+            (name, recorder)
+            for name, recorder in self._network_recorders.items()
+            if str(recorder.get("url_fragment", "")) in lowered_url
+        ]
+
+    def _append_network_entry(
+        self,
+        recorder: dict[str, Any],
+        entry: dict[str, object],
+    ) -> None:
+        entries = recorder.setdefault("entries", [])
+        assert isinstance(entries, list)
+        entries.append(
+            {
+                **entry,
+                "order": len(entries) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _request_post_data(self, request: Request) -> str:
+        post_data = getattr(request, "post_data", None)
+        try:
+            payload = post_data() if callable(post_data) else post_data
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request body: {error}]]"
+        if payload is None:
+            return ""
+        return str(payload)
+
+    def _response_text(self, response: Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return response.text()
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable response body: {error}]]"
+
+    def _request_failure_text(self, request: Request) -> str | None:
+        failure = getattr(request, "failure", None)
+        try:
+            payload = failure() if callable(failure) else failure
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request failure: {error}]]"
+        if payload is None:
+            return None
+        return str(payload)
 
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
@@ -433,18 +994,27 @@ class PlaywrightStoredTokenWebAppRuntime(
             },
         )
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_key = self._repository.replace("/", ".")
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
+        )
         self._context.add_init_script(
             script=(
                 "(() => {"
-                f"const repositoryStorageKey = {json.dumps(storage_key)};"
+                f"const repositoryStorageKeys = {json.dumps(storage_keys)};"
                 f"const token = {json.dumps(self._token)};"
-                "const keys = ["
-                "  `trackstate.githubToken.${repositoryStorageKey}`,"
-                "  `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
-                "];"
-                "for (const key of keys) {"
-                "  window.localStorage.setItem(key, token);"
+                "for (const repositoryStorageKey of repositoryStorageKeys) {"
+                "  const keys = ["
+                "    `trackstate.githubToken.${repositoryStorageKey}`,"
+                "    `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "  ];"
+                "  for (const key of keys) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
                 "}"
                 "})()"
             ),

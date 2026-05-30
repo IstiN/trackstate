@@ -7,8 +7,10 @@ from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPa
 from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 from testing.core.interfaces.web_app_session import WebAppSession
 from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightStoredTokenWebAppRuntime,
     PlaywrightWebAppRuntime,
+)
+from testing.tests.support.stored_workspace_profiles_runtime import (
+    StoredWorkspaceProfilesRuntime,
 )
 
 WebAppRuntimeFactory = Callable[[], AbstractContextManager[WebAppSession]]
@@ -62,12 +64,29 @@ def create_live_tracker_app_with_stored_token(
     viewport_width: int = 1440,
     viewport_height: int = 960,
 ) -> TrackStateTrackerAppContext:
+    hosted_workspace_id = f"hosted:{config.repository.lower()}@{config.ref}"
+    workspace_state: dict[str, object] = {
+        "activeWorkspaceId": hosted_workspace_id,
+        "migrationComplete": True,
+        "profiles": [
+            {
+                "id": hosted_workspace_id,
+                "displayName": "",
+                "targetType": "hosted",
+                "target": config.repository,
+                "defaultBranch": config.ref,
+                "writeBranch": config.ref,
+            },
+        ],
+    }
     return TrackStateTrackerAppContext(
         config=config,
-        runtime_factory=lambda: PlaywrightStoredTokenWebAppRuntime(
+        runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
             repository=config.repository,
             token=token,
             viewport_width=viewport_width,
             viewport_height=viewport_height,
+            workspace_state=workspace_state,
+            workspace_token_profile_ids=(hosted_workspace_id,),
         ),
     )
