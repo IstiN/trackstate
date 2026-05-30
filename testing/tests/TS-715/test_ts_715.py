@@ -36,7 +36,10 @@ RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
-FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 900
+# The linked backoff bugs are marked Done, so this live test should still fail
+# far sooner than the old 15-minute workaround while leaving enough time to
+# capture a clearly delayed follow-up retry for bug reporting.
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 240
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
@@ -301,7 +304,7 @@ def _wait_for_failed_request(
         ),
         is_satisfied=lambda item: item is not None,
         timeout_seconds=timeout_seconds,
-        interval_seconds=1.0,
+        interval_seconds=2.0,
     )
     requests = tuple(observation.failed_sync_requests)
     if found and isinstance(request, HostedSyncAuthFailureRequest):
