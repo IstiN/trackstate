@@ -97,31 +97,7 @@ class LiveSettingsFieldsPage:
     def field_row_observation(self, field_name: str) -> SettingsFieldRowObservation:
         selector = self._field_row_selector(field_name)
         self._ensure_field_row_visible(selector)
-        payload = self._session.evaluate(
-            """
-            ({ rowSelector, fieldName }) => {
-              const row = document.querySelector(rowSelector);
-              if (!row) {
-                return null;
-              }
-              const deleteVisible = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).some((candidate) =>
-                (candidate.getAttribute('aria-label') ?? '').includes(
-                  `Delete field ${fieldName}`,
-                ),
-              );
-              return {
-                ariaLabel: row.getAttribute('aria-label') ?? '',
-                actionButtonCount: row.querySelectorAll(
-                  ':scope > flt-semantics[role="button"]',
-                ).length,
-                deleteActionVisible: deleteVisible,
-              };
-            }
-            """,
-            arg={"rowSelector": selector, "fieldName": field_name},
-        )
+        payload = self._field_row_payload(selector=selector, field_name=field_name)
         if not isinstance(payload, dict):
             raise AssertionError(
                 f'Could not locate the "{field_name}" field row in Settings > Fields.\n'
@@ -133,6 +109,106 @@ class LiveSettingsFieldsPage:
             action_button_count=int(payload["actionButtonCount"]),
             delete_action_visible=bool(payload["deleteActionVisible"]),
         )
+
+    def wait_for_field_row(
+        self,
+        field_name: str,
+        *,
+        timeout_ms: int = 20_000,
+    ) -> SettingsFieldRowObservation:
+        selector = self._field_row_selector(field_name)
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ rowSelector, fieldName }) => {
+                  const payloadForRow = (row) => {
+                    const deleteVisible = Array.from(
+                      document.querySelectorAll('flt-semantics[role="button"]'),
+                    ).some((candidate) =>
+                      (candidate.getAttribute('aria-label') ?? '').includes(
+                        `Delete field ${fieldName}`,
+                      ),
+                    );
+                    return {
+                      ariaLabel: row.getAttribute('aria-label') ?? '',
+                      actionButtonCount: row.querySelectorAll(
+                        ':scope > flt-semantics[role="button"]',
+                      ).length,
+                      deleteActionVisible: deleteVisible,
+                    };
+                  };
+                  const scrollRoots = () => {
+                    const roots = [];
+                    const documentScroller = document.scrollingElement;
+                    if (documentScroller) {
+                      roots.push(documentScroller);
+                    }
+                    for (const element of Array.from(document.querySelectorAll('*'))) {
+                      const style = window.getComputedStyle(element);
+                      const isScrollable =
+                        element.scrollHeight > element.clientHeight
+                        && ['auto', 'scroll'].includes(style.overflowY);
+                      if (isScrollable) {
+                        roots.push(element);
+                      }
+                    }
+                    return roots;
+                  };
+
+                  const row = document.querySelector(rowSelector);
+                  if (row) {
+                    row.scrollIntoView({ block: 'center' });
+                    return payloadForRow(row);
+                  }
+
+                  for (const root of scrollRoots()) {
+                    if (root === document.scrollingElement) {
+                      root.scrollBy(0, window.innerHeight * 0.8);
+                      continue;
+                    }
+                    root.scrollTop += Math.max(root.clientHeight * 0.8, 200);
+                  }
+
+                  const rowAfterScroll = document.querySelector(rowSelector);
+                  if (!rowAfterScroll) {
+                    return null;
+                  }
+                  rowAfterScroll.scrollIntoView({ block: 'center' });
+                  return payloadForRow(rowAfterScroll);
+                }
+                """,
+                arg={"rowSelector": selector, "fieldName": field_name},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            payload = None
+        if not isinstance(payload, dict):
+            available_rows = self.visible_field_rows()
+            raise AssertionError(
+                f'Could not locate the "{field_name}" field row in Settings > Fields '
+                f"after waiting {timeout_ms / 1000:.0f} seconds for the hosted save to "
+                "persist.\n"
+                f"Visible field rows after save: {available_rows}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return SettingsFieldRowObservation(
+            field_name=field_name,
+            aria_label=str(payload["ariaLabel"]),
+            action_button_count=int(payload["actionButtonCount"]),
+            delete_action_visible=bool(payload["deleteActionVisible"]),
+        )
+
+    def visible_field_rows(self) -> list[str]:
+        payload = self._session.evaluate(
+            """
+            () => Array.from(
+              document.querySelectorAll('flt-semantics[role="button"][aria-label*="Edit field"]'),
+            ).map((candidate) => candidate.getAttribute('aria-label') ?? '')
+            """
+        )
+        if not isinstance(payload, list):
+            return []
+        return [str(item) for item in payload if str(item).strip()]
 
     def open_field_editor(self, field_name: str) -> str:
         selector = self._field_row_edit_button_selector(field_name)
@@ -548,6 +624,33 @@ class LiveSettingsFieldsPage:
                 "scrolling the hosted field catalog.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+
+    def _field_row_payload(self, *, selector: str, field_name: str) -> object:
+        return self._session.evaluate(
+            """
+            ({ rowSelector, fieldName }) => {
+              const row = document.querySelector(rowSelector);
+              if (!row) {
+                return null;
+              }
+              const deleteVisible = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).some((candidate) =>
+                (candidate.getAttribute('aria-label') ?? '').includes(
+                  `Delete field ${fieldName}`,
+                ),
+              );
+              return {
+                ariaLabel: row.getAttribute('aria-label') ?? '',
+                actionButtonCount: row.querySelectorAll(
+                  ':scope > flt-semantics[role="button"]',
+                ).length,
+                deleteActionVisible: deleteVisible,
+              };
+            }
+            """,
+            arg={"rowSelector": selector, "fieldName": field_name},
+        )
 
     @staticmethod
     def _escape(value: str) -> str:

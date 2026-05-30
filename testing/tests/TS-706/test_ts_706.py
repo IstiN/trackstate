@@ -443,23 +443,37 @@ def _collect_precondition_run_evidence(
     if not _step_exists(result, 4):
         preflight_conclusion = _read_nested_string(preflight_job, "conclusion") or "<missing>"
         preflight_url = _read_nested_string(preflight_job, "html_url") or run_url
+        run_status = _read_nested_string(run, "status") or "<missing>"
+        run_conclusion = _read_nested_string(run, "conclusion") or "<missing>"
         downstream_status = _read_nested_string(downstream_job, "status") or "<missing>"
         downstream_conclusion = (
             _read_nested_string(downstream_job, "conclusion") or "<missing>"
         )
         downstream_url = _read_nested_string(downstream_job, "html_url")
-        _record_step(
-            result,
-            step=4,
-            status="blocked",
-            action=REQUEST_STEPS[3],
-            observed=(
+        visible_warning = _runner_permission_warning(result)
+        if (
+            preflight_conclusion == "success"
+            and run_status == "completed"
+            and downstream_conclusion != "skipped"
+        ):
+            observed = (
+                "Observed a precondition-not-met run instead of the ticket's expected failure "
+                f"path: preflight job conclusion was `{preflight_conclusion}`, run "
+                f"status/conclusion was `{run_status}` / `{run_conclusion}`, and downstream "
+                f"job status/conclusion was `{downstream_status}` / `{downstream_conclusion}`. "
+                "This run proves the ticket precondition was not met because a matching "
+                "macOS release runner was available during the live workflow execution. "
+                f"Preflight job URL: {preflight_url}. Downstream job URL: "
+                f"{downstream_url or '<missing>'}."
+            )
+        else:
+            observed = (
                 "Observed a precondition-not-met run instead of the ticket's expected failure "
                 f"path: preflight job conclusion was `{preflight_conclusion}`, downstream job "
                 f"status/conclusion was `{downstream_status}` / `{downstream_conclusion}`"
                 + (
-                    f", and the visible warning was `{_runner_permission_warning(result)}`"
-                    if _runner_permission_warning(result)
+                    f", and the visible warning was `{visible_warning}`"
+                    if visible_warning
                     else ""
                 )
                 + ". This signal is still ambiguous because a matching runner could be online "
@@ -467,7 +481,13 @@ def _collect_precondition_run_evidence(
                 "classifying it as a product defect. "
                 f"Preflight job URL: {preflight_url}. Downstream job URL: "
                 f"{downstream_url or '<missing>'}."
-            ),
+            )
+        _record_step(
+            result,
+            step=4,
+            status="blocked",
+            action=REQUEST_STEPS[3],
+            observed=observed,
         )
 
 
