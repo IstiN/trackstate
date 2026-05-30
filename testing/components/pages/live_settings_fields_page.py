@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
+from testing.core.interfaces.web_app_session import WebAppTimeoutError
 
 
 @dataclass(frozen=True)
@@ -182,7 +183,6 @@ class LiveSettingsFieldsPage:
             )
         else:
             self._session.wait_for_input_value(selector, value, timeout_ms=30_000)
-        self._session.press(selector, "Tab", timeout_ms=30_000)
 
     def select_field_type(self, type_name: str) -> None:
         self._session.click(self._button_selector, has_text="Type ", timeout_ms=30_000)
@@ -256,25 +256,65 @@ class LiveSettingsFieldsPage:
         }
 
     def save_field_editor(self, *, field_name: str | None = None) -> None:
-        self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
-        if field_name is None:
-            self._session.wait_for_function(
-                """
-                () => {
-                  const bodyText = document.body?.innerText ?? '';
-                  return !bodyText.includes('Add field') && !bodyText.includes('Edit field');
-                }
-                """,
-                timeout_ms=30_000,
-            )
-            return
-        self._session.wait_for_selector(
-            self._button_by_aria_label(f"Edit field {field_name}"),
+        self._click_editor_action_button("Save")
+        self._session.wait_for_function(
+            """
+            () => {
+              const bodyText = document.body?.innerText ?? '';
+              return !bodyText.includes('Add field') && !bodyText.includes('Edit field');
+            }
+            """,
             timeout_ms=30_000,
         )
 
-    def save_settings(self) -> None:
+    def save_settings(self) -> str:
         self._session.click(self._button_selector, has_text="Save settings", timeout_ms=30_000)
+        try:
+            self._session.wait_for_function(
+                """
+                (selector) => {
+                  const button = Array.from(document.querySelectorAll(selector)).find((candidate) => {
+                    const text = (candidate.innerText ?? '').trim();
+                    const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                    return text === 'Save settings' || aria === 'Save settings';
+                  });
+                  return !!button && button.getAttribute('aria-disabled') === 'true';
+                }
+                """,
+                arg='flt-semantics[aria-label="Save settings"], flt-semantics[role="button"]',
+                timeout_ms=10_000,
+            )
+        except WebAppTimeoutError:
+            pass
+        body_text = self._session.wait_for_function(
+            """
+            (selector) => {
+              const bodyText = document.body?.innerText ?? '';
+              const button = Array.from(document.querySelectorAll(selector)).find((candidate) => {
+                const text = (candidate.innerText ?? '').trim();
+                const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                return text === 'Save settings' || aria === 'Save settings';
+              });
+              if (!button) {
+                return null;
+              }
+              const isReady = button.getAttribute('aria-disabled') !== 'true'
+                && !bodyText.includes('Save failed:')
+                && !bodyText.includes('Syncing');
+              return isReady ? bodyText : null;
+            }
+            """,
+            arg='flt-semantics[aria-label="Save settings"], flt-semantics[role="button"]',
+            timeout_ms=120_000,
+        )
+        if not isinstance(body_text, str):
+            body_text = self.current_body_text()
+        if "Save failed:" in body_text:
+            raise AssertionError(
+                "Saving field settings failed in the hosted app.\n"
+                f"Observed body text:\n{body_text}",
+            )
+        return body_text
 
     def read_editor_observation(self) -> FieldEditorObservation:
         payload = self._session.evaluate(
@@ -359,7 +399,7 @@ class LiveSettingsFieldsPage:
         )
 
     def cancel_editor(self) -> None:
-        self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
+        self._click_editor_action_button("Cancel")
         self._session.wait_for_function(
             """
             () => {
@@ -426,6 +466,30 @@ class LiveSettingsFieldsPage:
 
     def _editor_input_selector(self, label: str) -> str:
         return f'input[aria-label="{self._escape(label)}"]'
+
+    def _click_editor_action_button(self, label: str) -> None:
+        clicked = self._session.wait_for_function(
+            """
+            (expectedLabel) => {
+              const normalize = (value) => (value ?? '').replace(/\\s+/g, ' ').trim();
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][flt-tappable]'),
+              ).find((candidate) => normalize(candidate.innerText) === expectedLabel);
+              if (!button) {
+                return false;
+              }
+              button.click();
+              return true;
+            }
+            """,
+            arg=label,
+            timeout_ms=30_000,
+        )
+        if clicked is not True:
+            raise AssertionError(
+                f'Could not locate the "{label}" editor action button.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
     def _scroll_into_view(self, selector: str) -> None:
         self._session.evaluate(

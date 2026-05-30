@@ -25,6 +25,8 @@ flutter test testing/tests/TS-318/test_ts_318.dart -r expanded
 - Flutter SDK available on `PATH`
 - No extra environment variables are required
 - The test uses the local widget fixture provided by this repository
+- The ticket does not specify a viewport, so the harness uses the desktop
+  default viewport: `1440x900`
 
 ## Expected result
 

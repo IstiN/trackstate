@@ -189,10 +189,15 @@ class ProviderSession {
 }
 
 class RepositoryTreeEntry {
-  const RepositoryTreeEntry({required this.path, required this.type});
+  const RepositoryTreeEntry({
+    required this.path,
+    required this.type,
+    this.revision,
+  });
 
   final String path;
   final String type;
+  final String? revision;
 }
 
 class RepositorySyncState {
