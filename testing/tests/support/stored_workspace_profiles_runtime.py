@@ -65,11 +65,18 @@ class StoredWorkspaceProfilesRuntime(PlaywrightStoredTokenWebAppRuntime):
         *,
         repository: str,
         token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
         workspace_state: dict[str, object],
         workspace_token_profile_ids: tuple[str, ...] = (),
         restore_local_workspace_handles: bool = True,
     ) -> None:
-        super().__init__(repository=repository, token=token)
+        super().__init__(
+            repository=repository,
+            token=token,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+        )
         self._workspace_state = workspace_state
         self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
         self._restore_local_workspace_handles = restore_local_workspace_handles
