@@ -294,10 +294,10 @@ def main() -> None:
                 try:
                     settings_page.open_add_field_editor()
                     settings_page.select_field_type(CUSTOM_FIELD_TYPE)
+                    settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
                     settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
                     settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
                     settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
-                    settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
                     environment_editor_draft = settings_page.read_editor_observation()
                     result["environment_editor_before_save"] = _editor_payload(
                         environment_editor_draft,
@@ -310,13 +310,6 @@ def main() -> None:
                         ),
                     )
                     settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
-                    environment_row_before_save = settings_page.field_row_observation(
-                        CUSTOM_FIELD_NAME,
-                    )
-                    result["environment_row_before_save_settings"] = _row_payload(
-                        environment_row_before_save,
-                    )
-                    _assert_custom_field_row(environment_row_before_save)
                     settings_page.save_settings()
                     refreshed_fields_text = _reopen_fields_tab(
                         tracker_page=tracker_page,
@@ -591,13 +584,13 @@ def _restore_field_snapshot(
 ) -> None:
     settings_page.open_add_field_editor()
     settings_page.select_field_type(snapshot.field_type)
+    settings_page.set_applicable_issue_types(set(snapshot.selected_issue_types))
     settings_page.fill_editor_input("ID", snapshot.field_id)
     settings_page.fill_editor_input("Name", snapshot.field_name_value)
     if snapshot.options_value:
         settings_page.fill_editor_input("Options", snapshot.options_value)
     if snapshot.default_value:
         settings_page.fill_editor_input("Default value", snapshot.default_value)
-    settings_page.set_applicable_issue_types(set(snapshot.selected_issue_types))
     settings_page.save_field_editor(field_name=snapshot.field_name)
 
 

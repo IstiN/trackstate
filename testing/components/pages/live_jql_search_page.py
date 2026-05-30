@@ -89,6 +89,11 @@ class LiveJqlSearchPage:
         query: str,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
+        if expected_count_summaries is not None:
+            return self.search_with_verified_result_change(
+                query=query,
+                expected_count_summaries=expected_count_summaries,
+            )
         field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
         return self._observe(

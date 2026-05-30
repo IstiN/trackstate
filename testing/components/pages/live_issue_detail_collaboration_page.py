@@ -73,6 +73,7 @@ class LiveIssueDetailCollaborationPage:
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
+    _connect_button_label = "Connect GitHub"
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
         'flt-semantics[aria-label*="Choose attachment"] flt-semantics[flt-tappable], '
@@ -108,8 +109,8 @@ class LiveIssueDetailCollaborationPage:
         user_login: str,
     ) -> None:
         connected_banners = TrackStateTrackerPage.connected_banner_variants(
-            user_login=user_login,
             repository=repository,
+            user_login=user_login,
         )
         if not self._is_connected(user_login=user_login, repository=repository):
             try:
@@ -125,7 +126,7 @@ class LiveIssueDetailCollaborationPage:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-389.\n"
+                "precondition for TS-396.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
 
@@ -1051,6 +1052,17 @@ class LiveIssueDetailCollaborationPage:
 
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
+
+    def wait_for_active_element_change(
+        self,
+        previous: FocusedElementObservation,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        return self._session.wait_for_active_element_change(
+            previous.outer_html,
+            timeout_ms=timeout_ms,
+        )
 
     def press_key(self, key: str) -> None:
         self._session.press_key(key, timeout_ms=30_000)
