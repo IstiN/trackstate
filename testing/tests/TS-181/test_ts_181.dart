@@ -73,7 +73,11 @@ void main() {
           );
         }
         await screen.openSection('Dashboard');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+        await _waitForTopBarLabelVisible(
+          screen,
+          'Local Git',
+          timeout: const Duration(seconds: 5),
+        );
 
         final localGitVisible = await _isTopBarLabelVisible(
           screen,
@@ -90,11 +94,11 @@ void main() {
           );
         }
 
-        final hostedLabelStillVisible = await _isAnyTopBarLabelVisible(
+        final hostedLabelsHidden = await _waitForAnyTopBarLabelHidden(
           screen,
           const ['Connect GitHub', 'Connected'],
         );
-        if (hostedLabelStillVisible) {
+        if (!hostedLabelsHidden) {
           fail(
             'Step 3 failed: the hosted repository-access label remained visible '
             'in the top bar after switching to Local Git. Top bar texts: '
@@ -215,6 +219,37 @@ Future<bool> _isAnyTopBarLabelVisible(
     }
   }
   return false;
+}
+
+Future<void> _waitForTopBarLabelVisible(
+  TrackStateAppComponent screen,
+  String label, {
+  Duration timeout = const Duration(seconds: 2),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (await _isTopBarLabelVisible(screen, label)) {
+      return;
+    }
+    await screen.waitWithoutInteraction(step);
+  }
+}
+
+Future<bool> _waitForAnyTopBarLabelHidden(
+  TrackStateAppComponent screen,
+  List<String> labels, {
+  Duration timeout = const Duration(seconds: 2),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (!await _isAnyTopBarLabelVisible(screen, labels)) {
+      return true;
+    }
+    await screen.waitWithoutInteraction(step);
+  }
+  return !await _isAnyTopBarLabelVisible(screen, labels);
 }
 
 Future<bool> _isAnyLabelVisible(
