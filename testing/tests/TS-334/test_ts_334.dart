@@ -4,6 +4,9 @@ import '../../core/interfaces/create_issue_accessibility_screen.dart';
 import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
+  const desktopViewportWidth = 1440.0;
+  const desktopViewportHeight = 900.0;
+
   testWidgets(
     'TS-334 Create issue desktop surface is flush with the right viewport edge',
     (tester) async {
@@ -11,7 +14,11 @@ void main() {
       CreateIssueAccessibilityScreenHandle? screen;
 
       try {
-        screen = await launchCreateIssueAccessibilityFixture(tester);
+        screen = await launchCreateIssueAccessibilityFixture(
+          tester,
+          initialViewportWidth: desktopViewportWidth,
+          initialViewportHeight: desktopViewportHeight,
+        );
         final failures = <String>[];
 
         for (final text in const [
@@ -38,16 +45,19 @@ void main() {
         final layout = screen.observeLayout();
         final rightEdge = layout.surfaceLeft + layout.surfaceWidth;
 
-        if (layout.viewportWidth != 1440) {
+        if (layout.viewportWidth != desktopViewportWidth) {
           failures.add(
-            'TS-334 validates the desktop Create issue layout at 1440px width, '
+            'TS-334 validates the desktop Create issue layout at '
+            '${desktopViewportWidth.toStringAsFixed(0)}px width, '
             'but observed ${layout.viewportWidth.toStringAsFixed(0)}px.',
           );
         }
-        if (layout.viewportHeight != 960) {
+        if (layout.viewportHeight != desktopViewportHeight) {
           failures.add(
-            'TS-334 validates the desktop Create issue layout at 960px height, '
-            'but observed ${layout.viewportHeight.toStringAsFixed(0)}px.',
+            'TS-334 uses the default desktop viewport height of '
+            '${desktopViewportHeight.toStringAsFixed(0)}px because the ticket '
+            'only specifies a 1440px-wide desktop viewport, but observed '
+            '${layout.viewportHeight.toStringAsFixed(0)}px.',
           );
         }
         if (layout.widthFraction < 0.3 || layout.widthFraction > 0.5) {
