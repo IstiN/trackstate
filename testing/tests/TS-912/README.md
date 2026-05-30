@@ -1,51 +1,48 @@
 # TS-912
 
-Validates that an unavailable saved local workspace can be restored only through
-the user-visible manual action exposed from the Workspace switcher and that the
-flow reaches a real browser directory-access callback before the workspace
-returns to `Local Git`.
+Validates that an unavailable saved local workspace can be restored to active
+`Local Git` only after the user-visible Retry or Re-authenticate flow completes
+the directory-access grant step.
 
 The automation:
-1. preloads one hosted workspace as active plus one saved local workspace in the
+1. seeds one hosted active workspace plus one saved local workspace in the
    `Unavailable` state
-2. recreates the local repository on disk so the saved workspace becomes
-   restorable
-3. opens the Workspace switcher and clicks the exact visible action exposed for
-   the unavailable saved workspace row
-4. records whether the deployed app invokes `showDirectoryPicker(...)` or
-   `FileSystemHandle.requestPermission(...)`, and if picker automation is
-   required it returns a real OPFS-backed `FileSystemDirectoryHandle`
-5. verifies the restored workspace becomes active as `Local Git`, the shell
-   stays interactive, and browser storage updates to the local workspace
+2. launches the production tracker in the supported Flutter widget runtime at
+   the ticket viewport of 1440x900
+3. opens the Workspace switcher, confirms the saved local row is visibly
+   unavailable, and taps the visible Retry or Re-authenticate action
+4. completes the directory-access grant through the app's
+   `workspaceDirectoryPicker` seam without manufacturing the restored end state
+5. verifies the same saved workspace becomes active as `Local Git`, the retry
+   action disappears, the directory-access prompt ran exactly once, and seeded
+   local issue content is visible from the restored repository
 
-## Install dependencies
-
-```bash
-python3 -m pip install playwright
-python3 -m playwright install chromium
-```
+The earlier live Playwright rework stopped at Chromium's native picker boundary.
+That boundary is an automation gap for that surface, not the intended TS-912
+result. This ticket now runs in the supported Flutter harness that can complete
+the access-grant step.
 
 ## Run this test
 
 ```bash
-mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-912/test_ts_912.py
+mkdir -p outputs && flutter test testing/tests/TS-912/test_ts_912.dart --reporter expanded
 ```
 
 ## Required environment and config
 
-- Python 3.12+
-- Playwright for Python with Chromium installed
-- `GH_TOKEN` or `GITHUB_TOKEN` with access to `IstiN/trackstate-setup`
-- defaults come from `testing/core/config/live_setup_test_config.py`
+- Flutter SDK available on `PATH`
+- Linux widget-test environment
 
 ## Expected result
 
 ```text
-Pass: the saved unavailable local workspace exposes a working manual restore
-action, the deployed app triggers a real browser directory-access callback, and
-the workspace becomes the active `Local Git` workspace.
+Pass: the saved unavailable local workspace exposes a working Retry or
+Re-authenticate action, the directory-access prompt completes once for the
+saved folder, the workspace becomes the active `Local Git` session, and the
+restored repository loads the seeded `DEMO-1` local issue content.
 
-Fail: the saved workspace action never triggers a directory-access callback, the
-deployed app reports an access/open error instead of a re-authentication flow,
-or the workspace never reaches `Local Git` after the callback.
+Fail: the unavailable row is missing, the visible retry-style action cannot be
+activated, the directory-access prompt does not complete, or the workspace does
+not settle to active `Local Git` with the seeded local content after access is
+granted.
 ```

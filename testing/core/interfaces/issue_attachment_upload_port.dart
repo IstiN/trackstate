@@ -15,5 +15,6 @@ abstract interface class IssueAttachmentUploadPort {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   });
 }

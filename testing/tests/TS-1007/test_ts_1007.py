@@ -840,8 +840,6 @@ def _resolve_primary_saved_workspace_row(
         return rows[0], "first-visible-row"
 
     return None, "missing-row"
-
-
 def _saved_workspace_row_focus_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> str:
@@ -1313,8 +1311,6 @@ def _clip_text(value: object, *, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
-
-
 def _capture_failure_screenshot(
     page: LiveWorkspaceSwitcherPage | None,
     result: dict[str, object],

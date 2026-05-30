@@ -184,7 +184,7 @@ jobs:
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           echo "desktop_archive=TrackState-macos-arm64-${release_tag}.zip" >> "$GITHUB_OUTPUT"
           echo "cli_archive=trackstate-cli-macos-arm64-${release_tag}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "checksum_file=trackstate-apple-${release_tag}-sha256.txt" >> "$GITHUB_OUTPUT"
+          echo "checksum_file=trackstate-apple-${release_tag}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Build macOS desktop app
         shell: bash
@@ -206,6 +206,10 @@ jobs:
           }
           trap cleanup_heartbeat EXIT
 
+          export ARCHS=arm64
+          export ONLY_ACTIVE_ARCH=YES
+          export EXCLUDED_ARCHS=x86_64
+
           flutter build macos --release \
             --build-name="${{ steps.metadata.outputs.build_name }}" \
             --build-number="${{ steps.metadata.outputs.build_number }}"
@@ -226,6 +230,77 @@ jobs:
         run: |
           set -euo pipefail
 
+          verify_arm64_binary() {
+            local binary_path="$1"
+            local label="$2"
+            local file_output=""
+
+            if [[ ! -f "$binary_path" ]]; then
+              echo "::error::$label binary was not found at $binary_path."
+              exit 1
+            fi
+
+            file_output="$(file "$binary_path")"
+            if [[ "$file_output" != *"Mach-O 64-bit executable arm64"* ]]; then
+              echo "::error::$label binary was not reported as Mach-O 64-bit executable arm64."
+              echo "::error::Observed file output: $file_output"
+              exit 1
+            fi
+
+            if [[ "$file_output" == *"universal binary"* || "$file_output" == *"x86_64"* ]]; then
+              echo "::error::$label binary still includes a non-arm64 architecture."
+              echo "::error::Observed file output: $file_output"
+              exit 1
+            fi
+          }
+
+          if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then
+            source ./tool/thin_macos_app_bundle.sh
+          else
+            read_file_mode() {
+              local file_path="$1"
+              stat -f '%Lp' "$file_path"
+            }
+
+            preserve_file_mode() {
+              local source_path="$1"
+              local target_path="$2"
+              local file_mode=""
+
+              file_mode="$(read_file_mode "$source_path")"
+              chmod "$file_mode" "$target_path"
+            }
+
+            thin_macho_to_arm64() {
+              local binary_path="$1"
+              local file_output=""
+              local thinned_path="${binary_path}.arm64"
+
+              if [[ ! -f "$binary_path" ]]; then
+                return
+              fi
+
+              file_output="$(file "$binary_path")"
+              if [[ "$file_output" != *"Mach-O"* ]]; then
+                return
+              fi
+
+              if [[ "$file_output" == *"Mach-O universal binary"* ]]; then
+                lipo -thin arm64 "$binary_path" -output "$thinned_path"
+                preserve_file_mode "$binary_path" "$thinned_path"
+                mv "$thinned_path" "$binary_path"
+              fi
+            }
+
+            thin_app_bundle_to_arm64() {
+              local app_bundle_path="$1"
+
+              while IFS= read -r -d '' bundle_file; do
+                thin_macho_to_arm64 "$bundle_file"
+              done < <(find "$app_bundle_path" -type f -print0)
+            }
+          fi
+
           app_path="build/macos/Build/Products/Release/trackstate.app"
           if [[ ! -d "$app_path" ]]; then
             app_path=""
@@ -239,6 +314,22 @@ jobs:
             echo "::error::macOS app bundle was not produced by flutter build macos."
             exit 1
           fi
+
+          thin_app_bundle_to_arm64 "$app_path"
+
+          app_binary=""
+          while IFS= read -r candidate_app_binary; do
+            app_binary="$candidate_app_binary"
+            break
+          done < <(find "$app_path/Contents/MacOS" -maxdepth 1 -type f)
+
+          if [[ -z "$app_binary" || ! -f "$app_binary" ]]; then
+            echo "::error::Unable to locate the macOS app executable inside $app_path."
+            exit 1
+          fi
+
+          verify_arm64_binary "$app_binary" "macOS desktop"
+          verify_arm64_binary "build/release/trackstate" "macOS CLI"
 
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" \
@@ -292,8 +383,12 @@ jobs:
           trap cleanup_heartbeat EXIT
 
           release_notes="$(mktemp)"
+          legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"
           if gh release view "$release_tag" >/dev/null 2>&1; then
             echo "Updating existing release $release_tag"
+            if gh release view "$release_tag" --json assets --jq '.assets[].name' | grep -Fxq "$legacy_checksum_asset"; then
+              gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes
+            fi
           else
             gh api \
               -H "Accept: application/vnd.github+json" \

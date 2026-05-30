@@ -1006,14 +1006,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text) async {
     await expectMessageBannerContains(text);
-    final visibleTexts = visibleTextsSnapshot();
-    final visibleSemantics = visibleSemanticsLabelsSnapshot();
     final liveRegionAlert = find.semantics.byPredicate((node) {
       final data = node.getSemanticsData();
       return data.label.trim() == text &&
           data.hasFlag(SemanticsFlag.isLiveRegion);
     }, describeMatch: (_) => 'live-region semantics node for "$text"');
 
+    final end = DateTime.now().add(const Duration(seconds: 2));
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (liveRegionAlert.evaluate().isNotEmpty) {
+        await _pumpFrames();
+        return;
+      }
+    }
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
     expect(
       liveRegionAlert.evaluate(),
       isNotEmpty,
@@ -1188,7 +1197,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
-  @override
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;
@@ -1436,8 +1444,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         'but it was not visible after opening the menu.',
       );
     }
-    await tester.ensureVisible(option.last);
-    await tester.tap(option.last, warnIfMissed: false);
+    final hitTestableOption = option.hitTestable();
+    final tappableOption = hitTestableOption.evaluate().isNotEmpty
+        ? hitTestableOption.last
+        : option.last;
+    await tester.ensureVisible(tappableOption);
+    await tester.tap(tappableOption, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -1451,8 +1463,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final dropdown = tester.widget<DropdownButtonFormField<Object?>>(
       field.first,
     );
+    final state = tester.state<FormFieldState<Object?>>(field.first);
+    final selectedValue = state.value?.toString();
     final helperText = dropdown.decoration.helperText?.trim();
     final hintText = dropdown.decoration.hintText?.trim();
+    final errorText = dropdown.decoration.errorText?.trim();
     for (final widget in tester.widgetList<Text>(
       find.descendant(of: field.first, matching: find.byType(Text)),
     )) {
@@ -1461,12 +1476,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           value.isEmpty ||
           value == label ||
           value == helperText ||
-          value == hintText) {
+          value == hintText ||
+          value == errorText) {
         continue;
       }
       return value;
     }
-    return null;
+    return selectedValue;
   }
 
   @override
@@ -1850,7 +1866,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return false;
     }
     await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save' || label == 'Post comment') {
+    if (label == 'Save' || label == 'Save settings') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 2000));
+      });
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+      }
+      return true;
+    }
+    if (label == 'Create' || label == 'Post comment') {
       await tester.runAsync(() async {
         await tester.tap(target.first, warnIfMissed: false);
         await tester.pump();

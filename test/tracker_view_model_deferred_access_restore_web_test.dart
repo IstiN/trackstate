@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
@@ -10,39 +9,13 @@ import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.da
 
 void main() {
   test(
-    'deferred access restore publishes the snapshot before delayed connect completes',
+    'provider-backed deferred access restore publishes the setup snapshot before delayed GitHub auth completes',
     () async {
       const workspaceId = 'local:/tmp/trackstate-demo@main';
-      final repository = _DelayedConnectRepository();
-      final viewModel = TrackerViewModel(
-        repository: repository,
-        authStore: _FixedAuthStore(),
-        workspaceId: workspaceId,
-      );
-      addTearDown(viewModel.dispose);
-
-      final completedQuickly = await Future.any([
-        viewModel.load(deferAccessRestore: true).then((_) => true),
-        Future<bool>.delayed(const Duration(milliseconds: 200), () => false),
-      ]);
-
-      expect(
-        completedQuickly,
-        isTrue,
-        reason:
-            'load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
-      );
-      expect(viewModel.snapshot, isNotNull);
-      expect(viewModel.isLoading, isFalse);
-    },
-  );
-
-  test(
-    'provider-backed deferred access restore publishes the setup snapshot before delayed connect completes',
-    () async {
-      const workspaceId = 'local:/tmp/trackstate-demo@main';
-      final repository = ProviderBackedTrackStateRepository(
-        provider: _DelayedFixtureProvider(),
+      final provider = _DelayedFixtureProvider();
+      final repository = _DelayedFixtureRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
       );
       final viewModel = TrackerViewModel(
         repository: repository,
@@ -51,8 +24,9 @@ void main() {
       );
       addTearDown(viewModel.dispose);
 
+      final loadFuture = viewModel.load(deferAccessRestore: true);
       final completedQuickly = await Future.any([
-        viewModel.load(deferAccessRestore: true).then((_) => true),
+        loadFuture.then((_) => true),
         Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
       ]);
 
@@ -60,11 +34,278 @@ void main() {
         completedQuickly,
         isTrue,
         reason:
-            'Provider-backed load(deferAccessRestore: true) must not wait for the delayed GitHub connect path.',
+            'Provider-backed load(deferAccessRestore: true) should publish the shell snapshot without waiting for delayed startup auth.',
       );
+      await loadFuture;
       expect(viewModel.snapshot, isNotNull);
       expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
       expect(viewModel.isLoading, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.isConnected, isFalse);
+      expect(viewModel.providerSession, isNotNull);
+      expect(viewModel.providerSession?.canRead, isTrue);
+      expect(viewModel.providerSession?.canWrite, isFalse);
+      expect(viewModel.providerSession?.canCreateBranch, isFalse);
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.providerSession?.canWrite, isTrue);
+      expect(viewModel.providerSession?.canCreateBranch, isTrue);
+    },
+  );
+
+  test(
+    'provider-backed deferred access restore does not await the initial search page when search needs delayed auth',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final provider = _DelayedFixtureProvider();
+      final repository = _DelayedSearchRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
+      ]);
+
+      expect(
+        completedQuickly,
+        isTrue,
+        reason:
+            'Provider-backed startup should publish the shell snapshot without waiting for the initial search page when auth is still pending.',
+      );
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(repository.searchStarted, isTrue);
+      expect(repository.searchCompleted, isFalse);
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.searchCompleted, isTrue);
+      expect(viewModel.hasLoadedInitialSearchResults, isTrue);
+      expect(viewModel.searchResults, isNotEmpty);
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.providerSession?.canWrite, isTrue);
+      expect(viewModel.providerSession?.canCreateBranch, isTrue);
+    },
+  );
+
+  test(
+    'provider-backed deferred access restore publishes a fallback shell snapshot when hosted bootstrap exceeds the startup timeout',
+    () async {
+      const workspaceId = 'local:/tmp/trackstate-demo@main';
+      final provider = _DelayedFixtureProvider();
+      final repository = _SlowHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('IstiN/trackstate-setup'),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.project?.repository, 'IstiN/trackstate-setup');
+      expect(viewModel.issues, isEmpty);
+      expect(
+        viewModel.snapshot?.loadWarnings,
+        contains(
+          contains(
+            ProviderBackedTrackStateRepository
+                .hostedStartupShellFallbackWarningPrefix,
+          ),
+        ),
+      );
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.isConnected, isFalse);
+      expect(viewModel.providerSession?.canWrite, isFalse);
+      expect(viewModel.providerSession?.canCreateBranch, isFalse);
+    },
+  );
+
+  test(
+    'provider-backed deferred access restore keeps the hosted fallback access mode stable after delayed auth completes',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _AttachmentRestrictedDelayedProvider();
+      final repository = _SlowReloadingHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForAttachmentRestrictedRepository(
+          'trackstate/trackstate',
+        ),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+      expect(
+        viewModel.snapshot?.loadWarnings,
+        contains(
+          contains(
+            ProviderBackedTrackStateRepository
+                .hostedStartupShellFallbackWarningPrefix,
+          ),
+        ),
+      );
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason:
+            'Late auth completion must not mutate the visible hosted fallback access state after the shell is already interactive.',
+      );
+    },
+  );
+
+  test(
+    'provider-backed deferred auth timeout keeps hosted access disconnected after a late automatic auth success',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _AttachmentRestrictedDelayedProvider();
+      final repository = _DelayedFixtureRepository(
+        provider: provider,
+        snapshot: await _snapshotForAttachmentRestrictedRepository(
+          'trackstate/trackstate',
+        ),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 500), () => false),
+      ]);
+
+      expect(
+        completedQuickly,
+        isTrue,
+        reason:
+            'The hosted shell should publish immediately from the loaded snapshot while automatic auth restore continues in the background.',
+      );
+      await loadFuture;
+      expect(viewModel.snapshot, isNotNull);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+
+      await Future<void>.delayed(const Duration(seconds: 11));
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason:
+            'The visible hosted access mode must still be the startup disconnected state when the automatic auth restore times out.',
+      );
+
+      provider.completeAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason:
+            'Late automatic auth success after the startup timeout must not mutate the visible hosted access state once the interactive shell is already on screen.',
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 20)),
+  );
+
+  test(
+    'provider-backed hosted fallback clears the startup override when manual sign-in succeeds after timeout',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _AttachmentRestrictedDelayedProvider();
+      final repository = _SlowReloadingHostedStartupRepository(
+        provider: provider,
+        snapshot: await _snapshotForAttachmentRestrictedRepository(
+          'trackstate/trackstate',
+        ),
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+      );
+      addTearDown(viewModel.dispose);
+
+      final loadFuture = viewModel.load(deferAccessRestore: true);
+      final completedQuickly = await Future.any([
+        loadFuture.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 80), () => false),
+      ]);
+
+      expect(completedQuickly, isTrue);
+      await loadFuture;
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+
+      final connectFuture = viewModel.connectGitHub('manual-token');
+      await Future<void>.delayed(Duration.zero);
+      provider.completeAuthentication();
+      await connectFuture;
+
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.connectedUser?.login, 'demo-user');
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.attachmentRestricted,
+        reason:
+            'Manual post-timeout sign-in must clear the hosted startup fallback override so the visible access state can leave Needs sign-in.',
+      );
     },
   );
 
@@ -88,7 +329,10 @@ void main() {
         viewModel.message?.kind,
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 
@@ -121,18 +365,6 @@ void main() {
       );
     },
   );
-}
-
-class _DelayedConnectRepository extends DemoTrackStateRepository {
-  _DelayedConnectRepository();
-
-  final Completer<void> _connectCompleter = Completer<void>();
-
-  @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    await _connectCompleter.future;
-    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
-  }
 }
 
 class _FailingConnectRepository extends DemoTrackStateRepository {
@@ -179,13 +411,156 @@ class _FixedAuthStore implements TrackStateAuthStore {
   }) async {}
 }
 
+Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
+  final base = await const DemoTrackStateRepository().loadSnapshot();
+  return TrackerSnapshot(
+    project: ProjectConfig(
+      key: base.project.key,
+      name: base.project.name,
+      repository: repository,
+      branch: base.project.branch,
+      defaultLocale: base.project.defaultLocale,
+      supportedLocales: base.project.supportedLocales,
+      issueTypeDefinitions: base.project.issueTypeDefinitions,
+      statusDefinitions: base.project.statusDefinitions,
+      fieldDefinitions: base.project.fieldDefinitions,
+      workflowDefinitions: base.project.workflowDefinitions,
+      priorityDefinitions: base.project.priorityDefinitions,
+      versionDefinitions: base.project.versionDefinitions,
+      componentDefinitions: base.project.componentDefinitions,
+      resolutionDefinitions: base.project.resolutionDefinitions,
+      attachmentStorage: base.project.attachmentStorage,
+    ),
+    issues: base.issues,
+    repositoryIndex: base.repositoryIndex,
+    loadWarnings: base.loadWarnings,
+    readiness: base.readiness,
+    startupRecovery: base.startupRecovery,
+  );
+}
+
+Future<TrackerSnapshot> _snapshotForAttachmentRestrictedRepository(
+  String repository,
+) async {
+  final base = await _snapshotForRepository(repository);
+  return TrackerSnapshot(
+    project: ProjectConfig(
+      key: base.project.key,
+      name: base.project.name,
+      repository: base.project.repository,
+      branch: base.project.branch,
+      defaultLocale: base.project.defaultLocale,
+      supportedLocales: base.project.supportedLocales,
+      issueTypeDefinitions: base.project.issueTypeDefinitions,
+      statusDefinitions: base.project.statusDefinitions,
+      fieldDefinitions: base.project.fieldDefinitions,
+      workflowDefinitions: base.project.workflowDefinitions,
+      priorityDefinitions: base.project.priorityDefinitions,
+      versionDefinitions: base.project.versionDefinitions,
+      componentDefinitions: base.project.componentDefinitions,
+      resolutionDefinitions: base.project.resolutionDefinitions,
+      attachmentStorage: const ProjectAttachmentStorageSettings(
+        mode: AttachmentStorageMode.githubReleases,
+        githubReleases: GitHubReleasesAttachmentStorageSettings(
+          tagPrefix: 'trackstate-attachments-',
+        ),
+      ),
+    ),
+    issues: base.issues,
+    repositoryIndex: base.repositoryIndex,
+    loadWarnings: base.loadWarnings,
+    readiness: base.readiness,
+    startupRecovery: base.startupRecovery,
+  );
+}
+
+class _DelayedFixtureRepository extends ProviderBackedTrackStateRepository {
+  _DelayedFixtureRepository({required this.snapshot, required this.provider})
+    : super(provider: provider);
+
+  final TrackerSnapshot snapshot;
+  final _DelayedFixtureProvider provider;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _SlowHostedStartupRepository extends ProviderBackedTrackStateRepository {
+  _SlowHostedStartupRepository({
+    required this.snapshot,
+    required _DelayedFixtureProvider provider,
+  }) : super(
+         provider: provider,
+         hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+       );
+
+  final TrackerSnapshot snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _SlowReloadingHostedStartupRepository
+    extends ProviderBackedTrackStateRepository {
+  _SlowReloadingHostedStartupRepository({
+    required this.provider,
+    required this.snapshot,
+  }) : super(
+         provider: provider,
+         hostedStartupProbeTimeout: const Duration(milliseconds: 10),
+       );
+
+  final _AttachmentRestrictedDelayedProvider provider;
+  final TrackerSnapshot snapshot;
+  int _loadSnapshotCalls = 0;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    _loadSnapshotCalls += 1;
+    if (_loadSnapshotCalls == 1) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+}
+
+class _DelayedSearchRepository extends _DelayedFixtureRepository {
+  _DelayedSearchRepository({required super.snapshot, required super.provider});
+  bool searchStarted = false;
+  bool searchCompleted = false;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    searchStarted = true;
+    await provider.waitForAuthentication();
+    final page = await super.searchIssuePage(
+      jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+    searchCompleted = true;
+    return page;
+  }
+}
+
 class _DelayedFixtureProvider implements TrackStateProviderAdapter {
   _DelayedFixtureProvider();
 
   final Completer<void> _authenticationGate = Completer<void>();
-  final Directory _root = Directory(
-    '${Directory.current.path}/trackstate-setup/DEMO',
-  );
   bool _authenticated = false;
 
   @override
@@ -253,35 +628,20 @@ class _DelayedFixtureProvider implements TrackStateProviderAdapter {
   Future<bool> isLfsTracked(String path) async => false;
 
   @override
-  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
-    final entries = <RepositoryTreeEntry>[];
-    await for (final entity in _root.list(recursive: true, followLinks: false)) {
-      final relative = entity.path.substring(_root.parent.path.length + 1);
-      if (entity is File) {
-        entries.add(RepositoryTreeEntry(path: relative, type: 'blob'));
-      }
-    }
-    entries.sort((left, right) => left.path.compareTo(right.path));
-    return entries;
-  }
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
 
   @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
-  }) async {
-    final file = File('${_root.parent.path}/$path');
-    return RepositoryAttachment(path: path, bytes: await file.readAsBytes());
-  }
+  }) async => throw UnimplementedError();
 
   @override
   Future<RepositoryTextFile> readTextFile(
     String path, {
     required String ref,
-  }) async {
-    final file = File('${_root.parent.path}/$path');
-    return RepositoryTextFile(path: path, content: await file.readAsString());
-  }
+  }) async => throw UnimplementedError();
 
   @override
   Future<String> resolveWriteBranch() async => 'main';
@@ -302,6 +662,34 @@ class _DelayedFixtureProvider implements TrackStateProviderAdapter {
     path: request.path,
     branch: request.branch,
     revision: 'fixture-revision',
+  );
+
+  void completeAuthentication() {
+    if (_authenticationGate.isCompleted) {
+      return;
+    }
+    _authenticationGate.complete();
+  }
+
+  Future<void> waitForAuthentication() => _authenticationGate.future;
+}
+
+class _AttachmentRestrictedDelayedProvider extends _DelayedFixtureProvider {
+  @override
+  String get repositoryLabel => 'trackstate/trackstate';
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _authenticated,
+    isAdmin: false,
+    canCreateBranch: _authenticated,
+    canManageAttachments: false,
+    attachmentUploadMode: _authenticated
+        ? AttachmentUploadMode.noLfs
+        : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
+    canCheckCollaborators: false,
   );
 }
 

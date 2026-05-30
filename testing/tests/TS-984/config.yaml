@@ -6,7 +6,7 @@ dependencies:
   - Playwright for Python with Chromium installed
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
-  - Opens the deployed TrackState web app with a stored signed-in GitHub token and preloaded local plus hosted workspace profiles.
-  - Delays the initial GitHub /user startup probe for 31 seconds so the live startup path stays pending beyond the explicit 11-second timeout.
-  - Waits through the 11-second timeout before asserting so the test verifies the deployed fallback behavior instead of checking too early.
+  - Opens the deployed TrackState web app with a stored signed-in GitHub token, a preloaded active local workspace plus hosted fallback profile, and hosted workspace-scoped token storage.
+  - Delays the initial GitHub /user startup probe for 31 seconds inside the browser runtime so the live startup path stays pending beyond the explicit 11-second timeout.
+  - Waits through the 11-second timeout from application launch before asserting so the test verifies the deployed fallback behavior instead of checking too early.
   - Confirms the visible shell, TopBar workspace trigger, and branding remain available while the delayed startup probe is still pending.
