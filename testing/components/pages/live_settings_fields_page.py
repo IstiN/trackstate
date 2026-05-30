@@ -121,24 +121,60 @@ class LiveSettingsFieldsPage:
             payload = self._session.wait_for_function(
                 """
                 ({ rowSelector, fieldName }) => {
+                  const payloadForRow = (row) => {
+                    const deleteVisible = Array.from(
+                      document.querySelectorAll('flt-semantics[role="button"]'),
+                    ).some((candidate) =>
+                      (candidate.getAttribute('aria-label') ?? '').includes(
+                        `Delete field ${fieldName}`,
+                      ),
+                    );
+                    return {
+                      ariaLabel: row.getAttribute('aria-label') ?? '',
+                      actionButtonCount: row.querySelectorAll(
+                        ':scope > flt-semantics[role="button"]',
+                      ).length,
+                      deleteActionVisible: deleteVisible,
+                    };
+                  };
+                  const scrollRoots = () => {
+                    const roots = [];
+                    const documentScroller = document.scrollingElement;
+                    if (documentScroller) {
+                      roots.push(documentScroller);
+                    }
+                    for (const element of Array.from(document.querySelectorAll('*'))) {
+                      const style = window.getComputedStyle(element);
+                      const isScrollable =
+                        element.scrollHeight > element.clientHeight
+                        && ['auto', 'scroll'].includes(style.overflowY);
+                      if (isScrollable) {
+                        roots.push(element);
+                      }
+                    }
+                    return roots;
+                  };
+
                   const row = document.querySelector(rowSelector);
-                  if (!row) {
+                  if (row) {
+                    row.scrollIntoView({ block: 'center' });
+                    return payloadForRow(row);
+                  }
+
+                  for (const root of scrollRoots()) {
+                    if (root === document.scrollingElement) {
+                      root.scrollBy(0, window.innerHeight * 0.8);
+                      continue;
+                    }
+                    root.scrollTop += Math.max(root.clientHeight * 0.8, 200);
+                  }
+
+                  const rowAfterScroll = document.querySelector(rowSelector);
+                  if (!rowAfterScroll) {
                     return null;
                   }
-                  const deleteVisible = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
-                  ).some((candidate) =>
-                    (candidate.getAttribute('aria-label') ?? '').includes(
-                      `Delete field ${fieldName}`,
-                    ),
-                  );
-                  return {
-                    ariaLabel: row.getAttribute('aria-label') ?? '',
-                    actionButtonCount: row.querySelectorAll(
-                      ':scope > flt-semantics[role="button"]',
-                    ).length,
-                    deleteActionVisible: deleteVisible,
-                  };
+                  rowAfterScroll.scrollIntoView({ block: 'center' });
+                  return payloadForRow(rowAfterScroll);
                 }
                 """,
                 arg={"rowSelector": selector, "fieldName": field_name},
