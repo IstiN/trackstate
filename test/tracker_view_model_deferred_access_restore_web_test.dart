@@ -329,7 +329,10 @@ void main() {
         viewModel.message?.kind,
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 

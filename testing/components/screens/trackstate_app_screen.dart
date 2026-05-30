@@ -1197,7 +1197,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
-  @override
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;

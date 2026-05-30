@@ -6,10 +6,12 @@ limit during deferred bootstrap against `https://istin.github.io/trackstate-setu
 The automation:
 1. opens the deployed hosted tracker
 2. blocks `DEMO/.trackstate/index/tombstones.json` with a synthetic GitHub
-   rate-limit 403 during deferred bootstrap
-3. verifies the app shell remains visible instead of collapsing into a dead end
-4. verifies the user lands in **Settings** and the Settings admin content is
-   active
+    rate-limit 403 during deferred bootstrap
+3. records the hosted shell markers visible around the blocked tombstones
+   request and proves the request was captured during deferred bootstrap once
+   the recoverable shell path was available
+4. verifies the app shell remains visible instead of collapsing into a dead end
+5. verifies the user lands in **Settings**
 
 ## Install dependencies
 
@@ -38,4 +40,3 @@ shell, exposes the recovery affordances, and selects Settings automatically.
 Fail: the rate-limited deferred bootstrap does not occur, the hosted shell does
 not remain visible, or the visible selected section is not Settings.
 ```
-

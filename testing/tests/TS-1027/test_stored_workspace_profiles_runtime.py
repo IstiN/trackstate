@@ -15,6 +15,7 @@ from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
     WorkspaceProfilesRuntime,
     _build_preload_script,
+    _workspace_token_storage_keys,
 )
 from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 
@@ -147,6 +148,30 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
             [expected_script],
             "Stored workspace preload must be injected into the current page or "
             "browser tests miss saved workspace state during the first load.",
+        )
+
+    def test_workspace_token_storage_keys_default_to_all_workspace_profiles(self) -> None:
+        keys = _workspace_token_storage_keys(
+            {
+                "activeWorkspaceId": "local:/tmp/demo@main",
+                "profiles": [
+                    {"id": "local:/tmp/demo@main"},
+                    {"id": "hosted:istin/trackstate-setup@main"},
+                ],
+            },
+        )
+
+        self.assertEqual(
+            keys,
+            [
+                "trackstate.githubToken.workspace.local%3A%2Ftmp%2Fdemo%40main",
+                "flutter.trackstate.githubToken.workspace.local%3A%2Ftmp%2Fdemo%40main",
+                "trackstate.githubToken.workspace.hosted%3Aistin%2Ftrackstate-setup%40main",
+                "flutter.trackstate.githubToken.workspace.hosted%3Aistin%2Ftrackstate-setup%40main",
+            ],
+            "When callers omit workspace_token_profile_ids, the shared runtime "
+            "must preserve the legacy default of seeding every saved workspace "
+            "token key so startup restore tests still exercise the real auth path.",
         )
 
     def test_preload_script_seeds_restorable_local_workspace_fixture_for_existing_path(

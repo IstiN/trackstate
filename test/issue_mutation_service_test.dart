@@ -487,7 +487,12 @@ void main() {
       issueKey: 'DEMO-2',
       body: 'CLI parity keeps comments in the shared mutation layer.',
     );
-    final head = await Process.run('git', ['-C', repo.path, 'rev-parse', 'HEAD']);
+    final head = await Process.run('git', [
+      '-C',
+      repo.path,
+      'rev-parse',
+      'HEAD',
+    ]);
 
     expect(result.isSuccess, isTrue);
     expect(result.revision, head.stdout.toString().trim());
@@ -882,7 +887,7 @@ void main() {
   });
 
   test(
-    'github provider validates expected revisions against the captured commit sha',
+    'github provider validates expected revisions from the captured tree snapshot',
     () async {
       final backend = _HostedRepositoryBackend(files: _mutationFixtureFiles());
       final provider = GitHubTrackStateProvider(
@@ -901,8 +906,8 @@ void main() {
         'DEMO/DEMO-10/main.md',
         ref: 'main',
       );
-      final capturedHeadCommitSha = backend.headCommitSha;
-      backend.clearObservedContentRefs();
+      final capturedHeadTreeSha = backend.headTreeSha;
+      backend.clearObservedRevisionLookups();
 
       await provider.applyFileChanges(
         RepositoryFileChangeRequest(
@@ -921,7 +926,8 @@ void main() {
         ),
       );
 
-      expect(backend.observedContentRefs, [capturedHeadCommitSha]);
+      expect(backend.observedContentRefs, isEmpty);
+      expect(backend.observedTreeShas, [capturedHeadTreeSha]);
     },
   );
 }
@@ -1265,6 +1271,7 @@ class _HostedRepositoryBackend {
       <String, Map<String, Uint8List>>{};
   final Map<String, String> _commitTrees = <String, String>{};
   final List<String> _observedContentRefs = <String>[];
+  final List<String> _observedTreeShas = <String>[];
   int _shaCounter = 0;
   late String _headCommitSha;
 
@@ -1273,11 +1280,16 @@ class _HostedRepositoryBackend {
   bool exists(String path) => _files.containsKey(path);
 
   String get headCommitSha => _headCommitSha;
+  String get headTreeSha => _commitTrees[_headCommitSha]!;
 
   List<String> get observedContentRefs =>
       List.unmodifiable(_observedContentRefs);
+  List<String> get observedTreeShas => List.unmodifiable(_observedTreeShas);
 
-  void clearObservedContentRefs() => _observedContentRefs.clear();
+  void clearObservedRevisionLookups() {
+    _observedContentRefs.clear();
+    _observedTreeShas.clear();
+  }
 
   void advanceHeadText(String path, String content) {
     _files[path] = Uint8List.fromList(utf8.encode(content));
@@ -1309,7 +1321,35 @@ class _HostedRepositoryBackend {
       return http.Response(
         jsonEncode({
           'tree': [
-            for (final filePath in tree) {'path': filePath, 'type': 'blob'},
+            for (final filePath in tree)
+              {
+                'path': filePath,
+                'type': 'blob',
+                'sha': _blobRevision(_files[filePath]!),
+              },
+          ],
+        }),
+        200,
+      );
+    }
+    if (path.startsWith('/repos/$_repository/git/trees/') &&
+        request.method == 'GET') {
+      final treeSha = path.split('/').last;
+      final snapshot = _treeSnapshots[treeSha];
+      if (snapshot == null) {
+        return http.Response('{"message":"Unhandled"}', 404);
+      }
+      _observedTreeShas.add(treeSha);
+      final tree = snapshot.keys.toList()..sort();
+      return http.Response(
+        jsonEncode({
+          'tree': [
+            for (final filePath in tree)
+              {
+                'path': filePath,
+                'type': 'blob',
+                'sha': _blobRevision(snapshot[filePath]!),
+              },
           ],
         }),
         200,

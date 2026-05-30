@@ -13,6 +13,7 @@ import '../../../../../data/repositories/browser_local_workspace_repository.dart
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/providers/trackstate_provider.dart';
 import '../../../../../data/services/local_workspace_onboarding_service.dart';
 import '../../../../../data/services/trackstate_auth_store.dart';
 import '../../../../../data/services/workspace_profile_service.dart';
@@ -25,6 +26,10 @@ import '../services/attachment_picker.dart';
 import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
     as browser_focusable_control;
+import '../services/browser_text_field_value_sync_stub.dart'
+    if (dart.library.js_interop)
+        '../services/browser_text_field_value_sync_web.dart'
+    as browser_text_field_value_sync;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -76,6 +81,8 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+const _browserDesktopHeaderControlsSemanticsIdentifier =
+    'trackstate-desktop-header-controls';
 const _workspaceSwitcherTargetTypeHostedFocusId =
     'trackstate-workspace-switcher-target-type-hosted';
 const _workspaceSwitcherTargetTypeLocalFocusId =
@@ -869,17 +876,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       final loadFuture = fallbackViewModel.load(
         deferAccessRestore: deferAccessRestore,
       );
-      if (deferAccessRestore && kIsWeb) {
-        unawaited(loadFuture);
-        await Future<void>.microtask(() {});
-        final publishedFallback = await fallbackViewModel
-            .publishHostedStartupFallbackShell();
-        if (!publishedFallback) {
-          await loadFuture;
-        }
-      } else {
-        await loadFuture;
-      }
+      await _awaitStartupLoadWithHostedFallback(
+        fallbackViewModel,
+        loadFuture: loadFuture,
+        allowHostedFallback: deferAccessRestore && kIsWeb,
+        waitForLoadAfterHostedFallback: false,
+      );
       if (fallbackViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(
           fallbackViewModel.message,
@@ -900,6 +902,25 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       return null;
     }
+  }
+
+  Future<void> _awaitStartupLoadWithHostedFallback(
+    TrackerViewModel model, {
+    required Future<void> loadFuture,
+    required bool allowHostedFallback,
+    bool waitForLoadAfterHostedFallback = true,
+  }) async {
+    if (!allowHostedFallback) {
+      await loadFuture;
+      return;
+    }
+    unawaited(loadFuture);
+    await Future<void>.microtask(() {});
+    final publishedFallback = await model.publishHostedStartupFallbackShell();
+    if (publishedFallback && !waitForLoadAfterHostedFallback) {
+      return;
+    }
+    await loadFuture;
   }
 
   Future<_PreparedWorkspaceSwitch?> _prepareWorkspaceSwitch(
@@ -1291,7 +1312,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         _workspaceProfilesReady = true;
       });
       _pendingStartupLocalFallbackWorkspaceId = null;
-      await viewModel.load(deferAccessRestore: true);
+      await _awaitStartupLoadWithHostedFallback(
+        viewModel,
+        loadFuture: viewModel.load(deferAccessRestore: true),
+        allowHostedFallback: kIsWeb,
+      );
       return;
     }
     if (_workspaceProfilesReady &&
@@ -1336,7 +1361,11 @@ class _TrackStateAppState extends State<TrackStateApp>
       _pendingStartupLocalFallbackWorkspaceId = null;
       return;
     }
-    await viewModel.load(deferAccessRestore: true);
+    await _awaitStartupLoadWithHostedFallback(
+      viewModel,
+      loadFuture: viewModel.load(deferAccessRestore: true),
+      allowHostedFallback: kIsWeb,
+    );
     await _ensureCurrentContextWorkspaceMigration();
     if (!mounted) {
       return;
@@ -2004,11 +2033,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
 
-    final prepared = await _prepareWorkspaceSwitch(
-      nextWorkspace,
-      previousViewModel: previousViewModel,
-      showFailureMessage: false,
-    );
+    final prepared =
+        await _prepareBrowserLocalWorkspaceSwitchWithLoader(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          repositoryLoader: widget.requestBrowserLocalRepositoryAccess,
+        ) ??
+        await _prepareWorkspaceSwitch(
+          nextWorkspace,
+          previousViewModel: previousViewModel,
+          showFailureMessage: false,
+        );
     if (prepared != null) {
       var selectedState = await widget.workspaceProfileService.selectProfile(
         nextWorkspace.id,
@@ -5568,116 +5603,127 @@ class _TopBar extends StatelessWidget {
             );
           }
 
-          return Row(
-            children: [
-              if (showHostedConnectAction)
-                orderedControl(
-                  syncPillOrder ?? searchOrder + 1,
-                  _SecondaryButton(
-                    label: l10n.connectGitHub,
-                    icon: TrackStateIconGlyph.repository,
-                    onPressed: openHostedRepositoryAccess,
-                    height: _desktopTopBarControlHeight,
-                    semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+          return Semantics(
+            container: true,
+            explicitChildNodes: true,
+            identifier: _browserDesktopHeaderControlsSemanticsIdentifier,
+            child: Row(
+              children: [
+                if (showHostedConnectAction)
+                  orderedControl(
+                    syncPillOrder ?? searchOrder + 1,
+                    _SecondaryButton(
+                      label: l10n.connectGitHub,
+                      icon: TrackStateIconGlyph.repository,
+                      onPressed: openHostedRepositoryAccess,
+                      height: _desktopTopBarControlHeight,
+                      semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
+                    ),
+                  )
+                else
+                  orderedControl(
+                    syncPillOrder ?? searchOrder + 1,
+                    _SyncPill(
+                      label: _workspaceSyncLabel(l10n, viewModel),
+                      semanticLabel: _workspaceSyncSemanticLabel(
+                        l10n,
+                        viewModel,
+                      ),
+                      tone: _workspaceSyncTone(viewModel),
+                      height: _desktopTopBarControlHeight,
+                      onPressed: () =>
+                          viewModel.selectSection(TrackerSection.settings),
+                      semanticsSortOrder: syncPillOrder,
+                    ),
                   ),
-                )
-              else
-                orderedControl(
-                  syncPillOrder ?? searchOrder + 1,
-                  _SyncPill(
-                    label: _workspaceSyncLabel(l10n, viewModel),
-                    semanticLabel: _workspaceSyncSemanticLabel(l10n, viewModel),
-                    tone: _workspaceSyncTone(viewModel),
+                const SizedBox(width: 12),
+                buildPrimaryHeaderActions(),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
                     height: _desktopTopBarControlHeight,
-                    onPressed: () =>
-                        viewModel.selectSection(TrackerSection.settings),
-                    semanticsSortOrder: syncPillOrder,
-                  ),
-                ),
-              const SizedBox(width: 12),
-              buildPrimaryHeaderActions(),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SizedBox(
-                  height: _desktopTopBarControlHeight,
-                  child: orderedControl(
-                    searchOrder,
-                    CallbackShortcuts(
-                      bindings: !kIsWeb
-                          ? <ShortcutActivator, VoidCallback>{
-                              const SingleActivator(
-                                LogicalKeyboardKey.tab,
-                                shift: true,
-                              ): () => workspaceSwitcherTriggerFocusNode
-                                  .requestFocus(),
-                            }
-                          : const <ShortcutActivator, VoidCallback>{},
-                      child: Builder(
-                        builder: (context) {
-                          final desktopSearchField = TextField(
-                            focusNode: desktopSearchFocusNode,
-                            controller: TextEditingController(
-                              text: viewModel.jql,
-                            ),
-                            onSubmitted: viewModel.updateQuery,
-                            maxLines: 1,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.copyWith(height: 1),
-                            textAlignVertical: TextAlignVertical.center,
-                            decoration: InputDecoration(
-                              isDense: true,
-                              isCollapsed: true,
-                              constraints: const BoxConstraints.tightFor(
-                                height: _desktopTopBarControlHeight,
+                    child: orderedControl(
+                      searchOrder,
+                      CallbackShortcuts(
+                        bindings: !kIsWeb
+                            ? <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(
+                                  LogicalKeyboardKey.tab,
+                                  shift: true,
+                                ): () => workspaceSwitcherTriggerFocusNode
+                                    .requestFocus(),
+                              }
+                            : const <ShortcutActivator, VoidCallback>{},
+                        child: Builder(
+                          builder: (context) {
+                            final desktopSearchField = TextField(
+                              focusNode: desktopSearchFocusNode,
+                              controller: TextEditingController(
+                                text: viewModel.jql,
                               ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              prefixIcon: Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: TrackStateIcon(
-                                  TrackStateIconGlyph.search,
-                                  color: colors.muted,
-                                  size: _desktopTopBarIconSize,
-                                  semanticLabel: l10n.searchIssues,
+                              onSubmitted: viewModel.updateQuery,
+                              maxLines: 1,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.copyWith(height: 1),
+                              textAlignVertical: TextAlignVertical.center,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                isCollapsed: true,
+                                constraints: const BoxConstraints.tightFor(
+                                  height: _desktopTopBarControlHeight,
                                 ),
-                              ),
-                              prefixIconConstraints:
-                                  const BoxConstraints.tightFor(
-                                    width: _desktopTopBarControlHeight,
-                                    height: _desktopTopBarControlHeight,
+                                contentPadding: const EdgeInsets.only(
+                                  right: 10,
+                                ),
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: TrackStateIcon(
+                                    TrackStateIconGlyph.search,
+                                    color: colors.muted,
+                                    size: _desktopTopBarIconSize,
+                                    semanticLabel: l10n.searchIssues,
                                   ),
-                              hintText: l10n.jqlPlaceholder,
-                              hintStyle: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: colors.muted, height: 1),
-                            ),
-                          );
-                          if (kIsWeb) {
+                                ),
+                                prefixIconConstraints:
+                                    const BoxConstraints.tightFor(
+                                      width: _desktopTopBarControlHeight,
+                                      height: _desktopTopBarControlHeight,
+                                    ),
+                                hintText: l10n.jqlPlaceholder,
+                                hintStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(color: colors.muted, height: 1),
+                              ),
+                            );
+                            if (kIsWeb) {
+                              return Semantics(
+                                identifier:
+                                    browserDesktopSearchInputSemanticsIdentifier,
+                                label: l10n.searchIssues,
+                                textField: true,
+                                child: desktopSearchField,
+                              );
+                            }
                             return Semantics(
+                              focusable: true,
+                              identifier:
+                                  browserDesktopSearchInputSemanticsIdentifier,
                               label: l10n.searchIssues,
+                              sortKey: OrdinalSortKey(searchOrder),
                               textField: true,
                               child: desktopSearchField,
                             );
-                          }
-                          return Semantics(
-                            focusable: true,
-                            identifier:
-                                browserDesktopSearchInputSemanticsIdentifier,
-                            label: l10n.searchIssues,
-                            sortKey: OrdinalSortKey(searchOrder),
-                            textField: true,
-                            child: desktopSearchField,
-                          );
-                        },
+                          },
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              buildTrailingHeaderActions(),
-            ],
+                buildTrailingHeaderActions(),
+              ],
+            ),
           );
         },
       ),
@@ -6341,6 +6387,9 @@ String _attachmentsAccessMessage(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
+  final uploadMode =
+      viewModel.providerSession?.attachmentUploadMode ??
+      AttachmentUploadMode.none;
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected =>
       l10n.attachmentsAccessMessageDisconnected,
@@ -6348,7 +6397,10 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.usesGitHubReleasesAttachmentStorage
+      viewModel.usesGitHubReleasesAttachmentStorage &&
+              uploadMode == AttachmentUploadMode.noLfs
+          ? l10n.attachmentsDownloadOnlyMessage
+          : viewModel.usesGitHubReleasesAttachmentStorage
           ? l10n.attachmentsGitHubReleasesUnsupportedMessage
           : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
@@ -6713,12 +6765,7 @@ class _AccessCallout extends StatelessWidget {
       explicitChildNodes: true,
       readOnly: true,
       sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label: [
-        semanticLabel,
-        title,
-        message,
-        if (detailMessage != null) detailMessage!,
-      ].join(' '),
+      label: [semanticLabel, title, message].join(' '),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -6763,12 +6810,16 @@ class _AccessCallout extends StatelessWidget {
             ),
             if (detailMessage != null) ...[
               const SizedBox(height: 8),
-              ExcludeSemantics(
-                child: Text(
-                  detailMessage!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: contentColor,
-                    fontFamily: 'JetBrains Mono',
+              Semantics(
+                readOnly: true,
+                label: detailMessage!,
+                child: ExcludeSemantics(
+                  child: Text(
+                    detailMessage!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: contentColor,
+                      fontFamily: 'JetBrains Mono',
+                    ),
                   ),
                 ),
               ),
@@ -13543,6 +13594,49 @@ class _SettingsTextField extends StatelessWidget {
       return helperBaseStyle.copyWith(color: colors.muted);
     });
 
+    if (kIsWeb && controller != null) {
+      final textController = controller!;
+      return ValueListenableBuilder<TextEditingValue>(
+        valueListenable: textController,
+        builder: (context, value, _) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            browser_text_field_value_sync.syncBrowserTextFieldValue(
+              label: label,
+              value: value.text,
+              enabled: enabled,
+              readOnly: !enabled,
+            );
+          });
+          return Semantics(
+            label: label,
+            textField: true,
+            enabled: enabled,
+            value: value.text,
+            child: ExcludeSemantics(
+              child: TextField(
+                key: fieldKey,
+                controller: textController,
+                focusNode: focusNode,
+                autofocus: autofocus,
+                enabled: enabled,
+                onChanged: onChanged,
+                style: helperBaseStyle.copyWith(
+                  color: enabled ? colors.text : colors.muted,
+                ),
+                decoration: InputDecoration(
+                  labelText: label,
+                  helperText: helperText,
+                  labelStyle: labelStyle,
+                  floatingLabelStyle: labelStyle,
+                  helperStyle: helperStyle,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     return TextFormField(
       key: fieldKey,
       controller: controller,
@@ -17270,9 +17364,7 @@ class _HistoryRow extends StatelessWidget {
                   ),
                   Text(
                     '${entry.author} · ${entry.timestamp}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    style: _collaborationMetadataTextStyle(context),
                   ),
                   if ((entry.before ?? '').isNotEmpty ||
                       (entry.after ?? '').isNotEmpty)
@@ -17330,9 +17422,7 @@ class _CommentBubble extends StatelessWidget {
                     ),
                     Text(
                       metadata,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                      style: _collaborationMetadataTextStyle(context),
                     ),
                     const SizedBox(height: 6),
                     Text(comment.body),
@@ -17354,6 +17444,17 @@ String _commentMetadata(IssueComment comment, AppLocalizations l10n) {
     return '$createdAt · ${l10n.editedAt(updatedAt)}';
   }
   return createdAt;
+}
+
+TextStyle? _collaborationMetadataTextStyle(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.textTheme.labelSmall?.copyWith(
+    color: context.ts.text,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    height: 1.2,
+    letterSpacing: .24,
+  );
 }
 
 String _formatAttachmentFileSize(int sizeBytes) {

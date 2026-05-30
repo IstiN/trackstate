@@ -896,6 +896,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         if result.get("cli_observation") is not None
         else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
     )
+    cli_scope_line = (
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
+        if result.get("cli_observation") is not None
+        else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
     lines = [
         "h3. Test Automation Result",
         "",

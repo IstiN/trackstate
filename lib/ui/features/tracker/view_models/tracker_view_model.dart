@@ -488,7 +488,12 @@ class TrackerViewModel extends ChangeNotifier {
         !session.canWrite) {
       return false;
     }
-    return session.canManageAttachments;
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.canManageAttachments &&
+          session.supportsReleaseAttachmentWrites;
+    }
+    return session.canManageAttachments &&
+        session.attachmentUploadMode != AttachmentUploadMode.none;
   }
 
   bool get hasBlockedWriteAccess =>
@@ -1318,6 +1323,22 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _selectIssueFromSnapshot(saved);
       await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
+      if (transitionChanged) {
+        final project = _snapshot!.project;
+        final statusLabel = project.statusLabel(saved.statusId);
+        _message = usesLocalPersistence
+            ? TrackerMessage.localGitMoveCommitted(
+                issueKey: saved.key,
+                statusLabel: statusLabel,
+                branch: project.branch,
+              )
+            : _isConnected
+            ? TrackerMessage.githubMoveCommitted(
+                issueKey: saved.key,
+                statusLabel: statusLabel,
+              )
+            : TrackerMessage.movePendingGitHubPersistence(issueKey: saved.key);
+      }
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
