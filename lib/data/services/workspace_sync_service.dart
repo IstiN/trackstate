@@ -12,10 +12,7 @@ typedef WorkspaceSyncRefreshHandler =
 typedef WorkspaceSyncStatusListener = void Function(WorkspaceSyncStatus status);
 
 class WorkspaceSyncRefresh {
-  const WorkspaceSyncRefresh({
-    required this.result,
-    required this.snapshot,
-  });
+  const WorkspaceSyncRefresh({required this.result, required this.snapshot});
 
   final WorkspaceSyncResult result;
   final TrackerSnapshot? snapshot;
@@ -61,16 +58,19 @@ class WorkspaceSyncService {
   Timer? _timer;
   bool _disposed = false;
   bool _inFlight = false;
-  bool _pendingFollowUp = false;
+  WorkspaceSyncTrigger? _queuedFollowUpTrigger;
   int _hostedBackoffIndex = 0;
   DateTime? _lastCompletedAt;
+  DateTime? _scheduledHostedRetryAt;
   TrackerSnapshot? _baselineSnapshot;
   RepositorySyncState? _previousSyncState;
 
   void start({required TrackerSnapshot initialSnapshot}) {
     _baselineSnapshot = initialSnapshot;
     _scheduleNext(_cadence);
-    unawaited(checkNow(trigger: WorkspaceSyncTrigger.workspaceSwitch, force: true));
+    unawaited(
+      checkNow(trigger: WorkspaceSyncTrigger.workspaceSwitch, force: true),
+    );
   }
 
   void updateBaselineSnapshot(TrackerSnapshot snapshot) {
@@ -93,18 +93,23 @@ class WorkspaceSyncService {
       return;
     }
     if (_inFlight) {
-      _pendingFollowUp = true;
+      _queuedFollowUpTrigger = trigger;
       return;
     }
     final completedAt = _lastCompletedAt;
     final now = _now();
-    if (!force &&
+    final queuedFollowUpTrigger = _queuedFollowUpTrigger;
+    final enforceMinimumInterval = !force || queuedFollowUpTrigger != null;
+    if (enforceMinimumInterval &&
         completedAt != null &&
         now.difference(completedAt) < _minimumInterval) {
+      _queuedFollowUpTrigger = trigger;
       _scheduleNext(_minimumInterval - now.difference(completedAt));
       return;
     }
 
+    final effectiveTrigger = _queuedFollowUpTrigger ?? trigger;
+    _queuedFollowUpTrigger = null;
     _timer?.cancel();
     _inFlight = true;
     _publishStatus(
@@ -121,11 +126,12 @@ class WorkspaceSyncService {
       );
       _previousSyncState = syncCheck.state;
       final result = await _buildResult(
-        trigger: trigger,
+        trigger: effectiveTrigger,
         syncCheck: syncCheck,
       );
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
+      _scheduledHostedRetryAt = null;
       _publishStatus(
         _status.copyWith(
           health: WorkspaceSyncHealth.synced,
@@ -142,7 +148,7 @@ class WorkspaceSyncService {
       final nextRetryAt = _computeNextRetryAt();
       _publishStatus(
         _status.copyWith(
-          health: WorkspaceSyncHealth.attentionNeeded,
+          health: _healthForError(error),
           lastCheckAt: _lastCompletedAt,
           latestError: '$error',
           nextRetryAt: nextRetryAt,
@@ -151,9 +157,8 @@ class WorkspaceSyncService {
       _scheduleNext(nextRetryAt.difference(_lastCompletedAt!));
     } finally {
       _inFlight = false;
-      if (_pendingFollowUp && !_disposed) {
-        _pendingFollowUp = false;
-        unawaited(checkNow(trigger: trigger, force: true));
+      if (_queuedFollowUpTrigger case final pendingTrigger? when !_disposed) {
+        unawaited(checkNow(trigger: pendingTrigger));
       }
     }
   }
@@ -167,20 +172,20 @@ class WorkspaceSyncService {
     required RepositorySyncCheck syncCheck,
   }) async {
     final baselineSnapshot = _baselineSnapshot;
-    final snapshotNeeded =
-        syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository);
+    final pathChanges = _domainsFromChangedPaths(
+      syncCheck.changedPaths,
+    ).toList(growable: false);
+    final snapshotNeeded = _requiresSnapshotReload(
+      syncCheck: syncCheck,
+      pathChanges: pathChanges,
+    );
     TrackerSnapshot? nextSnapshot;
     if (snapshotNeeded) {
       nextSnapshot = await _loadSnapshot();
       _baselineSnapshot = nextSnapshot;
     }
     final domains = <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{};
-    _mergeDomainChanges(
-      domains,
-      _domainsFromChangedPaths(syncCheck.changedPaths),
-    );
+    _mergeDomainChanges(domains, pathChanges);
     if (baselineSnapshot != null && nextSnapshot != null) {
       _mergeDomainChanges(
         domains,
@@ -205,9 +210,75 @@ class WorkspaceSyncService {
       domains: domains,
     );
     if (result.hasChanges) {
-      await _onRefresh(WorkspaceSyncRefresh(result: result, snapshot: nextSnapshot));
+      await _onRefresh(
+        WorkspaceSyncRefresh(result: result, snapshot: nextSnapshot),
+      );
     }
     return result;
+  }
+
+  // Returns true only when a full snapshot reload is necessary to correctly
+  // reflect the incoming sync event. The evaluation order is intentional:
+  //
+  //  1. Local-head / local-worktree signals always require a reload.
+  //  2. An explicit directive from the server overrides path-based logic.
+  //  3. A dedicated hostedSnapshotReload signal triggers a reload.
+  //  4. If no hostedRepository signal is present the event carries no
+  //     remote-content changes — skip the reload.
+  //  5. [changedPaths.isEmpty] — the server reported a repository signal
+  //     with no individual paths; treat as a no-op to avoid spurious reloads.
+  //  6. [pathChanges.isEmpty] — all reported paths fall outside every known
+  //     sync domain (e.g. an internal bookkeeping file such as
+  //     "sync-domains/unknown-domain.md"). An unrecognised path must NOT
+  //     trigger a global snapshot reload; doing so would be incorrect and
+  //     could expose stale or hidden content to the UI (TS-741 / TS-789).
+  bool _requiresSnapshotReload({
+    required RepositorySyncCheck syncCheck,
+    required List<WorkspaceSyncDomainChange> pathChanges,
+  }) {
+    if (syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
+        syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree)) {
+      return true;
+    }
+    if (syncCheck.hostedSnapshotReloadDirective ==
+        HostedSnapshotReloadDirective.disabled) {
+      return false;
+    }
+    if (syncCheck.hostedSnapshotReloadDirective ==
+        HostedSnapshotReloadDirective.enabled) {
+      return true;
+    }
+    if (syncCheck.signals.contains(WorkspaceSyncSignal.hostedSnapshotReload)) {
+      return true;
+    }
+    if (!syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository)) {
+      return false;
+    }
+    if (syncCheck.changedPaths.isEmpty) {
+      return false;
+    }
+    if (pathChanges.isEmpty) {
+      // All reported paths are outside every known sync domain.
+      // An unrecognised path must not trigger a global snapshot reload.
+      return false;
+    }
+    for (final change in pathChanges) {
+      switch (change.domain) {
+        case WorkspaceSyncDomain.projectMeta:
+          break;
+        case WorkspaceSyncDomain.issueSummaries:
+        case WorkspaceSyncDomain.issueDetails:
+        case WorkspaceSyncDomain.repositoryIndex:
+          return true;
+        case WorkspaceSyncDomain.comments:
+        case WorkspaceSyncDomain.attachments:
+          if (change.isGlobal) {
+            return true;
+          }
+          break;
+      }
+    }
+    return false;
   }
 
   DateTime _computeNextRetryAt() {
@@ -215,14 +286,39 @@ class WorkspaceSyncService {
     if (_repository.usesLocalPersistence || _hostedBackoffSteps.isEmpty) {
       return now.add(_cadence);
     }
+    final scheduledHostedRetryAt = _scheduledHostedRetryAt;
+    if (scheduledHostedRetryAt != null && scheduledHostedRetryAt.isAfter(now)) {
+      return scheduledHostedRetryAt;
+    }
     final index = _hostedBackoffIndex < _hostedBackoffSteps.length
         ? _hostedBackoffIndex
         : _hostedBackoffSteps.length - 1;
     final nextRetryAt = now.add(_hostedBackoffSteps[index]);
+    _scheduledHostedRetryAt = nextRetryAt;
     if (_hostedBackoffIndex < _hostedBackoffSteps.length - 1) {
       _hostedBackoffIndex += 1;
     }
     return nextRetryAt;
+  }
+
+  WorkspaceSyncHealth _healthForError(Object error) {
+    if (_isHostedAuthenticationFailure(error)) {
+      return WorkspaceSyncHealth.unavailable;
+    }
+    return WorkspaceSyncHealth.attentionNeeded;
+  }
+
+  bool _isHostedAuthenticationFailure(Object error) {
+    if (_repository.usesLocalPersistence || error is GitHubRateLimitException) {
+      return false;
+    }
+    final message = '$error'.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains(' 401') ||
+        message.contains('bad credentials') ||
+        message.contains('authentication failed') ||
+        message.contains('requires github authentication') ||
+        message.contains('connect a github token');
   }
 
   void _scheduleNext(Duration duration) {
@@ -267,7 +363,9 @@ void _mergeDomainChange(
   target[change.domain] = previous == null ? change : previous.merge(change);
 }
 
-Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(Set<String> paths) {
+Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(
+  Set<String> paths,
+) {
   final changes = <WorkspaceSyncDomainChange>[];
   for (final path in paths) {
     final issueKeys = _issueKeysFromPath(path);
@@ -307,6 +405,7 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(Set<String> paths) 
         ),
       );
     } else if (path.endsWith('/acceptance_criteria.md') ||
+        path == 'links.json' ||
         path.endsWith('/links.json')) {
       changes.add(
         WorkspaceSyncDomainChange(
@@ -363,9 +462,7 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromSnapshotDiff({
     );
   }
 
-  final previousByKey = {
-    for (final issue in previous.issues) issue.key: issue,
-  };
+  final previousByKey = {for (final issue in previous.issues) issue.key: issue};
   final nextByKey = {for (final issue in next.issues) issue.key: issue};
   final allKeys = {...previousByKey.keys, ...nextByKey.keys};
   final summaryKeys = <String>{};
@@ -391,7 +488,8 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromSnapshotDiff({
     if (_issueCommentsSignature(before) != _issueCommentsSignature(after)) {
       commentKeys.add(key);
     }
-    if (_issueAttachmentsSignature(before) != _issueAttachmentsSignature(after)) {
+    if (_issueAttachmentsSignature(before) !=
+        _issueAttachmentsSignature(after)) {
       attachmentKeys.add(key);
     }
     if (_issueIndexSignature(before) != _issueIndexSignature(after)) {
@@ -452,11 +550,15 @@ String _projectSignature(ProjectConfig project) {
     project.branch,
     project.defaultLocale,
     project.supportedLocales.join(','),
-    for (final entry in project.issueTypeDefinitions) _configEntrySignature(entry),
+    for (final entry in project.issueTypeDefinitions)
+      _configEntrySignature(entry),
     for (final entry in project.statusDefinitions) _configEntrySignature(entry),
-    for (final entry in project.priorityDefinitions) _configEntrySignature(entry),
-    for (final entry in project.versionDefinitions) _configEntrySignature(entry),
-    for (final entry in project.componentDefinitions) _configEntrySignature(entry),
+    for (final entry in project.priorityDefinitions)
+      _configEntrySignature(entry),
+    for (final entry in project.versionDefinitions)
+      _configEntrySignature(entry),
+    for (final entry in project.componentDefinitions)
+      _configEntrySignature(entry),
     for (final entry in project.resolutionDefinitions)
       _configEntrySignature(entry),
     for (final field in project.fieldDefinitions) _fieldSignature(field),
@@ -525,9 +627,7 @@ String _issueDetailSignature(TrackStateIssue issue) {
     issue.resolutionId ?? '',
     '${issue.progress}',
     issue.links
-        .map(
-          (link) => '${link.type}:${link.targetKey}:${link.direction}',
-        )
+        .map((link) => '${link.type}:${link.targetKey}:${link.direction}')
         .join(','),
     issue.customFields.entries
         .map((entry) => '${entry.key}:${entry.value}')
@@ -574,8 +674,7 @@ bool _isRepositoryIndexPath(String path) {
 }
 
 Set<String> _issueKeysFromPath(String path) {
-  return RegExp(r'([A-Z][A-Z0-9]+-\d+)')
-      .allMatches(path)
-      .map((match) => match.group(1)!)
-      .toSet();
+  return RegExp(
+    r'([A-Z][A-Z0-9]+-\d+[A-Z0-9]*)',
+  ).allMatches(path).map((match) => match.group(1)!).toSet();
 }

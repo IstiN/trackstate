@@ -1,7 +1,11 @@
+import '../models/workspace_onboarding_choice_observation.dart';
+import '../models/workspace_shell_entry_point_observation.dart';
 import '../models/workspace_onboarding_state.dart';
 
 abstract interface class WorkspaceOnboardingScreenHandle {
   Future<void> openAddWorkspace();
+
+  Future<void> chooseOpenExistingFolder();
 
   Future<void> chooseExistingFolder();
 
@@ -9,9 +13,25 @@ abstract interface class WorkspaceOnboardingScreenHandle {
 
   Future<void> chooseHostedRepositorySuggestion(String fullName);
 
+  Future<void> enterLocalWorkspaceName(String value);
+
+  Future<void> enterLocalWriteBranch(String value);
+
+  Future<void> enterHostedRepository(String repository);
+
+  Future<void> enterHostedBranch(String branch);
+
   Future<void> submit();
 
+  Future<List<String>> collectHostedRepositoryFocusOrder({int maxTabs = 16});
+
   WorkspaceOnboardingState captureState();
+
+  WorkspaceOnboardingChoiceObservation observeTargetChoices();
+
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  });
 
   bool isAccessCalloutVisible({required String title, required String message});
 

@@ -1,0 +1,13 @@
+test_id: TS-1005
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored GitHub token and a preloaded mismatched local workspace as the active startup target plus one hosted fallback workspace.
+  - Uses the ticket viewport of 1440x900 and waits for startup hydration to settle before asserting the visible surface.
+  - Verifies the current view falls back to the default landing state instead of loading the dashboard for the broken workspace.
+  - Reopens Workspace switcher and requires the broken local workspace to stay Unavailable without any visible Active selection indicator.
+  - Covers the deployed TS-1030, TS-1011, and TS-995 startup mismatch fix path, so the test records both the current visible route and the final switcher row state.

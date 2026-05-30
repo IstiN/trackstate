@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../../../../lib/cli/trackstate_cli.dart';
 import '../../../../../lib/data/providers/trackstate_provider.dart';
+import '../../../../../lib/data/repositories/trackstate_repository.dart';
 import '../../../../../lib/domain/models/trackstate_models.dart';
 
 const List<String> _ticketArguments = <String>[
@@ -147,6 +148,142 @@ class _RecordingTrackStateCliProviderFactory
   }
 }
 
+class _RecordingTrackStateCliRepositoryFactory
+    implements TrackStateCliRepositoryFactory {
+  const _RecordingTrackStateCliRepositoryFactory({
+    required this.hostedProvider,
+  });
+
+  final _RecordingHostedProvider hostedProvider;
+
+  @override
+  Never createLocal({
+    required String repositoryPath,
+    required String dataRef,
+    http.Client? client,
+  }) {
+    throw StateError(
+      'TS-268 should not resolve a local repository while testing hosted target selection.',
+    );
+  }
+
+  @override
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+  }) => _RecordingHostedRepository(hostedProvider: hostedProvider);
+}
+
+class _RecordingHostedRepository implements TrackStateRepository {
+  const _RecordingHostedRepository({required this.hostedProvider});
+
+  final _RecordingHostedProvider hostedProvider;
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) =>
+      hostedProvider.authenticate(connection);
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => TrackerSnapshot(
+    project: ProjectConfig(
+      key: 'DEMO',
+      name: 'Demo',
+      repository: 'owner/repo',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: const <TrackStateConfigEntry>[
+        TrackStateConfigEntry(id: 'story', name: 'Story', workflowId: 'delivery'),
+      ],
+      statusDefinitions: const <TrackStateConfigEntry>[
+        TrackStateConfigEntry(id: 'todo', name: 'To Do', category: 'new'),
+      ],
+      fieldDefinitions: const <TrackStateFieldDefinition>[
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      workflowDefinitions: const <TrackStateWorkflowDefinition>[
+        TrackStateWorkflowDefinition(
+          id: 'delivery',
+          name: 'Delivery',
+          statusIds: <String>['todo'],
+        ),
+      ],
+    ),
+    issues: const <TrackStateIssue>[],
+  );
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) =>
+      throw UnimplementedError();
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+    String? sourceName,
+  }) => throw UnimplementedError();
+}
+
 Future<String?> _ghToken() async => 'gh-probe-token';
 
 Map<String, Object?>? _serializeConnection(RepositoryConnection? connection) {
@@ -183,6 +320,9 @@ Future<void> main() async {
       readGhAuthToken: _ghToken,
     ),
     providerFactory: providerFactory,
+    repositoryFactory: _RecordingTrackStateCliRepositoryFactory(
+      hostedProvider: hostedProvider,
+    ),
   );
 
   final result = await cli.run(_ticketArguments);

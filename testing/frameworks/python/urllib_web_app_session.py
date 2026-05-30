@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from socket import timeout as SocketTimeout
@@ -42,9 +43,65 @@ class _BodyTextParser(HTMLParser):
         return unescape(collapsed).strip()
 
 
+@dataclass(frozen=True)
+class _HtmlControl:
+    tag: str
+    attrs: dict[str, str]
+    value: str
+
+
+class _FormControlParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._controls: list[_HtmlControl] = []
+        self._active_textarea_attrs: dict[str, str] | None = None
+        self._active_textarea_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        lowered_tag = tag.lower()
+        normalized_attrs = {
+            str(name).lower(): value
+            for name, value in attrs
+            if isinstance(name, str) and isinstance(value, str)
+        }
+        if lowered_tag == "input":
+            self._controls.append(
+                _HtmlControl(
+                    tag=lowered_tag,
+                    attrs=normalized_attrs,
+                    value=normalized_attrs.get("value", ""),
+                )
+            )
+            return
+        if lowered_tag == "textarea":
+            self._active_textarea_attrs = normalized_attrs
+            self._active_textarea_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._active_textarea_attrs is not None:
+            self._active_textarea_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "textarea" or self._active_textarea_attrs is None:
+            return
+        self._controls.append(
+            _HtmlControl(
+                tag="textarea",
+                attrs=self._active_textarea_attrs,
+                value=unescape("".join(self._active_textarea_parts)),
+            )
+        )
+        self._active_textarea_attrs = None
+        self._active_textarea_parts = []
+
+    def controls(self) -> tuple[_HtmlControl, ...]:
+        return tuple(self._controls)
+
+
 class UrllibWebAppSession(WebAppSession):
     def __init__(self) -> None:
         self._body_text = ""
+        self._controls: tuple[_HtmlControl, ...] = ()
 
     def goto(
         self,
@@ -73,6 +130,9 @@ class UrllibWebAppSession(WebAppSession):
         parser = _BodyTextParser()
         parser.feed(html)
         self._body_text = parser.text()
+        control_parser = _FormControlParser()
+        control_parser.feed(html)
+        self._controls = control_parser.controls()
 
     def activate_accessibility(self) -> None:
         return None
@@ -179,10 +239,17 @@ class UrllibWebAppSession(WebAppSession):
         index: int = 0,
         timeout_ms: int = 30_000,
     ) -> str:
-        del selector, has_text, index, timeout_ms
-        raise NotImplementedError(
-            "Reading input values is not supported by the urllib web session fallback."
-        )
+        del has_text, timeout_ms
+        matches = [
+            control
+            for control in self._controls
+            if _control_matches_selector(control, selector)
+        ]
+        if index >= len(matches):
+            raise WebAppTimeoutError(
+                f'Timed out reading the value for selector "{selector}".'
+            )
+        return matches[index].value
 
     def read_text(
         self,
@@ -275,6 +342,17 @@ class UrllibWebAppSession(WebAppSession):
             "Active-element inspection is not supported by the urllib web session fallback."
         )
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        del previous_outer_html, timeout_ms
+        raise NotImplementedError(
+            "Active-element change waits are not supported by the urllib web session fallback."
+        )
+
     def wait_for_download_after_keypress(
         self,
         key: str,
@@ -299,8 +377,16 @@ class UrllibWebAppSession(WebAppSession):
             "Download capture is not supported by the urllib web session fallback."
         )
 
-    def screenshot(self, path: str) -> None:
-        del path
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        del name, url_fragment
+        return None
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        del name
+        return []
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        del path, full_page
         return None
 
 
@@ -310,3 +396,51 @@ class UrllibWebAppRuntime(AbstractContextManager[UrllibWebAppSession]):
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         return None
+
+
+def _parse_selector_rules(
+    selector: str,
+) -> tuple[str | None, str | None, tuple[tuple[str, str, str], ...]]:
+    normalized_selector = selector.strip()
+    tag_match = re.match(r"^[a-zA-Z][a-zA-Z0-9_-]*", normalized_selector)
+    tag = tag_match.group(0).lower() if tag_match is not None else None
+    id_match = re.search(r"#([a-zA-Z_][a-zA-Z0-9_-]*)", normalized_selector)
+    identifier = id_match.group(1).lower() if id_match is not None else None
+    attr_rules = tuple(
+        (
+            match.group(1).strip().lower(),
+            match.group(2),
+            match.group(4),
+        )
+        for match in re.finditer(
+            r"""\[([^\]=*]+)(\*=|=)(["'])(.*?)\3\]""",
+            normalized_selector,
+        )
+    )
+    return tag, identifier, attr_rules
+
+
+def _matches_attr_rule(
+    attrs: dict[str, str],
+    rule: tuple[str, str, str],
+) -> bool:
+    attr_name, operator, expected_value = rule
+    actual_value = attrs.get(attr_name)
+    if actual_value is None:
+        return False
+    normalized_actual = actual_value.lower()
+    normalized_expected = expected_value.lower()
+    if operator == "=":
+        return normalized_actual == normalized_expected
+    if operator == "*=":
+        return normalized_expected in normalized_actual
+    return False
+
+
+def _control_matches_selector(control: _HtmlControl, selector: str) -> bool:
+    tag, identifier, attr_rules = _parse_selector_rules(selector)
+    if tag is not None and control.tag != tag:
+        return False
+    if identifier is not None and control.attrs.get("id", "").lower() != identifier:
+        return False
+    return all(_matches_attr_rule(control.attrs, rule) for rule in attr_rules)
