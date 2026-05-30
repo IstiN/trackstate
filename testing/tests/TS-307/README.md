@@ -1,7 +1,7 @@
 # TS-307
 
 Validates the production-visible **Create issue** flow in the local Git runtime
-across desktop and compact widget viewports.
+across a **1440x900** desktop viewport and a **390x844** compact viewport.
 
 The automation:
 1. opens the real Create issue surface from the running app shell

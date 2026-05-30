@@ -11,7 +11,7 @@ The automation:
 3. creates a new draft status with duplicate ID `in-progress` and name `Doing`
 4. saves the draft, then clicks **Save settings** and checks for the expected
    duplicate-ID validation message without any repository write
-5. resets the unsaved draft to restore the repository-backed baseline
+5. reopens a clean Settings session against the unchanged repository baseline
 6. attempts to save another new status with a blank name and verifies the
    missing-name validation message without any repository write
 

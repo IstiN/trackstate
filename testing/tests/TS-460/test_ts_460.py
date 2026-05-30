@@ -601,7 +601,7 @@ def _jira_comment(context: dict[str, object], *, passed: bool) -> str:
                 "*What automation checked:*",
                 f"* Executed the live public command {{code}}{context['executed_command']}{{code}}.",
                 (
-                "* Verified the CLI returned one success envelope for "
+                    "* Verified the CLI returned one success envelope for "
                     "{{ticket-update}} and reported one {{update-fields}} operation."
                 ),
                 (

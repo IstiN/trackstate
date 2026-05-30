@@ -1,11 +1,20 @@
 test_id: TS-912
-type: web
-framework: playwright
-platform: chromium
+type: ui
+framework: flutter_test
+platform: linux
 dependencies:
-  - Playwright for Python with Chromium installed
-  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+  - Flutter SDK available on PATH
 notes:
-  - Opens the deployed TrackState web app with a stored signed-in GitHub token.
-  - Preloads one hosted workspace as active plus one saved local workspace that starts unavailable.
-  - Recreates the saved local repository before the manual restore action, then verifies the manual switch restores it to Local Git.
+  - Runs in the supported Flutter widget runtime at 1440x900.
+  - Seeds one hosted active workspace plus one saved local workspace marked unavailable.
+  - Verifies the visible Retry or Re-authenticate action completes one directory-access prompt, restores the saved workspace to active Local Git, and loads seeded local issue content from the restored repository.
+runtime_inputs:
+  active_workspace_kind: hosted
+  retry_workspace_kind: local unavailable
+  viewport: 1440x900
+  expected_retry_actions:
+    - Retry
+    - Re-authenticate
+  expected_directory_picker_calls: 1
+  expected_final_state: saved local workspace restored as active Local Git with seeded local issue content loaded
+  run_command: flutter test testing/tests/TS-912/test_ts_912.dart --reporter expanded

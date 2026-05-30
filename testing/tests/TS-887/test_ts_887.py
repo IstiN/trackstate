@@ -96,6 +96,7 @@ def main() -> None:
                         "tracker shell before the edit-validation scenario began.\n"
                         f"Observed body text:\n{runtime.body_text}",
                     )
+                edit_page.set_viewport(width=1440, height=900)
 
                 connected_text = settings_page.ensure_write_capable_connection(
                     token=token,
@@ -103,10 +104,10 @@ def main() -> None:
                     user_login=user.login,
                 )
                 result["connected_body_text"] = connected_text
-                settings_page.dismiss_connection_banner()
 
                 edit_dialog_text = edit_page.open_edit_dialog_for_issue_key(
                     issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
                 )
                 result["edit_dialog_text"] = edit_dialog_text
                 _record_human_verification(
@@ -701,7 +702,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         "* Opened the deployed hosted TrackState app.",
-        "* Connected the live session with the configured GitHub token until the write-capable connected banner appeared.",
+        "* Connected the live session with the configured GitHub token until the hosted repository-access state showed the session could edit issues.",
         "* Opened the live Edit issue surface for DEMO-2.",
         "* Attempted the required user flow: clear Summary, click Save, inspect the Summary-required feedback, check contrast, and verify the accessibility announcement path.",
         "",
@@ -751,7 +752,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         "- Opened the deployed hosted TrackState app.",
-        "- Connected the live session with the configured GitHub token until the connected banner appeared.",
+        "- Connected the live session with the configured GitHub token until the hosted repository-access state showed issue edits were available.",
         "- Opened the live `Edit issue` surface for `DEMO-2`.",
         "- Exercised the ticket flow: cleared `Summary`, clicked `Save`, inspected the `Summary is required` feedback, checked contrast, and checked the accessibility announcement path.",
         "",
@@ -789,29 +790,29 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     lines = [
-        f"h3. {TICKET_KEY} rework {status}",
+        f"## {TICKET_KEY} {status}",
         "",
-        "*Fixes applied*",
-        "* Relaxed visible-message discovery to the ticket fragment {{Summary is required}} so compliant shorter copy is still measured.",
-        "* Tightened Step 5 so the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
-        "* Added an assertion that the visible validation text uses the TrackState error theme token colors (`#c25742` / `#e8a085`) rather than any arbitrary high-contrast color.",
-        "* Added pass-path artifact writing plus stale bug cleanup and review replies.",
+        "### What changed",
+        "- Matched visible-message discovery to the ticket fragment `Summary is required` so compliant shorter copy is still measured.",
+        "- Kept Step 5 strict: the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
+        "- Required the visible validation text to use the TrackState error theme token colors (`#c25742` / `#e8a085`).",
+        "- Kept pass/fail artifact writing aligned with the pipeline outputs.",
         "",
-        "*New test result*",
+        "### Result",
         (
-            "* PASSED — the hosted Edit issue validation flow now meets the ticket requirements end to end."
+            "- PASSED — the hosted Edit issue validation flow now meets the ticket requirements end to end."
             if passed
-            else f"* FAILED — {_failure_summary(result)}"
+            else f"- FAILED — {_failure_summary(result)}"
         ),
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "*Exact error*",
-                "{code}",
+                "### Exact error",
+                "```text",
                 str(result.get("traceback", result.get("error", ""))),
-                "{code}",
+                "```",
             ]
         )
     return "\n".join(lines) + "\n"
@@ -820,42 +821,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _write_review_replies() -> None:
     REVIEW_REPLIES_PATH.write_text(
         json.dumps(
-            {
-                "replies": [
-                    {
-                        "inReplyToId": 3282755133,
-                        "threadId": "PRRT_kwDOSU6Gf86D3eir",
-                        "reply": (
-                            "Fixed: Step 4 now asserts the visible Summary validation text uses "
-                            "the TrackState error theme token, normalizing the computed CSS "
-                            "foreground color and requiring the expected error values "
-                            "(`#c25742` in light mode or `#e8a085` in dark mode`) before the "
-                            "contrast check can pass."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703459,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VGB",
-                        "reply": (
-                            "Fixed: the Summary validation probe now discovers the visible message using the ticket fragment `Summary is required` instead of the stricter full sentence, so compliant shorter copy is still captured for the contrast and accessibility checks."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703608,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VH4",
-                        "reply": (
-                            "Fixed: Step 5 no longer treats `aria-invalid` plus focus on the Summary field as sufficient. It now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content."
-                        ),
-                    },
-                    {
-                        "inReplyToId": 3282703774,
-                        "threadId": "PRRT_kwDOSU6Gf86D3VJz",
-                        "reply": (
-                            "Fixed: TS-887 now writes the standard pass artifacts on success (`test_automation_result.json`, `response.md`, `pr_body.md`, review replies), and it removes any stale `bug_description.md` when the scenario passes."
-                        ),
-                    },
-                ]
-            },
+            {"replies": []},
         )
         + "\n",
         encoding="utf-8",

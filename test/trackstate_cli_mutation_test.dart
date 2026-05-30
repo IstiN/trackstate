@@ -447,6 +447,55 @@ void main() {
     });
 
     test(
+      'supports multi-field ticket updates with inline JSON array values',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => _deleteDirectoryIfPresent(repo));
+        final cli = _createCli();
+
+        final result = await cli.run([
+          'ticket',
+          'update',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--key',
+          'DEMO-2',
+          '--field',
+          'summary=Updated from multi-field command',
+          '--field',
+          'priority=High',
+          '--field',
+          'labels=["bug","ai"]',
+          '--field',
+          'assignee=cli-user',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final issue = data['issue']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['command'], 'ticket-update');
+        expect(data['operation'], 'update-fields');
+        expect(issue['summary'], 'Updated from multi-field command');
+        expect(issue['priority'], 'high');
+        expect(issue['assignee'], 'cli-user');
+        expect(issue['labels'], ['bug', 'ai']);
+        expect(
+          File('${repo.path}/DEMO/DEMO-1/DEMO-2/main.md').readAsStringSync(),
+          allOf([
+            contains('summary: "Updated from multi-field command"'),
+            contains('priority: high'),
+            contains('assignee: cli-user'),
+            contains('labels: ["bug","ai"]'),
+          ]),
+        );
+      },
+    );
+
+    test(
       'updates and clears fields by display name and customfield id',
       () async {
         final repo = await _createCliMutationRepository();
@@ -689,10 +738,12 @@ void main() {
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
       );
+      expect(
+        File('${repo.path}/DEMO/DEMO-10/links.json').existsSync(),
+        isFalse,
+      );
       final storedLinks =
-          jsonDecode(
-                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
-              )
+          jsonDecode(File('${repo.path}/links.json').readAsStringSync())
               as List<dynamic>;
       expect(storedLinks, [
         {'type': 'blocks', 'target': 'DEMO-2', 'direction': 'outward'},

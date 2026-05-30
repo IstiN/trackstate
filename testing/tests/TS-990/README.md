@@ -10,8 +10,8 @@ The automation:
    remains pending beyond the 11-second synchronization window in the live
    deployment, even though the request itself starts several seconds after app
    launch
-3. waits past the timeout before asserting so the linked TS-971 non-blocking
-   shell-ready behavior is exercised
+3. waits past the timeout before asserting so the current TS-1045 / TS-1145
+   startup-timeout fixes are exercised on the live deployment
 4. keeps sampling the real deployed shell until the delayed probe resolves and
    checks that navigation, the workspace trigger, route, and TrackState branding
    stay stable from the user's perspective

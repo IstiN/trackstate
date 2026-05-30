@@ -175,7 +175,6 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isNavigationControlVisible(String label);
 
   Future<void> expectNavigationControlEnabled(String label);
-
   Future<bool> isNavigationChromeVisible();
 
   Future<List<String>> collectDisabledNavigationViolations({
@@ -201,7 +200,6 @@ abstract interface class TrackStateAppComponent {
   Future<int> countDropdownFields(String label);
 
   Future<List<String>> readDropdownOptions(String label);
-
   Future<void> selectDropdownOption(String label, {required String optionText});
 
   Future<String?> readDropdownFieldValue(String label);

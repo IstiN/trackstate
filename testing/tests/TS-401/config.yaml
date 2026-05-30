@@ -5,4 +5,6 @@ platform: chromium
 dependencies: []
 notes:
   - Exercises the hosted tracker at https://istin.github.io/trackstate-setup/ using the stored GitHub token flow.
-  - Uses the live DEMO-3 issue as the production-visible reproduction for the multi-view edit refresh scenario.
+  - Selects a Board-visible non-epic issue that is not already Done/Highest so reruns still prove a fresh mutation.
+  - Prefers DEMO-3994 through DEMO-3997 when they are visible on the live Board.
+  - Uses the current Board edit flow and falls back to JQL Search opening if the Board card click path is stale; when needed, visible setup transitions stage the issue until the final Done transition is available.
