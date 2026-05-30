@@ -25,9 +25,8 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-409/test_ts_409.py
   against the hosted setup repository
 - `TRACKSTATE_LIVE_APP_URL` pointing at the deployed hosted TrackState app
 - Defaults come from `testing/core/config/live_setup_test_config.py`
-- The hosted CLI parity step uses `trackstate` on `PATH` when available and
-  falls back to `dart run trackstate` from the repository root when the
-  standalone executable is not installed
+- The hosted CLI parity step requires the installed `trackstate` executable on
+  `PATH`; it does not fall back to `dart run trackstate`
 
 ## Scenario notes
 

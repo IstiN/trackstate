@@ -75,12 +75,7 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         if executable is not None:
             return (executable,)
 
-        dart = shutil.which("dart")
-        if dart is not None:
-            return (dart, "run", "trackstate")
-
         raise AssertionError(
-            "Precondition failed: TS-409 requires either the installed `trackstate` "
-            "CLI on PATH or the Dart SDK so the hosted session parity check can run "
-            "via `dart run trackstate`."
+            "Precondition failed: TS-409 requires the installed `trackstate` CLI "
+            "on PATH so Step 5 validates the packaged `trackstate session` surface."
         )
