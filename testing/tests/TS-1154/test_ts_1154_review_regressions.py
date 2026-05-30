@@ -99,6 +99,33 @@ class Ts1154ReviewRegressionTest(unittest.TestCase):
         self.assertEqual(row.display_name, "Active local workspace")
         self.assertEqual(row.state_label, "Local Git")
 
+    def test_falls_back_to_unique_trigger_matching_local_git_row_without_actions(self) -> None:
+        switcher = WorkspaceSwitcherObservation(
+            body_text="Workspace switcher",
+            switcher_text="Workspace switcher",
+            row_count=2,
+            rows=(
+                self._row(selected=False),
+                self._row(
+                    selected=False,
+                    display_name="Hosted workspace",
+                    target_type_label="Hosted",
+                    state_label="Attachments limited",
+                    detail_text="istin/trackstate-setup, Branch: main",
+                    action_labels=("Open: Hosted workspace", "Delete: Hosted workspace"),
+                    button_labels=("Open: Hosted workspace", "Delete: Hosted workspace"),
+                ),
+            ),
+        )
+
+        row = self.module._find_active_local_row(  # type: ignore[attr-defined]
+            switcher,
+            trigger=self._trigger(),
+        )
+
+        self.assertEqual(row.display_name, "Active local workspace")
+        self.assertEqual(row.state_label, "Local Git")
+
     def test_rejects_trigger_matching_row_when_not_selected(self) -> None:
         switcher = WorkspaceSwitcherObservation(
             body_text="Workspace switcher",
@@ -153,6 +180,55 @@ class Ts1154ReviewRegressionTest(unittest.TestCase):
         )
 
         self.assertFalse(requires_connect)
+
+    def test_authenticated_session_accepts_synced_local_git_shell(self) -> None:
+        requires_connect = self.module._session_requires_connect(  # type: ignore[attr-defined]
+            body_text="\n".join(
+                [
+                    "Workspace switcher: Active local workspace, Local, Local Git",
+                    "Dashboard",
+                    "Create issue",
+                    "Synced with Git",
+                ],
+            ),
+            user_login="octocat",
+            repository="IstiN/trackstate-setup",
+        )
+
+        self.assertFalse(requires_connect)
+
+    def test_signed_in_active_local_precondition_requires_authenticated_session(self) -> None:
+        trigger = self._trigger()
+
+        self.assertFalse(
+            self.module._signed_in_active_local_precondition(  # type: ignore[attr-defined]
+                trigger=trigger,
+                body_text=(
+                    "Workspace switcher: Active local workspace, Local, Local Git, "
+                    "/tmp/trackstate-demo, Branch: main\n"
+                    "Hosted setup workspace\n"
+                    "Hosted\n"
+                    "Needs sign-in\n"
+                    "GitHub write access is not connected"
+                ),
+                user_login="octocat",
+                repository="IstiN/trackstate-setup",
+            ),
+        )
+
+        self.assertTrue(
+            self.module._signed_in_active_local_precondition(  # type: ignore[attr-defined]
+                trigger=trigger,
+                body_text=(
+                    "Workspace switcher: Active local workspace, Local, Local Git, "
+                    "/tmp/trackstate-demo, Branch: main\n"
+                    "Connected as octocat to IstiN/trackstate-setup.\n"
+                    "Manage GitHub access"
+                ),
+                user_login="octocat",
+                repository="IstiN/trackstate-setup",
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -575,7 +575,20 @@ def _ensure_active_local_precondition(
     result: dict[str, object],
 ) -> WorkspaceSwitcherTriggerObservation:
     trigger = initial_trigger
-    current_body_text = page.current_body_text()
+    startup_ready, startup_observation = _wait_for_signed_in_active_local_precondition(
+        page=page,
+        user_login=user_login,
+        repository=repository,
+        timeout_seconds=TRIGGER_WAIT_SECONDS,
+    )
+    result["precondition_startup_observation"] = startup_observation
+    result["precondition_restored_within_wait"] = startup_ready
+    trigger = _trigger_from_precondition_observation(startup_observation, fallback=trigger)
+    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
+    if startup_ready:
+        return trigger
+
+    current_body_text = str(startup_observation.get("body_text", page.current_body_text()))
     if _session_requires_connect(
         body_text=current_body_text,
         user_login=user_login,
@@ -588,19 +601,20 @@ def _ensure_active_local_precondition(
         )
         result["precondition_connection_body_text"] = connection_body_text
         page.dismiss_connection_banner()
-        trigger = page.observe_trigger()
+        connected_ready, connected_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_connect_observation"] = connected_observation
+        trigger = _trigger_from_precondition_observation(
+            connected_observation,
+            fallback=trigger,
+        )
         result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
-
-    restored, trigger = poll_until(
-        probe=lambda: page.observe_trigger(timeout_ms=10_000),
-        is_satisfied=_trigger_matches_active_local_precondition,
-        timeout_seconds=TRIGGER_WAIT_SECONDS,
-        interval_seconds=5,
-    )
-    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
-    result["precondition_restored_within_wait"] = restored
-    if _trigger_matches_active_local_precondition(trigger):
-        return trigger
+        if connected_ready:
+            return trigger
 
     switcher = page.open_and_observe()
     result["precondition_switcher_before_switch"] = _switcher_payload(switcher)
@@ -651,7 +665,24 @@ def _ensure_active_local_precondition(
                 f"{error}"
             ) from error
         result["precondition_trigger_after_switch"] = _trigger_payload(trigger)
-        if "Connect GitHub" in page.current_body_text():
+        post_switch_ready, post_switch_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_switch_observation"] = post_switch_observation
+        trigger = _trigger_from_precondition_observation(
+            post_switch_observation,
+            fallback=trigger,
+        )
+        if post_switch_ready:
+            return trigger
+        if _session_requires_connect(
+            body_text=str(post_switch_observation.get("body_text", page.current_body_text())),
+            user_login=user_login,
+            repository=repository,
+        ):
             connection_body_text = settings_page.ensure_connected(
                 token=token,
                 repository=repository,
@@ -661,9 +692,26 @@ def _ensure_active_local_precondition(
                 connection_body_text
             )
             page.dismiss_connection_banner()
-            trigger = page.observe_trigger()
+            connected_ready, connected_observation = _wait_for_signed_in_active_local_precondition(
+                page=page,
+                user_login=user_login,
+                repository=repository,
+                timeout_seconds=TRIGGER_WAIT_SECONDS,
+            )
+            result["precondition_post_switch_connect_observation"] = connected_observation
+            trigger = _trigger_from_precondition_observation(
+                connected_observation,
+                fallback=trigger,
+            )
             result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
-        if _trigger_matches_active_local_precondition(trigger):
+            if connected_ready:
+                return trigger
+        if _signed_in_active_local_precondition(
+            trigger=trigger,
+            body_text=page.current_body_text(),
+            user_login=user_login,
+            repository=repository,
+        ):
             return trigger
 
     if local_row is not None and local_row.state_label == "Unavailable":
@@ -674,7 +722,18 @@ def _ensure_active_local_precondition(
             saved_local_row=saved_local_row,
             result=result,
         )
-        if _trigger_matches_active_local_precondition(trigger):
+        restored_ready, restored_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_manual_restore_observation"] = restored_observation
+        trigger = _trigger_from_precondition_observation(
+            restored_observation,
+            fallback=trigger,
+        )
+        if restored_ready:
             return trigger
 
     raise AssertionError(
@@ -687,6 +746,81 @@ def _ensure_active_local_precondition(
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
 
+
+def _wait_for_signed_in_active_local_precondition(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    user_login: str,
+    repository: str,
+    timeout_seconds: int,
+) -> tuple[bool, dict[str, object]]:
+    return poll_until(
+        probe=lambda: _observe_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+        ),
+        is_satisfied=lambda observation: bool(observation["ready"]),
+        timeout_seconds=timeout_seconds,
+        interval_seconds=5,
+    )
+
+
+def _observe_signed_in_active_local_precondition(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    user_login: str,
+    repository: str,
+) -> dict[str, object]:
+    body_text = page.current_body_text()
+    trigger = _safe_trigger_payload(page)
+    return {
+        "ready": (
+            trigger is not None
+            and _signed_in_active_local_precondition(
+                trigger=_trigger_from_payload(trigger),
+                body_text=body_text,
+                user_login=user_login,
+                repository=repository,
+            )
+        ),
+        "authenticated_session": not _session_requires_connect(
+            body_text=body_text,
+            user_login=user_login,
+            repository=repository,
+        ),
+        "body_text": body_text,
+        "trigger": trigger,
+    }
+
+
+def _trigger_from_precondition_observation(
+    observation: dict[str, object],
+    *,
+    fallback: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherTriggerObservation:
+    trigger_payload = observation.get("trigger")
+    if isinstance(trigger_payload, dict):
+        return _trigger_from_payload(trigger_payload)
+    return fallback
+
+
+def _signed_in_active_local_precondition(
+    *,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    body_text: str,
+    user_login: str,
+    repository: str,
+) -> bool:
+    return _trigger_matches_active_local_precondition(
+        trigger,
+    ) and not _session_requires_connect(
+        body_text=body_text,
+        user_login=user_login,
+        repository=repository,
+    )
+
+
 def _session_requires_connect(
     *,
     body_text: str,
@@ -698,6 +832,8 @@ def _session_requires_connect(
         user_login=user_login,
         repository=repository,
     )
+
+
 def _restore_unavailable_local_workspace(
     *,
     tracker_page,
@@ -857,12 +993,35 @@ def _find_active_local_row(
             and row.state_label == "Local Git"
         ):
             return row
+    fallback_candidates = [
+        row
+        for row in switcher.rows
+        if (
+            row.display_name == trigger.display_name
+            and row.target_type_label == "Local"
+            and row.state_label == "Local Git"
+            and not _row_has_visible_workspace_actions(row)
+        )
+    ]
+    if len(fallback_candidates) == 1:
+        return fallback_candidates[0]
     raise AssertionError(
         "Step 2 failed: the workspace switcher did not show a selected active local "
         "workspace row in the `Local Git` state after startup.\n"
         f"Observed trigger label: {trigger.semantic_label!r}\n"
         f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
+    )
+
+
+def _row_has_visible_workspace_actions(row: WorkspaceSwitcherRowObservation) -> bool:
+    labels = [
+        *row.action_labels,
+        *row.button_labels,
+    ]
+    action_prefixes = ("Open:", "Delete:", "Retry:", "Connect GitHub", "Active")
+    return any(
+        label != row.visible_text and label.startswith(action_prefixes) for label in labels
     )
 
 
