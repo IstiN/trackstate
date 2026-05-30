@@ -4973,46 +4973,49 @@ class _TrackerMainPane extends StatelessWidget {
         key: workspaceSwitcherOverlayHostKey,
         clipBehavior: Clip.none,
         children: [
-          Column(
-            children: [
-              _TopBar(
-                viewModel: viewModel,
-                workspaces: workspaces,
-                localWorkspaceAvailability: localWorkspaceAvailability,
-                compact: compact,
-                isDesktopWorkspaceSwitcherVisible:
-                    isDesktopWorkspaceSwitcherVisible,
-                workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
-                workspaceSwitcherTriggerFocusNode:
-                    workspaceSwitcherTriggerFocusNode,
-                desktopSearchFocusNode: desktopSearchFocusNode,
-                desktopSettingsFocusNode: desktopSettingsFocusNode,
-                onOpenCreateIssue: onOpenCreateIssue,
-                onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                onFocusActiveWorkspaceSwitcherRow:
-                    onFocusActiveWorkspaceSwitcherRow,
-                onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
-                canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
-              ),
-              _RepositoryAccessBanner(viewModel: viewModel),
-              Expanded(
-                child: _SectionBody(
+          ExcludeSemantics(
+            excluding: isCreateIssueVisible,
+            child: Column(
+              children: [
+                _TopBar(
                   viewModel: viewModel,
-                  compact: compact,
-                  onOpenCreateIssue: onOpenCreateIssue,
-                  onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
                   workspaces: workspaces,
-                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
-                  onSelectWorkspace: onSelectWorkspace,
-                  onDeleteWorkspace: onDeleteWorkspace,
-                  workspaceRestoreFailure: workspaceRestoreFailure,
-                  onRetryStartupRecovery: onRetryStartupRecovery,
-                  onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                  attachmentPicker: attachmentPicker,
+                  localWorkspaceAvailability: localWorkspaceAvailability,
+                  compact: compact,
+                  isDesktopWorkspaceSwitcherVisible:
+                      isDesktopWorkspaceSwitcherVisible,
+                  workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+                  workspaceSwitcherTriggerFocusNode:
+                      workspaceSwitcherTriggerFocusNode,
+                  desktopSearchFocusNode: desktopSearchFocusNode,
+                  desktopSettingsFocusNode: desktopSettingsFocusNode,
+                  onOpenCreateIssue: onOpenCreateIssue,
+                  onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                  onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                  onFocusActiveWorkspaceSwitcherRow:
+                      onFocusActiveWorkspaceSwitcherRow,
+                  onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                  canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
                 ),
-              ),
-            ],
+                _RepositoryAccessBanner(viewModel: viewModel),
+                Expanded(
+                  child: _SectionBody(
+                    viewModel: viewModel,
+                    compact: compact,
+                    onOpenCreateIssue: onOpenCreateIssue,
+                    onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                    workspaces: workspaces,
+                    authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                    onSelectWorkspace: onSelectWorkspace,
+                    onDeleteWorkspace: onDeleteWorkspace,
+                    workspaceRestoreFailure: workspaceRestoreFailure,
+                    onRetryStartupRecovery: onRetryStartupRecovery,
+                    onRetryWorkspaceRestore: onRetryWorkspaceRestore,
+                    attachmentPicker: attachmentPicker,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (!compact && desktopWorkspaceSwitcherContent != null)
             _DesktopWorkspaceSwitcherOverlay(
@@ -5023,14 +5026,16 @@ class _TrackerMainPane extends StatelessWidget {
             ),
           if (isCreateIssueVisible)
             Positioned.fill(
-              child: _CreateIssueOverlay(
-                compact: compact,
-                child: _CreateIssueDialog(
-                  viewModel: viewModel,
-                  onDismiss: onCloseCreateIssue,
-                  prefill:
-                      createIssuePrefill ??
-                      _CreateIssuePrefill(originSection: viewModel.section),
+              child: BlockSemantics(
+                child: _CreateIssueOverlay(
+                  compact: compact,
+                  child: _CreateIssueDialog(
+                    viewModel: viewModel,
+                    onDismiss: onCloseCreateIssue,
+                    prefill:
+                        createIssuePrefill ??
+                        _CreateIssuePrefill(originSection: viewModel.section),
+                  ),
                 ),
               ),
             ),
@@ -15203,6 +15208,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                       );
                 return _SurfaceCard(
                   semanticLabel: l10n.createIssue,
+                  explicitChildNodes: true,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
